@@ -1,0 +1,33 @@
+{
+  "name": "@homehub/mcp-server",
+  "version": "1.0.0",
+  "description": "HomeHub MCP Server — exposes smart plug controls as AI tools",
+  "main": "dist/server.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "dev": "tsx watch src/server.ts",
+    "inspector": "npx @modelcontextprotocol/inspector dist/server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": ["mcp", "homehub"],
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.25.2",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "express": "^5.2.1",
+    "log4js": "^6.9.1",
+    "suncalc": "^1.9.0",
+    "zod": "^4.3.5"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/suncalc": "^1.9.2",
+    "@types/express": "^5.0.6",
+    "@types/node": "^24.0.0",
+    "tsx": "^4.19.4",
+    "typescript": "^5.7.0"
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "name": "homehub",
+  "version": "1.0.0",
+  "description": "Local-first smart home automation — Raspberry Pi + Kasa plugs + local LLM",
+  "private": true,
+  "scripts": {
+    "dev": "docker compose up",
+    "build": "pnpm -r run build",
+    "install:all": "pnpm install",
+    "clean": "pnpm -r exec rm -rf dist node_modules"
+  },
+  "keywords": ["smart-home", "kasa", "mcp", "homehub"],
+  "license": "ISC",
+  "engines": {
+    "node": ">=24.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  }
+}

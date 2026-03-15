@@ -1,0 +1,22 @@
+{
+  "TCP": {
+    "443": {
+      "HTTPS": true
+    }
+  },
+  "Web": {
+    "${TS_HOSTNAME:-homehub}.ts.net:443": {
+      "Handlers": {
+        "/": {
+          "Proxy": "http://frontend:80"
+        },
+        "/api/": {
+          "Proxy": "http://localhost:3000"
+        },
+        "/socket.io/": {
+          "Proxy": "http://localhost:3000"
+        }
+      }
+    }
+  }
+}

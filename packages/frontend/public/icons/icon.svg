@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192">
+  <rect width="192" height="192" rx="38" fill="#3b82f6"/>
+  <!-- House -->
+  <path d="M96 36 L158 92 H144 V152 H108 V116 H84 V152 H48 V92 H34 Z" fill="white"/>
+  <!-- Lightning bolt in door area -->
+  <path d="M104 72 L88 104 H100 L88 128 L112 96 H100 Z" fill="#fbbf24"/>
+</svg>

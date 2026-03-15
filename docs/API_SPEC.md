@@ -1,0 +1,439 @@
+# HomeHub API Specification
+
+Base URL: `http://<pi-ip>:3000`
+Auth: `Authorization: Bearer <access_token>` on all routes except `/health` and `/api/auth/*`
+
+---
+
+## Health
+
+### `GET /health`
+Public. Returns service status.
+
+**Response 200**
+```json
+{ "status": "ok", "version": "1.0.0" }
+```
+
+---
+
+## Auth
+
+### `POST /api/auth/login`
+**Body**
+```json
+{ "username": "admin", "password": "secret" }
+```
+**Response 200**
+```json
+{
+  "accessToken": "<jwt>",
+  "user": { "id": 1, "name": "admin", "role": "admin" }
+}
+```
+Sets `httpOnly` cookie: `refreshToken=<jwt>; Path=/api/auth/refresh; SameSite=Strict`
+
+**Response 401**
+```json
+{ "error": "Invalid credentials" }
+```
+
+---
+
+### `POST /api/auth/refresh`
+Reads `refreshToken` cookie. Returns new access token.
+
+**Response 200**
+```json
+{ "accessToken": "<new-jwt>" }
+```
+
+---
+
+### `POST /api/auth/logout`
+Clears refresh token cookie.
+
+**Response 204** — no body
+
+---
+
+## Devices
+
+### `GET /api/devices`
+Returns all configured devices with current state.
+
+**Response 200**
+```json
+[
+  {
+    "id": 1,
+    "alias": "living-room-lamp",
+    "ip": "192.168.1.101",
+    "model": "HS103",
+    "state": true,
+    "online": true,
+    "wattage": 42.3
+  }
+]
+```
+
+---
+
+### `GET /api/devices/:id`
+`:id` is device alias (e.g. `living-room-lamp`) or numeric id.
+
+**Response 200**
+```json
+{
+  "id": 1,
+  "alias": "living-room-lamp",
+  "ip": "192.168.1.101",
+  "model": "HS103",
+  "state": true,
+  "online": true,
+  "wattage": 42.3
+}
+```
+**Response 404**
+```json
+{ "error": "Device not found" }
+```
+
+---
+
+### `POST /api/devices/:id/on`
+Turns device on.
+
+**Response 200**
+```json
+{ "alias": "living-room-lamp", "state": true }
+```
+
+---
+
+### `POST /api/devices/:id/off`
+Turns device off.
+
+**Response 200**
+```json
+{ "alias": "living-room-lamp", "state": false }
+```
+
+---
+
+### `GET /api/devices/:id/energy`
+Live energy metrics. Only available on HS110, KP115 models. Returns `null` values for non-energy models.
+
+**Response 200**
+```json
+{
+  "alias": "office-lamp",
+  "wattage": 8.5,
+  "voltage": 121.2,
+  "current": 0.07,
+  "totalKwh": 12.4,
+  "recordedAt": "2026-03-12T18:00:00Z"
+}
+```
+
+---
+
+### `GET /api/devices/:id/energy/history`
+**Query params:** `range=24h|7d|30d` (default: `24h`)
+
+**Response 200**
+```json
+{
+  "alias": "office-lamp",
+  "range": "24h",
+  "readings": [
+    { "wattage": 8.5, "voltage": 121.2, "current": 0.07, "recordedAt": "2026-03-12T17:00:00Z" },
+    { "wattage": 0.0, "voltage": 0.0, "current": 0.0, "recordedAt": "2026-03-12T18:00:00Z" }
+  ]
+}
+```
+
+---
+
+### `POST /api/devices` — `admin` only
+Register a device manually (for when discovery is not used).
+
+**Body**
+```json
+{ "alias": "office-lamp", "ip": "192.168.1.102", "model": "KP115" }
+```
+**Response 201**
+```json
+{ "id": 2, "alias": "office-lamp", "ip": "192.168.1.102", "model": "KP115" }
+```
+
+---
+
+### `PATCH /api/devices/:id` — `admin` only
+Update alias or IP.
+
+**Body** (all fields optional)
+```json
+{ "alias": "new-alias", "ip": "192.168.1.103" }
+```
+**Response 200** — updated device object
+
+---
+
+### `DELETE /api/devices/:id` — `admin` only
+**Response 204** — no body
+
+---
+
+### `POST /api/devices/discover` — `admin` only
+Triggers subnet broadcast discovery. Returns found devices (not yet saved).
+
+**Response 200**
+```json
+[
+  { "ip": "192.168.1.105", "alias": "TP-LINK_PLUG_A2B3", "model": "HS103" }
+]
+```
+
+---
+
+## Schedules
+
+### `GET /api/schedules`
+**Response 200**
+```json
+[
+  {
+    "id": 1,
+    "deviceAlias": "porch-light",
+    "label": "Porch on at sunset",
+    "triggerType": "solar",
+    "solarEvent": "sunset",
+    "solarOffsetMinutes": 0,
+    "state": true,
+    "enabled": true,
+    "nextRun": "2026-03-12T19:42:00Z"
+  },
+  {
+    "id": 2,
+    "deviceAlias": "porch-light",
+    "label": "Porch off at midnight",
+    "triggerType": "cron",
+    "cronExpression": "0 0 * * *",
+    "state": false,
+    "enabled": true,
+    "nextRun": "2026-03-13T00:00:00Z"
+  }
+]
+```
+
+---
+
+### `POST /api/schedules` — `admin` only
+**Body (cron type)**
+```json
+{
+  "deviceAlias": "office-lamp",
+  "label": "Office off at 11pm",
+  "triggerType": "cron",
+  "cronExpression": "0 23 * * *",
+  "state": false
+}
+```
+
+**Body (solar type)**
+```json
+{
+  "deviceAlias": "porch-light",
+  "label": "Porch on at sunset",
+  "triggerType": "solar",
+  "solarEvent": "sunset",
+  "solarOffsetMinutes": -15,
+  "state": true
+}
+```
+
+Valid `solarEvent` values: `sunrise` · `sunset` · `dawn` · `dusk` · `goldenHour` · `solarNoon`
+
+**Response 201** — created schedule object
+
+---
+
+### `PATCH /api/schedules/:id/toggle` — `admin` only
+Enable or disable a schedule.
+
+**Body**
+```json
+{ "enabled": false }
+```
+**Response 200** — updated schedule object
+
+---
+
+### `DELETE /api/schedules/:id` — `admin` only
+**Response 204** — no body
+
+---
+
+## Natural Language (NLP)
+
+### `POST /api/nlp`
+Sends a natural language command to Ollama. Response is streamed via Server-Sent Events.
+
+**Body**
+```json
+{
+  "message": "Turn off the office lamp if it has been on for more than 2 hours",
+  "history": [
+    { "role": "user", "content": "What lights are on?" },
+    { "role": "assistant", "content": "The office lamp and living room lamp are on." }
+  ]
+}
+```
+
+**Response** — `Content-Type: text/event-stream`
+```
+data: {"type":"token","content":"I'll"}
+data: {"type":"token","content":" check"}
+data: {"type":"tool_call","tool":"get_energy_metrics","args":{"device_alias":"office-lamp"}}
+data: {"type":"tool_result","tool":"get_energy_metrics","result":{"wattage":8.5}}
+data: {"type":"token","content":" The office lamp has been on for 3h 12m."}
+data: {"type":"action","summary":"Turned off: office-lamp"}
+data: {"type":"done"}
+```
+
+---
+
+## Energy Summary
+
+### `GET /api/energy/summary`
+Total live wattage across all online devices.
+
+**Response 200**
+```json
+{
+  "totalWattage": 127.4,
+  "deviceCount": 5,
+  "onlineCount": 4,
+  "readings": [
+    { "alias": "office-lamp", "wattage": 8.5 },
+    { "alias": "living-room-lamp", "wattage": 42.3 }
+  ]
+}
+```
+
+---
+
+## Users — `admin` only
+
+### `GET /api/users`
+**Response 200**
+```json
+[
+  { "id": 1, "name": "admin", "role": "admin", "createdAt": "2026-03-01T00:00:00Z" },
+  { "id": 2, "name": "jeff", "role": "member", "createdAt": "2026-03-10T00:00:00Z" }
+]
+```
+
+---
+
+### `POST /api/users`
+**Body**
+```json
+{ "name": "jeff", "password": "secure-password", "role": "member" }
+```
+**Response 201**
+```json
+{ "id": 2, "name": "jeff", "role": "member" }
+```
+
+---
+
+### `PATCH /api/users/:id/password`
+User can change their own password. Admin can change any user's password.
+
+**Body**
+```json
+{ "currentPassword": "old", "newPassword": "new-secure" }
+```
+**Response 204** — no body
+
+---
+
+### `DELETE /api/users/:id` — `admin` only
+Cannot delete your own account.
+
+**Response 204** — no body
+
+---
+
+## Settings — `admin` only
+
+### `GET /api/settings`
+**Response 200**
+```json
+{
+  "latitude": 37.7749,
+  "longitude": -122.4194,
+  "timezone": "America/Los_Angeles",
+  "ollamaModel": "llama3.2:3b",
+  "energyRatePerKwh": 0.15,
+  "pollingIntervalSeconds": 30
+}
+```
+
+---
+
+### `PATCH /api/settings`
+**Body** (all fields optional)
+```json
+{
+  "latitude": 37.7749,
+  "longitude": -122.4194,
+  "timezone": "America/Los_Angeles",
+  "energyRatePerKwh": 0.18
+}
+```
+**Response 200** — updated settings object
+
+---
+
+## WebSocket Events (Socket.io)
+
+Connect to `ws://<pi-ip>:3000` with a valid JWT:
+```js
+const socket = io('http://pi-ip:3000', {
+  auth: { token: accessToken }
+});
+```
+
+### Events from server → client
+
+| Event | Payload | Description |
+|---|---|---|
+| `device:state` | `{ id, alias, state, wattage }` | A plug was toggled |
+| `device:energy` | `{ id, alias, wattage, voltage, current }` | Periodic energy poll |
+| `device:online` | `{ id, alias, online }` | Device came online or went offline |
+| `schedule:fired` | `{ scheduleId, label, deviceAlias, state }` | A schedule just executed |
+| `nlp:action` | `{ summary, deviceAlias, state }` | NLP command took an action |
+
+---
+
+## Error Format
+
+All error responses use a consistent shape:
+
+```json
+{
+  "error": "Human-readable message",
+  "code": "DEVICE_NOT_FOUND"
+}
+```
+
+Common HTTP status codes:
+- `400` — bad request / validation error
+- `401` — missing or invalid JWT
+- `403` — valid JWT but insufficient role
+- `404` — resource not found
+- `409` — conflict (e.g. alias already exists)
+- `503` — device unreachable / Kasa TCP timeout

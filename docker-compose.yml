@@ -1,0 +1,167 @@
+name: homehub
+
+services:
+
+  # ── Angular frontend served by Nginx ──────────────────────────
+  frontend:
+    build:
+      context: ./packages/frontend
+      dockerfile: Dockerfile
+      target: production
+    ports:
+      - "4200:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    logging: &default-logging
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    networks:
+      - homehub-net
+
+  # ── Node.js core backend ───────────────────────────────────────
+  # NOTE: network_mode: host is used so tplink-smarthome-api can
+  # send/receive UDP broadcast packets for device discovery.
+  # When host networking is active, remove the `networks` key and
+  # the `ports` mapping is implicit (binds directly to host port).
+  backend:
+    build:
+      context: ./packages/backend
+      dockerfile: Dockerfile
+      target: production
+    env_file: .env
+    environment:
+      - NODE_ENV=production
+      - DB_PATH=/data/db.sqlite
+      - OLLAMA_URL=http://ollama:11434
+    volumes:
+      - homehub-data:/data
+    network_mode: host
+    depends_on:
+      ollama:
+        condition: service_healthy
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/health',(r)=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+
+  # ── MCP server (AI agent bridge) ──────────────────────────────
+  mcp-server:
+    build:
+      context: ./packages/mcp-server
+      dockerfile: Dockerfile
+      target: production
+    ports:
+      - "3001:3001"
+    env_file: .env
+    environment:
+      - PORT=3001
+      - BACKEND_URL=http://backend:3000
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3001/health',(r)=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+    logging: *default-logging
+    networks:
+      - homehub-net
+
+  # ── Automation scheduler (cron + solar) ───────────────────────
+  scheduler:
+    build:
+      context: ./packages/scheduler
+      dockerfile: Dockerfile
+      target: production
+    ports:
+      - "3002:3002"
+    env_file: .env
+    environment:
+      - SCHEDULER_PORT=3002
+      - BACKEND_URL=http://backend:3000
+      - SCHEDULER_URL=http://scheduler:3002
+      - DB_PATH=/data/db.sqlite
+    volumes:
+      - homehub-data:/data
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3002/health',(r)=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+    logging: *default-logging
+    networks:
+      - homehub-net
+
+  # ── Local LLM (Ollama) ─────────────────────────────────────────
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-models:/root/.ollama
+    entrypoint: ["/bin/sh", "-c"]
+    command: >
+      "ollama serve &
+      sleep 8 &&
+      ollama pull ${OLLAMA_MODEL:-llama3.2:3b} &&
+      wait"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+    restart: unless-stopped
+    logging: *default-logging
+    networks:
+      - homehub-net
+
+  # ── Tailscale sidecar (remote access) ─────────────────────────
+  tailscale:
+    image: tailscale/tailscale:latest
+    hostname: homehub
+    environment:
+      - TS_AUTHKEY=${TS_AUTHKEY:-}
+      - TS_STATE_DIR=/var/lib/tailscale
+      - TS_EXTRA_ARGS=--advertise-tags=tag:homehub
+    volumes:
+      - tailscale-state:/var/lib/tailscale
+      - /dev/net/tun:/dev/net/tun
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    restart: unless-stopped
+    profiles:
+      - remote-access
+    networks:
+      - homehub-net
+
+volumes:
+  homehub-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./data
+  ollama-models:
+  tailscale-state:
+
+networks:
+  homehub-net:
+    driver: bridge

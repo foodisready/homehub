@@ -1,0 +1,89 @@
+import dotenv from 'dotenv';
+import path from 'path';
+// Repo root .env is two levels up from packages/backend/
+dotenv.config({ path: path.resolve(process.cwd(), '../../.env') });
+
+import { validateEnv } from './env';
+validateEnv();   // crash early with a clear message if config is incomplete
+
+import express, { Request, Response, NextFunction } from 'express';
+import cors from 'cors';
+import cookieParser from 'cookie-parser';
+import { createServer } from 'http';
+import { logger } from './logger';
+import { healthRouter } from './routes/health';
+import { authRouter } from './routes/auth';
+import { devicesRouter } from './routes/devices';
+import { schedulesRouter } from './routes/schedules';
+import { usersRouter } from './routes/users';
+import { internalRouter } from './routes/internal';
+import { nlpRouter } from './routes/nlp';
+import { energyRouter } from './routes/energy';
+import { pushRouter } from './routes/push';
+import { scenesRouter } from './routes/scenes';
+import { runBackup } from './db/backup';
+import { authenticate } from './middleware/auth';
+import { getDb } from './db';
+import { startPolling } from './kasa/device.cache';
+import { seedAdminIfEmpty } from './auth/auth.service';
+import { initSocket } from './socket';
+
+const app = express();
+const httpServer = createServer(app);
+
+// Socket.io must be attached before any listen() call
+initSocket(httpServer);
+
+app.use(cors({ origin: process.env.CORS_ORIGIN || 'http://localhost:4200', credentials: true }));
+app.use(express.json());
+app.use(cookieParser());
+
+// ── Public routes ──────────────────────────────────────────────
+app.use(healthRouter);
+app.use('/api/auth', authRouter);
+
+// ── Internal service-to-service routes (key auth, no JWT) ──────
+app.use('/internal', internalRouter);
+
+// ── All routes below require a valid JWT ──────────────────────
+app.use('/api', (req: Request, res: Response, next: NextFunction) => {
+  authenticate(req, res, next);
+});
+
+app.use('/api/devices',   devicesRouter);
+app.use('/api/schedules', schedulesRouter);
+app.use('/api/users',     usersRouter);
+app.use('/api/nlp',       nlpRouter);
+app.use('/api/push',      pushRouter);
+app.use('/api/scenes',    scenesRouter);
+app.use('/api/devices',   energyRouter);   // history sub-routes: /api/devices/:id/energy/history
+
+// ── Global error handler ───────────────────────────────────────
+app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
+  logger.error(err, 'Unhandled error');
+  res.status(500).json({ error: 'Internal server error', code: 'INTERNAL_ERROR' });
+});
+
+// ── Start ──────────────────────────────────────────────────────
+const PORT = process.env.PORT || 3000;
+
+httpServer.listen(PORT, async () => {
+  logger.info({ port: PORT }, 'HomeHub backend started');
+  getDb();                   // init DB + run migrations
+  await seedAdminIfEmpty();  // create default admin if DB is empty
+  startPolling();            // begin device state polling
+
+  // Daily DB backup: run once at startup, then every 24 hours
+  runBackup();
+  setInterval(runBackup, 24 * 60 * 60 * 1000);
+});
+
+process.on('SIGTERM', () => {
+  logger.info('SIGTERM received, shutting down');
+  httpServer.close(() => {
+    logger.info('HTTP server closed');
+    process.exit(0);
+  });
+});
+
+export { app, httpServer };

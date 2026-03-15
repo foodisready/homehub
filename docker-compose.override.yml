@@ -1,0 +1,43 @@
+# Development overrides — applied automatically by `docker compose up`
+# Mounts source directories for hot reload.
+
+name: homehub
+
+services:
+
+  frontend:
+    build:
+      target: production   # stays as nginx placeholder until Phase 4
+    ports:
+      - "4200:80"
+
+  backend:
+    build:
+      target: dev
+    volumes:
+      - ./packages/backend/src:/app/src
+      - homehub-data:/data
+    environment:
+      - NODE_ENV=development
+    # network_mode: host is inherited from docker-compose.yml
+
+  mcp-server:
+    build:
+      target: dev
+    volumes:
+      - ./packages/mcp-server/src:/app/src
+    environment:
+      - NODE_ENV=development
+
+  scheduler:
+    build:
+      target: dev
+    volumes:
+      - ./packages/scheduler/src:/app/src
+    environment:
+      - NODE_ENV=development
+
+  ollama:
+    # Shorter healthcheck wait in dev
+    healthcheck:
+      start_period: 60s

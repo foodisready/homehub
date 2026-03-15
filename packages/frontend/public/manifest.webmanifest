@@ -1,0 +1,30 @@
+{
+  "name": "HomeHub",
+  "short_name": "HomeHub",
+  "description": "Local smart plug automation and control",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#3b82f6",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Dashboard",
+      "url": "/dashboard",
+      "description": "View and control all plugs"
+    },
+    {
+      "name": "Chat",
+      "url": "/chat",
+      "description": "Control plugs with natural language"
+    }
+  ]
+}
