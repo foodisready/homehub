@@ -8,6 +8,13 @@ build/
 **/dist/
 packages/frontend/dist/
 
+# Angular build cache
+.angular/
+**/.angular/
+
+# Lock files (generated, not needed in repo)
+**/package-lock.json
+
 # Environment — never commit real secrets
 .env
 .env.local
