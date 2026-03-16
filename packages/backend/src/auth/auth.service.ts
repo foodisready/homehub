@@ -3,7 +3,7 @@ import jwt from 'jsonwebtoken';
 import { getDb } from '../db';
 
 const BCRYPT_ROUNDS = 12;
-const ACCESS_TTL    = '15m';
+const ACCESS_TTL    = '8h';
 const REFRESH_TTL   = '7d';
 
 const JWT_SECRET         = process.env.JWT_SECRET         || 'dev-secret-change-me';

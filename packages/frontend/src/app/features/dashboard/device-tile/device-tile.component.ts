@@ -87,7 +87,7 @@ import { Device } from '../../../shared/models/device.model';
         class="toggle"
         [class.on]="device().state"
         [class.off]="!device().state"
-        [disabled]="!device().online || busy()"
+        [disabled]="busy()"
         (click)="toggled.emit(device())">
         {{ device().state ? 'Turn Off' : 'Turn On' }}
       </button>

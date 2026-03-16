@@ -12,6 +12,7 @@ interface LoginResponse {
 
 interface RefreshResponse {
   accessToken: string;
+  user: AuthUser;
 }
 
 @Injectable({ providedIn: 'root' })
@@ -43,7 +44,7 @@ export class AuthService {
 
   refresh(): Observable<string> {
     return this.http.post<RefreshResponse>(`${API}/auth/refresh`, {}, { withCredentials: true }).pipe(
-      tap((res) => this._token.set(res.accessToken)),
+      tap((res) => { this._token.set(res.accessToken); this._user.set(res.user); }),
       map((res) => res.accessToken),
     );
   }

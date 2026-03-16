@@ -28,7 +28,7 @@ function mergeWithCache(device: DeviceRow) {
     icon:      device.icon,
     state:     cached?.state   ?? false,
     wattage:   cached?.wattage ?? null,
-    online:    cached?.online  ?? false,
+    online:    cached?.online  ?? true,   // optimistic until first poll
   };
 }
 

@@ -57,7 +57,7 @@ authRouter.post('/refresh', (req: Request, res: Response) => {
     const { accessToken, refreshToken: newRefresh } = issueTokens(user);
     // Rotate the refresh token
     res.cookie(REFRESH_COOKIE, newRefresh, COOKIE_OPTS);
-    res.json({ accessToken });
+    res.json({ accessToken, user: { id: user.id, name: user.name, role: user.role } });
   } catch {
     res.clearCookie(REFRESH_COOKIE, { path: '/api/auth/refresh' });
     res.status(401).json({ error: 'Refresh token expired or invalid', code: 'UNAUTHORIZED' });
