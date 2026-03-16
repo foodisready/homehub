@@ -1,7 +1,7 @@
 import { Component, OnInit, signal, computed } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { RouterLink } from '@angular/router';
-import { DecimalPipe, DatePipe } from '@angular/common';
+import { DecimalPipe } from '@angular/common';
 import { Device } from '../../shared/models/device.model';
 
 type Range = '24h' | '7d' | '30d';
@@ -110,7 +110,7 @@ function xLabels(readings: EnergyReading[], range: Range): { label: string; x: n
 @Component({
   selector: 'app-energy',
   standalone: true,
-  imports: [RouterLink, DecimalPipe, DatePipe],
+  imports: [RouterLink, DecimalPipe],
   styles: [`
     .topbar {
       display: flex;

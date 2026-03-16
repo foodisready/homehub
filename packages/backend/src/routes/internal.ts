@@ -28,6 +28,16 @@ internalRouter.post('/devices/:id/execute', async (req: Request, res: Response) 
     return res.status(400).json({ error: '`state` must be a boolean', code: 'VALIDATION_ERROR' });
   }
 
+  // Skip if there is an active manual override for this device
+  const override = db.prepare(
+    "SELECT override_state FROM devices WHERE id = ? AND override_until > datetime('now')"
+  ).get(device.id) as { override_state: number } | undefined;
+
+  if (override !== undefined) {
+    logger.info({ deviceId: device.id, alias: device.alias }, 'Scheduled action skipped — active override');
+    return res.json({ alias: device.alias, state, skipped: true });
+  }
+
   try {
     await setPowerState(device.ip, state);
     emitDeviceState(device.id, device.alias, state, getCachedState(device.id)?.wattage ?? null);

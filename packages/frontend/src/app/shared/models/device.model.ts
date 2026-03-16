@@ -8,4 +8,6 @@ export interface Device {
   state: boolean;
   wattage: number | null;
   online: boolean;
+  overrideState: boolean | null;
+  overrideUntil: string | null;   // ISO datetime string, null = no active override
 }

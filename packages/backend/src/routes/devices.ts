@@ -15,20 +15,26 @@ interface DeviceRow {
   has_emeter: number;
   icon: string | null;
   created_at: string;
+  override_state: number | null;
+  override_until: string | null;
 }
 
 function mergeWithCache(device: DeviceRow) {
   const cached = getCachedState(device.id);
   return {
-    id:        device.id,
-    alias:     device.alias,
-    ip:        device.ip,
-    model:     device.model,
-    hasEmeter: device.has_emeter === 1,
-    icon:      device.icon,
-    state:     cached?.state   ?? false,
-    wattage:   cached?.wattage ?? null,
-    online:    cached?.online  ?? true,   // optimistic until first poll
+    id:            device.id,
+    alias:         device.alias,
+    ip:            device.ip,
+    model:         device.model,
+    hasEmeter:     device.has_emeter === 1,
+    icon:          device.icon,
+    state:         cached?.state   ?? false,
+    wattage:       cached?.wattage ?? null,
+    online:        cached?.online  ?? true,   // optimistic until first poll
+    overrideState: device.override_state != null ? device.override_state === 1 : null,
+    overrideUntil: device.override_until
+      ? device.override_until.replace(' ', 'T') + 'Z'
+      : null,
   };
 }
 
@@ -166,6 +172,44 @@ devicesRouter.patch('/:id', (req: Request, res: Response) => {
 
   const updated = db.prepare('SELECT * FROM devices WHERE id = ?').get(device.id) as DeviceRow;
   res.json(mergeWithCache(updated));
+});
+
+// POST /api/devices/:id/override — freeze device in current state for N minutes
+devicesRouter.post('/:id/override', async (req: Request, res: Response) => {
+  const { state, durationMinutes } = req.body as { state?: boolean; durationMinutes?: number };
+  if (typeof state !== 'boolean' || !durationMinutes || durationMinutes <= 0) {
+    return res.status(400).json({ error: 'state (boolean) and durationMinutes (>0) are required', code: 'VALIDATION_ERROR' });
+  }
+
+  const db = getDb();
+  const device = db.prepare('SELECT * FROM devices WHERE id = ? OR alias = ?')
+    .get(req.params.id, req.params.id) as DeviceRow | undefined;
+  if (!device) return res.status(404).json({ error: 'Device not found', code: 'DEVICE_NOT_FOUND' });
+
+  // Store until-time in SQLite datetime format (UTC) for easy comparison
+  db.prepare("UPDATE devices SET override_state = ?, override_until = datetime('now', ? || ' minutes') WHERE id = ?")
+    .run(state ? 1 : 0, String(durationMinutes), device.id);
+
+  try {
+    await setPowerState(device.ip, state);
+    emitDeviceState(device.id, device.alias, state, getCachedState(device.id)?.wattage ?? null);
+  } catch (err) {
+    logger.warn({ ip: device.ip }, 'Could not apply override state immediately');
+  }
+
+  const updated = db.prepare('SELECT * FROM devices WHERE id = ?').get(device.id) as DeviceRow;
+  logger.info({ deviceId: device.id, state, durationMinutes }, 'Override set');
+  res.json(mergeWithCache(updated));
+});
+
+// DELETE /api/devices/:id/override — cancel active override
+devicesRouter.delete('/:id/override', (req: Request, res: Response) => {
+  const db = getDb();
+  const result = db.prepare(
+    'UPDATE devices SET override_state = NULL, override_until = NULL WHERE id = ? OR alias = ?'
+  ).run(req.params.id, req.params.id);
+  if (result.changes === 0) return res.status(404).json({ error: 'Device not found', code: 'DEVICE_NOT_FOUND' });
+  res.status(204).send();
 });
 
 // DELETE /api/devices/:id

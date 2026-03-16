@@ -1,6 +1,6 @@
 // HomeHub service worker — app shell cache + push notifications
-const CACHE    = 'homehub-v1';
-const APP_SHELL = ['/', '/index.html'];
+const CACHE    = 'homehub-v2';
+const APP_SHELL = ['/'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(

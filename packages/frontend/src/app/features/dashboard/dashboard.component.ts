@@ -4,7 +4,7 @@ import { Router, RouterLink } from '@angular/router';
 import { DecimalPipe } from '@angular/common';
 import { AuthService } from '../../core/auth/auth.service';
 import { SocketService, DeviceStateEvent, DeviceOnlineEvent } from '../../core/socket/socket.service';
-import { DeviceTileComponent } from './device-tile/device-tile.component';
+import { DeviceTileComponent, OverrideRequest } from './device-tile/device-tile.component';
 import { Device } from '../../shared/models/device.model';
 
 @Component({
@@ -111,7 +111,9 @@ import { Device } from '../../shared/models/device.model';
             <app-device-tile
               [device]="device"
               [busy]="busyIds().has(device.id)"
-              (toggled)="toggle($event)" />
+              (toggled)="toggle($event)"
+              (overrideSet)="setOverride($event)"
+              (overrideCancelled)="cancelOverride($event)" />
           }
         </div>
       }
@@ -192,6 +194,37 @@ export class DashboardComponent implements OnInit, OnDestroy {
       },
       complete: () => {
         this._busyIds.update((s) => { const next = new Set(s); next.delete(device.id); return next; });
+      },
+    });
+  }
+
+  setOverride({ device, durationMinutes }: OverrideRequest): void {
+    // Optimistic: show badge immediately
+    const until = new Date(Date.now() + durationMinutes * 60_000).toISOString();
+    this._devices.update((list) =>
+      list.map((d) => d.id === device.id
+        ? { ...d, state: device.state, overrideState: device.state, overrideUntil: until }
+        : d)
+    );
+
+    this.http.post<Device>(`/api/devices/${device.id}/override`, { state: device.state, durationMinutes }).subscribe({
+      next: (updated) => {
+        this._devices.update((list) => list.map((d) => d.id === updated.id ? updated : d));
+      },
+      error: () => {
+        this._devices.update((list) =>
+          list.map((d) => d.id === device.id ? { ...d, overrideState: null, overrideUntil: null } : d)
+        );
+      },
+    });
+  }
+
+  cancelOverride(device: Device): void {
+    this.http.delete(`/api/devices/${device.id}/override`).subscribe({
+      next: () => {
+        this._devices.update((list) =>
+          list.map((d) => d.id === device.id ? { ...d, overrideState: null, overrideUntil: null } : d)
+        );
       },
     });
   }

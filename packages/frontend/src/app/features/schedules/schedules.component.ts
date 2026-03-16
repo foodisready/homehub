@@ -123,6 +123,48 @@ const CRON_PRESETS = [
     }
     .btn-cancel:hover { background: var(--surface); }
     .btn-save { flex: 2; }
+
+    .label-row { display: flex; align-items: center; gap: 0.4rem; margin-bottom: 0.3rem; }
+    .label-row .field-label { font-size: 0.82rem; font-weight: 500; color: var(--text-muted); }
+    .help-btn {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      border-radius: 50%;
+      width: 1.3rem;
+      height: 1.3rem;
+      font-size: 0.7rem;
+      font-weight: 700;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      line-height: 1;
+      flex-shrink: 0;
+    }
+    .help-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+    .cron-help {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 0.6rem 0.75rem;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-bottom: 0.5rem;
+      line-height: 1.6;
+    }
+    .cron-help code {
+      font-family: monospace;
+      color: var(--text);
+      background: var(--bg);
+      padding: 0.05rem 0.3rem;
+      border-radius: 3px;
+    }
+    .cron-help table { border-collapse: collapse; width: 100%; margin: 0.3rem 0; }
+    .cron-help th { color: var(--text); font-size: 0.7rem; text-align: left; padding: 0.1rem 0.4rem 0.1rem 0; }
+    .cron-help td { padding: 0.1rem 0.4rem 0.1rem 0; }
   `],
   template: `
     <div class="page">
@@ -244,8 +286,30 @@ const CRON_PRESETS = [
               </select>
             </div>
             <div class="field">
-              <label>Cron expression</label>
-              <input type="text" [(ngModel)]="form.cronExpression" placeholder="0 21 * * *" />
+              <div class="label-row">
+                <span class="field-label">Cron expression</span>
+                <button type="button" class="help-btn" (click)="toggleCronHelp($event)">?</button>
+              </div>
+              @if (showCronHelp()) {
+                <div class="cron-help" style="margin-top:0.4rem">
+                  <strong style="color:var(--text)">Format:</strong>
+                  <code>min&nbsp;&nbsp;hour&nbsp;&nbsp;day&nbsp;&nbsp;month&nbsp;&nbsp;weekday</code><br>
+                  <table>
+                    <tr><th>Field</th><th>Range</th><th>Example</th></tr>
+                    <tr><td>min</td><td>0–59</td><td><code>30</code> = at :30</td></tr>
+                    <tr><td>hour</td><td>0–23</td><td><code>21</code> = 9 PM</td></tr>
+                    <tr><td>day</td><td>1–31</td><td><code>*</code> = every day</td></tr>
+                    <tr><td>month</td><td>1–12</td><td><code>*</code> = every month</td></tr>
+                    <tr><td>weekday</td><td>0–6 (Sun=0)</td><td><code>1-5</code> = Mon–Fri</td></tr>
+                  </table>
+                  <div style="margin-top:0.3rem">
+                    <code>0 21 * * *</code> — every day at 9 PM<br>
+                    <code>0 8 * * 1-5</code> — weekdays at 8 AM<br>
+                    <code>0 8,20 * * *</code> — 8 AM and 8 PM daily
+                  </div>
+                </div>
+              }
+              <input type="text" [(ngModel)]="form.cronExpression" placeholder="0 21 * * *" style="margin-top:0.3rem" />
             </div>
           }
 
@@ -273,9 +337,10 @@ export class SchedulesComponent implements OnInit {
 
   readonly schedules  = this._schedules.asReadonly();
   readonly devices    = this._devices.asReadonly();
-  readonly showForm   = signal(false);
-  readonly saving     = signal(false);
-  readonly formError  = signal('');
+  readonly showForm      = signal(false);
+  readonly saving        = signal(false);
+  readonly formError     = signal('');
+  readonly showCronHelp  = signal(false);
 
   form = this.blankForm();
 
@@ -302,10 +367,16 @@ export class SchedulesComponent implements OnInit {
     };
   }
 
+  toggleCronHelp(e: Event): void {
+    e.stopPropagation();
+    this.showCronHelp.update((v) => !v);
+  }
+
   closeForm(): void {
     this.showForm.set(false);
     this.form = this.blankForm();
     this.formError.set('');
+    this.showCronHelp.set(false);
   }
 
   applyPreset(event: Event): void {

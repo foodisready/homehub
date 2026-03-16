@@ -85,4 +85,8 @@ function migrate(db: Database.Database): void {
       state     INTEGER NOT NULL CHECK(state IN (0, 1))
     );
   `);
+
+  // Additive migrations — safe to re-run (SQLite ignores duplicate column errors)
+  try { db.exec('ALTER TABLE devices ADD COLUMN override_state INTEGER'); } catch {}
+  try { db.exec('ALTER TABLE devices ADD COLUMN override_until TEXT'); } catch {}
 }

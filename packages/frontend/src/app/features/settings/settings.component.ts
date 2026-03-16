@@ -178,7 +178,7 @@ interface DiscoveredDevice {
             <div class="add-form" style="margin-top:0.75rem">
               <input type="text" [(ngModel)]="newDeviceAlias" placeholder="Alias (e.g. Porch Light)" />
               <input type="text" [(ngModel)]="newDeviceIp"    placeholder="IP address (e.g. 192.168.1.50)" />
-              <button class="btn-sm btn-primary" (click)="addManual()" [disabled]="!newDeviceAlias?.trim() || !newDeviceIp?.trim()">Add</button>
+              <button class="btn-sm btn-primary" (click)="addManual()" [disabled]="!newDeviceAlias.trim() || !newDeviceIp.trim()">Add</button>
             </div>
             <button class="btn-sm btn-ghost" style="margin-top:0.5rem" [disabled]="discovering()" (click)="discover()">
               {{ discovering() ? 'Scanning…' : '+ Discover on network' }}
@@ -243,7 +243,7 @@ interface DiscoveredDevice {
             <div class="add-form" style="margin-top:0.75rem">
               <input type="text"     [(ngModel)]="newUsername" placeholder="Username" autocomplete="off" />
               <input type="password" [(ngModel)]="newPassword" placeholder="Password" autocomplete="new-password" />
-              <button class="btn-sm btn-primary" (click)="addUser()" [disabled]="!newUsername?.trim() || !newPassword?.trim()">Add user</button>
+              <button class="btn-sm btn-primary" (click)="addUser()" [disabled]="!newUsername.trim() || !newPassword.trim()">Add user</button>
             </div>
             @if (addUserMsg()) { <p class="msg" [class.ok]="!addUserErr()" [class.err]="addUserErr()">{{ addUserMsg() }}</p> }
           </div>
