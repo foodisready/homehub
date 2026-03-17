@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { getDb } from '../db';
-import { setPowerState } from '../kasa/kasa.service';
+import { getDriver } from '../drivers/registry';
 import { emitDeviceState } from '../socket';
 import { getCachedState } from '../kasa/device.cache';
 import { logger } from '../logger';
@@ -9,7 +9,7 @@ export const scenesRouter = Router();
 
 interface SceneRow     { id: number; name: string; icon: string | null; created_at: string }
 interface ActionRow    { id: number; scene_id: number; device_id: number; state: number }
-interface DeviceRow    { id: number; alias: string; ip: string }
+interface DeviceRow    { id: number; alias: string; ip: string; driver_type: string; driver_config: string | null }
 
 function withActions(scene: SceneRow) {
   const db      = getDb();
@@ -68,14 +68,15 @@ scenesRouter.post('/:id/run', async (req: Request, res: Response) => {
   if (!scene) return res.status(404).json({ error: 'Scene not found', code: 'NOT_FOUND' });
 
   const actions = db.prepare(`
-    SELECT sa.state, d.id, d.ip, d.alias
+    SELECT sa.state, d.id, d.ip, d.alias, d.driver_type, d.driver_config
     FROM scene_actions sa JOIN devices d ON d.id = sa.device_id
     WHERE sa.scene_id = ?
   `).all(scene.id) as (ActionRow & DeviceRow & { alias: string })[];
 
   const results = await Promise.allSettled(
     actions.map(async (a) => {
-      await setPowerState(a.ip, a.state === 1);
+      const config = a.driver_config ? JSON.parse(a.driver_config) : undefined;
+      await getDriver(a.driver_type ?? 'kasa').setPower(a.ip, a.state === 1, config);
       emitDeviceState(a.id, a.alias, a.state === 1, getCachedState(a.id)?.wattage ?? null);
       return { alias: a.alias, state: a.state === 1 };
     })

@@ -1,7 +1,7 @@
 import SunCalc from 'suncalc';
 import { getDb } from '../db';
 import { getCachedState } from '../kasa/device.cache';
-import { setPowerState, getEnergyMetrics } from '../kasa/kasa.service';
+import { getDriver } from '../drivers/registry';
 import { emitDeviceState } from '../socket';
 import { logger } from '../logger';
 
@@ -160,7 +160,8 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
       const state = String(args.state ?? '') === 'on';
       const device = db.prepare('SELECT * FROM devices WHERE alias = ? COLLATE NOCASE').get(alias) as any;
       if (!device) return { error: `Device "${alias}" not found. Use list_devices to see available devices.` };
-      await setPowerState(device.ip, state);
+      const driverConfig = device.driver_config ? JSON.parse(device.driver_config) : undefined;
+      await getDriver(device.driver_type ?? 'kasa').setPower(device.ip, state, driverConfig);
       emitDeviceState(device.id, device.alias, state, getCachedState(device.id)?.wattage ?? null);
       return { success: true, alias: device.alias, state: state ? 'on' : 'off' };
     }
@@ -170,7 +171,8 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
       const device = db.prepare('SELECT * FROM devices WHERE alias = ? COLLATE NOCASE').get(alias) as any;
       if (!device) return { error: `Device "${alias}" not found` };
       if (!device.has_emeter) return { error: `"${alias}" does not support energy monitoring` };
-      const metrics = await getEnergyMetrics(device.ip);
+      const driverConfig = device.driver_config ? JSON.parse(device.driver_config) : undefined;
+      const metrics = await getDriver(device.driver_type ?? 'kasa').getEnergy(device.ip, driverConfig);
       return { alias: device.alias, ...metrics };
     }
 
@@ -263,7 +265,7 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
 // ── Shared helpers ─────────────────────────────────────────────
 
 function buildSystemPrompt(): string {
-  return `You are HomeHub, a helpful smart home assistant. You control TP-Link Kasa smart plugs and manage automation schedules.
+  return `You are HomeHub, a helpful smart home assistant. You control smart plugs and switches (TP-Link Kasa, Shelly, and others) and manage automation schedules.
 
 Use the provided tools when the user wants to control devices or manage schedules. Be concise and friendly. After taking actions, briefly summarize what you did.
 

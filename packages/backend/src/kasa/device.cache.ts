@@ -1,5 +1,5 @@
 import { getDb } from '../db';
-import { getPowerState, getEnergyMetrics } from './kasa.service';
+import { getDriver } from '../drivers/registry';
 import { emitDeviceState, emitDeviceOnline, emitDeviceEnergy } from '../socket';
 import { sendPushToAll } from '../push/push.service';
 import { logger } from '../logger';
@@ -29,11 +29,14 @@ async function pollDevice(
   ip: string,
   alias: string,
   hasEmeter: boolean,
+  driverType: string,
+  driverConfig: Record<string, unknown> | undefined,
 ): Promise<void> {
-  const prev = cache.get(id);
+  const prev   = cache.get(id);
+  const driver = getDriver(driverType);
   try {
-    const state  = await getPowerState(ip);
-    const energy = hasEmeter ? await getEnergyMetrics(ip) : null;
+    const state  = await driver.getPower(ip, driverConfig);
+    const energy = hasEmeter ? await driver.getEnergy(ip, driverConfig) : null;
     cache.set(id, { state, wattage: energy?.wattage ?? null, online: true, lastPolled: new Date() });
 
     // Track when device was turned on/off (for auto-off schedules)
@@ -73,11 +76,14 @@ async function pollDevice(
 /** Poll all devices in the DB. */
 async function pollAll(): Promise<void> {
   const db = getDb();
-  const devices = db.prepare('SELECT id, ip, alias, has_emeter FROM devices').all() as
-    { id: number; ip: string; alias: string; has_emeter: number }[];
+  const devices = db.prepare('SELECT id, ip, alias, has_emeter, driver_type, driver_config FROM devices').all() as
+    { id: number; ip: string; alias: string; has_emeter: number; driver_type: string; driver_config: string | null }[];
 
   await Promise.allSettled(
-    devices.map((d) => pollDevice(d.id, d.ip, d.alias, d.has_emeter === 1))
+    devices.map((d) => {
+      const config = d.driver_config ? JSON.parse(d.driver_config) : undefined;
+      return pollDevice(d.id, d.ip, d.alias, d.has_emeter === 1, d.driver_type ?? 'kasa', config);
+    })
   );
 }
 

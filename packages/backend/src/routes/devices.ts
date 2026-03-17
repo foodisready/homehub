@@ -1,9 +1,31 @@
 import { Router, Request, Response } from 'express';
 import { getDb } from '../db';
 import { getCachedState, getAllCachedStates } from '../kasa/device.cache';
-import { setPowerState, getEnergyMetrics, discoverDevices } from '../kasa/kasa.service';
+import { getDriver, getAllDrivers } from '../drivers/registry';
 import { emitDeviceState } from '../socket';
 import { logger } from '../logger';
+
+function confirmStateAsync(
+  deviceId: number,
+  alias: string,
+  driverType: string,
+  ip: string,
+  config: Record<string, unknown> | undefined,
+  expectedState: boolean,
+): void {
+  setTimeout(async () => {
+    try {
+      const actual = await getDriver(driverType).getPower(ip, config);
+      const states = getAllCachedStates();
+      const prev   = states.get(deviceId);
+      states.set(deviceId, { state: actual, wattage: prev?.wattage ?? null, online: true, lastPolled: new Date() });
+      if (actual !== expectedState) {
+        emitDeviceState(deviceId, alias, actual, prev?.wattage ?? null);
+        logger.warn({ deviceId, alias, expectedState, actual }, 'Device state mismatch after setPower — corrected');
+      }
+    } catch { /* device offline — next poll will handle it */ }
+  }, 1200);
+}
 
 export const devicesRouter = Router();
 
@@ -17,6 +39,8 @@ interface DeviceRow {
   created_at: string;
   override_state: number | null;
   override_until: string | null;
+  driver_type: string;
+  driver_config: string | null;
 }
 
 function mergeWithCache(device: DeviceRow) {
@@ -35,6 +59,8 @@ function mergeWithCache(device: DeviceRow) {
     overrideUntil: device.override_until
       ? device.override_until.replace(' ', 'T') + 'Z'
       : null,
+    driverType:   device.driver_type ?? 'kasa',
+    driverConfig: device.driver_config ? JSON.parse(device.driver_config) : null,
   };
 }
 
@@ -62,9 +88,11 @@ devicesRouter.post('/:id/on', async (req: Request, res: Response) => {
   if (!device) return res.status(404).json({ error: 'Device not found', code: 'DEVICE_NOT_FOUND' });
 
   try {
-    await setPowerState(device.ip, true);
+    const config = device.driver_config ? JSON.parse(device.driver_config) : undefined;
+    await getDriver(device.driver_type ?? 'kasa').setPower(device.ip, true, config);
     db.prepare("UPDATE devices SET turned_on_at = datetime('now') WHERE id = ?").run(device.id);
     emitDeviceState(device.id, device.alias, true, getCachedState(device.id)?.wattage ?? null);
+    confirmStateAsync(device.id, device.alias, device.driver_type ?? 'kasa', device.ip, config, true);
     res.json({ alias: device.alias, state: true });
   } catch (err) {
     logger.error(err, 'Failed to turn on device');
@@ -80,9 +108,11 @@ devicesRouter.post('/:id/off', async (req: Request, res: Response) => {
   if (!device) return res.status(404).json({ error: 'Device not found', code: 'DEVICE_NOT_FOUND' });
 
   try {
-    await setPowerState(device.ip, false);
+    const config = device.driver_config ? JSON.parse(device.driver_config) : undefined;
+    await getDriver(device.driver_type ?? 'kasa').setPower(device.ip, false, config);
     db.prepare('UPDATE devices SET turned_on_at = NULL WHERE id = ?').run(device.id);
     emitDeviceState(device.id, device.alias, false, null);
+    confirmStateAsync(device.id, device.alias, device.driver_type ?? 'kasa', device.ip, config, false);
     res.json({ alias: device.alias, state: false });
   } catch (err) {
     logger.error(err, 'Failed to turn off device');
@@ -99,7 +129,8 @@ devicesRouter.get('/:id/energy', async (req: Request, res: Response) => {
   if (!device.has_emeter) return res.status(400).json({ error: 'Device does not support energy monitoring', code: 'NO_EMETER' });
 
   try {
-    const metrics = await getEnergyMetrics(device.ip);
+    const config  = device.driver_config ? JSON.parse(device.driver_config) : undefined;
+    const metrics = await getDriver(device.driver_type ?? 'kasa').getEnergy(device.ip, config);
     res.json({ alias: device.alias, ...metrics, recordedAt: new Date().toISOString() });
   } catch (err) {
     logger.error(err, 'Failed to get energy metrics');
@@ -124,10 +155,13 @@ devicesRouter.get('/energy/summary', (_req: Request, res: Response) => {
   res.json({ totalWattage, deviceCount: devices.length, onlineCount, readings });
 });
 
-// POST /api/devices/discover — trigger UDP broadcast discovery
+// POST /api/devices/discover — fan out discovery across all registered drivers
 devicesRouter.post('/discover', async (_req: Request, res: Response) => {
   try {
-    const found = await discoverDevices(5000);
+    const results = await Promise.allSettled(getAllDrivers().map((d) => d.discover()));
+    const found = results
+      .filter((r): r is PromiseFulfilledResult<any[]> => r.status === 'fulfilled')
+      .flatMap((r) => r.value);
     res.json(found);
   } catch (err) {
     logger.error(err, 'Discovery failed');
@@ -135,18 +169,34 @@ devicesRouter.post('/discover', async (_req: Request, res: Response) => {
   }
 });
 
+// POST /api/devices/probe — probe a single IP to identify its device type and metadata
+devicesRouter.post('/probe', async (req: Request, res: Response) => {
+  const { ip, driverType } = req.body as { ip?: string; driverType?: string };
+  if (!ip) return res.status(400).json({ error: 'ip is required', code: 'VALIDATION_ERROR' });
+
+  const typesToTry = driverType ? [driverType] : getAllDrivers().map((d) => d.type);
+  for (const type of typesToTry) {
+    try {
+      const result = await getDriver(type).probe(ip);
+      if (result) return res.json({ ...result, driverType: type });
+    } catch {}
+  }
+  res.status(404).json({ error: `No device found at ${ip}`, code: 'DEVICE_NOT_FOUND' });
+});
+
 // POST /api/devices — manually register a device
 devicesRouter.post('/', (req: Request, res: Response) => {
-  const { alias, ip, model, hasEmeter = false } = req.body as {
+  const { alias, ip, model, hasEmeter = false, driverType = 'kasa', driverConfig } = req.body as {
     alias: string; ip: string; model?: string; hasEmeter?: boolean;
+    driverType?: string; driverConfig?: Record<string, unknown>;
   };
   if (!alias || !ip) return res.status(400).json({ error: 'alias and ip are required', code: 'VALIDATION_ERROR' });
 
   const db = getDb();
   try {
     const result = db.prepare(
-      'INSERT INTO devices (alias, ip, model, has_emeter) VALUES (?, ?, ?, ?)'
-    ).run(alias, ip, model ?? null, hasEmeter ? 1 : 0);
+      'INSERT INTO devices (alias, ip, model, has_emeter, driver_type, driver_config) VALUES (?, ?, ?, ?, ?, ?)'
+    ).run(alias, ip, model ?? null, hasEmeter ? 1 : 0, driverType, driverConfig ? JSON.stringify(driverConfig) : null);
     const device = db.prepare('SELECT * FROM devices WHERE id = ?').get(result.lastInsertRowid) as DeviceRow;
     res.status(201).json(mergeWithCache(device));
   } catch (err: any) {
@@ -164,13 +214,20 @@ devicesRouter.patch('/:id', (req: Request, res: Response) => {
     .get(req.params.id, req.params.id) as DeviceRow | undefined;
   if (!device) return res.status(404).json({ error: 'Device not found', code: 'DEVICE_NOT_FOUND' });
 
-  const { alias, ip, icon } = req.body as { alias?: string; ip?: string; icon?: string };
-  const newAlias = alias ?? device.alias;
-  const newIp    = ip    ?? device.ip;
-  const newIcon  = icon  ?? device.icon;
+  const { alias, ip, icon, driverType, driverConfig } = req.body as {
+    alias?: string; ip?: string; icon?: string;
+    driverType?: string; driverConfig?: Record<string, unknown> | null;
+  };
+  const newAlias        = alias       ?? device.alias;
+  const newIp           = ip          ?? device.ip;
+  const newIcon         = icon        ?? device.icon;
+  const newDriverType   = driverType  ?? device.driver_type;
+  const newDriverConfig = driverConfig !== undefined
+    ? (driverConfig ? JSON.stringify(driverConfig) : null)
+    : device.driver_config;
 
-  db.prepare('UPDATE devices SET alias = ?, ip = ?, icon = ? WHERE id = ?')
-    .run(newAlias, newIp, newIcon, device.id);
+  db.prepare('UPDATE devices SET alias = ?, ip = ?, icon = ?, driver_type = ?, driver_config = ? WHERE id = ?')
+    .run(newAlias, newIp, newIcon, newDriverType, newDriverConfig, device.id);
 
   const updated = db.prepare('SELECT * FROM devices WHERE id = ?').get(device.id) as DeviceRow;
   res.json(mergeWithCache(updated));
@@ -193,7 +250,8 @@ devicesRouter.post('/:id/override', async (req: Request, res: Response) => {
     .run(state ? 1 : 0, String(durationMinutes), device.id);
 
   try {
-    await setPowerState(device.ip, state);
+    const config = device.driver_config ? JSON.parse(device.driver_config) : undefined;
+    await getDriver(device.driver_type ?? 'kasa').setPower(device.ip, state, config);
     emitDeviceState(device.id, device.alias, state, getCachedState(device.id)?.wattage ?? null);
   } catch (err) {
     logger.warn({ ip: device.ip }, 'Could not apply override state immediately');

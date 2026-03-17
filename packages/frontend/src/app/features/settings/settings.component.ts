@@ -12,13 +12,22 @@ interface UserRow {
 }
 
 interface DiscoveredDevice {
-  ip: string;
-  alias: string;
-  model: string;
-  hasEmeter: boolean;
-  // editable alias before registering
+  ip:           string;
+  alias:        string;
+  model:        string;
+  hasEmeter:    boolean;
+  driverType:   string;
+  driverConfig?: Record<string, unknown>;
+  // editable before registering
   pendingAlias?: string;
+  pendingKey?:   string;   // Tuya only: local key required for control
 }
+
+const DRIVER_LABEL: Record<string, string> = {
+  kasa:   'Kasa',
+  shelly: 'Shelly',
+  tuya:   'Tuya',
+};
 
 @Component({
   selector: 'app-settings',
@@ -40,7 +49,6 @@ interface DiscoveredDevice {
       margin-bottom:0.75rem;
     }
 
-    /* Table-like rows */
     .row-item {
       display:flex;
       align-items:center;
@@ -59,6 +67,17 @@ interface DiscoveredDevice {
     }
     .role-badge.admin { background:#1e3a5f; color:var(--accent); }
 
+    .driver-badge {
+      font-size:0.68rem; font-weight:600;
+      padding:0.1rem 0.5rem; border-radius:999px;
+      background:var(--surface); color:var(--text-muted);
+      border:1px solid var(--border);
+      flex-shrink:0;
+    }
+    .driver-badge.kasa   { border-color:#1d4ed8; color:#60a5fa; }
+    .driver-badge.shelly { border-color:#b45309; color:#fbbf24; }
+    .driver-badge.tuya   { border-color:#15803d; color:#4ade80; }
+
     .btn-sm {
       padding:0.3rem 0.75rem;
       font-size:0.8rem;
@@ -76,7 +95,6 @@ interface DiscoveredDevice {
     }
     .btn-danger:hover { color:var(--red); }
 
-    /* Inline edit row */
     .edit-row {
       display:grid;
       grid-template-columns:1fr 1fr;
@@ -87,7 +105,15 @@ interface DiscoveredDevice {
     .edit-row.single { grid-template-columns:1fr; }
     .edit-row input { font-size:0.85rem; padding:0.4rem 0.7rem; }
 
-    /* Preferences */
+    .pass-wrap { position:relative; display:flex; align-items:center; }
+    .pass-wrap input { flex:1; padding-right:2.2rem; }
+    .pass-eye {
+      position:absolute; right:0.5rem;
+      background:none; border:none; padding:0; cursor:pointer;
+      color:var(--text-muted); line-height:0;
+    }
+    .pass-eye:hover { color:var(--text); }
+
     .pref-row {
       display:flex;
       align-items:center;
@@ -102,10 +128,10 @@ interface DiscoveredDevice {
 
     .add-form {
       display:grid;
-      grid-template-columns:1fr 1fr auto;
+      grid-template-columns:1fr 1fr auto auto;
       gap:0.5rem;
       margin-top:0.75rem;
-      flex-wrap:wrap;
+      align-items:center;
     }
     .add-form input { font-size:0.85rem; }
 
@@ -113,19 +139,23 @@ interface DiscoveredDevice {
     .msg.ok  { color:var(--green); }
     .msg.err { color:var(--red); }
 
-    /* Discovery results */
     .discover-list { margin-top:0.75rem; border:1px solid var(--border); border-radius:var(--radius); overflow:hidden; }
     .discover-row {
-      display:flex; align-items:center; gap:0.75rem;
+      display:flex; align-items:center; gap:0.6rem;
       padding:0.5rem 0.75rem; border-bottom:1px solid var(--border); font-size:0.88rem;
+      flex-wrap:wrap;
     }
     .discover-row:last-child { border-bottom:none; }
     .discover-row input[type=checkbox] { width:1rem; height:1rem; flex-shrink:0; accent-color:var(--accent); cursor:pointer; }
-    .discover-alias { flex:1; min-width:0; }
+    .discover-alias { flex:1; min-width:120px; }
     .discover-alias input { font-size:0.85rem; padding:0.25rem 0.5rem; width:100%; }
-    .discover-ip   { font-size:0.78rem; color:var(--text-muted); white-space:nowrap; }
-    .discover-model{ font-size:0.72rem; color:var(--text-muted); white-space:nowrap; }
+    .discover-key { min-width:150px; }
+    .discover-key input { font-size:0.8rem; padding:0.25rem 0.5rem; width:100%; }
+    .discover-key-label { font-size:0.72rem; color:var(--text-muted); display:block; margin-bottom:2px; }
+    .discover-ip    { font-size:0.78rem; color:var(--text-muted); white-space:nowrap; }
+    .discover-model { font-size:0.72rem; color:var(--text-muted); white-space:nowrap; }
     .discover-footer { display:flex; align-items:center; justify-content:space-between; margin-top:0.5rem; }
+    .key-warning { font-size:0.75rem; color:#fbbf24; margin-top:0.25rem; }
   `],
   template: `
     <div class="page">
@@ -149,8 +179,31 @@ interface DiscoveredDevice {
                     <input type="text" [(ngModel)]="editAlias" placeholder="Alias" />
                     <input type="text" [(ngModel)]="editIp"    placeholder="IP address" />
                   </div>
+                  @if (d.driverType === 'shelly' || d.driverType === 'tuya') {
+                    <div class="edit-row" style="margin-top:0.4rem">
+                      <input type="text"     [(ngModel)]="editAuthUser" placeholder="Username (leave blank to clear)" autocomplete="off" />
+                      <div class="pass-wrap">
+                        <input [type]="showAuthPass ? 'text' : 'password'" [(ngModel)]="editAuthPass" placeholder="Password (leave blank to clear)" autocomplete="new-password" />
+                        <button type="button" class="pass-eye" (click)="showAuthPass = !showAuthPass" [attr.aria-label]="showAuthPass ? 'Hide password' : 'Show password'">
+                          @if (showAuthPass) {
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                              <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
+                              <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
+                              <line x1="1" y1="1" x2="23" y2="23"/>
+                            </svg>
+                          } @else {
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                              <circle cx="12" cy="12" r="3"/>
+                            </svg>
+                          }
+                        </button>
+                      </div>
+                    </div>
+                    <p style="font-size:0.75rem;color:var(--text-muted);margin:0.2rem 0 0">Leave both blank to remove stored credentials.</p>
+                  }
                   <div style="display:flex;gap:0.5rem;margin-top:0.4rem">
-                    <button class="btn-sm btn-primary" (click)="saveDevice(d.id)">Save</button>
+                    <button class="btn-sm btn-primary" (click)="saveDevice(d.id, d.driverType)">Save</button>
                     <button class="btn-sm btn-ghost" (click)="cancelDeviceEdit()">Cancel</button>
                     @if (deviceMsg()) { <span class="msg" [class.ok]="!deviceErr()" [class.err]="deviceErr()">{{ deviceMsg() }}</span> }
                   </div>
@@ -159,8 +212,11 @@ interface DiscoveredDevice {
                 <div class="row-label">
                   {{ d.alias }}
                   <span class="row-meta"> · {{ d.ip }}</span>
-                  @if (d.hasEmeter) { <span class="row-meta"> · ⚡ emeter</span> }
+                  @if (d.hasEmeter) { <span class="row-meta"> · ⚡</span> }
                 </div>
+                <span class="driver-badge" [class]="'driver-badge ' + (d.driverType ?? 'kasa')">
+                  {{ driverLabel(d.driverType ?? 'kasa') }}
+                </span>
                 @if (isAdmin()) {
                   <button class="btn-sm btn-ghost" (click)="startDeviceEdit(d)">Edit</button>
                   <button class="btn-sm btn-danger" (click)="deleteDevice(d.id, d.alias)">✕</button>
@@ -170,35 +226,58 @@ interface DiscoveredDevice {
           }
 
           @if (devices().length === 0) {
-            <p style="color:var(--text-muted);font-size:0.85rem;padding:0.5rem 0">No devices registered. Use Discover to find plugs on your network.</p>
+            <p style="color:var(--text-muted);font-size:0.85rem;padding:0.5rem 0">No devices registered. Use Discover to find devices on your network.</p>
           }
 
           @if (isAdmin()) {
-            <!-- Manual add -->
+            <!-- Manual add with Probe -->
             <div class="add-form" style="margin-top:0.75rem">
               <input type="text" [(ngModel)]="newDeviceAlias" placeholder="Alias (e.g. Porch Light)" />
-              <input type="text" [(ngModel)]="newDeviceIp"    placeholder="IP address (e.g. 192.168.1.50)" />
+              <input type="text" [(ngModel)]="newDeviceIp"    placeholder="IP address (e.g. 192.168.1.50)"
+                     (keydown.enter)="probeIp()" />
+              <button class="btn-sm btn-ghost" (click)="probeIp()" [disabled]="!newDeviceIp.trim() || probing()">
+                {{ probing() ? '…' : 'Probe' }}
+              </button>
               <button class="btn-sm btn-primary" (click)="addManual()" [disabled]="!newDeviceAlias.trim() || !newDeviceIp.trim()">Add</button>
             </div>
-            <button class="btn-sm btn-ghost" style="margin-top:0.5rem" [disabled]="discovering()" (click)="discover()">
-              {{ discovering() ? 'Scanning…' : '+ Discover on network' }}
-            </button>
+            @if (probeMsg()) {
+              <p class="msg" [class.ok]="!probeErr()" [class.err]="probeErr()">{{ probeMsg() }}</p>
+            }
+
+            <!-- Discover buttons -->
+            <div style="display:flex;gap:0.5rem;margin-top:0.5rem;flex-wrap:wrap">
+              <button class="btn-sm btn-ghost" [disabled]="discovering()" (click)="discover()">
+                {{ discovering() ? 'Scanning…' : '+ Discover on network' }}
+              </button>
+            </div>
             @if (discoverMsg()) { <p class="msg" [class.ok]="!discoverErr()" [class.err]="discoverErr()">{{ discoverMsg() }}</p> }
 
-            <!-- Discovery results: selectable list -->
+            <!-- Discovery results -->
             @if (discoveredDevices().length > 0) {
               <div class="discover-list">
                 @for (d of discoveredDevices(); track d.ip) {
                   <div class="discover-row">
-                    <input type="checkbox" [checked]="isSelected(d.ip)" (change)="toggleSelect(d.ip)" />
+                    <input type="checkbox" [checked]="isSelected(d.ip)" (change)="toggleSelect(d.ip)"
+                           [disabled]="d.driverType === 'tuya' && !d.pendingKey?.trim()" />
                     <div class="discover-alias">
                       <input type="text" [(ngModel)]="d.pendingAlias" placeholder="Alias" />
                     </div>
                     <span class="discover-ip">{{ d.ip }}</span>
-                    @if (d.model) { <span class="discover-model">{{ d.model }}</span> }
+                    @if (d.model && d.model !== d.ip) { <span class="discover-model">{{ d.model }}</span> }
+                    <span class="driver-badge" [class]="'driver-badge ' + d.driverType">{{ driverLabel(d.driverType) }}</span>
+                    @if (d.driverType === 'tuya') {
+                      <div class="discover-key">
+                        <span class="discover-key-label">Local Key (required)</span>
+                        <input type="text" [(ngModel)]="d.pendingKey" placeholder="e.g. a1b2c3d4e5f6g7h8"
+                               (ngModelChange)="onTuyaKeyChange(d)" />
+                      </div>
+                    }
                   </div>
                 }
               </div>
+              @if (hasTuyaDevices()) {
+                <p class="key-warning">⚠ Tuya devices require a Local Key from the <strong>Tuya IoT Platform</strong> (iot.tuya.com → Cloud → Devices). Enter it above before registering.</p>
+              }
               <div class="discover-footer">
                 <span style="font-size:0.8rem;color:var(--text-muted)">{{ selectedCount() }} of {{ discoveredDevices().length }} selected</span>
                 <button class="btn-sm btn-primary" [disabled]="selectedCount() === 0 || registering()" (click)="registerSelected()">
@@ -239,11 +318,10 @@ interface DiscoveredDevice {
               </div>
             }
 
-            <!-- Add user form -->
             <div class="add-form" style="margin-top:0.75rem">
               <input type="text"     [(ngModel)]="newUsername" placeholder="Username" autocomplete="off" />
               <input type="password" [(ngModel)]="newPassword" placeholder="Password" autocomplete="new-password" />
-              <button class="btn-sm btn-primary" (click)="addUser()" [disabled]="!newUsername.trim() || !newPassword.trim()">Add user</button>
+              <button class="btn-sm btn-primary" style="grid-column:span 2" (click)="addUser()" [disabled]="!newUsername.trim() || !newPassword.trim()">Add user</button>
             </div>
             @if (addUserMsg()) { <p class="msg" [class.ok]="!addUserErr()" [class.err]="addUserErr()">{{ addUserMsg() }}</p> }
           </div>
@@ -312,8 +390,11 @@ export class SettingsComponent implements OnInit {
 
   // Device editing
   editingDeviceId = signal<number | null>(null);
-  editAlias = '';
-  editIp    = '';
+  editAlias    = '';
+  editIp       = '';
+  editAuthUser  = '';
+  editAuthPass  = '';
+  showAuthPass  = false;
   deviceMsg = signal('');
   deviceErr = signal(false);
 
@@ -329,7 +410,16 @@ export class SettingsComponent implements OnInit {
   addUserMsg = signal('');
   addUserErr = signal(false);
 
-  // Discovery + manual add
+  // Manual add + probe
+  newDeviceAlias      = '';
+  newDeviceIp         = '';
+  newDeviceDriverType = 'kasa';
+  newDeviceDriverConfig: Record<string, unknown> | null = null;
+  probing   = signal(false);
+  probeMsg  = signal('');
+  probeErr  = signal(false);
+
+  // Discovery
   discovering       = signal(false);
   discoverMsg       = signal('');
   discoverErr       = signal(false);
@@ -338,17 +428,18 @@ export class SettingsComponent implements OnInit {
   readonly discoveredDevices = this._discoveredDevices.asReadonly();
   private selectedIps = new Set<string>();
   readonly selectedCount = computed(() => {
-    this.discoveredDevices(); // track signal
+    this.discoveredDevices();
     return this.selectedIps.size;
   });
-  newDeviceAlias = '';
-  newDeviceIp    = '';
+  readonly hasTuyaDevices = computed(() =>
+    this.discoveredDevices().some((d) => d.driverType === 'tuya')
+  );
 
   // Push notifications
-  pushSupported  = 'serviceWorker' in navigator && 'PushManager' in window;
-  pushEnabled    = signal(false);
-  pushMsg        = signal('');
-  pushErr        = signal(false);
+  pushSupported = 'serviceWorker' in navigator && 'PushManager' in window;
+  pushEnabled   = signal(false);
+  pushMsg       = signal('');
+  pushErr       = signal(false);
 
   // kWh rate
   kwhRateDraft = localStorage.getItem('kwhRate') ?? '0.15';
@@ -361,6 +452,10 @@ export class SettingsComponent implements OnInit {
       this.http.get<UserRow[]>('/api/users').subscribe((u) => this._users.set(u));
     }
     this.checkPushStatus();
+  }
+
+  driverLabel(type: string): string {
+    return DRIVER_LABEL[type] ?? type;
   }
 
   private async checkPushStatus(): Promise<void> {
@@ -389,10 +484,7 @@ export class SettingsComponent implements OnInit {
         });
         if (!keyRes.ok) { this.pushMsg.set('Push not configured on server.'); this.pushErr.set(true); return; }
         const { key } = await keyRes.json();
-        const sub = await reg.pushManager.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey: key,
-        });
+        const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
         const json = sub.toJSON() as any;
         this.http.post('/api/push/subscribe', { endpoint: json.endpoint, keys: json.keys }).subscribe();
         this.pushEnabled.set(true);
@@ -409,20 +501,42 @@ export class SettingsComponent implements OnInit {
 
   startDeviceEdit(d: Device): void {
     this.editingDeviceId.set(d.id);
-    this.editAlias = d.alias;
-    this.editIp    = d.ip;
+    this.editAlias    = d.alias;
+    this.editIp       = d.ip;
+    // Pre-fill credentials if already stored
+    const auth = (d.driverConfig as any)?.auth;
+    this.editAuthUser = auth?.user ?? '';
+    this.editAuthPass = auth?.pass ?? '';
+    this.showAuthPass = false;
     this.deviceMsg.set('');
   }
 
   cancelDeviceEdit(): void {
     this.editingDeviceId.set(null);
+    this.editAuthUser = '';
+    this.editAuthPass = '';
+    this.showAuthPass = false;
     this.deviceMsg.set('');
   }
 
-  saveDevice(id: number): void {
-    this.http.patch<Device>(`/api/devices/${id}`, { alias: this.editAlias, ip: this.editIp }).subscribe({
+  saveDevice(id: number, driverType?: string): void {
+    const device  = this.devices().find((d) => d.id === id);
+    const payload: Record<string, unknown> = { alias: this.editAlias, ip: this.editIp };
+
+    // For Shelly/Tuya, merge auth into driverConfig
+    if (driverType === 'shelly' || driverType === 'tuya') {
+      const baseConfig = { ...(device?.driverConfig ?? {}) } as Record<string, unknown>;
+      if (this.editAuthUser.trim() && this.editAuthPass.trim()) {
+        baseConfig['auth'] = { user: this.editAuthUser.trim(), pass: this.editAuthPass.trim() };
+      } else {
+        delete baseConfig['auth'];
+      }
+      payload['driverConfig'] = baseConfig;
+    }
+
+    this.http.patch<Device>(`/api/devices/${id}`, payload).subscribe({
       next: (updated) => {
-        this._devices.update((list) => list.map((d) => d.id === id ? { ...d, alias: updated.alias, ip: updated.ip } : d));
+        this._devices.update((list) => list.map((d) => d.id === id ? { ...d, ...updated } : d));
         this.deviceMsg.set('Saved');
         this.deviceErr.set(false);
         setTimeout(() => this.cancelDeviceEdit(), 800);
@@ -438,12 +552,48 @@ export class SettingsComponent implements OnInit {
     });
   }
 
+  // ── Probe ──────────────────────────────────────────────────
+
+  probeIp(): void {
+    const ip = this.newDeviceIp.trim();
+    if (!ip) return;
+    this.probing.set(true);
+    this.probeMsg.set('');
+    this.probeErr.set(false);
+    this.http.post<any>('/api/devices/probe', { ip }).subscribe({
+      next: (result) => {
+        this.probing.set(false);
+        this.newDeviceDriverType   = result.driverType ?? 'kasa';
+        this.newDeviceDriverConfig = result.driverConfig ?? null;
+        if (!this.newDeviceAlias.trim()) {
+          this.newDeviceAlias = result.alias && result.alias !== ip ? result.alias : '';
+        }
+        this.probeMsg.set(`Detected: ${result.model ?? result.driverType} (${this.driverLabel(result.driverType)})`);
+      },
+      error: () => {
+        this.probing.set(false);
+        this.newDeviceDriverType   = 'kasa';
+        this.newDeviceDriverConfig = null;
+        this.probeMsg.set('Could not detect device — it may be offline or use an unsupported protocol.');
+        this.probeErr.set(true);
+      },
+    });
+  }
+
+  // ── Discover ───────────────────────────────────────────────
+
   isSelected(ip: string): boolean { return this.selectedIps.has(ip); }
 
   toggleSelect(ip: string): void {
     if (this.selectedIps.has(ip)) this.selectedIps.delete(ip);
     else this.selectedIps.add(ip);
-    // Re-trigger selectedCount computed by writing to the signal
+    this._discoveredDevices.update((list) => [...list]);
+  }
+
+  onTuyaKeyChange(d: DiscoveredDevice): void {
+    // Auto-select Tuya device once a key is entered
+    if (d.pendingKey?.trim()) this.selectedIps.add(d.ip);
+    else this.selectedIps.delete(d.ip);
     this._discoveredDevices.update((list) => [...list]);
   }
 
@@ -456,21 +606,21 @@ export class SettingsComponent implements OnInit {
       next: (found) => {
         this.discovering.set(false);
         if (found.length === 0) {
-          this.discoverMsg.set('No devices found. Check that plugs are on the same network.');
+          this.discoverMsg.set('No new devices found. Kasa uses UDP broadcast; Shelly/Tuya must be added via IP probe.');
           this.discoverErr.set(false);
           return;
         }
         const existingIps = new Set(this._devices().map((d) => d.ip));
         const newDevices  = found
           .filter((f) => !existingIps.has(f.ip))
-          .map((f) => ({ ...f, pendingAlias: f.alias || f.ip }));
+          .map((f) => ({ ...f, pendingAlias: f.alias && f.alias !== f.ip ? f.alias : '' }));
         if (newDevices.length === 0) {
           this.discoverMsg.set(`Found ${found.length} device(s) — all already registered.`);
           this.discoverErr.set(false);
           return;
         }
-        // Pre-select all
-        newDevices.forEach((d) => this.selectedIps.add(d.ip));
+        // Pre-select non-Tuya devices (Tuya needs key first)
+        newDevices.filter((d) => d.driverType !== 'tuya').forEach((d) => this.selectedIps.add(d.ip));
         this._discoveredDevices.set(newDevices);
         this.discoverMsg.set(`Found ${newDevices.length} new device(s). Review and register below.`);
         this.discoverErr.set(false);
@@ -484,12 +634,21 @@ export class SettingsComponent implements OnInit {
     if (!toRegister.length) return;
     this.registering.set(true);
     let done = 0;
+
     for (const d of toRegister) {
+      // Build driver config — for Tuya, merge the user-supplied key in
+      let driverConfig = d.driverConfig ?? null;
+      if (d.driverType === 'tuya' && d.pendingKey?.trim()) {
+        driverConfig = { ...driverConfig, key: d.pendingKey.trim() };
+      }
+
       this.http.post<Device>('/api/devices', {
-        alias:     (d.pendingAlias || d.ip).trim(),
-        ip:        d.ip,
-        model:     d.model ?? null,
-        hasEmeter: d.hasEmeter ?? false,
+        alias:        (d.pendingAlias || d.ip).trim(),
+        ip:           d.ip,
+        model:        d.model ?? null,
+        hasEmeter:    d.hasEmeter ?? false,
+        driverType:   d.driverType,
+        driverConfig: driverConfig ?? undefined,
       }).subscribe({
         next: (created) => {
           this._devices.update((list) => [...list, created]);
@@ -515,18 +674,22 @@ export class SettingsComponent implements OnInit {
   addManual(): void {
     if (!this.newDeviceAlias.trim() || !this.newDeviceIp.trim()) return;
     this.http.post<Device>('/api/devices', {
-      alias: this.newDeviceAlias.trim(),
-      ip:    this.newDeviceIp.trim(),
+      alias:        this.newDeviceAlias.trim(),
+      ip:           this.newDeviceIp.trim(),
+      driverType:   this.newDeviceDriverType,
+      driverConfig: this.newDeviceDriverConfig ?? undefined,
     }).subscribe({
       next: (created) => {
         this._devices.update((list) => [...list, created]);
-        this.newDeviceAlias = '';
-        this.newDeviceIp    = '';
-        this.discoverMsg.set(`"${created.alias}" added.`);
-        this.discoverErr.set(false);
-        setTimeout(() => this.discoverMsg.set(''), 2000);
+        this.newDeviceAlias       = '';
+        this.newDeviceIp          = '';
+        this.newDeviceDriverType  = 'kasa';
+        this.newDeviceDriverConfig = null;
+        this.probeMsg.set(`"${created.alias}" added.`);
+        this.probeErr.set(false);
+        setTimeout(() => this.probeMsg.set(''), 2000);
       },
-      error: (err) => { this.discoverMsg.set(err.error?.error ?? 'Failed to add device.'); this.discoverErr.set(true); },
+      error: (err) => { this.probeMsg.set(err.error?.error ?? 'Failed to add device.'); this.probeErr.set(true); },
     });
   }
 
@@ -580,8 +743,6 @@ export class SettingsComponent implements OnInit {
 
   saveKwhRate(): void {
     const rate = parseFloat(this.kwhRateDraft);
-    if (!isNaN(rate) && rate >= 0) {
-      localStorage.setItem('kwhRate', String(rate));
-    }
+    if (!isNaN(rate) && rate >= 0) localStorage.setItem('kwhRate', String(rate));
   }
 }

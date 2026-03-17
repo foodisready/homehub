@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { requireInternalKey } from '../middleware/internal';
 import { getDb } from '../db';
-import { setPowerState } from '../kasa/kasa.service';
+import { getDriver } from '../drivers/registry';
 import { getCachedState } from '../kasa/device.cache';
 import { emitDeviceState } from '../socket';
 import { logger } from '../logger';
@@ -10,13 +10,13 @@ export const internalRouter = Router();
 
 internalRouter.use(requireInternalKey);
 
-interface DeviceRow { id: number; alias: string; ip: string; }
+interface DeviceRow { id: number; alias: string; ip: string; driver_type: string; driver_config: string | null; }
 
 // POST /internal/devices/:id/execute  { state: boolean }
 // Called by the scheduler when a scheduled action fires.
 internalRouter.post('/devices/:id/execute', async (req: Request, res: Response) => {
   const db = getDb();
-  const device = db.prepare('SELECT id, alias, ip FROM devices WHERE id = ?')
+  const device = db.prepare('SELECT id, alias, ip, driver_type, driver_config FROM devices WHERE id = ?')
     .get(req.params.id) as DeviceRow | undefined;
 
   if (!device) {
@@ -39,7 +39,8 @@ internalRouter.post('/devices/:id/execute', async (req: Request, res: Response) 
   }
 
   try {
-    await setPowerState(device.ip, state);
+    const config = device.driver_config ? JSON.parse(device.driver_config) : undefined;
+    await getDriver(device.driver_type ?? 'kasa').setPower(device.ip, state, config);
     if (state) {
       db.prepare("UPDATE devices SET turned_on_at = datetime('now') WHERE id = ?").run(device.id);
     } else {
