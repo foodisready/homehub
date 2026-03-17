@@ -4,9 +4,12 @@ import { provideHttpClient, withInterceptors } from '@angular/common/http';
 import { routes } from './app.routes';
 import { authInterceptor } from './core/auth/auth.interceptor';
 import { AuthService } from './core/auth/auth.service';
+import { SocketService } from './core/socket/socket.service';
 
-function initAuth(auth: AuthService) {
-  return () => auth.refresh().toPromise().catch(() => null);
+function initAuth(auth: AuthService, socket: SocketService) {
+  return () => auth.refresh().toPromise()
+    .then(() => { if (auth.isLoggedIn()) socket.connect(); })
+    .catch(() => null);
 }
 
 export const appConfig: ApplicationConfig = {
@@ -17,7 +20,7 @@ export const appConfig: ApplicationConfig = {
     {
       provide: APP_INITIALIZER,
       useFactory: initAuth,
-      deps: [AuthService],
+      deps: [AuthService, SocketService],
       multi: true,
     },
   ],

@@ -36,6 +36,16 @@ async function pollDevice(
     const energy = hasEmeter ? await getEnergyMetrics(ip) : null;
     cache.set(id, { state, wattage: energy?.wattage ?? null, online: true, lastPolled: new Date() });
 
+    // Track when device was turned on/off (for auto-off schedules)
+    const db = getDb();
+    if (state) {
+      // Seed turned_on_at if lamp is on but has no timestamp (e.g. was on before backend started)
+      db.prepare("UPDATE devices SET turned_on_at = datetime('now') WHERE id = ? AND turned_on_at IS NULL").run(id);
+    } else if (prev?.online && prev.state !== state) {
+      // Clear turned_on_at when lamp turns off
+      db.prepare('UPDATE devices SET turned_on_at = NULL WHERE id = ?').run(id);
+    }
+
     // Emit state if it changed or device just came online
     if (!prev?.online || prev.state !== state || prev.wattage !== (energy?.wattage ?? null)) {
       emitDeviceState(id, alias, state, energy?.wattage ?? null);

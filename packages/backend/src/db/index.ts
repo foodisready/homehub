@@ -89,4 +89,33 @@ function migrate(db: Database.Database): void {
   // Additive migrations — safe to re-run (SQLite ignores duplicate column errors)
   try { db.exec('ALTER TABLE devices ADD COLUMN override_state INTEGER'); } catch {}
   try { db.exec('ALTER TABLE devices ADD COLUMN override_until TEXT'); } catch {}
+  try { db.exec('ALTER TABLE devices ADD COLUMN turned_on_at TEXT'); } catch {}
+
+  // Recreate schedules to add auto_off trigger type + duration_minutes column
+  const schedCols = db.prepare("PRAGMA table_info(schedules)").all() as { name: string }[];
+  if (!schedCols.some((c) => c.name === 'duration_minutes')) {
+    db.exec(`
+      BEGIN;
+      CREATE TABLE schedules_v2 (
+        id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+        device_id            INTEGER NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+        label                TEXT    NOT NULL,
+        trigger_type         TEXT    NOT NULL CHECK(trigger_type IN ('cron', 'solar', 'auto_off')),
+        cron_expression      TEXT,
+        solar_event          TEXT,
+        solar_offset_minutes INTEGER NOT NULL DEFAULT 0,
+        duration_minutes     INTEGER,
+        state                INTEGER NOT NULL CHECK(state IN (0, 1)),
+        enabled              INTEGER NOT NULL DEFAULT 1,
+        created_at           TEXT    NOT NULL DEFAULT (datetime('now'))
+      );
+      INSERT INTO schedules_v2
+        (id, device_id, label, trigger_type, cron_expression, solar_event, solar_offset_minutes, state, enabled, created_at)
+        SELECT id, device_id, label, trigger_type, cron_expression, solar_event, solar_offset_minutes, state, enabled, created_at
+        FROM schedules;
+      DROP TABLE schedules;
+      ALTER TABLE schedules_v2 RENAME TO schedules;
+      COMMIT;
+    `);
+  }
 }

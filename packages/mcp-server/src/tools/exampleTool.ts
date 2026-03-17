@@ -46,7 +46,7 @@ export function registerExampleTool(server: McpServer) {
     }
   };
   
-  server.tool(toolName, toolDescription, toolSchema, toolCallback);
+  server.registerTool(toolName, { description: toolDescription, inputSchema: toolSchema }, toolCallback);
 }
 
 // Made with Bob

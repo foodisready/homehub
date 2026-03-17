@@ -260,23 +260,33 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
   }
 }
 
-// ── Main entry point ───────────────────────────────────────────
+// ── Shared helpers ─────────────────────────────────────────────
 
-export async function processMessage(
-  userMessage: string,
-  history: ChatMessage[],
-): Promise<{ response: string; actions: ActionTaken[] }> {
-  const ollamaUrl = process.env.OLLAMA_URL ?? 'http://localhost:11434';
-  const model     = process.env.OLLAMA_MODEL ?? 'llama3.2:3b';
-
-  const systemPrompt = `You are HomeHub, a helpful smart home assistant. You control TP-Link Kasa smart plugs and manage automation schedules.
+function buildSystemPrompt(): string {
+  return `You are HomeHub, a helpful smart home assistant. You control TP-Link Kasa smart plugs and manage automation schedules.
 
 Use the provided tools when the user wants to control devices or manage schedules. Be concise and friendly. After taking actions, briefly summarize what you did.
 
+IMPORTANT: When reporting device states, always use the exact data returned by the list_devices tool. Never guess or assume device states. Only report devices as "on" if their state field is true in the tool result.
+
+Do NOT output raw JSON or tool call syntax in your responses. Always respond in plain English.
+
 Today's date: ${new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}`;
+}
+
+/**
+ * Run the tool-call loop until Ollama stops requesting tools.
+ * Returns the messages array (ready for a final text call) and all actions taken.
+ */
+export async function resolveTools(
+  userMessage: string,
+  history: ChatMessage[],
+): Promise<{ messages: OllamaMessage[]; actions: ActionTaken[] }> {
+  const ollamaUrl = process.env.OLLAMA_URL ?? 'http://localhost:11434';
+  const model     = process.env.OLLAMA_MODEL ?? 'llama3.2:3b';
 
   const messages: OllamaMessage[] = [
-    { role: 'system', content: systemPrompt },
+    { role: 'system', content: buildSystemPrompt() },
     ...history.slice(-10).map((m) => ({ role: m.role as OllamaMessage['role'], content: m.content })),
     { role: 'user', content: userMessage },
   ];
@@ -291,36 +301,141 @@ Today's date: ${new Date().toLocaleDateString('en-US', { weekday: 'long', year: 
       body:    JSON.stringify({ model, messages, tools: TOOLS, stream: false }),
     });
 
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`Ollama error ${res.status}: ${text}`);
-    }
+    if (!res.ok) throw new Error(`Ollama error ${res.status}: ${await res.text()}`);
 
     const data         = await res.json() as any;
     const assistantMsg = data.message as OllamaMessage;
     messages.push(assistantMsg);
 
-    if (!assistantMsg.tool_calls?.length) {
-      return { response: assistantMsg.content ?? '', actions };
-    }
+    // No more tool calls — messages are ready for final text response
+    if (!assistantMsg.tool_calls?.length) return { messages, actions };
 
-    // Execute each tool call and append results
     for (const call of assistantMsg.tool_calls) {
       const toolName = call.function.name;
       const toolArgs = call.function.arguments ?? {};
       logger.info({ tool: toolName, args: toolArgs }, 'NLP tool call');
 
       let result: unknown;
-      try {
-        result = await executeTool(toolName, toolArgs);
-      } catch (err: any) {
-        result = { error: err.message };
-      }
+      try { result = await executeTool(toolName, toolArgs); }
+      catch (err: any) { result = { error: err.message }; }
 
       actions.push({ tool: toolName, args: toolArgs, result });
       messages.push({ role: 'tool', content: JSON.stringify(result), name: toolName });
     }
   }
 
+  return { messages, actions };
+}
+
+// ── Non-streaming entry point ───────────────────────────────────
+
+export async function processMessage(
+  userMessage: string,
+  history: ChatMessage[],
+): Promise<{ response: string; actions: ActionTaken[] }> {
+  const { messages, actions } = await resolveTools(userMessage, history);
+
+  // The last message is already a text response (no tool calls) — return it directly
+  const last = messages[messages.length - 1];
+  if (last.role === 'assistant' && !last.tool_calls?.length && last.content) {
+    return { response: last.content, actions };
+  }
+
+  // Shouldn't reach here normally, but fall back to a final call
   return { response: 'Done — actions completed.', actions };
+}
+
+// ── Streaming entry point ───────────────────────────────────────
+
+export type StreamEvent =
+  | { type: 'action'; action: ActionTaken }
+  | { type: 'token';  content: string }
+  | { type: 'done' }
+  | { type: 'error';  message: string };
+
+export async function* processMessageStream(
+  userMessage: string,
+  history: ChatMessage[],
+): AsyncGenerator<StreamEvent> {
+  const ollamaUrl = process.env.OLLAMA_URL ?? 'http://localhost:11434';
+  const model     = process.env.OLLAMA_MODEL ?? 'llama3.2:3b';
+
+  let messages: OllamaMessage[];
+  let actions: ActionTaken[];
+
+  try {
+    ({ messages, actions } = await resolveTools(userMessage, history));
+  } catch (err: any) {
+    yield { type: 'error', message: err.message };
+    return;
+  }
+
+  // Emit each action taken
+  for (const action of actions) yield { type: 'action', action };
+
+  // Check if last message already has text (resolveTools returned early on final text)
+  const last = messages[messages.length - 1];
+  if (last.role === 'assistant' && !last.tool_calls?.length && last.content) {
+    // Stream it character-by-character to simulate streaming from cache
+    // (In practice resolveTools already made the final non-streaming call)
+    yield { type: 'token', content: last.content };
+    yield { type: 'done' };
+    return;
+  }
+
+  // Stream final response from Ollama
+  let streamRes: Response;
+  try {
+    streamRes = await fetch(`${ollamaUrl}/api/chat`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ model, messages, stream: true }),
+    });
+    if (!streamRes.ok) throw new Error(`Ollama error ${streamRes.status}`);
+  } catch (err: any) {
+    yield { type: 'error', message: err.message };
+    return;
+  }
+
+  const reader  = streamRes.body!.getReader();
+  const decoder = new TextDecoder();
+  let   buf         = '';
+  let   accumulated = '';
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+
+      const lines = buf.split('\n');
+      buf = lines.pop() ?? '';
+
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const chunk = JSON.parse(line) as any;
+          if (chunk.message?.content) {
+            accumulated += chunk.message.content;
+            yield { type: 'token', content: chunk.message.content };
+          }
+          if (chunk.done) {
+            // If the entire response looks like a raw tool-call JSON, suppress it
+            const trimmed = accumulated.trim();
+            if (trimmed.startsWith('{') && trimmed.includes('"name"') && trimmed.includes('"parameters"')) {
+              // Model output a tool call as text — emit a fallback message instead
+              yield { type: 'error', message: 'Model returned invalid output. Try switching to a better model (e.g. qwen2.5:3b) via OLLAMA_MODEL.' };
+            } else {
+              yield { type: 'done' };
+            }
+            return;
+          }
+        } catch { /* skip malformed chunk */ }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  yield { type: 'done' };
 }

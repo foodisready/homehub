@@ -1,5 +1,4 @@
-import { Component, signal, computed, ViewChild, ElementRef, AfterViewChecked } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
+import { Component, signal, computed, ViewChild, ElementRef, AfterViewChecked, NgZone } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { AuthService } from '../../core/auth/auth.service';
@@ -32,6 +31,7 @@ const TOOL_LABELS: Record<string, string> = {
   selector: 'app-chat',
   standalone: true,
   imports: [FormsModule, RouterLink],
+  // HttpClient not needed — uses native fetch() for SSE streaming
   styles: [`
     .topbar {
       display: flex;
@@ -129,6 +129,14 @@ const TOOL_LABELS: Record<string, string> = {
       40%           { transform: scale(1);   opacity: 1; }
     }
 
+    .cursor {
+      display: inline-block;
+      animation: blink 1s step-end infinite;
+      color: var(--accent);
+      margin-left: 1px;
+    }
+    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+
     .input-row {
       display: flex;
       gap: 0.75rem;
@@ -207,16 +215,20 @@ const TOOL_LABELS: Record<string, string> = {
             </div>
           }
 
-          <!-- Typing indicator -->
+          <!-- Typing / streaming indicator -->
           @if (loading()) {
             <div class="bubble-row">
               <div class="avatar avatar-assistant">AI</div>
               <div class="bubble bubble-assistant">
-                <div class="typing">
-                  <div class="dot"></div>
-                  <div class="dot"></div>
-                  <div class="dot"></div>
-                </div>
+                @if (streamingText()) {
+                  {{ streamingText() }}<span class="cursor">▋</span>
+                } @else {
+                  <div class="typing">
+                    <div class="dot"></div>
+                    <div class="dot"></div>
+                    <div class="dot"></div>
+                  </div>
+                }
               </div>
             </div>
           }
@@ -242,13 +254,15 @@ const TOOL_LABELS: Record<string, string> = {
 export class ChatComponent implements AfterViewChecked {
   @ViewChild('messageList') private messageList!: ElementRef<HTMLDivElement>;
 
-  private readonly _entries = signal<ChatEntry[]>([]);
-  private readonly _loading = signal(false);
+  private readonly _entries      = signal<ChatEntry[]>([]);
+  private readonly _loading      = signal(false);
+  private readonly _streamingText = signal('');
   private shouldScroll = false;
 
-  readonly entries   = this._entries.asReadonly();
-  readonly loading   = this._loading.asReadonly();
-  readonly userInitial = computed(() => {
+  readonly entries       = this._entries.asReadonly();
+  readonly loading       = this._loading.asReadonly();
+  readonly streamingText = this._streamingText.asReadonly();
+  readonly userInitial   = computed(() => {
     const name = this.auth.user()?.name ?? '';
     return name.charAt(0).toUpperCase() || 'U';
   });
@@ -263,7 +277,7 @@ export class ChatComponent implements AfterViewChecked {
     'Turn on the living room lamp',
   ];
 
-  constructor(readonly auth: AuthService, private http: HttpClient) {}
+  constructor(readonly auth: AuthService, private zone: NgZone) {}
 
   ngAfterViewChecked(): void {
     if (this.shouldScroll) {
@@ -287,32 +301,76 @@ export class ChatComponent implements AfterViewChecked {
     if (!text || this.loading()) return;
 
     this.draft = '';
-
-    // Append user message
     this._entries.update((list) => [...list, { role: 'user', content: text }]);
     this._loading.set(true);
+    this._streamingText.set('');
     this.shouldScroll = true;
 
-    // Build history from current entries (before the new user msg)
     const history = this._entries()
-      .slice(0, -1)   // exclude the just-added user message
+      .slice(0, -1)
       .filter((e) => !e.error)
       .map((e) => ({ role: e.role, content: e.content }));
 
-    this.http.post<{ response: string; actions: ActionTaken[] }>('/api/nlp', { message: text, history })
-      .subscribe({
-        next: ({ response, actions }) => {
-          this._entries.update((list) => [...list, { role: 'assistant', content: response, actions }]);
-          this._loading.set(false);
-          this.shouldScroll = true;
-        },
-        error: (err) => {
-          const msg = err.error?.error ?? 'Something went wrong. Please try again.';
-          this._entries.update((list) => [...list, { role: 'assistant', content: msg, error: true }]);
-          this._loading.set(false);
-          this.shouldScroll = true;
-        },
+    const token   = this.auth.accessToken() ?? '';
+    const actions: ActionTaken[] = [];
+
+    fetch('/api/nlp/stream', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body:    JSON.stringify({ message: text, history }),
+    }).then(async (res) => {
+      if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+
+      const reader  = res.body.getReader();
+      const decoder = new TextDecoder();
+      let   buf     = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+
+        const lines = buf.split('\n');
+        buf = lines.pop() ?? '';
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          try {
+            const event = JSON.parse(line.slice(6));
+            this.zone.run(() => {
+              if (event.type === 'action') {
+                actions.push(event.action);
+              } else if (event.type === 'token') {
+                this._streamingText.update((t) => t + event.content);
+                this.shouldScroll = true;
+              } else if (event.type === 'done') {
+                const finalText = this._streamingText();
+                this._entries.update((list) => [
+                  ...list, { role: 'assistant', content: finalText, actions: [...actions] }
+                ]);
+                this._loading.set(false);
+                this._streamingText.set('');
+                this.shouldScroll = true;
+              } else if (event.type === 'error') {
+                this._entries.update((list) => [
+                  ...list, { role: 'assistant', content: event.message, error: true }
+                ]);
+                this._loading.set(false);
+                this._streamingText.set('');
+              }
+            });
+          } catch { /* skip malformed line */ }
+        }
+      }
+    }).catch((err) => {
+      this.zone.run(() => {
+        this._entries.update((list) => [
+          ...list, { role: 'assistant', content: 'Connection error. Please try again.', error: true }
+        ]);
+        this._loading.set(false);
+        this._streamingText.set('');
       });
+    });
   }
 
   actionLabel(action: ActionTaken): string {

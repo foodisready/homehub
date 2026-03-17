@@ -1,5 +1,5 @@
 // HomeHub service worker — app shell cache + push notifications
-const CACHE    = 'homehub-v2';
+const CACHE    = 'homehub-v3';
 const APP_SHELL = ['/'];
 
 self.addEventListener('install', (event) => {

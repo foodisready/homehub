@@ -25,10 +25,12 @@ function safeErr(e: unknown) {
 export function registerHomeHubTools(server: McpServer): void {
 
   // ── list_devices ─────────────────────────────────────────────
-  server.tool(
+  server.registerTool(
     'list_devices',
-    'List all registered smart plugs with their current on/off state, online status, and live wattage.',
-    {},
+    {
+      description: 'List all registered smart plugs with their current on/off state, online status, and live wattage.',
+      inputSchema: {},
+    },
     async () => {
       try {
         const devices = await apiRequest<any[]>('GET', '/api/devices');
@@ -42,10 +44,12 @@ export function registerHomeHubTools(server: McpServer): void {
   );
 
   // ── get_all_states ────────────────────────────────────────────
-  server.tool(
+  server.registerTool(
     'get_all_states',
-    'Get a quick snapshot of every device — name, on/off, online, and current wattage.',
-    {},
+    {
+      description: 'Get a quick snapshot of every device — name, on/off, online, and current wattage.',
+      inputSchema: {},
+    },
     async () => {
       try {
         const devices = await apiRequest<any[]>('GET', '/api/devices');
@@ -66,12 +70,14 @@ export function registerHomeHubTools(server: McpServer): void {
   );
 
   // ── set_power_state ───────────────────────────────────────────
-  server.tool(
+  server.registerTool(
     'set_power_state',
-    'Turn a smart plug on or off by its alias/name.',
     {
-      device_alias: z.string().describe('Device name/alias, e.g. "Living Room Lamp"'),
-      state:        z.enum(['on', 'off']).describe('"on" to turn on, "off" to turn off'),
+      description: 'Turn a smart plug on or off by its alias/name.',
+      inputSchema: {
+        device_alias: z.string().describe('Device name/alias, e.g. "Living Room Lamp"'),
+        state:        z.enum(['on', 'off']).describe('"on" to turn on, "off" to turn off'),
+      },
     },
     async ({ device_alias, state }) => {
       try {
@@ -83,11 +89,13 @@ export function registerHomeHubTools(server: McpServer): void {
   );
 
   // ── get_energy_metrics ────────────────────────────────────────
-  server.tool(
+  server.registerTool(
     'get_energy_metrics',
-    'Get live wattage, voltage, and current for a device that supports energy monitoring (HS110 / KP115).',
     {
-      device_alias: z.string().describe('Device name/alias'),
+      description: 'Get live wattage, voltage, and current for a device that supports energy monitoring (HS110 / KP115).',
+      inputSchema: {
+        device_alias: z.string().describe('Device name/alias'),
+      },
     },
     async ({ device_alias }) => {
       try {
@@ -104,24 +112,25 @@ export function registerHomeHubTools(server: McpServer): void {
   );
 
   // ── create_schedule ───────────────────────────────────────────
-  server.tool(
+  server.registerTool(
     'create_schedule',
-    'Create an automation schedule to turn a device on or off at a fixed time (cron) or solar event (sunrise, sunset, etc.).',
     {
-      device_alias:         z.string().describe('Device alias'),
-      label:                z.string().describe('Human-readable label, e.g. "Porch on at sunset"'),
-      trigger_type:         z.enum(['cron', 'solar']).describe('"cron" for fixed time, "solar" for sunrise/sunset event'),
-      state:                z.enum(['on', 'off']).describe('Action: "on" or "off"'),
-      cron_expression:      z.string().optional().describe('Cron expression — required when trigger_type is "cron", e.g. "0 21 * * *"'),
-      solar_event:          z.enum(['sunrise', 'sunset', 'dawn', 'dusk', 'goldenHour', 'solarNoon'])
-                              .optional().describe('Solar event — required when trigger_type is "solar"'),
-      solar_offset_minutes: z.number().optional().describe('Minutes offset from the solar event (negative = before)'),
+      description: 'Create an automation schedule to turn a device on or off at a fixed time (cron) or solar event (sunrise, sunset, etc.).',
+      inputSchema: {
+        device_alias:         z.string().describe('Device alias'),
+        label:                z.string().describe('Human-readable label, e.g. "Porch on at sunset"'),
+        trigger_type:         z.enum(['cron', 'solar']).describe('"cron" for fixed time, "solar" for sunrise/sunset event'),
+        state:                z.enum(['on', 'off']).describe('Action: "on" or "off"'),
+        cron_expression:      z.string().optional().describe('Cron expression — required when trigger_type is "cron", e.g. "0 21 * * *"'),
+        solar_event:          z.enum(['sunrise', 'sunset', 'dawn', 'dusk', 'goldenHour', 'solarNoon'])
+                                .optional().describe('Solar event — required when trigger_type is "solar"'),
+        solar_offset_minutes: z.number().optional().describe('Minutes offset from the solar event (negative = before)'),
+      },
     },
     async (params) => {
       try {
         const { device_alias, label, trigger_type, state, cron_expression, solar_event, solar_offset_minutes } = params;
 
-        // Find the device id from the backend first (POST /api/schedules expects deviceId)
         const devices = await apiRequest<any[]>('GET', '/api/devices');
         const device  = devices.find((d) => d.alias.toLowerCase() === device_alias.toLowerCase());
         if (!device) return err(`Device "${device_alias}" not found. Available: ${devices.map((d) => d.alias).join(', ')}`);
@@ -143,11 +152,13 @@ export function registerHomeHubTools(server: McpServer): void {
   );
 
   // ── delete_schedule ───────────────────────────────────────────
-  server.tool(
+  server.registerTool(
     'delete_schedule',
-    'Delete an automation schedule by its ID. Use list_schedules to find IDs.',
     {
-      schedule_id: z.number().describe('The numeric schedule ID to delete'),
+      description: 'Delete an automation schedule by its ID. Use list_schedules to find IDs.',
+      inputSchema: {
+        schedule_id: z.number().describe('The numeric schedule ID to delete'),
+      },
     },
     async ({ schedule_id }) => {
       try {
@@ -158,10 +169,12 @@ export function registerHomeHubTools(server: McpServer): void {
   );
 
   // ── list_schedules ────────────────────────────────────────────
-  server.tool(
+  server.registerTool(
     'list_schedules',
-    'List all automation schedules with their trigger, device, and enabled status.',
-    {},
+    {
+      description: 'List all automation schedules with their trigger, device, and enabled status.',
+      inputSchema: {},
+    },
     async () => {
       try {
         const schedules = await apiRequest<any[]>('GET', '/api/schedules');
@@ -178,11 +191,13 @@ export function registerHomeHubTools(server: McpServer): void {
   );
 
   // ── get_sunrise_sunset ────────────────────────────────────────
-  server.tool(
+  server.registerTool(
     'get_sunrise_sunset',
-    'Get sunrise, sunset, and other solar event times for today or a given date.',
     {
-      date: z.string().optional().describe('ISO date YYYY-MM-DD (optional, defaults to today)'),
+      description: 'Get sunrise, sunset, and other solar event times for today or a given date.',
+      inputSchema: {
+        date: z.string().optional().describe('ISO date YYYY-MM-DD (optional, defaults to today)'),
+      },
     },
     async ({ date }) => {
       try {

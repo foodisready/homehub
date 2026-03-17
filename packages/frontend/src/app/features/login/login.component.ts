@@ -110,7 +110,7 @@ export class LoginComponent {
 
     this.auth.login(this.username, this.password).subscribe({
       next: () => {
-        this.socket.connect(this.auth.accessToken()!);
+        this.socket.connect();
         this.router.navigate(['/dashboard']);
       },
       error: () => {

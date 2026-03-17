@@ -15,7 +15,7 @@ interface DeviceRow { id: number; alias: string; ip: string; }
 // POST /internal/devices/:id/execute  { state: boolean }
 // Called by the scheduler when a scheduled action fires.
 internalRouter.post('/devices/:id/execute', async (req: Request, res: Response) => {
-  const db     = getDb();
+  const db = getDb();
   const device = db.prepare('SELECT id, alias, ip FROM devices WHERE id = ?')
     .get(req.params.id) as DeviceRow | undefined;
 
@@ -40,6 +40,11 @@ internalRouter.post('/devices/:id/execute', async (req: Request, res: Response) 
 
   try {
     await setPowerState(device.ip, state);
+    if (state) {
+      db.prepare("UPDATE devices SET turned_on_at = datetime('now') WHERE id = ?").run(device.id);
+    } else {
+      db.prepare('UPDATE devices SET turned_on_at = NULL WHERE id = ?').run(device.id);
+    }
     emitDeviceState(device.id, device.alias, state, getCachedState(device.id)?.wattage ?? null);
     logger.info({ deviceId: device.id, alias: device.alias, state }, 'Scheduled action executed');
     res.json({ alias: device.alias, state });

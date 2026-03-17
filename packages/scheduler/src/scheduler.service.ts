@@ -13,17 +13,19 @@ interface ScheduleRow {
   id: number;
   device_id: number;
   label: string;
-  trigger_type: 'cron' | 'solar';
+  trigger_type: 'cron' | 'solar' | 'auto_off';
   cron_expression: string | null;
   solar_event: SolarEvent | null;
   solar_offset_minutes: number;
+  duration_minutes: number | null;
   state: number;
   enabled: number;
 }
 
 export class SchedulerService {
-  private cronJobs    = new Map<number, cron.ScheduledTask>();
-  private solarTimers = new Map<number, NodeJS.Timeout>();
+  private cronJobs      = new Map<number, cron.ScheduledTask>();
+  private solarTimers   = new Map<number, NodeJS.Timeout>();
+  private autoOffTimers = new Map<number, NodeJS.Timeout>();
 
   private readonly lat: number;
   private readonly lon: number;
@@ -50,25 +52,32 @@ export class SchedulerService {
     let cronCount  = 0;
     let solarCount = 0;
 
+    let autoOffCount = 0;
+
     for (const row of rows) {
       if (row.trigger_type === 'cron') {
         this.registerCron(row);
         cronCount++;
-      } else {
+      } else if (row.trigger_type === 'solar') {
         this.registerSolar(row);
         solarCount++;
+      } else if (row.trigger_type === 'auto_off') {
+        this.registerAutoOff(row);
+        autoOffCount++;
       }
     }
 
-    logger.info({ cronCount, solarCount }, 'Schedules loaded');
+    logger.info({ cronCount, solarCount, autoOffCount }, 'Schedules loaded');
   }
 
   /** Clear all active jobs and timers. */
   clearAll(): void {
-    for (const task of this.cronJobs.values())    task.stop();
-    for (const timer of this.solarTimers.values()) clearTimeout(timer);
+    for (const task  of this.cronJobs.values())      task.stop();
+    for (const timer of this.solarTimers.values())   clearTimeout(timer);
+    for (const timer of this.autoOffTimers.values()) clearInterval(timer);
     this.cronJobs.clear();
     this.solarTimers.clear();
+    this.autoOffTimers.clear();
   }
 
   // ── Cron ──────────────────────────────────────────────────────
@@ -116,6 +125,38 @@ export class SchedulerService {
 
     this.solarTimers.set(row.id, timer);
     logger.debug({ id: row.id, label: row.label, target: target.toISOString(), msUntil }, 'Solar scheduled');
+  }
+
+  // ── Auto-off ──────────────────────────────────────────────────
+
+  private registerAutoOff(row: ScheduleRow): void {
+    const durationMs = (row.duration_minutes ?? 15) * 60_000;
+
+    const timer = setInterval(async () => {
+      // Re-check enabled in case it was toggled
+      const latest = this.db.prepare('SELECT enabled FROM schedules WHERE id = ?')
+        .get(row.id) as { enabled: number } | undefined;
+      if (!latest || latest.enabled === 0) return;
+
+      const device = this.db.prepare('SELECT turned_on_at FROM devices WHERE id = ?')
+        .get(row.device_id) as { turned_on_at: string | null } | undefined;
+      if (!device?.turned_on_at) return;
+
+      const turnedOnAt   = new Date(device.turned_on_at.replace(' ', 'T') + 'Z');
+      const elapsedMs    = Date.now() - turnedOnAt.getTime();
+      if (elapsedMs < durationMs) return;
+
+      logger.info(
+        { id: row.id, label: row.label, deviceId: row.device_id, elapsedMinutes: Math.floor(elapsedMs / 60_000) },
+        'Auto-off threshold reached, turning off'
+      );
+      this.execute(row).catch((err) =>
+        logger.error({ err: err.message, scheduleId: row.id }, 'Auto-off execution failed')
+      );
+    }, 60_000);
+
+    this.autoOffTimers.set(row.id, timer);
+    logger.debug({ id: row.id, label: row.label, durationMinutes: row.duration_minutes }, 'Auto-off registered');
   }
 
   // ── Daily solar refresh ───────────────────────────────────────

@@ -12,10 +12,11 @@ export interface ScheduleRow {
   id: number;
   device_id: number;
   label: string;
-  trigger_type: 'cron' | 'solar';
+  trigger_type: 'cron' | 'solar' | 'auto_off';
   cron_expression: string | null;
   solar_event: SolarEvent | null;
   solar_offset_minutes: number;
+  duration_minutes: number | null;
   state: number;
   enabled: number;
   created_at: string;
@@ -31,6 +32,7 @@ function toPublic(row: ScheduleRow & { device_alias?: string }) {
     cronExpression:     row.cron_expression,
     solarEvent:         row.solar_event,
     solarOffsetMinutes: row.solar_offset_minutes,
+    durationMinutes:    row.duration_minutes,
     state:              row.state === 1,
     enabled:            row.enabled === 1,
     createdAt:          row.created_at,
@@ -63,11 +65,11 @@ schedulesRouter.get('/:id', (req: Request, res: Response) => {
 schedulesRouter.post('/', requireAdmin, (req: Request, res: Response) => {
   const {
     deviceId, label, triggerType,
-    cronExpression, solarEvent, solarOffsetMinutes = 0, state,
+    cronExpression, solarEvent, solarOffsetMinutes = 0, durationMinutes, state,
   } = req.body as {
-    deviceId: number; label: string; triggerType: 'cron' | 'solar';
+    deviceId: number; label: string; triggerType: 'cron' | 'solar' | 'auto_off';
     cronExpression?: string; solarEvent?: SolarEvent;
-    solarOffsetMinutes?: number; state: boolean;
+    solarOffsetMinutes?: number; durationMinutes?: number; state: boolean;
   };
 
   if (!deviceId || !label || !triggerType || typeof state !== 'boolean') {
@@ -79,6 +81,9 @@ schedulesRouter.post('/', requireAdmin, (req: Request, res: Response) => {
   if (triggerType === 'solar' && (!solarEvent || !SOLAR_EVENTS.includes(solarEvent))) {
     return res.status(400).json({ error: `solarEvent must be one of: ${SOLAR_EVENTS.join(', ')}`, code: 'VALIDATION_ERROR' });
   }
+  if (triggerType === 'auto_off' && (!durationMinutes || durationMinutes <= 0)) {
+    return res.status(400).json({ error: 'durationMinutes (>0) required for auto_off trigger', code: 'VALIDATION_ERROR' });
+  }
 
   const db = getDb();
   const device = db.prepare('SELECT id FROM devices WHERE id = ?').get(deviceId);
@@ -86,9 +91,9 @@ schedulesRouter.post('/', requireAdmin, (req: Request, res: Response) => {
 
   try {
     const result = db.prepare(`
-      INSERT INTO schedules (device_id, label, trigger_type, cron_expression, solar_event, solar_offset_minutes, state)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(deviceId, label, triggerType, cronExpression ?? null, solarEvent ?? null, solarOffsetMinutes, state ? 1 : 0);
+      INSERT INTO schedules (device_id, label, trigger_type, cron_expression, solar_event, solar_offset_minutes, duration_minutes, state)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(deviceId, label, triggerType, cronExpression ?? null, solarEvent ?? null, solarOffsetMinutes, durationMinutes ?? null, state ? 1 : 0);
 
     const created = db.prepare(
       'SELECT s.*, d.alias AS device_alias FROM schedules s JOIN devices d ON d.id = s.device_id WHERE s.id = ?'
@@ -100,6 +105,52 @@ schedulesRouter.post('/', requireAdmin, (req: Request, res: Response) => {
   } catch (err: any) {
     throw err;
   }
+});
+
+// PUT /api/schedules/:id — admin only
+schedulesRouter.put('/:id', requireAdmin, (req: Request, res: Response) => {
+  const {
+    deviceId, label, triggerType,
+    cronExpression, solarEvent, solarOffsetMinutes = 0, durationMinutes, state,
+  } = req.body as {
+    deviceId: number; label: string; triggerType: 'cron' | 'solar' | 'auto_off';
+    cronExpression?: string; solarEvent?: SolarEvent;
+    solarOffsetMinutes?: number; durationMinutes?: number; state: boolean;
+  };
+
+  if (!deviceId || !label || !triggerType || typeof state !== 'boolean') {
+    return res.status(400).json({ error: 'deviceId, label, triggerType and state are required', code: 'VALIDATION_ERROR' });
+  }
+  if (triggerType === 'cron' && !cronExpression) {
+    return res.status(400).json({ error: 'cronExpression required for cron trigger', code: 'VALIDATION_ERROR' });
+  }
+  if (triggerType === 'solar' && (!solarEvent || !SOLAR_EVENTS.includes(solarEvent))) {
+    return res.status(400).json({ error: `solarEvent must be one of: ${SOLAR_EVENTS.join(', ')}`, code: 'VALIDATION_ERROR' });
+  }
+  if (triggerType === 'auto_off' && (!durationMinutes || durationMinutes <= 0)) {
+    return res.status(400).json({ error: 'durationMinutes (>0) required for auto_off trigger', code: 'VALIDATION_ERROR' });
+  }
+
+  const db = getDb();
+  const device = db.prepare('SELECT id FROM devices WHERE id = ?').get(deviceId);
+  if (!device) return res.status(404).json({ error: 'Device not found', code: 'DEVICE_NOT_FOUND' });
+
+  const result = db.prepare(`
+    UPDATE schedules
+    SET device_id = ?, label = ?, trigger_type = ?, cron_expression = ?,
+        solar_event = ?, solar_offset_minutes = ?, duration_minutes = ?, state = ?
+    WHERE id = ?
+  `).run(deviceId, label, triggerType, cronExpression ?? null, solarEvent ?? null, solarOffsetMinutes, durationMinutes ?? null, state ? 1 : 0, req.params.id);
+
+  if (result.changes === 0) return res.status(404).json({ error: 'Schedule not found', code: 'NOT_FOUND' });
+
+  const updated = db.prepare(
+    'SELECT s.*, d.alias AS device_alias FROM schedules s JOIN devices d ON d.id = s.device_id WHERE s.id = ?'
+  ).get(req.params.id) as (ScheduleRow & { device_alias: string });
+
+  notifyScheduler();
+  logger.info({ scheduleId: updated.id, label, triggerType }, 'Schedule updated');
+  res.json(toPublic(updated));
 });
 
 // PATCH /api/schedules/:id/toggle — admin only

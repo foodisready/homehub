@@ -10,10 +10,11 @@ interface Schedule {
   deviceId: number;
   deviceAlias: string;
   label: string;
-  triggerType: 'cron' | 'solar';
+  triggerType: 'cron' | 'solar' | 'auto_off';
   cronExpression: string | null;
   solarEvent: string | null;
   solarOffsetMinutes: number;
+  durationMinutes: number | null;
   state: boolean;
   enabled: boolean;
 }
@@ -84,6 +85,15 @@ const CRON_PRESETS = [
     }
     .toggle-btn.active { border-color: var(--green); color: var(--green); }
     .toggle-btn:hover { background: var(--surface); }
+
+    .edit-btn {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      padding: 0.3rem 0.5rem;
+      font-size: 1rem;
+    }
+    .edit-btn:hover { color: var(--accent); }
 
     .delete-btn {
       background: transparent;
@@ -197,11 +207,13 @@ const CRON_PRESETS = [
                   {{ s.deviceAlias }} ·
                   @if (s.triggerType === 'cron') {
                     {{ s.cronExpression }}
-                  } @else {
+                  } @else if (s.triggerType === 'solar') {
                     {{ solarLabel(s.solarEvent) }}
                     @if (s.solarOffsetMinutes !== 0) {
                       {{ s.solarOffsetMinutes > 0 ? '+' : '' }}{{ s.solarOffsetMinutes }}min
                     }
+                  } @else {
+                    Auto-off after {{ s.durationMinutes }}min
                   }
                 </div>
               </div>
@@ -213,6 +225,7 @@ const CRON_PRESETS = [
                   (click)="toggleEnabled(s)">
                   {{ s.enabled ? 'Enabled' : 'Disabled' }}
                 </button>
+                <button class="edit-btn" title="Edit" (click)="openEdit(s)">✎</button>
                 <button class="delete-btn" title="Delete" (click)="deleteSchedule(s)">✕</button>
               }
             </div>
@@ -221,11 +234,11 @@ const CRON_PRESETS = [
       }
     </div>
 
-    <!-- Create form modal -->
+    <!-- Create / Edit form modal -->
     @if (showForm()) {
       <div class="form-overlay" (click)="closeForm()">
         <div class="card form-card" (click)="$event.stopPropagation()">
-          <h2>New Schedule</h2>
+          <h2>{{ editingId() ? 'Edit Schedule' : 'New Schedule' }}</h2>
 
           <div class="field">
             <label>Device</label>
@@ -248,15 +261,18 @@ const CRON_PRESETS = [
               <select [(ngModel)]="form.triggerType">
                 <option value="solar">Solar event</option>
                 <option value="cron">Cron (fixed time)</option>
+                <option value="auto_off">Auto-off timer</option>
               </select>
             </div>
-            <div class="field">
-              <label>Action</label>
-              <select [(ngModel)]="form.state">
-                <option [ngValue]="true">Turn ON</option>
-                <option [ngValue]="false">Turn OFF</option>
-              </select>
-            </div>
+            @if (form.triggerType !== 'auto_off') {
+              <div class="field">
+                <label>Action</label>
+                <select [(ngModel)]="form.state">
+                  <option [ngValue]="true">Turn ON</option>
+                  <option [ngValue]="false">Turn OFF</option>
+                </select>
+              </div>
+            }
           </div>
 
           @if (form.triggerType === 'solar') {
@@ -279,7 +295,7 @@ const CRON_PRESETS = [
           @if (form.triggerType === 'cron') {
             <div class="field">
               <label>Preset</label>
-              <select (change)="applyPreset($event)">
+              <select [(ngModel)]="form.selectedPreset" (change)="applyPreset($event)">
                 @for (p of cronPresets; track p.value) {
                   <option [value]="p.value">{{ p.label }}</option>
                 }
@@ -313,6 +329,17 @@ const CRON_PRESETS = [
             </div>
           }
 
+          @if (form.triggerType === 'auto_off') {
+            <div class="field">
+              <label>Turn off after (minutes)</label>
+              <input type="number" [(ngModel)]="form.durationMinutes" min="1" placeholder="15" />
+            </div>
+            <p style="font-size:0.8rem; color:var(--text-muted); margin: -0.5rem 0 1rem">
+              Turns the device off automatically N minutes after it is switched on.
+              Use the override button on the tile to keep it on longer when needed.
+            </p>
+          }
+
           @if (formError()) {
             <p class="error-msg">{{ formError() }}</p>
           }
@@ -320,7 +347,7 @@ const CRON_PRESETS = [
           <div class="form-actions">
             <button class="btn-cancel" (click)="closeForm()">Cancel</button>
             <button class="btn-primary btn-save" [disabled]="saving()" (click)="save()">
-              {{ saving() ? 'Saving…' : 'Save Schedule' }}
+              {{ saving() ? 'Saving…' : (editingId() ? 'Update Schedule' : 'Save Schedule') }}
             </button>
           </div>
         </div>
@@ -341,6 +368,7 @@ export class SchedulesComponent implements OnInit {
   readonly saving        = signal(false);
   readonly formError     = signal('');
   readonly showCronHelp  = signal(false);
+  readonly editingId     = signal<number | null>(null);
 
   form = this.blankForm();
 
@@ -359,11 +387,13 @@ export class SchedulesComponent implements OnInit {
     return {
       deviceId:           '' as number | '',
       label:              '',
-      triggerType:        'solar' as 'solar' | 'cron',
+      triggerType:        'solar' as 'solar' | 'cron' | 'auto_off',
       state:              true,
       solarEvent:         'sunset',
       solarOffsetMinutes: 0,
       cronExpression:     '',
+      selectedPreset:     '',
+      durationMinutes:    15,
     };
   }
 
@@ -372,15 +402,36 @@ export class SchedulesComponent implements OnInit {
     this.showCronHelp.update((v) => !v);
   }
 
+  openEdit(s: Schedule): void {
+    this.editingId.set(s.id);
+    const expr = s.cronExpression ?? '';
+    const matchedPreset = CRON_PRESETS.find((p) => p.value !== '' && p.value === expr);
+    this.form = {
+      deviceId:           s.deviceId,
+      label:              s.label,
+      triggerType:        s.triggerType,
+      state:              s.state,
+      solarEvent:         s.solarEvent ?? 'sunset',
+      solarOffsetMinutes: s.solarOffsetMinutes,
+      cronExpression:     expr,
+      selectedPreset:     matchedPreset ? matchedPreset.value : '',
+      durationMinutes:    s.durationMinutes ?? 15,
+    };
+    this.showForm.set(true);
+  }
+
   closeForm(): void {
     this.showForm.set(false);
+    this.editingId.set(null);
     this.form = this.blankForm();
     this.formError.set('');
     this.showCronHelp.set(false);
   }
 
   applyPreset(event: Event): void {
-    this.form.cronExpression = (event.target as HTMLSelectElement).value;
+    const val = (event.target as HTMLSelectElement).value;
+    this.form.selectedPreset = val;
+    if (val !== '') this.form.cronExpression = val;
   }
 
   solarLabel(event: string | null): string {
@@ -388,22 +439,34 @@ export class SchedulesComponent implements OnInit {
   }
 
   save(): void {
-    const { deviceId, label, triggerType, state, solarEvent, solarOffsetMinutes, cronExpression } = this.form;
+    const { deviceId, label, triggerType, state, solarEvent, solarOffsetMinutes, cronExpression, durationMinutes } = this.form;
     if (!deviceId || !label) { this.formError.set('Device and label are required.'); return; }
     if (triggerType === 'cron' && !cronExpression) { this.formError.set('Cron expression is required.'); return; }
+    if (triggerType === 'auto_off' && (!durationMinutes || durationMinutes <= 0)) { this.formError.set('Duration must be greater than 0.'); return; }
 
     this.saving.set(true);
     this.formError.set('');
 
     const payload = {
-      deviceId: Number(deviceId), label, triggerType, state,
-      ...(triggerType === 'solar' ? { solarEvent, solarOffsetMinutes: Number(solarOffsetMinutes) } : {}),
-      ...(triggerType === 'cron'  ? { cronExpression } : {}),
+      deviceId: Number(deviceId), label, triggerType,
+      state: triggerType === 'auto_off' ? false : state,
+      ...(triggerType === 'solar'    ? { solarEvent, solarOffsetMinutes: Number(solarOffsetMinutes) } : {}),
+      ...(triggerType === 'cron'     ? { cronExpression } : {}),
+      ...(triggerType === 'auto_off' ? { durationMinutes: Number(durationMinutes) } : {}),
     };
 
-    this.http.post<Schedule>('/api/schedules', payload).subscribe({
-      next: (created) => {
-        this._schedules.update((list) => [created, ...list]);
+    const id = this.editingId();
+    const req$ = id
+      ? this.http.put<Schedule>(`/api/schedules/${id}`, payload)
+      : this.http.post<Schedule>('/api/schedules', payload);
+
+    req$.subscribe({
+      next: (result) => {
+        if (id) {
+          this._schedules.update((list) => list.map((x) => x.id === id ? result : x));
+        } else {
+          this._schedules.update((list) => [result, ...list]);
+        }
         this.closeForm();
         this.saving.set(false);
       },

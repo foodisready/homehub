@@ -63,6 +63,7 @@ devicesRouter.post('/:id/on', async (req: Request, res: Response) => {
 
   try {
     await setPowerState(device.ip, true);
+    db.prepare("UPDATE devices SET turned_on_at = datetime('now') WHERE id = ?").run(device.id);
     emitDeviceState(device.id, device.alias, true, getCachedState(device.id)?.wattage ?? null);
     res.json({ alias: device.alias, state: true });
   } catch (err) {
@@ -80,6 +81,7 @@ devicesRouter.post('/:id/off', async (req: Request, res: Response) => {
 
   try {
     await setPowerState(device.ip, false);
+    db.prepare('UPDATE devices SET turned_on_at = NULL WHERE id = ?').run(device.id);
     emitDeviceState(device.id, device.alias, false, null);
     res.json({ alias: device.alias, state: false });
   } catch (err) {

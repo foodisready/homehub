@@ -4,7 +4,6 @@ dotenv.config({ path: path.resolve(process.cwd(), '../../.env') });
 import express from 'express';
 import Database from 'better-sqlite3';
 import cron from 'node-cron';
-import path from 'path';
 import pino from 'pino';
 import { SchedulerService } from './scheduler.service';
 
@@ -14,7 +13,7 @@ const logger = pino(
     : { transport: { target: 'pino-pretty', options: { colorize: true } } }
 );
 
-const DB_PATH      = process.env.DB_PATH      || path.join(process.cwd(), 'data', 'db.sqlite');
+const DB_PATH      = process.env.DB_PATH      || path.resolve(process.cwd(), '../backend/data/db.sqlite');
 const PORT         = process.env.SCHEDULER_PORT || 3002;
 const INTERNAL_KEY = process.env.INTERNAL_API_KEY || '';
 
