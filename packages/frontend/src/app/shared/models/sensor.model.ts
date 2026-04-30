@@ -14,6 +14,7 @@ export interface Sensor {
   firmwareVersion:     string | null;
   pendingState:        'idle' | 'flowing';
   snoozedUntil:        string | null;
+  staleSince:          string | null;
   createdAt:           string;
 }
 

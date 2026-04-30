@@ -29,6 +29,7 @@ export interface SensorRow {
   pending_state:          'idle' | 'flowing';
   pending_count:          number;
   snoozed_until:          string | null;
+  stale_since:            string | null;
   created_at:             string;
 }
 

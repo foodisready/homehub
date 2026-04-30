@@ -121,8 +121,6 @@ export class SensorsComponent implements OnInit, OnDestroy {
   }
 
   isStale(s: Sensor): boolean {
-    if (!s.lastSeenAt) return false;
-    const ageMs = Date.now() - new Date(s.lastSeenAt.replace(' ', 'T') + 'Z').getTime();
-    return ageMs > 5 * 60_000;   // > 5 min
+    return !!s.staleSince;
   }
 }

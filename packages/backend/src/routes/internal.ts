@@ -10,6 +10,7 @@ import { resolveFlowConfig, type FlowReading } from '../sensors/flow-engine';
 import { notify } from '../notifications/router';
 import { maybeFireShutoff } from '../sensors/shutoff';
 import { realInvoker, realNotifier } from '../sensors/shutoff-runtime';
+import { notifyStaleRecovery } from '../sensors/stale-check';
 
 export const internalRouter = Router();
 
@@ -134,10 +135,14 @@ internalRouter.post('/sensors/flow/readings', (req: Request, res: Response) => {
 
   const result = ingestReading(sensor, reading, tOffsetMs);
 
-  // Update diagnostics columns on every successful ingest.
+  // Update diagnostics columns on every successful ingest. Clearing
+  // stale_since here is the recovery half of the stale-detection state
+  // machine — see sensors/stale-check.ts.
+  const wasStale = !!sensor.stale_since;
   getDb().prepare(`
     UPDATE sensors
        SET last_seen_at        = ?,
+           stale_since         = NULL,
            last_rssi           = COALESCE(?, last_rssi),
            last_uptime_sec     = COALESCE(?, last_uptime_sec),
            last_signal_quality = COALESCE(?, last_signal_quality),
@@ -151,6 +156,9 @@ internalRouter.post('/sensors/flow/readings', (req: Request, res: Response) => {
     body.firmwareVersion ?? null,
     sensor.id,
   );
+  if (wasStale) {
+    notifyStaleRecovery(sensor.id, sensor.alias);
+  }
 
   // Real-time updates for the dashboard.
   if (!result.decision.rejectedSignal) {

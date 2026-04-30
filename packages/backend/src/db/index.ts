@@ -222,4 +222,7 @@ function migrate(db: Database.Database): void {
   try { db.exec('ALTER TABLE flow_events ADD COLUMN shutoff_fired_at TEXT'); } catch {}
   try { db.exec('ALTER TABLE flow_events ADD COLUMN shutoff_completed_at TEXT'); } catch {}
   try { db.exec('ALTER TABLE flow_events ADD COLUMN shutoff_rate_at_fire REAL'); } catch {}
+
+  // ── AuraFlow stale-sensor detection ────────────────────────────
+  try { db.exec('ALTER TABLE sensors ADD COLUMN stale_since TEXT'); } catch {}
 }

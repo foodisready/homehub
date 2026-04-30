@@ -25,6 +25,7 @@ import { tuyaRouter }   from './routes/tuya';
 import { sensorsRouter } from './routes/sensors';
 import { notificationsAckRouter } from './routes/notifications-ack';
 import { runBackup } from './db/backup';
+import { checkAllSensors } from './sensors/stale-check';
 import { authenticate } from './middleware/auth';
 import { getDb } from './db';
 import { startPolling } from './kasa/device.cache';
@@ -88,6 +89,13 @@ httpServer.listen(PORT, async () => {
   // Hourly prune of flow_readings older than 7 days. flow_events are kept indefinitely.
   pruneFlowReadings();
   setInterval(pruneFlowReadings, 60 * 60 * 1000);
+
+  // Stale-sensor check: every 60s, alert if a sensor has stopped reporting.
+  setInterval(() => {
+    try { checkAllSensors(); } catch (err) {
+      logger.error(err, 'stale-check failed');
+    }
+  }, 60 * 1000);
 });
 
 function pruneFlowReadings(): void {

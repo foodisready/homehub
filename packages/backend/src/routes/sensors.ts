@@ -22,6 +22,7 @@ function toPublicSensor(row: SensorRow) {
     firmwareVersion:    row.firmware_version,
     pendingState:       row.pending_state,
     snoozedUntil:       row.snoozed_until,
+    staleSince:         row.stale_since,
     createdAt:          row.created_at,
   };
 }
