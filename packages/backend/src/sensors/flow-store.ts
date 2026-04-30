@@ -33,16 +33,19 @@ export interface SensorRow {
 }
 
 export interface FlowEventRow {
-  id:             number;
-  sensor_id:      number;
-  start_time:     string;
-  end_time:       string | null;
-  peak_rate:      number;
-  avg_rate:       number | null;
-  total_m3:       number | null;
-  total_m3_start: number | null;
-  status:         'active' | 'closed';
-  alert_level:    AlertLevel;
+  id:                    number;
+  sensor_id:             number;
+  start_time:            string;
+  end_time:              string | null;
+  peak_rate:             number;
+  avg_rate:              number | null;
+  total_m3:              number | null;
+  total_m3_start:        number | null;
+  status:                'active' | 'closed';
+  alert_level:           AlertLevel;
+  shutoff_status:        'not_fired' | 'fired' | 'verified' | 'failed';
+  shutoff_fired_at:      string | null;
+  shutoff_completed_at:  string | null;
 }
 
 export function getSensorByKey(sensorKey: string): SensorRow | undefined {

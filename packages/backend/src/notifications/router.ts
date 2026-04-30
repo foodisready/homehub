@@ -151,3 +151,63 @@ function persistDispatches(eventId: number, level: AlertLevel, channels: Channel
     return rows;
   })();
 }
+
+// ── Phase 6: shutoff status notifications ──────────────────────
+
+export interface ShutoffNotifyInput {
+  eventId:      number;
+  sensorRowId:  number;
+  sensorAlias:  string;
+}
+
+/** Always fires all channels — auto-shutoff failures are critical. */
+export function notifyShutoffFailure(input: ShutoffNotifyInput): void {
+  const channels: Channel[] = ['push', 'email', 'sms'];
+  const dispatchRows = persistDispatches(input.eventId, 3 as AlertLevel, channels);
+
+  const sends = channels.map((ch, i) => {
+    const notifier = NOTIFIERS.find((n) => n.channel === ch);
+    if (!notifier) return Promise.resolve();
+    const payload: NotificationPayload = {
+      title:        `🚨 ${input.sensorAlias} — auto-shutoff FAILED`,
+      body:         `Valve closure command sent but flow did not stop. Check the valve immediately.`,
+      level:        3,
+      eventId:      input.eventId,
+      sensorId:     input.sensorRowId,
+      sensorKey:    '',
+      sensorAlias:  input.sensorAlias,
+      rateM3h:      0,
+      ackToken:     dispatchRows[i].ackToken,
+    };
+    return notifier.send(payload).catch((err) => {
+      logger.warn({ err, channel: ch }, 'Shutoff-failure notification failed');
+    });
+  });
+
+  Promise.allSettled(sends).then(() => {
+    logger.error({ eventId: input.eventId }, 'Shutoff failure notifications dispatched');
+  });
+}
+
+/** Confirmation that the valve closed and flow dropped. Push only — informational. */
+export function notifyShutoffSuccess(input: ShutoffNotifyInput): void {
+  const dispatchRows = persistDispatches(input.eventId, 2 as AlertLevel, ['push']);
+  const notifier = NOTIFIERS.find((n) => n.channel === 'push');
+  if (!notifier) return;
+
+  const payload: NotificationPayload = {
+    title:        `✅ ${input.sensorAlias} — valve closed`,
+    body:         `Auto-shutoff confirmed: flow stopped after the valve close.`,
+    level:        2,
+    eventId:      input.eventId,
+    sensorId:     input.sensorRowId,
+    sensorKey:    '',
+    sensorAlias:  input.sensorAlias,
+    rateM3h:      0,
+    ackToken:     dispatchRows[0].ackToken,
+  };
+
+  notifier.send(payload).catch((err) => {
+    logger.warn({ err }, 'Shutoff-success notification failed');
+  });
+}

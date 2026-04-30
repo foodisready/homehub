@@ -8,6 +8,8 @@ import { logger } from '../logger';
 import { ingestReading, getSensorByKey, parseSensorConfig } from '../sensors/flow-store';
 import { resolveFlowConfig, type FlowReading } from '../sensors/flow-engine';
 import { notify } from '../notifications/router';
+import { maybeFireShutoff } from '../sensors/shutoff';
+import { realInvoker, realNotifier } from '../sensors/shutoff-runtime';
 
 export const internalRouter = Router();
 
@@ -173,6 +175,13 @@ internalRouter.post('/sensors/flow/readings', (req: Request, res: Response) => {
         sensorAlias:  sensor.alias,
         rateM3h:      body.rateM3h,
         snoozedUntil: sensor.snoozed_until,
+      });
+    }
+
+    // Auto-shutoff: idempotent, only fires once per event when level reaches 3.
+    if (result.level >= 3) {
+      maybeFireShutoff(result.eventId, realInvoker, realNotifier).catch((err) => {
+        logger.error(err, 'Auto-shutoff threw');
       });
     }
   }

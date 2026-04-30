@@ -2,13 +2,15 @@ import {
   Component, OnInit, OnDestroy, AfterViewInit, ViewChild, ElementRef,
   signal, computed, inject,
 } from '@angular/core';
+import { HttpClient } from '@angular/common/http';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import Chart from 'chart.js/auto';
 import { SensorService } from '../../core/services/sensor.service';
 import { SocketService } from '../../core/socket/socket.service';
-import type { Sensor, FlowEvent, FlowReading } from '../../shared/models/sensor.model';
+import type { Sensor, FlowEvent, FlowReading, ShutoffStatus } from '../../shared/models/sensor.model';
+import type { Device } from '../../shared/models/device.model';
 
 const ONE_HOUR_MS  = 60 * 60 * 1000;
 const M3H_TO_LPM   = 1000 / 60;
@@ -25,6 +27,13 @@ const LEVEL_COLOR: Record<number, string> = {
   1: '#1e40af',
   2: '#b45309',
   3: '#b91c1c',
+};
+
+const SHUTOFF_PILL: Record<ShutoffStatus, { label: string; color: string } | null> = {
+  not_fired: null,
+  fired:     { label: 'valve closing…',  color: '#92400e' },
+  verified:  { label: '✓ valve closed',  color: '#166534' },
+  failed:    { label: '⚠ valve failed',  color: '#7f1d1d' },
 };
 
 @Component({
@@ -59,10 +68,20 @@ const LEVEL_COLOR: Record<number, string> = {
 
     .events { display: flex; flex-direction: column; gap: 0.5rem; }
     .event-row {
-      display: grid; grid-template-columns: auto 1fr auto auto; gap: 0.75rem; align-items: center;
+      display: grid; grid-template-columns: auto 1fr auto auto auto; gap: 0.75rem; align-items: center;
       padding: 0.6rem 0.8rem; border: 1px solid var(--border); border-radius: 6px; font-size: 0.85rem;
     }
-    .level-pill { font-size: 0.7rem; padding: 0.15rem 0.5rem; border-radius: 999px; color: #fff; font-weight: 600; }
+    .level-pill, .shutoff-pill {
+      font-size: 0.7rem; padding: 0.15rem 0.5rem; border-radius: 999px; color: #fff; font-weight: 600;
+      white-space: nowrap;
+    }
+
+    .shutoff-row { display: grid; grid-template-columns: 1fr auto; gap: 0.75rem; align-items: center; }
+    .shutoff-row select {
+      background: var(--surface); border: 1px solid var(--border); color: var(--text);
+      padding: 0.4rem 0.6rem; border-radius: 6px; min-width: 14rem;
+    }
+    .shutoff-help { font-size: 0.8rem; color: var(--text-muted); margin-top: 0.5rem; }
 
     .empty { color: var(--text-muted); padding: 0.5rem 0; font-size: 0.85rem; }
   `],
@@ -112,6 +131,24 @@ const LEVEL_COLOR: Record<number, string> = {
         </div>
 
         <div class="card">
+          <h2>Auto-shutoff</h2>
+          <div class="shutoff-row">
+            <select [(ngModel)]="shutoffDeviceId">
+              <option [ngValue]="null">— No auto-shutoff —</option>
+              @for (d of devices(); track d.id) {
+                <option [ngValue]="d.id">{{ d.alias }} ({{ d.driverType }})</option>
+              }
+            </select>
+            <button class="btn" (click)="saveShutoffDevice()">Save</button>
+          </div>
+          <div class="shutoff-help">
+            On L3 alerts the selected device will be turned off (valve closed).
+            Flow is verified to drop within 60 s; if not, you'll get a critical
+            "valve failed to close" alert.
+          </div>
+        </div>
+
+        <div class="card">
           <h2>Recent events</h2>
           @if (events().length === 0) {
             <div class="empty">No flow events recorded yet.</div>
@@ -128,6 +165,11 @@ const LEVEL_COLOR: Record<number, string> = {
                   </span>
                   <span>peak {{ ev.peakRate | number:'1.2-2' }} m³/h</span>
                   <span>{{ ev.totalM3 ? ((ev.totalM3 * 264.172) | number:'1.0-1') + ' gal' : '—' }}</span>
+                  @if (shutoffPill(ev.shutoffStatus); as pill) {
+                    <span class="shutoff-pill" [style.background]="pill.color">{{ pill.label }}</span>
+                  } @else {
+                    <span></span>
+                  }
                 </div>
               }
             </div>
@@ -147,12 +189,15 @@ export class SensorDetailComponent implements OnInit, AfterViewInit, OnDestroy {
   private svc    = inject(SensorService);
   private socket = inject(SocketService);
   private route  = inject(ActivatedRoute);
+  private http   = inject(HttpClient);
 
   loading = signal(true);
   sensor  = signal<Sensor | null>(null);
   events  = signal<FlowEvent[]>([]);
+  devices = signal<Device[]>([]);
 
-  snoozeHours = 4;
+  snoozeHours      = 4;
+  shutoffDeviceId: number | null = null;
   snoozedActive = computed(() => {
     const s = this.sensor();
     if (!s?.snoozedUntil) return false;
@@ -180,7 +225,12 @@ export class SensorDetailComponent implements OnInit, AfterViewInit, OnDestroy {
 
   private refresh(): void {
     this.svc.get(this.sensorId).subscribe({
-      next: (s) => { this.sensor.set(s); this.loading.set(false); },
+      next: (s) => {
+        this.sensor.set(s);
+        this.loading.set(false);
+        const cfg = (s.config ?? {}) as { shutoffDeviceId?: number };
+        this.shutoffDeviceId = typeof cfg.shutoffDeviceId === 'number' ? cfg.shutoffDeviceId : null;
+      },
       error: () => this.loading.set(false),
     });
     this.svc.events(this.sensorId, { limit: 25 }).subscribe((es) => this.events.set(es));
@@ -188,6 +238,16 @@ export class SensorDetailComponent implements OnInit, AfterViewInit, OnDestroy {
       from:  new Date(Date.now() - ONE_HOUR_MS).toISOString(),
       limit: 1000,
     }).subscribe((readings) => this.seedChart(readings));
+    this.http.get<Device[]>('/api/devices').subscribe((d) => this.devices.set(d));
+  }
+
+  saveShutoffDevice(): void {
+    this.svc.updateConfig(this.sensorId, { shutoffDeviceId: this.shutoffDeviceId })
+      .subscribe((s) => this.sensor.set(s));
+  }
+
+  shutoffPill(status: ShutoffStatus): { label: string; color: string } | null {
+    return SHUTOFF_PILL[status];
   }
 
   private initChart(): void {

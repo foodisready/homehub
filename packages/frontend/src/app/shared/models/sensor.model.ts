@@ -17,16 +17,21 @@ export interface Sensor {
   createdAt:           string;
 }
 
+export type ShutoffStatus = 'not_fired' | 'fired' | 'verified' | 'failed';
+
 export interface FlowEvent {
-  id:           number;
-  sensorId:     number;
-  startTime:    string;
-  endTime:      string | null;
-  peakRate:     number;
-  avgRate:      number | null;
-  totalM3:      number | null;
-  status:       'active' | 'closed';
-  alertLevel:   AlertLevel;
+  id:                  number;
+  sensorId:            number;
+  startTime:           string;
+  endTime:             string | null;
+  peakRate:            number;
+  avgRate:             number | null;
+  totalM3:             number | null;
+  status:              'active' | 'closed';
+  alertLevel:          AlertLevel;
+  shutoffStatus:       ShutoffStatus;
+  shutoffFiredAt:      string | null;
+  shutoffCompletedAt:  string | null;
 }
 
 export interface FlowReading {

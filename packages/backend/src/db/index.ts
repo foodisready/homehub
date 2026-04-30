@@ -215,4 +215,11 @@ function migrate(db: Database.Database): void {
       grace_until   TEXT
     );
   `);
+
+  // ── AuraFlow Phase 6: shutoff tracking on flow_events ─────────
+  // Additive — safe to re-run.
+  try { db.exec("ALTER TABLE flow_events ADD COLUMN shutoff_status TEXT NOT NULL DEFAULT 'not_fired'"); } catch {}
+  try { db.exec('ALTER TABLE flow_events ADD COLUMN shutoff_fired_at TEXT'); } catch {}
+  try { db.exec('ALTER TABLE flow_events ADD COLUMN shutoff_completed_at TEXT'); } catch {}
+  try { db.exec('ALTER TABLE flow_events ADD COLUMN shutoff_rate_at_fire REAL'); } catch {}
 }

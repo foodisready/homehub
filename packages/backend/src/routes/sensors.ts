@@ -28,15 +28,18 @@ function toPublicSensor(row: SensorRow) {
 
 function toPublicEvent(row: FlowEventRow) {
   return {
-    id:           row.id,
-    sensorId:     row.sensor_id,
-    startTime:    row.start_time,
-    endTime:      row.end_time,
-    peakRate:     row.peak_rate,
-    avgRate:      row.avg_rate,
-    totalM3:      row.total_m3,
-    status:       row.status,
-    alertLevel:   row.alert_level,
+    id:                  row.id,
+    sensorId:            row.sensor_id,
+    startTime:           row.start_time,
+    endTime:             row.end_time,
+    peakRate:            row.peak_rate,
+    avgRate:             row.avg_rate,
+    totalM3:             row.total_m3,
+    status:              row.status,
+    alertLevel:          row.alert_level,
+    shutoffStatus:       row.shutoff_status,
+    shutoffFiredAt:      row.shutoff_fired_at,
+    shutoffCompletedAt:  row.shutoff_completed_at,
   };
 }
 
