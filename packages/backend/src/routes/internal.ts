@@ -7,6 +7,7 @@ import { emitDeviceState, emitSensorReading, emitSensorAlert } from '../socket';
 import { logger } from '../logger';
 import { ingestReading, getSensorByKey, parseSensorConfig } from '../sensors/flow-store';
 import { resolveFlowConfig, type FlowReading } from '../sensors/flow-engine';
+import { notify } from '../notifications/router';
 
 export const internalRouter = Router();
 
@@ -162,6 +163,18 @@ internalRouter.post('/sensors/flow/readings', (req: Request, res: Response) => {
       { sensorKey: sensor.sensor_id, eventId: result.eventId, level: result.level },
       'Flow alert level transition',
     );
+    // Fire-and-forget: don't block the ESP32's response on notification dispatch.
+    if (result.level >= 1) {
+      notify({
+        level:        result.level,
+        eventId:      result.eventId,
+        sensorRowId:  sensor.id,
+        sensorKey:    sensor.sensor_id,
+        sensorAlias:  sensor.alias,
+        rateM3h:      body.rateM3h,
+        snoozedUntil: sensor.snoozed_until,
+      });
+    }
   }
   if (result.opened) {
     logger.info({ sensorKey: sensor.sensor_id, eventId: result.eventId }, 'Flow event opened');

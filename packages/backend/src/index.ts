@@ -23,6 +23,7 @@ import { pushRouter } from './routes/push';
 import { scenesRouter } from './routes/scenes';
 import { tuyaRouter }   from './routes/tuya';
 import { sensorsRouter } from './routes/sensors';
+import { notificationsAckRouter } from './routes/notifications-ack';
 import { runBackup } from './db/backup';
 import { authenticate } from './middleware/auth';
 import { getDb } from './db';
@@ -46,6 +47,9 @@ app.use('/api/auth', authRouter);
 
 // ── Internal service-to-service routes (key auth, no JWT) ──────
 app.use('/internal', internalRouter);
+
+// ── Public ack endpoint — token IS the auth, single-use, must precede JWT
+app.use('/api/notifications/ack', notificationsAckRouter);
 
 // ── All routes below require a valid JWT ──────────────────────
 app.use('/api', (req: Request, res: Response, next: NextFunction) => {
