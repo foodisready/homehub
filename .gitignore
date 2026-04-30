@@ -19,6 +19,8 @@ packages/frontend/dist/
 .env
 .env.local
 .env.*.local
+packages/backend/scripts/swap-tuya.js
+packages/backend/scripts/update-tuya-keys.js
 
 # Data directory — contains SQLite db, backups, and Ollama model weights
 data/
