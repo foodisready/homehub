@@ -375,6 +375,103 @@ const DRIVER_LABEL: Record<string, string> = {
               </div>
             }
           </div>
+
+          <!-- ── Email (BYOK SMTP) ────────────────────────────────── -->
+          <div class="card">
+            <div class="pref-row" style="cursor:pointer" (click)="emailExpanded.set(!emailExpanded())">
+              <div class="pref-label">
+                Email alerts (SMTP)
+                <div class="pref-sub">Resend, Gmail App Password, AWS SES — any SMTP server. Used for L2+ alerts.</div>
+              </div>
+              @if (emailReady()) { <span class="tuya-synced">● Configured</span> }
+              <span style="color:var(--text-muted);font-size:0.85rem">{{ emailExpanded() ? '▲' : '▼' }}</span>
+            </div>
+            @if (emailExpanded()) {
+              <div class="tuya-cloud-form">
+                <input type="text" [(ngModel)]="smtpHost" placeholder="Host (e.g. smtp.resend.com)" autocomplete="off" />
+                <div style="display:flex;gap:0.5rem">
+                  <input type="number" [(ngModel)]="smtpPort" placeholder="Port" style="width:6rem" />
+                  <label style="display:flex;align-items:center;gap:0.4rem;font-size:0.85rem;color:var(--text-muted)">
+                    <input type="checkbox" [(ngModel)]="smtpSecure" /> TLS (port 465)
+                  </label>
+                </div>
+                <input type="text" [(ngModel)]="smtpUser" placeholder="Username" autocomplete="off" />
+                <div class="pass-wrap">
+                  <input [type]="showSmtpPass ? 'text' : 'password'" [(ngModel)]="smtpPass"
+                         [placeholder]="hasSmtpPass() ? 'Password (leave blank to keep current)' : 'Password / API key'"
+                         autocomplete="new-password" />
+                  <button type="button" class="pass-eye" (click)="showSmtpPass = !showSmtpPass">
+                    @if (showSmtpPass) {
+                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
+                        <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
+                        <line x1="1" y1="1" x2="23" y2="23"/>
+                      </svg>
+                    } @else {
+                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                        <circle cx="12" cy="12" r="3"/>
+                      </svg>
+                    }
+                  </button>
+                </div>
+                <input type="text" [(ngModel)]="smtpFrom" placeholder='From — "AuraFlow" <alerts@example.com>' autocomplete="off" />
+                <input type="text" [(ngModel)]="emailRecipients" placeholder="Recipients (comma-separated)" autocomplete="off" />
+                <div style="display:flex;align-items:center;gap:0.5rem">
+                  <button class="btn-sm btn-primary" (click)="saveSmtp()"
+                          [disabled]="!smtpHost.trim() || !emailRecipients.trim()">Save</button>
+                  @if (emailMsg()) {
+                    <span class="msg" [class.ok]="!emailErr()" [class.err]="emailErr()">{{ emailMsg() }}</span>
+                  }
+                </div>
+              </div>
+            }
+          </div>
+
+          <!-- ── SMS (BYOK Twilio) ────────────────────────────────── -->
+          <div class="card">
+            <div class="pref-row" style="cursor:pointer" (click)="smsExpanded.set(!smsExpanded())">
+              <div class="pref-label">
+                SMS alerts (Twilio)
+                <div class="pref-sub">Used for L3 critical alerts. Sender must be a Twilio-verified number in E.164.</div>
+              </div>
+              @if (smsReady()) { <span class="tuya-synced">● Configured</span> }
+              <span style="color:var(--text-muted);font-size:0.85rem">{{ smsExpanded() ? '▲' : '▼' }}</span>
+            </div>
+            @if (smsExpanded()) {
+              <div class="tuya-cloud-form">
+                <input type="text" [(ngModel)]="twilioAccountSid" placeholder="Account SID (starts with AC)" autocomplete="off" />
+                <div class="pass-wrap">
+                  <input [type]="showTwilioToken ? 'text' : 'password'" [(ngModel)]="twilioAuthToken"
+                         [placeholder]="hasTwilioToken() ? 'Auth Token (leave blank to keep current)' : 'Auth Token'"
+                         autocomplete="new-password" />
+                  <button type="button" class="pass-eye" (click)="showTwilioToken = !showTwilioToken">
+                    @if (showTwilioToken) {
+                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
+                        <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
+                        <line x1="1" y1="1" x2="23" y2="23"/>
+                      </svg>
+                    } @else {
+                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                        <circle cx="12" cy="12" r="3"/>
+                      </svg>
+                    }
+                  </button>
+                </div>
+                <input type="text" [(ngModel)]="twilioFrom" placeholder="From number (e.g. +15555551234)" autocomplete="off" />
+                <input type="text" [(ngModel)]="smsRecipients" placeholder="Recipient numbers (E.164, comma-separated)" autocomplete="off" />
+                <div style="display:flex;align-items:center;gap:0.5rem">
+                  <button class="btn-sm btn-primary" (click)="saveTwilio()"
+                          [disabled]="!twilioAccountSid.trim() || !twilioFrom.trim() || !smsRecipients.trim()">Save</button>
+                  @if (smsMsg()) {
+                    <span class="msg" [class.ok]="!smsErr()" [class.err]="smsErr()">{{ smsMsg() }}</span>
+                  }
+                </div>
+              </div>
+            }
+          </div>
         </div>
       }
 
@@ -538,6 +635,34 @@ export class SettingsComponent implements OnInit {
   tuyaSyncErr       = signal(false);
   tuyaCloudDevices: Array<{ deviceId: string; localKey: string; name: string; ip?: string }> = [];
 
+  // ── BYOK notification credentials ─────────────────────────────
+  // SMTP / email
+  smtpHost      = '';
+  smtpPort      = '587';
+  smtpSecure    = false;
+  smtpUser      = '';
+  smtpPass      = '';   // write-only; GET returns has_smtp_pass instead
+  smtpFrom      = '';
+  emailRecipients = '';
+  showSmtpPass    = false;
+  hasSmtpPass     = signal(false);
+  emailExpanded   = signal(false);
+  emailReady      = signal(false);
+  emailMsg        = signal('');
+  emailErr        = signal(false);
+
+  // Twilio / SMS
+  twilioAccountSid  = '';
+  twilioAuthToken   = '';   // write-only; GET returns has_twilio_auth_token
+  twilioFrom        = '';
+  smsRecipients     = '';
+  showTwilioToken   = false;
+  hasTwilioToken    = signal(false);
+  smsExpanded       = signal(false);
+  smsReady          = signal(false);
+  smsMsg            = signal('');
+  smsErr            = signal(false);
+
   // Push notifications
   pushSupported = 'serviceWorker' in navigator && 'PushManager' in window;
   pushEnabled   = signal(false);
@@ -558,8 +683,70 @@ export class SettingsComponent implements OnInit {
         this.tuyaRegion    = c.region;
         this.tuyaCloudReady.set(!!c.accessId && c.hasSecret);
       });
+      this.loadNotificationSettings();
     }
     this.checkPushStatus();
+  }
+
+  private loadNotificationSettings(): void {
+    this.http.get<Record<string, string | boolean>>('/api/notifications/settings').subscribe((s) => {
+      this.smtpHost        = String(s['smtp_host']        ?? '');
+      this.smtpPort        = String(s['smtp_port']        ?? '587');
+      this.smtpSecure      = String(s['smtp_secure']      ?? '0') === '1';
+      this.smtpUser        = String(s['smtp_user']        ?? '');
+      this.smtpFrom        = String(s['smtp_from']        ?? '');
+      this.emailRecipients = String(s['email_recipients'] ?? '');
+      this.hasSmtpPass.set(!!s['has_smtp_pass']);
+      this.emailReady.set(!!this.smtpHost && (!!s['has_smtp_pass'] || !this.smtpUser));
+
+      this.twilioAccountSid = String(s['twilio_account_sid'] ?? '');
+      this.twilioFrom       = String(s['twilio_from']        ?? '');
+      this.smsRecipients    = String(s['sms_recipients']     ?? '');
+      this.hasTwilioToken.set(!!s['has_twilio_auth_token']);
+      this.smsReady.set(!!this.twilioAccountSid && !!s['has_twilio_auth_token'] && !!this.twilioFrom);
+    });
+  }
+
+  saveSmtp(): void {
+    this.emailMsg.set(''); this.emailErr.set(false);
+    const body: Record<string, string> = {
+      smtp_host:        this.smtpHost.trim(),
+      smtp_port:        this.smtpPort.trim() || '587',
+      smtp_secure:      this.smtpSecure ? '1' : '0',
+      smtp_user:        this.smtpUser.trim(),
+      smtp_from:        this.smtpFrom.trim(),
+      email_recipients: this.emailRecipients.trim(),
+    };
+    // Only send the password field if the user typed something — otherwise leave it untouched.
+    if (this.smtpPass) body['smtp_pass'] = this.smtpPass;
+
+    this.http.put('/api/notifications/settings', body).subscribe({
+      next: () => {
+        this.emailMsg.set('Saved');
+        this.smtpPass = '';
+        this.loadNotificationSettings();
+      },
+      error: () => { this.emailMsg.set('Save failed'); this.emailErr.set(true); },
+    });
+  }
+
+  saveTwilio(): void {
+    this.smsMsg.set(''); this.smsErr.set(false);
+    const body: Record<string, string> = {
+      twilio_account_sid: this.twilioAccountSid.trim(),
+      twilio_from:        this.twilioFrom.trim(),
+      sms_recipients:     this.smsRecipients.trim(),
+    };
+    if (this.twilioAuthToken) body['twilio_auth_token'] = this.twilioAuthToken;
+
+    this.http.put('/api/notifications/settings', body).subscribe({
+      next: () => {
+        this.smsMsg.set('Saved');
+        this.twilioAuthToken = '';
+        this.loadNotificationSettings();
+      },
+      error: () => { this.smsMsg.set('Save failed'); this.smsErr.set(true); },
+    });
   }
 
   driverLabel(type: string): string {

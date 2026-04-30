@@ -24,6 +24,7 @@ import { scenesRouter } from './routes/scenes';
 import { tuyaRouter }   from './routes/tuya';
 import { sensorsRouter } from './routes/sensors';
 import { notificationsAckRouter } from './routes/notifications-ack';
+import { notificationSettingsRouter } from './routes/notification-settings';
 import { runBackup } from './db/backup';
 import { checkAllSensors } from './sensors/stale-check';
 import { authenticate } from './middleware/auth';
@@ -66,6 +67,7 @@ app.use('/api/scenes',    scenesRouter);
 app.use('/api/devices',   energyRouter);   // history sub-routes: /api/devices/:id/energy/history
 app.use('/api/tuya',      tuyaRouter);
 app.use('/api/sensors',   sensorsRouter);
+app.use('/api/notifications/settings', notificationSettingsRouter);
 
 // ── Global error handler ───────────────────────────────────────
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
