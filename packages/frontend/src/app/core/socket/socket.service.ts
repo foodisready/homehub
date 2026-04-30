@@ -15,6 +15,22 @@ export interface DeviceOnlineEvent {
   online: boolean;
 }
 
+export interface SensorReadingEvent {
+  id:           number;       // sensors.id
+  sensorId:     string;       // sensors.sensor_id (the human key)
+  rateM3h:      number;
+  totalM3:      number | null;
+  recordedAt:   string;
+}
+
+export interface SensorAlertEvent {
+  id:           number;       // sensors.id
+  sensorId:     string;
+  eventId:      number;
+  alertLevel:   number;
+  rateM3h:      number;
+}
+
 @Injectable({ providedIn: 'root' })
 export class SocketService implements OnDestroy {
   private socket: Socket | null = null;
@@ -58,6 +74,16 @@ export class SocketService implements OnDestroy {
   onDeviceOnline(callback: (event: DeviceOnlineEvent) => void): () => void {
     this.socket?.on('device:online', callback);
     return () => this.socket?.off('device:online', callback);
+  }
+
+  onSensorReading(callback: (event: SensorReadingEvent) => void): () => void {
+    this.socket?.on('sensor:flow:reading', callback);
+    return () => this.socket?.off('sensor:flow:reading', callback);
+  }
+
+  onSensorAlert(callback: (event: SensorAlertEvent) => void): () => void {
+    this.socket?.on('sensor:flow:alert', callback);
+    return () => this.socket?.off('sensor:flow:alert', callback);
   }
 
   ngOnDestroy(): void {

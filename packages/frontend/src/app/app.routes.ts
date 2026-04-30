@@ -37,5 +37,15 @@ export const routes: Routes = [
     loadComponent: () => import('./features/scenes/scenes.component').then((m) => m.ScenesComponent),
     canActivate: [authGuard],
   },
+  {
+    path: 'sensors',
+    loadComponent: () => import('./features/sensors/sensors.component').then((m) => m.SensorsComponent),
+    canActivate: [authGuard],
+  },
+  {
+    path: 'sensors/:id',
+    loadComponent: () => import('./features/sensors/sensor-detail.component').then((m) => m.SensorDetailComponent),
+    canActivate: [authGuard],
+  },
   { path: '**', redirectTo: 'dashboard' },
 ];
