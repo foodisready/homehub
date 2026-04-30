@@ -13,6 +13,14 @@ export class SensorService {
     return this.http.get<Sensor[]>('/api/sensors');
   }
 
+  create(input: { sensorId: string; alias: string; type?: string }): Observable<Sensor> {
+    return this.http.post<Sensor>('/api/sensors', input);
+  }
+
+  testShutoff(id: number): Observable<{ ok: true; deviceId: number }> {
+    return this.http.post<{ ok: true; deviceId: number }>(`/api/sensors/${id}/test-shutoff`, {});
+  }
+
   get(id: number): Observable<Sensor> {
     return this.http.get<Sensor>(`/api/sensors/${id}`);
   }

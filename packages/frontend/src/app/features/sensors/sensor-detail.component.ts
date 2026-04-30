@@ -146,6 +146,15 @@ const SHUTOFF_PILL: Record<ShutoffStatus, { label: string; color: string } | nul
             Flow is verified to drop within 60 s; if not, you'll get a critical
             "valve failed to close" alert.
           </div>
+          <div class="controls" style="margin-top:0.75rem">
+            <button class="btn danger" (click)="testFire()"
+                    [disabled]="!shutoffDeviceId || testFiring()">
+              {{ testFiring() ? 'Firing…' : 'Test fire valve' }}
+            </button>
+            @if (testFireMsg()) {
+              <span [style.color]="testFireErr() ? '#f87171' : '#4ade80'">{{ testFireMsg() }}</span>
+            }
+          </div>
         </div>
 
         <div class="card">
@@ -198,6 +207,9 @@ export class SensorDetailComponent implements OnInit, AfterViewInit, OnDestroy {
 
   snoozeHours      = 4;
   shutoffDeviceId: number | null = null;
+  testFiring  = signal(false);
+  testFireMsg = signal('');
+  testFireErr = signal(false);
   snoozedActive = computed(() => {
     const s = this.sensor();
     if (!s?.snoozedUntil) return false;
@@ -244,6 +256,25 @@ export class SensorDetailComponent implements OnInit, AfterViewInit, OnDestroy {
   saveShutoffDevice(): void {
     this.svc.updateConfig(this.sensorId, { shutoffDeviceId: this.shutoffDeviceId })
       .subscribe((s) => this.sensor.set(s));
+  }
+
+  testFire(): void {
+    if (!this.shutoffDeviceId) return;
+    if (!confirm('This will close the configured valve immediately. Continue?')) return;
+
+    this.testFiring.set(true);
+    this.testFireMsg.set(''); this.testFireErr.set(false);
+    this.svc.testShutoff(this.sensorId).subscribe({
+      next: () => {
+        this.testFiring.set(false);
+        this.testFireMsg.set('Valve close fired. Watch the live chart for the rate drop.');
+      },
+      error: (err) => {
+        this.testFiring.set(false);
+        this.testFireErr.set(true);
+        this.testFireMsg.set(err?.error?.error ?? 'Test fire failed.');
+      },
+    });
   }
 
   shutoffPill(status: ShutoffStatus): { label: string; color: string } | null {

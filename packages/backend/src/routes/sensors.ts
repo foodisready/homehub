@@ -4,6 +4,7 @@ import { getDb } from '../db';
 import { logger } from '../logger';
 import { type SensorRow, type FlowEventRow } from '../sensors/flow-store';
 import { getConsumptionBuckets, type Bucket } from '../sensors/consumption';
+import { realInvoker } from '../sensors/shutoff-runtime';
 
 export const sensorsRouter = Router();
 
@@ -246,6 +247,30 @@ sensorsRouter.delete('/:id/snooze', (req: Request, res: Response) => {
     .run(req.params.id);
   if (result.changes === 0) return res.status(404).json({ error: 'Sensor not found', code: 'NOT_FOUND' });
   res.status(204).end();
+});
+
+// POST /api/sensors/:id/test-shutoff — admin only.
+// Manually fires the configured shutoff device WITHOUT touching the engine
+// state machine. Used during hardware bring-up to verify the valve actually
+// closes from homehub before betting on it during a real L3 event.
+sensorsRouter.post('/:id/test-shutoff', requireAdmin, async (req: Request, res: Response) => {
+  const row = getDb().prepare('SELECT * FROM sensors WHERE id = ?').get(req.params.id) as SensorRow | undefined;
+  if (!row) return res.status(404).json({ error: 'Sensor not found', code: 'NOT_FOUND' });
+
+  const cfg = row.config ? (safeJson(row.config) as { shutoffDeviceId?: number }) : {};
+  const deviceId = cfg?.shutoffDeviceId;
+  if (typeof deviceId !== 'number' || deviceId <= 0) {
+    return res.status(400).json({ error: 'No shutoffDeviceId configured for this sensor', code: 'NO_SHUTOFF_DEVICE' });
+  }
+
+  try {
+    await realInvoker.closeValve(deviceId);
+    logger.warn({ sensorId: row.id, alias: row.alias, deviceId }, 'Manual test-shutoff fired');
+    return res.json({ ok: true, deviceId });
+  } catch (err) {
+    logger.error({ err, deviceId }, 'Manual test-shutoff failed');
+    return res.status(503).json({ error: 'Valve actuation failed', code: 'ACTUATION_FAILED', detail: (err as Error).message });
+  }
 });
 
 function clampInt(v: unknown, fallback: number, min: number, max: number): number {
