@@ -61,3 +61,23 @@ export function emitDeviceEnergy(
 export function emitDeviceOnline(deviceId: number, alias: string, online: boolean): void {
   _io?.emit('device:online', { id: deviceId, alias, online });
 }
+
+export function emitSensorReading(
+  sensorRowId:  number,
+  sensorKey:    string,
+  rateM3h:      number,
+  totalM3:      number | null,
+  recordedAt:   string,
+): void {
+  _io?.emit('sensor:flow:reading', { id: sensorRowId, sensorId: sensorKey, rateM3h, totalM3, recordedAt });
+}
+
+export function emitSensorAlert(
+  sensorRowId:  number,
+  sensorKey:    string,
+  eventId:      number,
+  alertLevel:   number,
+  rateM3h:      number,
+): void {
+  _io?.emit('sensor:flow:alert', { id: sensorRowId, sensorId: sensorKey, eventId, alertLevel, rateM3h });
+}

@@ -125,4 +125,94 @@ function migrate(db: Database.Database): void {
       COMMIT;
     `);
   }
+
+  // ── AuraFlow / sensor subsystem ────────────────────────────────
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS sensors (
+      id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+      sensor_id           TEXT    NOT NULL UNIQUE,
+      type                TEXT    NOT NULL,
+      alias               TEXT    NOT NULL,
+      config              TEXT,
+      first_seen_mac      TEXT,
+      last_seen_at        TEXT,
+      last_rssi           INTEGER,
+      last_uptime_sec     INTEGER,
+      last_signal_quality INTEGER,
+      firmware_version    TEXT,
+      pending_state       TEXT    NOT NULL DEFAULT 'idle' CHECK(pending_state IN ('idle','flowing')),
+      pending_count       INTEGER NOT NULL DEFAULT 0,
+      snoozed_until       TEXT,
+      created_at          TEXT    NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS flow_readings (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      sensor_id       INTEGER NOT NULL REFERENCES sensors(id) ON DELETE CASCADE,
+      rate_m3h        REAL    NOT NULL,
+      total_m3        REAL,
+      signal_quality  INTEGER,
+      t_offset_ms     INTEGER NOT NULL DEFAULT 0,
+      recorded_at     TEXT    NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_flow_readings_sensor_time
+      ON flow_readings(sensor_id, recorded_at);
+
+    CREATE TABLE IF NOT EXISTS flow_events (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      sensor_id    INTEGER NOT NULL REFERENCES sensors(id) ON DELETE CASCADE,
+      start_time   TEXT    NOT NULL DEFAULT (datetime('now')),
+      end_time     TEXT,
+      peak_rate    REAL    NOT NULL DEFAULT 0,
+      avg_rate     REAL,
+      total_m3     REAL,
+      total_m3_start REAL,
+      status       TEXT    NOT NULL DEFAULT 'active' CHECK(status IN ('active','closed')),
+      alert_level  INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_flow_events_active
+      ON flow_events(sensor_id, status);
+
+    CREATE TABLE IF NOT EXISTS flow_event_acks (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      event_id    INTEGER NOT NULL REFERENCES flow_events(id) ON DELETE CASCADE,
+      user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      acked_at    TEXT    NOT NULL DEFAULT (datetime('now')),
+      reason      TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS notification_preferences (
+      id                INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id           INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      channel           TEXT    NOT NULL CHECK(channel IN ('push','email','sms','voice')),
+      min_level         INTEGER NOT NULL DEFAULT 1,
+      quiet_hours_from  TEXT,
+      quiet_hours_to    TEXT,
+      enabled           INTEGER NOT NULL DEFAULT 1,
+      destination       TEXT,
+      UNIQUE(user_id, channel)
+    );
+
+    CREATE TABLE IF NOT EXISTS notification_dispatches (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      event_id      INTEGER NOT NULL REFERENCES flow_events(id) ON DELETE CASCADE,
+      user_id       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      channel       TEXT    NOT NULL,
+      level         INTEGER NOT NULL,
+      sent_at       TEXT    NOT NULL DEFAULT (datetime('now')),
+      acked_at      TEXT,
+      ack_token     TEXT    UNIQUE
+    );
+    CREATE INDEX IF NOT EXISTS idx_notif_dispatches_event
+      ON notification_dispatches(event_id);
+
+    CREATE TABLE IF NOT EXISTS subscription (
+      license_key   TEXT PRIMARY KEY,
+      tier          TEXT NOT NULL DEFAULT 'free',
+      features_json TEXT NOT NULL DEFAULT '[]',
+      cached_at     TEXT NOT NULL DEFAULT (datetime('now')),
+      expires_at    TEXT,
+      grace_until   TEXT
+    );
+  `);
 }

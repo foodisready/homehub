@@ -22,6 +22,7 @@ import { energyRouter } from './routes/energy';
 import { pushRouter } from './routes/push';
 import { scenesRouter } from './routes/scenes';
 import { tuyaRouter }   from './routes/tuya';
+import { sensorsRouter } from './routes/sensors';
 import { runBackup } from './db/backup';
 import { authenticate } from './middleware/auth';
 import { getDb } from './db';
@@ -59,6 +60,7 @@ app.use('/api/push',      pushRouter);
 app.use('/api/scenes',    scenesRouter);
 app.use('/api/devices',   energyRouter);   // history sub-routes: /api/devices/:id/energy/history
 app.use('/api/tuya',      tuyaRouter);
+app.use('/api/sensors',   sensorsRouter);
 
 // ── Global error handler ───────────────────────────────────────
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
@@ -78,7 +80,24 @@ httpServer.listen(PORT, async () => {
   // Daily DB backup: run once at startup, then every 24 hours
   runBackup();
   setInterval(runBackup, 24 * 60 * 60 * 1000);
+
+  // Hourly prune of flow_readings older than 7 days. flow_events are kept indefinitely.
+  pruneFlowReadings();
+  setInterval(pruneFlowReadings, 60 * 60 * 1000);
 });
+
+function pruneFlowReadings(): void {
+  try {
+    const r = getDb()
+      .prepare("DELETE FROM flow_readings WHERE recorded_at < datetime('now', '-7 days')")
+      .run();
+    if (r.changes > 0) {
+      logger.info({ deleted: r.changes }, 'Pruned old flow_readings');
+    }
+  } catch (err) {
+    logger.error(err, 'flow_readings prune failed');
+  }
+}
 
 process.on('SIGTERM', () => {
   logger.info('SIGTERM received, shutting down');
