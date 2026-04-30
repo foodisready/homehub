@@ -21,6 +21,7 @@ import { nlpRouter } from './routes/nlp';
 import { energyRouter } from './routes/energy';
 import { pushRouter } from './routes/push';
 import { scenesRouter } from './routes/scenes';
+import { tuyaRouter }   from './routes/tuya';
 import { runBackup } from './db/backup';
 import { authenticate } from './middleware/auth';
 import { getDb } from './db';
@@ -57,6 +58,7 @@ app.use('/api/nlp',       nlpRouter);
 app.use('/api/push',      pushRouter);
 app.use('/api/scenes',    scenesRouter);
 app.use('/api/devices',   energyRouter);   // history sub-routes: /api/devices/:id/energy/history
+app.use('/api/tuya',      tuyaRouter);
 
 // ── Global error handler ───────────────────────────────────────
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {

@@ -1,7 +1,36 @@
 import * as dgram   from 'dgram';
+import * as net     from 'net';
+import * as os      from 'os';
 import * as crypto  from 'crypto';
 import { DeviceDriver, DiscoveredDevice, EnergyMetrics } from './DeviceDriver';
 import { logger } from '../logger';
+
+/** Return unique /24 subnet prefixes for all non-loopback IPv4 interfaces */
+function localSubnets(): string[] {
+  const prefixes = new Set<string>();
+  for (const addrs of Object.values(os.networkInterfaces())) {
+    for (const addr of addrs ?? []) {
+      if (addr.family === 'IPv4' && !addr.internal) {
+        const p = addr.address.split('.');
+        prefixes.add(`${p[0]}.${p[1]}.${p[2]}`);
+      }
+    }
+  }
+  return [...prefixes];
+}
+
+/** Check if TCP port 6668 is open on an IP within timeoutMs. */
+function probeTuyaPort(ip: string, timeoutMs: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const sock = new net.Socket();
+    const done = (result: boolean) => { sock.destroy(); resolve(result); };
+    sock.setTimeout(timeoutMs);
+    sock.once('connect', () => done(true));
+    sock.once('timeout', () => done(false));
+    sock.once('error',   () => done(false));
+    sock.connect(6668, ip);
+  });
+}
 
 // Well-known AES key used for Tuya v3.3+ UDP broadcast encryption
 const BROADCAST_KEY = Buffer.from('yGAdlopoPVldABfn');
@@ -46,6 +75,16 @@ function extractPacket(buf: Buffer): any | null {
   return tryParsePayload(buf);
 }
 
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const TuyAPI = require('tuyapi');
+
+/** Create a TuyAPI device instance with a no-op error handler to prevent unhandled error events crashing the process. */
+function makeTuyaDevice(deviceId: string, key: string, ip: string, version: string): any {
+  const device = new TuyAPI({ id: deviceId, key, ip, issueGetOnConnect: false, version });
+  device.on('error', () => {}); // suppress async ECONNRESET / socket errors
+  return device;
+}
+
 export class TuyaDriver implements DeviceDriver {
   readonly type = 'tuya';
 
@@ -53,9 +92,7 @@ export class TuyaDriver implements DeviceDriver {
     const { deviceId, key, version = '3.3' } = (config ?? {}) as unknown as TuyaConfig;
     if (!deviceId || !key) throw new Error('Tuya device requires deviceId and key in driver_config');
 
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const TuyAPI = require('tuyapi');
-    const device = new TuyAPI({ id: deviceId, key, ip, issueGetOnConnect: false, version });
+    const device = makeTuyaDevice(deviceId, key, ip, version);
     try {
       await device.connect();
       await device.set({ dps: '1', set: on });
@@ -68,9 +105,7 @@ export class TuyaDriver implements DeviceDriver {
     const { deviceId, key, version = '3.3' } = (config ?? {}) as unknown as TuyaConfig;
     if (!deviceId || !key) throw new Error('Tuya device requires deviceId and key in driver_config');
 
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const TuyAPI = require('tuyapi');
-    const device = new TuyAPI({ id: deviceId, key, ip, issueGetOnConnect: false, version });
+    const device = makeTuyaDevice(deviceId, key, ip, version);
     try {
       await device.connect();
       const status = await device.get({ dps: '1' });
@@ -90,9 +125,7 @@ export class TuyaDriver implements DeviceDriver {
     if (!deviceId || !key) return null;
 
     try {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const TuyAPI = require('tuyapi');
-      const device = new TuyAPI({ id: deviceId, key, ip, issueGetOnConnect: false, version });
+      const device = makeTuyaDevice(deviceId, key, ip, version);
       await device.connect();
       try { device.disconnect(); } catch {}
       return {
@@ -107,41 +140,35 @@ export class TuyaDriver implements DeviceDriver {
     }
   }
 
-  async discover(timeoutMs = 5000): Promise<DiscoveredDevice[]> {
-    return new Promise((resolve) => {
-      const found   = new Map<string, DiscoveredDevice>(); // keyed by gwId
-      const sockets: dgram.Socket[] = [];
+  async discover(udpTimeoutMs = 3000): Promise<DiscoveredDevice[]> {
+    const found = new Map<string, DiscoveredDevice>(); // keyed by IP
 
+    // ── 1. UDP broadcast (catches devices that recently joined the network) ──
+    await new Promise<void>((resolve) => {
+      const sockets: dgram.Socket[] = [];
       const finish = () => {
         clearTimeout(timer);
         sockets.forEach((s) => { try { s.close(); } catch {} });
-        resolve(Array.from(found.values()));
+        resolve();
       };
-
       // eslint-disable-next-line prefer-const
-      let timer = setTimeout(finish, timeoutMs);
+      let timer = setTimeout(finish, udpTimeoutMs);
 
       const onMessage = (msg: Buffer) => {
         const data = extractPacket(msg);
         if (!data?.gwId || !data?.ip) return;
-        if (found.has(data.gwId)) return;
-
-        logger.debug({ gwId: data.gwId, ip: data.ip, version: data.version }, 'Discovered Tuya device');
-        found.set(data.gwId, {
+        if (found.has(data.ip)) return;
+        logger.debug({ gwId: data.gwId, ip: data.ip, version: data.version }, 'Discovered Tuya device via UDP');
+        found.set(data.ip, {
           ip:          data.ip,
-          alias:       data.ip,  // No alias available from broadcast — user must set one
+          alias:       data.ip,
           model:       'Tuya Smart Plug',
           hasEmeter:   false,
           driverType:  'tuya',
-          driverConfig: {
-            deviceId: data.gwId,
-            version:  data.version ?? '3.3',
-            // key is intentionally absent — must be supplied by the user
-          },
+          driverConfig: { deviceId: data.gwId, version: data.version ?? '3.3' },
         });
       };
 
-      // Tuya devices broadcast on UDP 6666 (v3.1 plain) and 6667 (v3.3 encrypted)
       for (const port of [6666, 6667]) {
         try {
           const sock = dgram.createSocket({ type: 'udp4', reuseAddr: true });
@@ -152,5 +179,37 @@ export class TuyaDriver implements DeviceDriver {
         } catch {}
       }
     });
+
+    // ── 2. TCP port-6668 subnet scan (catches already-paired devices) ──
+    const subnets = localSubnets();
+    if (!subnets.length) {
+      logger.warn('Tuya scan: no non-loopback IPv4 interfaces found');
+      return Array.from(found.values());
+    }
+
+    logger.info({ subnets }, 'Tuya TCP port-6668 subnet scan started');
+
+    await Promise.allSettled(
+      subnets.flatMap((prefix) =>
+        Array.from({ length: 254 }, (_, i) => i + 1).map(async (host) => {
+          const ip = `${prefix}.${host}`;
+          if (found.has(ip)) return; // already found via UDP
+          const open = await probeTuyaPort(ip, 1000);
+          if (!open) return;
+          logger.debug({ ip }, 'Tuya device found via TCP scan (key required)');
+          found.set(ip, {
+            ip,
+            alias:       ip,
+            model:       'Tuya Smart Plug',
+            hasEmeter:   false,
+            driverType:  'tuya',
+            driverConfig: { version: '3.3' }, // deviceId + key must be supplied by user
+          });
+        })
+      )
+    );
+
+    logger.info({ count: found.size }, 'Tuya scan complete');
+    return Array.from(found.values());
   }
 }

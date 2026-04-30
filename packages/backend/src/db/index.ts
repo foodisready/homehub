@@ -84,6 +84,11 @@ function migrate(db: Database.Database): void {
       device_id INTEGER NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
       state     INTEGER NOT NULL CHECK(state IN (0, 1))
     );
+
+    CREATE TABLE IF NOT EXISTS settings (
+      key   TEXT PRIMARY KEY,
+      value TEXT NOT NULL DEFAULT ''
+    );
   `);
 
   // Additive migrations — safe to re-run (SQLite ignores duplicate column errors)

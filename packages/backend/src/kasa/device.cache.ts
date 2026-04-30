@@ -24,6 +24,11 @@ export function getAllCachedStates(): Map<number, DeviceState> {
 }
 
 /** Poll a single device, update the cache, and emit socket events. */
+// Tuya devices use a stateful TCP connection that gets confused by frequent polling.
+// Poll them at most once every 5 minutes — state is updated via confirmStateAsync after toggles.
+const TUYA_POLL_INTERVAL_MS = 5 * 60 * 1000;
+const tuyaLastPolled = new Map<number, number>();
+
 async function pollDevice(
   id: number,
   ip: string,
@@ -32,6 +37,13 @@ async function pollDevice(
   driverType: string,
   driverConfig: Record<string, unknown> | undefined,
 ): Promise<void> {
+  // Throttle Tuya polling to avoid connection lockouts
+  if (driverType === 'tuya') {
+    const last = tuyaLastPolled.get(id) ?? 0;
+    if (Date.now() - last < TUYA_POLL_INTERVAL_MS) return;
+    tuyaLastPolled.set(id, Date.now());
+  }
+
   const prev   = cache.get(id);
   const driver = getDriver(driverType);
   try {

@@ -19,8 +19,9 @@ interface DiscoveredDevice {
   driverType:   string;
   driverConfig?: Record<string, unknown>;
   // editable before registering
-  pendingAlias?: string;
-  pendingKey?:   string;   // Tuya only: local key required for control
+  pendingAlias?:    string;
+  pendingKey?:      string;   // Tuya only: local key required for control
+  pendingDeviceId?: string;   // Tuya only: deviceId (from TCP scan, no UDP gwId)
 }
 
 const DRIVER_LABEL: Record<string, string> = {
@@ -138,6 +139,12 @@ const DRIVER_LABEL: Record<string, string> = {
     .msg { font-size:0.82rem; margin-top:0.4rem; }
     .msg.ok  { color:var(--green); }
     .msg.err { color:var(--red); }
+
+    .tuya-cloud-form {
+      display:grid; grid-template-columns:1fr 1fr; gap:0.5rem; margin-top:0.75rem;
+    }
+    .tuya-cloud-form input, .tuya-cloud-form select { font-size:0.85rem; padding:0.4rem 0.7rem; }
+    .tuya-synced { font-size:0.72rem; color:#4ade80; margin-left:0.4rem; }
 
     .discover-list { margin-top:0.75rem; border:1px solid var(--border); border-radius:var(--radius); overflow:hidden; }
     .discover-row {
@@ -258,7 +265,7 @@ const DRIVER_LABEL: Record<string, string> = {
                 @for (d of discoveredDevices(); track d.ip) {
                   <div class="discover-row">
                     <input type="checkbox" [checked]="isSelected(d.ip)" (change)="toggleSelect(d.ip)"
-                           [disabled]="d.driverType === 'tuya' && !d.pendingKey?.trim()" />
+                           [disabled]="d.driverType === 'tuya' && (!d.pendingKey?.trim() || (!d.driverConfig?.['deviceId'] && !d.pendingDeviceId?.trim()))" />
                     <div class="discover-alias">
                       <input type="text" [(ngModel)]="d.pendingAlias" placeholder="Alias" />
                     </div>
@@ -266,17 +273,46 @@ const DRIVER_LABEL: Record<string, string> = {
                     @if (d.model && d.model !== d.ip) { <span class="discover-model">{{ d.model }}</span> }
                     <span class="driver-badge" [class]="'driver-badge ' + d.driverType">{{ driverLabel(d.driverType) }}</span>
                     @if (d.driverType === 'tuya') {
-                      <div class="discover-key">
-                        <span class="discover-key-label">Local Key (required)</span>
-                        <input type="text" [(ngModel)]="d.pendingKey" placeholder="e.g. a1b2c3d4e5f6g7h8"
-                               (ngModelChange)="onTuyaKeyChange(d)" />
-                      </div>
+                      @if (tuyaCloudDevices.length > 0) {
+                        <div class="discover-key" style="min-width:180px">
+                          <span class="discover-key-label">Match to cloud device</span>
+                          <select (change)="applyCloudDevice(d, $event)">
+                            <option value="">— select —</option>
+                            @for (c of tuyaCloudDevices; track c.deviceId) {
+                              <option [value]="c.deviceId">{{ c.name || c.deviceId }}</option>
+                            }
+                          </select>
+                        </div>
+                      } @else {
+                        @if (!d.driverConfig?.['deviceId']) {
+                          <div class="discover-key">
+                            <span class="discover-key-label">Device ID (required)</span>
+                            <input type="text" [(ngModel)]="d.pendingDeviceId" placeholder="e.g. bf1234abcd5678ef"
+                                   (ngModelChange)="onTuyaKeyChange(d)" />
+                          </div>
+                        }
+                        <div class="discover-key">
+                          <span class="discover-key-label">Local Key (required)</span>
+                          <input type="text" [(ngModel)]="d.pendingKey" placeholder="e.g. a1b2c3d4e5f6g7h8"
+                                 (ngModelChange)="onTuyaKeyChange(d)" />
+                        </div>
+                      }
                     }
                   </div>
                 }
               </div>
               @if (hasTuyaDevices()) {
-                <p class="key-warning">⚠ Tuya devices require a Local Key from the <strong>Tuya IoT Platform</strong> (iot.tuya.com → Cloud → Devices). Enter it above before registering.</p>
+                <p class="key-warning">
+                  ⚠ Tuya devices require a <strong>Device ID</strong> and <strong>Local Key</strong>.
+                  @if (tuyaCloudReady()) {
+                    <button class="btn-sm btn-ghost" style="margin-left:0.5rem" [disabled]="tuyaSyncing()" (click)="syncTuyaCloud()">
+                      {{ tuyaSyncing() ? 'Syncing…' : '⟳ Auto-fill from Tuya Cloud' }}
+                    </button>
+                    @if (tuyaSyncMsg()) { <span [class]="tuyaSyncErr() ? 'msg err' : 'msg ok'" style="margin-left:0.4rem">{{ tuyaSyncMsg() }}</span> }
+                  } @else {
+                    Enter them below, or configure Tuya Cloud credentials in the <strong>Integrations</strong> section to auto-fill.
+                  }
+                </p>
               }
               <div class="discover-footer">
                 <span style="font-size:0.8rem;color:var(--text-muted)">{{ selectedCount() }} of {{ discoveredDevices().length }} selected</span>
@@ -288,6 +324,59 @@ const DRIVER_LABEL: Record<string, string> = {
           }
         </div>
       </div>
+
+      <!-- ── Integrations (admin only) ────────────────────────── -->
+      @if (isAdmin()) {
+        <div class="section">
+          <div class="section-title">Integrations</div>
+          <div class="card">
+            <div class="pref-row" style="cursor:pointer" (click)="tuyaCloudExpanded.set(!tuyaCloudExpanded())">
+              <div class="pref-label">
+                Tuya Cloud
+                <div class="pref-sub">Connect to iot.tuya.com to auto-fill Device IDs and Local Keys during discovery</div>
+              </div>
+              @if (tuyaCloudReady()) { <span class="tuya-synced">● Connected</span> }
+              <span style="color:var(--text-muted);font-size:0.85rem">{{ tuyaCloudExpanded() ? '▲' : '▼' }}</span>
+            </div>
+            @if (tuyaCloudExpanded()) {
+              <div class="tuya-cloud-form">
+                <input type="text"     [(ngModel)]="tuyaAccessId"     placeholder="Access ID (Client ID)" autocomplete="off" />
+                <div class="pass-wrap">
+                  <input [type]="showTuyaSecret ? 'text' : 'password'" [(ngModel)]="tuyaAccessSecret"
+                         placeholder="Access Secret" autocomplete="new-password" />
+                  <button type="button" class="pass-eye" (click)="showTuyaSecret = !showTuyaSecret">
+                    @if (showTuyaSecret) {
+                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
+                        <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
+                        <line x1="1" y1="1" x2="23" y2="23"/>
+                      </svg>
+                    } @else {
+                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                        <circle cx="12" cy="12" r="3"/>
+                      </svg>
+                    }
+                  </button>
+                </div>
+                <select [(ngModel)]="tuyaRegion">
+                  <option value="us">Americas (openapi.tuyaus.com)</option>
+                  <option value="eu">Europe (openapi.tuyaeu.com)</option>
+                  <option value="cn">China (openapi.tuyacn.com)</option>
+                  <option value="in">India (openapi.tuyain.com)</option>
+                </select>
+                <div style="display:flex;align-items:center;gap:0.5rem">
+                  <button class="btn-sm btn-primary" (click)="saveTuyaCredentials()"
+                          [disabled]="!tuyaAccessId.trim() || !tuyaAccessSecret.trim()">Save</button>
+                  @if (tuyaCredsMsg()) {
+                    <span class="msg" [class.ok]="!tuyaCredsErr()" [class.err]="tuyaCredsErr()">{{ tuyaCredsMsg() }}</span>
+                  }
+                </div>
+              </div>
+            }
+          </div>
+        </div>
+      }
 
       <!-- ── Users (admin only) ────────────────────────────────── -->
       @if (isAdmin()) {
@@ -435,6 +524,20 @@ export class SettingsComponent implements OnInit {
     this.discoveredDevices().some((d) => d.driverType === 'tuya')
   );
 
+  // Tuya Cloud integration
+  tuyaAccessId      = '';
+  tuyaAccessSecret  = '';
+  tuyaRegion        = 'us';
+  showTuyaSecret    = false;
+  tuyaCloudExpanded = signal(false);
+  tuyaCloudReady    = signal(false);
+  tuyaCredsMsg      = signal('');
+  tuyaCredsErr      = signal(false);
+  tuyaSyncing       = signal(false);
+  tuyaSyncMsg       = signal('');
+  tuyaSyncErr       = signal(false);
+  tuyaCloudDevices: Array<{ deviceId: string; localKey: string; name: string; ip?: string }> = [];
+
   // Push notifications
   pushSupported = 'serviceWorker' in navigator && 'PushManager' in window;
   pushEnabled   = signal(false);
@@ -450,6 +553,11 @@ export class SettingsComponent implements OnInit {
     this.http.get<Device[]>('/api/devices').subscribe((d) => this._devices.set(d));
     if (this.isAdmin()) {
       this.http.get<UserRow[]>('/api/users').subscribe((u) => this._users.set(u));
+      this.http.get<{ accessId: string; region: string; hasSecret: boolean }>('/api/tuya/credentials').subscribe((c) => {
+        this.tuyaAccessId  = c.accessId;
+        this.tuyaRegion    = c.region;
+        this.tuyaCloudReady.set(!!c.accessId && c.hasSecret);
+      });
     }
     this.checkPushStatus();
   }
@@ -590,9 +698,21 @@ export class SettingsComponent implements OnInit {
     this._discoveredDevices.update((list) => [...list]);
   }
 
+  applyCloudDevice(d: DiscoveredDevice, event: Event): void {
+    const deviceId = (event.target as HTMLSelectElement).value;
+    if (!deviceId) return;
+    const cloud = this.tuyaCloudDevices.find((c) => c.deviceId === deviceId);
+    if (!cloud) return;
+    d.pendingDeviceId = cloud.deviceId;
+    d.pendingKey      = cloud.localKey;
+    if (!d.pendingAlias?.trim()) d.pendingAlias = cloud.name || d.ip;
+    this.onTuyaKeyChange(d);
+  }
+
   onTuyaKeyChange(d: DiscoveredDevice): void {
-    // Auto-select Tuya device once a key is entered
-    if (d.pendingKey?.trim()) this.selectedIps.add(d.ip);
+    const hasId  = d.driverConfig?.['deviceId'] || d.pendingDeviceId?.trim();
+    const hasKey = d.pendingKey?.trim();
+    if (hasId && hasKey) this.selectedIps.add(d.ip);
     else this.selectedIps.delete(d.ip);
     this._discoveredDevices.update((list) => [...list]);
   }
@@ -636,10 +756,12 @@ export class SettingsComponent implements OnInit {
     let done = 0;
 
     for (const d of toRegister) {
-      // Build driver config — for Tuya, merge the user-supplied key in
+      // Build driver config — for Tuya, merge the user-supplied deviceId + key
       let driverConfig = d.driverConfig ?? null;
-      if (d.driverType === 'tuya' && d.pendingKey?.trim()) {
-        driverConfig = { ...driverConfig, key: d.pendingKey.trim() };
+      if (d.driverType === 'tuya') {
+        driverConfig = { ...driverConfig };
+        if (d.pendingDeviceId?.trim()) driverConfig['deviceId'] = d.pendingDeviceId.trim();
+        if (d.pendingKey?.trim())      driverConfig['key']      = d.pendingKey.trim();
       }
 
       this.http.post<Device>('/api/devices', {
@@ -736,6 +858,66 @@ export class SettingsComponent implements OnInit {
         setTimeout(() => this.addUserMsg.set(''), 2000);
       },
       error: (err) => { this.addUserMsg.set(err.error?.error ?? 'Failed'); this.addUserErr.set(true); },
+    });
+  }
+
+  // ── Tuya Cloud ──────────────────────────────────────────────
+
+  saveTuyaCredentials(): void {
+    this.tuyaCredsMsg.set('');
+    this.http.put('/api/tuya/credentials', {
+      accessId:     this.tuyaAccessId.trim(),
+      accessSecret: this.tuyaAccessSecret.trim(),
+      region:       this.tuyaRegion,
+    }).subscribe({
+      next: () => {
+        this.tuyaCloudReady.set(true);
+        this.tuyaAccessSecret = '';
+        this.showTuyaSecret   = false;
+        this.tuyaCredsMsg.set('Saved');
+        this.tuyaCredsErr.set(false);
+        setTimeout(() => this.tuyaCredsMsg.set(''), 2000);
+      },
+      error: (err) => { this.tuyaCredsMsg.set(err.error?.error ?? 'Failed'); this.tuyaCredsErr.set(true); },
+    });
+  }
+
+  syncTuyaCloud(): void {
+    this.tuyaSyncing.set(true);
+    this.tuyaSyncMsg.set('');
+    this.http.post<Array<{ deviceId: string; localKey: string; name: string; ip?: string }>>('/api/tuya/sync', {}).subscribe({
+      next: (devices) => {
+        this.tuyaSyncing.set(false);
+        this.tuyaCloudDevices = devices;
+        // Auto-fill deviceId + localKey for any discovered Tuya devices
+        let filled = 0;
+        this._discoveredDevices.update((list) => list.map((d) => {
+          if (d.driverType !== 'tuya') return d;
+          // Match by IP first, then by name
+          const match = devices.find((c) => c.ip === d.ip)
+                     ?? devices.find((c) => c.name && d.alias && c.name.toLowerCase() === d.alias.toLowerCase());
+          if (!match) return d;
+          filled++;
+          return {
+            ...d,
+            pendingAlias:    d.pendingAlias || match.name || d.alias,
+            pendingDeviceId: match.deviceId,
+            pendingKey:      match.localKey,
+          };
+        }));
+        // Trigger checkbox re-evaluation for auto-filled devices
+        this._discoveredDevices().filter((d) => d.driverType === 'tuya').forEach((d) => this.onTuyaKeyChange(d));
+        const msg = filled > 0
+          ? `Auto-filled ${filled} of ${this._discoveredDevices().filter(d => d.driverType === 'tuya').length} Tuya device(s). ${devices.length} total in cloud.`
+          : `Fetched ${devices.length} cloud device(s) — no IP matches found. Enter Device IDs manually or check IPs.`;
+        this.tuyaSyncMsg.set(msg);
+        this.tuyaSyncErr.set(filled === 0 && devices.length > 0);
+      },
+      error: (err) => {
+        this.tuyaSyncing.set(false);
+        this.tuyaSyncMsg.set(err.error?.error ?? 'Cloud sync failed');
+        this.tuyaSyncErr.set(true);
+      },
     });
   }
 
