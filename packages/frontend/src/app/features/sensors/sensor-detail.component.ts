@@ -131,6 +131,33 @@ const SHUTOFF_PILL: Record<ShutoffStatus, { label: string; color: string } | nul
         </div>
 
         <div class="card">
+          <h2>Polling cadence</h2>
+          <div class="controls">
+            <span>When water is flowing, poll every</span>
+            <input type="number" [(ngModel)]="flowingPollSec" min="1" max="300" />
+            <span>s</span>
+          </div>
+          <div class="controls" style="margin-top: 0.4rem">
+            <span>When idle, poll every</span>
+            <input type="number" [(ngModel)]="idlePollSec" min="1" max="300" />
+            <span>s</span>
+          </div>
+          <div class="controls" style="margin-top: 0.6rem">
+            <button class="btn" (click)="saveCadence()"
+                    [disabled]="!cadenceValid() || cadenceSaving()">
+              {{ cadenceSaving() ? 'Saving…' : 'Save' }}
+            </button>
+            @if (cadenceMsg()) {
+              <span [style.color]="cadenceErr() ? '#f87171' : '#4ade80'">{{ cadenceMsg() }}</span>
+            }
+          </div>
+          <div class="shutoff-help">
+            The ESP32 picks up new values from the next upload response — typically
+            within one poll cycle. 1 s minimum, 300 s maximum.
+          </div>
+        </div>
+
+        <div class="card">
           <h2>Auto-shutoff</h2>
           <div class="shutoff-row">
             <select [(ngModel)]="shutoffDeviceId">
@@ -210,6 +237,14 @@ export class SensorDetailComponent implements OnInit, AfterViewInit, OnDestroy {
   testFiring  = signal(false);
   testFireMsg = signal('');
   testFireErr = signal(false);
+
+  /* Polling cadence — UI in seconds, stored in ms. Defaults match
+   * uplink.h's UPLINK_DEFAULT_FLOWING_POLL_INTERVAL_MS / IDLE_POLL_INTERVAL_MS. */
+  flowingPollSec = 5;
+  idlePollSec    = 30;
+  cadenceSaving  = signal(false);
+  cadenceMsg     = signal('');
+  cadenceErr     = signal(false);
   snoozedActive = computed(() => {
     const s = this.sensor();
     if (!s?.snoozedUntil) return false;
@@ -240,8 +275,18 @@ export class SensorDetailComponent implements OnInit, AfterViewInit, OnDestroy {
       next: (s) => {
         this.sensor.set(s);
         this.loading.set(false);
-        const cfg = (s.config ?? {}) as { shutoffDeviceId?: number };
+        const cfg = (s.config ?? {}) as {
+          shutoffDeviceId?: number;
+          flowingPollIntervalMs?: number;
+          idlePollIntervalMs?: number;
+        };
         this.shutoffDeviceId = typeof cfg.shutoffDeviceId === 'number' ? cfg.shutoffDeviceId : null;
+        if (typeof cfg.flowingPollIntervalMs === 'number' && cfg.flowingPollIntervalMs > 0) {
+          this.flowingPollSec = Math.round(cfg.flowingPollIntervalMs / 1000);
+        }
+        if (typeof cfg.idlePollIntervalMs === 'number' && cfg.idlePollIntervalMs > 0) {
+          this.idlePollSec = Math.round(cfg.idlePollIntervalMs / 1000);
+        }
       },
       error: () => this.loading.set(false),
     });
@@ -256,6 +301,33 @@ export class SensorDetailComponent implements OnInit, AfterViewInit, OnDestroy {
   saveShutoffDevice(): void {
     this.svc.updateConfig(this.sensorId, { shutoffDeviceId: this.shutoffDeviceId })
       .subscribe((s) => this.sensor.set(s));
+  }
+
+  cadenceValid(): boolean {
+    return Number.isFinite(this.flowingPollSec) && this.flowingPollSec >= 1 && this.flowingPollSec <= 300
+        && Number.isFinite(this.idlePollSec)    && this.idlePollSec    >= 1 && this.idlePollSec    <= 300;
+  }
+
+  saveCadence(): void {
+    if (!this.cadenceValid()) return;
+    this.cadenceSaving.set(true);
+    this.cadenceMsg.set(''); this.cadenceErr.set(false);
+
+    this.svc.updateConfig(this.sensorId, {
+      flowingPollIntervalMs: Math.round(this.flowingPollSec * 1000),
+      idlePollIntervalMs:    Math.round(this.idlePollSec    * 1000),
+    }).subscribe({
+      next: (s) => {
+        this.sensor.set(s);
+        this.cadenceSaving.set(false);
+        this.cadenceMsg.set('Saved. ESP32 will pick up new cadence on next upload.');
+      },
+      error: (err) => {
+        this.cadenceSaving.set(false);
+        this.cadenceErr.set(true);
+        this.cadenceMsg.set(err?.error?.error ?? 'Save failed.');
+      },
+    });
   }
 
   testFire(): void {
