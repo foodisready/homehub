@@ -345,6 +345,8 @@ export class SensorDetailComponent implements OnInit, AfterViewInit, OnDestroy {
   private offReading?: () => void;
   private offAlert?:   () => void;
   private sensorId    = 0;
+  private otaPollTimer?: ReturnType<typeof setInterval>;
+  private otaPollDeadline = 0;
 
   ngOnInit(): void {
     this.sensorId = Number(this.route.snapshot.paramMap.get('id'));
@@ -408,10 +410,13 @@ export class SensorDetailComponent implements OnInit, AfterViewInit, OnDestroy {
 
     this.otaDispatching.set(true);
     this.otaMsg.set(''); this.otaErr.set(false);
+    this.stopOtaPolling();
+    const targetVersion = release.version;
     this.firmware.dispatchOta(this.sensorId, this.selectedReleaseId).subscribe({
       next: () => {
         this.otaDispatching.set(false);
-        this.otaMsg.set(`OTA started — device should reconnect in 10–60 s. Watch firmware version below to confirm.`);
+        this.otaMsg.set(`OTA started — waiting for device to reconnect on v${targetVersion}…`);
+        this.startOtaPolling(targetVersion);
       },
       error: (err) => {
         this.otaDispatching.set(false);
@@ -419,6 +424,43 @@ export class SensorDetailComponent implements OnInit, AfterViewInit, OnDestroy {
         this.otaMsg.set(err?.error?.error ?? err?.message ?? 'OTA dispatch failed');
       },
     });
+  }
+
+  /* Poll the sensor every 5 s for up to 2 minutes after dispatch. The
+   * device reboots into the new partition and re-uploads with the new
+   * firmwareVersion; once we see that version land we declare success
+   * and refresh the rest of the page. If the deadline passes without a
+   * match we surface a clear failure-ish state instead of leaving the
+   * "started…" message hanging forever. */
+  private startOtaPolling(targetVersion: string): void {
+    this.otaPollDeadline = Date.now() + 120_000;
+    this.otaPollTimer = setInterval(() => {
+      this.svc.get(this.sensorId).subscribe({
+        next: (s) => {
+          this.sensor.set(s);
+          if (s.firmwareVersion === targetVersion) {
+            this.stopOtaPolling();
+            this.otaErr.set(false);
+            this.otaMsg.set(`✓ Update complete — device now running v${targetVersion}.`);
+          } else if (Date.now() > this.otaPollDeadline) {
+            this.stopOtaPolling();
+            this.otaErr.set(true);
+            this.otaMsg.set(
+              `Device hasn't reported v${targetVersion} yet. ` +
+              `Check the device's status page or try again.`
+            );
+          }
+        },
+        error: () => { /* transient — try again on the next tick */ },
+      });
+    }, 5_000);
+  }
+
+  private stopOtaPolling(): void {
+    if (this.otaPollTimer) {
+      clearInterval(this.otaPollTimer);
+      this.otaPollTimer = undefined;
+    }
   }
 
   saveShutoffDevice(): void {
@@ -568,6 +610,7 @@ export class SensorDetailComponent implements OnInit, AfterViewInit, OnDestroy {
     this.offReading?.();
     this.offAlert?.();
     this.chart?.destroy();
+    this.stopOtaPolling();
   }
 }
 
