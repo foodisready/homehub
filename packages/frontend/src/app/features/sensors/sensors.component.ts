@@ -4,8 +4,9 @@ import { DatePipe, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { AuthService } from '../../core/auth/auth.service';
 import { SensorService } from '../../core/services/sensor.service';
+import { FirmwareService } from '../../core/services/firmware.service';
 import { SocketService } from '../../core/socket/socket.service';
-import type { Sensor } from '../../shared/models/sensor.model';
+import type { Sensor, FirmwareRelease } from '../../shared/models/sensor.model';
 
 @Component({
   selector: 'app-sensors',
@@ -37,6 +38,7 @@ import type { Sensor } from '../../shared/models/sensor.model';
     .badge.flowing { background: #1e40af; border-color: #1e40af; color: #fff; }
     .badge.snoozed { background: #92400e; border-color: #92400e; color: #fff; }
     .badge.stale   { background: #6b1d1d; border-color: #6b1d1d; color: #fff; }
+    .badge.update  { background: #1e40af; border-color: #1e40af; color: #fff; }
     .empty { text-align: center; padding: 3rem 1rem; color: var(--text-muted); }
     .loading { color: var(--text-muted); padding: 2rem 0; text-align: center; }
 
@@ -107,6 +109,9 @@ import type { Sensor } from '../../shared/models/sensor.model';
                   @if (s.lastSignalQuality !== null) {
                     · signal {{ s.lastSignalQuality | number:'1.0-0' }}
                   }
+                  @if (s.firmwareVersion) {
+                    · fw {{ s.firmwareVersion }}
+                  }
                 </div>
               </div>
               <div class="badges">
@@ -119,6 +124,9 @@ import type { Sensor } from '../../shared/models/sensor.model';
                 @if (isStale(s)) {
                   <span class="badge stale">stale</span>
                 }
+                @if (updateAvailableFor(s); as latest) {
+                  <span class="badge update" [title]="'Update available: v' + latest">Update v{{ latest }}</span>
+                }
               </div>
             </a>
           }
@@ -128,12 +136,16 @@ import type { Sensor } from '../../shared/models/sensor.model';
   `,
 })
 export class SensorsComponent implements OnInit, OnDestroy {
-  private svc    = inject(SensorService);
-  private socket = inject(SocketService);
-  readonly auth  = inject(AuthService);
+  private svc      = inject(SensorService);
+  private firmware = inject(FirmwareService);
+  private socket   = inject(SocketService);
+  readonly auth    = inject(AuthService);
 
   loading  = signal(true);
   sensors  = signal<Sensor[]>([]);
+  /* target → latest version. The firmware list endpoint returns rows
+   * sorted DESC by uploaded_at, so the first row per target wins. */
+  private latestByTarget = signal<Map<string, string>>(new Map());
 
   createOpen   = signal(false);
   creating     = signal(false);
@@ -147,6 +159,11 @@ export class SensorsComponent implements OnInit, OnDestroy {
     this.svc.list().subscribe({
       next: (s) => { this.sensors.set(s); this.loading.set(false); },
       error: () => this.loading.set(false),
+    });
+
+    this.firmware.list().subscribe({
+      next: (releases) => this.latestByTarget.set(buildLatestMap(releases)),
+      error: () => { /* non-admin still sees the list endpoint, but be tolerant */ },
     });
 
     // Refresh last-seen-at as readings come in for any sensor.
@@ -168,6 +185,20 @@ export class SensorsComponent implements OnInit, OnDestroy {
 
   isStale(s: Sensor): boolean {
     return !!s.staleSince;
+  }
+
+  /** Returns the latest available version string when a newer release
+   *  exists than what's running on the device, otherwise null. The
+   *  template's `@if (...; as latest)` handles the null branch. We can't
+   *  guess the target for sensors that have never reported (firmwareVersion
+   *  null) — there's nothing to compare against, so no badge. */
+  updateAvailableFor(s: Sensor): string | null {
+    if (!s.firmwareVersion) return null;
+    // Single-target world for now. When multi-product lands, derive
+    // target from sensor.config or sensor.type instead.
+    const latest = this.latestByTarget().get('auraflow-mainline');
+    if (!latest) return null;
+    return latest === s.firmwareVersion ? null : latest;
   }
 
   createSensor(): void {
@@ -197,4 +228,15 @@ export class SensorsComponent implements OnInit, OnDestroy {
       },
     });
   }
+}
+
+/** First entry per target wins — the API sorts the full list by uploaded_at
+ *  DESC, so iterating in order means the latest gets in first and later
+ *  (older) duplicates are skipped. */
+function buildLatestMap(releases: FirmwareRelease[]): Map<string, string> {
+  const m = new Map<string, string>();
+  for (const r of releases) {
+    if (!m.has(r.target)) m.set(r.target, r.version);
+  }
+  return m;
 }
