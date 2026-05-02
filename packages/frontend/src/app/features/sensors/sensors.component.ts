@@ -39,6 +39,7 @@ import type { Sensor, FirmwareRelease } from '../../shared/models/sensor.model';
     .badge.snoozed { background: #92400e; border-color: #92400e; color: #fff; }
     .badge.stale   { background: #6b1d1d; border-color: #6b1d1d; color: #fff; }
     .badge.update  { background: #1e40af; border-color: #1e40af; color: #fff; }
+    .badge.no-meter{ background: #b45309; border-color: #b45309; color: #fff; }
     .empty { text-align: center; padding: 3rem 1rem; color: var(--text-muted); }
     .loading { color: var(--text-muted); padding: 2rem 0; text-align: center; }
 
@@ -123,6 +124,9 @@ import type { Sensor, FirmwareRelease } from '../../shared/models/sensor.model';
                 }
                 @if (isStale(s)) {
                   <span class="badge stale">stale</span>
+                }
+                @if (s.lastMeterReachable === false) {
+                  <span class="badge no-meter" title="Device is online but the flow meter isn't responding (Modbus read failed). Wire up the TUF-2000M to start collecting readings.">no meter</span>
                 }
                 @if (updateAvailableFor(s); as latest) {
                   <span class="badge update" [title]="'Update available: v' + latest">Update v{{ latest }}</span>

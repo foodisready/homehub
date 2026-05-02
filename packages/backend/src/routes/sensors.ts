@@ -25,6 +25,7 @@ function toPublicSensor(row: SensorRow) {
     snoozedUntil:       row.snoozed_until,
     staleSince:         row.stale_since,
     lastIp:             row.last_ip,
+    lastMeterReachable: row.last_meter_reachable === null ? null : row.last_meter_reachable === 1,
     createdAt:          row.created_at,
   };
 }

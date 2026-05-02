@@ -31,6 +31,8 @@ export interface SensorRow {
   snoozed_until:          string | null;
   stale_since:            string | null;
   last_ip:                string | null;
+  /** SQLite stores INTEGER, comes back as 0/1/null. */
+  last_meter_reachable:   number | null;
   created_at:             string;
 }
 

@@ -16,6 +16,10 @@ export interface Sensor {
   snoozedUntil:        string | null;
   staleSince:          string | null;
   lastIp:              string | null;
+  /** null = no firmware reading yet capable of reporting it.
+   *  true = meter answered last poll. false = device is alive but the
+   *  Modbus read of the meter failed (heartbeat-only mode). */
+  lastMeterReachable:  boolean | null;
   createdAt:           string;
 }
 

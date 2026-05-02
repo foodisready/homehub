@@ -231,6 +231,11 @@ function migrate(db: Database.Database): void {
   // /ota when an admin clicks "Update". DHCP-friendly — refreshes on each
   // reading. Static-IP devices never change.
   try { db.exec('ALTER TABLE sensors ADD COLUMN last_ip TEXT'); } catch {}
+  // Last-known meter reachability — set on every ingestion. NULL until the
+  // first reading from firmware that emits the field. 1=reachable,
+  // 0=unreachable (Modbus read failed; device is alive and posting
+  // diagnostic heartbeats).
+  try { db.exec('ALTER TABLE sensors ADD COLUMN last_meter_reachable INTEGER'); } catch {}
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS firmware_releases (

@@ -96,6 +96,13 @@ interface FlowReadingPayload {
   firmwareVersion?: string | null;
   mac?:            string | null;
   bootReason?:     string | null;
+  /** Sent by firmware ≥ 0.1.1-c. False means the Modbus read of the meter
+   *  failed (meter not yet wired, RS485 fault, etc.). When false the server
+   *  treats this POST as a diagnostic-only heartbeat: refresh sensor
+   *  diagnostics + last_ip, but skip the flow_readings INSERT and the leak
+   *  engine. Older firmware omits the field; absent → treated as `true` to
+   *  preserve historical behaviour. */
+  meterReachable?: boolean;
 }
 
 // POST /internal/sensors/flow/readings
@@ -134,6 +141,52 @@ internalRouter.post('/sensors/flow/readings', (req: Request, res: Response) => {
   const tOffsetMs = Math.max(0, Math.floor(body.tOffsetMs ?? 0));
   const recordedAt = new Date(now - tOffsetMs);
 
+  // Default to true when the field is missing — keeps older firmware
+  // (no meterReachable in payload) behaving exactly as before.
+  const meterReachable = body.meterReachable !== false;
+
+  // Diagnostic-only heartbeat path: skip the flow_readings INSERT and
+  // the leak engine. Still refresh diagnostics so the dashboard sees
+  // the device is alive, OTA dispatch knows the IP, and stale-check
+  // doesn't trip. We also DON'T emit the sensor-reading socket event
+  // (a heartbeat is not a reading), but the sensors-list will pick up
+  // the new last_seen on its next polling cycle.
+  const wasStale = !!sensor.stale_since;
+  const sourceIp = stripIpv6Mapped(req.ip);
+
+  if (!meterReachable) {
+    getDb().prepare(`
+      UPDATE sensors
+         SET last_seen_at         = ?,
+             stale_since          = NULL,
+             last_rssi            = COALESCE(?, last_rssi),
+             last_uptime_sec      = COALESCE(?, last_uptime_sec),
+             firmware_version     = COALESCE(?, firmware_version),
+             last_ip              = COALESCE(?, last_ip),
+             last_meter_reachable = 0
+       WHERE id = ?
+    `).run(
+      recordedAt.toISOString().replace('T', ' ').replace('Z', ''),
+      body.rssi ?? null,
+      body.uptimeSec ?? null,
+      body.firmwareVersion ?? null,
+      sourceIp,
+      sensor.id,
+    );
+    if (wasStale) notifyStaleRecovery(sensor.id, sensor.alias);
+    logger.debug({ sensorKey: body.sensorId, ip: sourceIp }, 'Diagnostic heartbeat (meter unreachable)');
+
+    // Honour the same response shape so the firmware applies cadence as usual.
+    const cfg = resolveFlowConfig(parseSensorConfig(sensor.config));
+    const stored: Partial<FlowReadingPollConfig> = sensor.config ? safeJson(sensor.config) : {};
+    return res.json({
+      pollIntervalMs:        stored.idlePollIntervalMs ?? 30000,
+      flowingPollIntervalMs: stored.flowingPollIntervalMs ?? 5000,
+      idlePollIntervalMs:    stored.idlePollIntervalMs   ?? 30000,
+      configVersion:         stored.version              ?? 1,
+    });
+  }
+
   const reading: FlowReading = {
     rate:          body.rateM3h,
     totalM3:       body.totalM3 ?? null,
@@ -146,21 +199,18 @@ internalRouter.post('/sensors/flow/readings', (req: Request, res: Response) => {
   // Update diagnostics columns on every successful ingest. Clearing
   // stale_since here is the recovery half of the stale-detection state
   // machine — see sensors/stale-check.ts.
-  const wasStale = !!sensor.stale_since;
   // last_ip is captured here so an admin clicking "Update firmware" on the
   // dashboard can dispatch to the device without requiring static IP.
-  // Express puts the connecting IP in req.ip; req.ips is the X-Forwarded-For
-  // chain when trust proxy is set. We prefer the immediate hop.
-  const sourceIp = stripIpv6Mapped(req.ip);
   getDb().prepare(`
     UPDATE sensors
-       SET last_seen_at        = ?,
-           stale_since         = NULL,
-           last_rssi           = COALESCE(?, last_rssi),
-           last_uptime_sec     = COALESCE(?, last_uptime_sec),
-           last_signal_quality = COALESCE(?, last_signal_quality),
-           firmware_version    = COALESCE(?, firmware_version),
-           last_ip             = COALESCE(?, last_ip)
+       SET last_seen_at         = ?,
+           stale_since          = NULL,
+           last_rssi            = COALESCE(?, last_rssi),
+           last_uptime_sec      = COALESCE(?, last_uptime_sec),
+           last_signal_quality  = COALESCE(?, last_signal_quality),
+           firmware_version     = COALESCE(?, firmware_version),
+           last_ip              = COALESCE(?, last_ip),
+           last_meter_reachable = 1
      WHERE id = ?
   `).run(
     recordedAt.toISOString().replace('T', ' ').replace('Z', ''),
