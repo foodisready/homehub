@@ -516,10 +516,18 @@ export class SensorDetailComponent implements OnInit, AfterViewInit, OnDestroy {
     });
   }
 
-  private seedChart(readings: FlowReading[]): void {
+  private seedChart(readings: FlowReading[], attempt = 0): void {
     if (!this.chart) {
-      // chart not ready yet — try again after view init via a microtask
-      queueMicrotask(() => this.seedChart(readings));
+      // The chart canvas is gated by `@if (sensor(); as s)`, so it's not
+      // in the DOM until ngAfterViewInit fires AND the sensor() signal
+      // is set. queueMicrotask was tempting but it runs before the
+      // browser paints — we'd spin forever in microtask land and freeze
+      // the tab. setTimeout yields to the renderer so the @if can flip.
+      // 30 attempts × 50 ms ≈ 1.5 s ceiling — well past any reasonable
+      // first-paint window; if we still don't have a chart by then,
+      // give up (the seed is just a one-shot backfill anyway).
+      if (attempt > 30) return;
+      setTimeout(() => this.seedChart(readings, attempt + 1), 50);
       return;
     }
     const sorted = [...readings].sort((a, b) => a.recordedAt.localeCompare(b.recordedAt));
