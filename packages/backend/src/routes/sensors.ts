@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import os from 'os';
 import { requireAdmin } from '../middleware/auth';
 import { getDb } from '../db';
 import { logger } from '../logger';
@@ -272,11 +273,18 @@ sensorsRouter.post('/:id/ota', requireAdmin, async (req: Request, res: Response)
     { id: number; filename: string; version: string } | undefined;
   if (!release) return res.status(404).json({ error: 'Firmware release not found', code: 'RELEASE_NOT_FOUND' });
 
-  // Build URL the device should fetch. req.protocol is the request's own
-  // scheme; req.get('host') is whatever host:port HomeHub was reached at —
-  // both come from the admin's browser, so they match the LAN interface
-  // the device can also see.
-  const homehubUrl = `${req.protocol}://${req.get('host')}/firmware/${release.filename}`;
+  // Build the URL the *device* should fetch. The naive `req.get('host')`
+  // doesn't work when the admin is on the same Mac as HomeHub: the host
+  // is `localhost:<port>`, which on the ESP32 resolves to the ESP32 itself,
+  // and the OTA fetch fails silently. Prefer:
+  //   1. HOMEHUB_PUBLIC_URL env var (admin override; e.g. "http://192.168.86.48:3300")
+  //   2. The LAN interface IP on the same /24 as the device's last_ip
+  //   3. Fall back to whatever req.get('host') was — last resort, may not work
+  const port = process.env.PORT ?? '3000';
+  const baseUrl = process.env.HOMEHUB_PUBLIC_URL
+               ?? deriveLanBaseUrl(sensor.last_ip, port)
+               ?? `${req.protocol}://${req.get('host')}`;
+  const homehubUrl = `${baseUrl}/firmware/${release.filename}`;
   const deviceOtaUrl = `http://${sensor.last_ip}/ota`;
 
   try {
@@ -333,4 +341,32 @@ function strQuery(v: unknown): string | undefined {
   if (typeof v === 'string') return v;
   if (Array.isArray(v) && typeof v[0] === 'string') return v[0];
   return undefined;
+}
+
+/**
+ * Pick a base URL the *device* can reach HomeHub on. Walks the host's
+ * IPv4 interfaces and prefers the one on the same /24 as the device's
+ * last_ip (the device announced its IP, so its subnet is HomeHub's
+ * subnet). Returns null if no non-loopback IPv4 is found.
+ *
+ * IPv6 is intentionally skipped — the device's HTTP client takes a v4
+ * URL today.
+ */
+function deriveLanBaseUrl(deviceIp: string | null, port: string): string | null {
+  if (!deviceIp) return null;
+  const devOctets = deviceIp.split('.');
+  if (devOctets.length !== 4) return null;
+  const devSubnet24 = devOctets.slice(0, 3).join('.');
+
+  const interfaces = os.networkInterfaces();
+  let fallback: string | null = null;
+  for (const list of Object.values(interfaces)) {
+    for (const addr of list ?? []) {
+      if (addr.family !== 'IPv4' || addr.internal) continue;
+      const ifSubnet24 = addr.address.split('.').slice(0, 3).join('.');
+      if (ifSubnet24 === devSubnet24) return `http://${addr.address}:${port}`;
+      fallback ??= `http://${addr.address}:${port}`;
+    }
+  }
+  return fallback;
 }
