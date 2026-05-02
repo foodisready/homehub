@@ -61,13 +61,13 @@ import type { Sensor, FirmwareRelease } from '../../shared/models/sensor.model';
   template: `
     <div class="page">
       <div class="topbar">
-        <h1>Sensors</h1>
-        <div style="display:flex;align-items:center;gap:0.75rem">
-          <button class="btn primary" (click)="createOpen.set(!createOpen())">
-            {{ createOpen() ? 'Cancel' : '+ Add sensor' }}
-          </button>
-          <a routerLink="/dashboard" class="back-link">← Dashboard</a>
+        <div style="display:flex;align-items:center;gap:1rem">
+          <a class="back-link" routerLink="/dashboard">← Dashboard</a>
+          <h1>Sensors</h1>
         </div>
+        <button class="btn primary" (click)="createOpen.set(!createOpen())">
+          {{ createOpen() ? 'Cancel' : '+ Add sensor' }}
+        </button>
       </div>
 
       @if (createOpen()) {

@@ -55,8 +55,10 @@ import type { FirmwareRelease } from '../../shared/models/sensor.model';
   template: `
     <div class="page">
       <div class="topbar">
-        <a class="back-link" routerLink="/dashboard">← Dashboard</a>
-        <h1>Firmware library</h1>
+        <div style="display:flex;align-items:center;gap:1rem">
+          <a class="back-link" routerLink="/dashboard">← Dashboard</a>
+          <h1>Firmware library</h1>
+        </div>
         <span></span>
       </div>
 
