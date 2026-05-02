@@ -90,8 +90,11 @@ const SHUTOFF_PILL: Record<ShutoffStatus, { label: string; color: string } | nul
   template: `
     <div class="page">
       <div class="topbar">
-        <h1>{{ sensor()?.alias ?? 'Sensor' }}</h1>
-        <a routerLink="/sensors" class="back-link">← All sensors</a>
+        <div style="display:flex;align-items:center;gap:1rem">
+          <a routerLink="/sensors" class="back-link">← All sensors</a>
+          <h1>{{ sensor()?.alias ?? 'Sensor' }}</h1>
+        </div>
+        <span></span>
       </div>
 
       @if (sensor(); as s) {
