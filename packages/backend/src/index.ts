@@ -26,6 +26,7 @@ import { sensorsRouter } from './routes/sensors';
 import { firmwareApiRouter, firmwarePublicRouter } from './routes/firmware';
 import { notificationsAckRouter } from './routes/notifications-ack';
 import { notificationSettingsRouter } from './routes/notification-settings';
+import { notificationHistoryRouter } from './routes/notification-history';
 import { runBackup } from './db/backup';
 import { checkAllSensors } from './sensors/stale-check';
 import { authenticate } from './middleware/auth';
@@ -76,6 +77,7 @@ app.use('/api/tuya',      tuyaRouter);
 app.use('/api/sensors',   sensorsRouter);
 app.use('/api/firmware',  firmwareApiRouter);
 app.use('/api/notifications/settings', notificationSettingsRouter);
+app.use('/api/notifications/history',  notificationHistoryRouter);
 
 // ── Global error handler ───────────────────────────────────────
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
