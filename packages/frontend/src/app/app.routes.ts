@@ -47,5 +47,10 @@ export const routes: Routes = [
     loadComponent: () => import('./features/sensors/sensor-detail.component').then((m) => m.SensorDetailComponent),
     canActivate: [authGuard],
   },
+  {
+    path: 'firmware',
+    loadComponent: () => import('./features/firmware/firmware.component').then((m) => m.FirmwareComponent),
+    canActivate: [authGuard],
+  },
   { path: '**', redirectTo: 'dashboard' },
 ];

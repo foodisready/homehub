@@ -71,6 +71,7 @@ import { Device } from '../../shared/models/device.model';
           <a routerLink="/schedules" style="font-size:0.85rem; color:var(--text-muted)">Schedules</a>
           <a routerLink="/scenes" style="font-size:0.85rem; color:var(--text-muted)">Scenes</a>
           <a routerLink="/sensors" style="font-size:0.85rem; color:var(--text-muted)">Sensors</a>
+          <a routerLink="/firmware" style="font-size:0.85rem; color:var(--text-muted)">Firmware</a>
           <a routerLink="/energy" style="font-size:0.85rem; color:var(--text-muted)">Energy</a>
           <a routerLink="/chat" style="font-size:0.85rem; color:var(--text-muted)">Chat</a>
           <a routerLink="/settings" style="font-size:0.85rem; color:var(--text-muted)">Settings</a>

@@ -8,8 +8,10 @@ import { DatePipe, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import Chart from 'chart.js/auto';
 import { SensorService } from '../../core/services/sensor.service';
+import { FirmwareService } from '../../core/services/firmware.service';
 import { SocketService } from '../../core/socket/socket.service';
-import type { Sensor, FlowEvent, FlowReading, ShutoffStatus } from '../../shared/models/sensor.model';
+import { AuthService } from '../../core/auth/auth.service';
+import type { Sensor, FlowEvent, FlowReading, ShutoffStatus, FirmwareRelease } from '../../shared/models/sensor.model';
 import type { Device } from '../../shared/models/device.model';
 
 const ONE_HOUR_MS  = 60 * 60 * 1000;
@@ -158,6 +160,63 @@ const SHUTOFF_PILL: Record<ShutoffStatus, { label: string; color: string } | nul
         </div>
 
         <div class="card">
+          <h2>Firmware</h2>
+          <div class="meta" style="margin-bottom:0.6rem">
+            <span>running <strong>{{ s.firmwareVersion ?? '—' }}</strong></span>
+            @if (latestRelease(); as latest) {
+              <span>latest available <strong>{{ latest.version }}</strong></span>
+            }
+            @if (s.lastIp) {
+              <span>device IP <strong>{{ s.lastIp }}</strong></span>
+            }
+          </div>
+          @if (updateAvailable()) {
+            <div class="snooze-banner" style="background:#1e40af; margin-bottom:0.75rem">
+              <span>Update available: v{{ latestRelease()?.version }}</span>
+            </div>
+          }
+          @if (releases().length === 0) {
+            <div class="empty">
+              No firmware in the library yet.
+              @if (isAdmin()) {
+                <a routerLink="/firmware" style="color:var(--accent)">Upload one →</a>
+              }
+            </div>
+          } @else {
+            <div class="shutoff-row">
+              <select [(ngModel)]="selectedReleaseId" [disabled]="!isAdmin() || otaDispatching()">
+                @for (r of releases(); track r.id) {
+                  <option [ngValue]="r.id">
+                    {{ r.target }} v{{ r.version }}
+                    @if (r.id === latestRelease()?.id) { (latest) }
+                  </option>
+                }
+              </select>
+              <button class="btn" (click)="dispatchOta()"
+                      [disabled]="!isAdmin() || !selectedReleaseId || !s.lastIp || otaDispatching()">
+                {{ otaDispatching() ? 'Dispatching…' : 'Update firmware' }}
+              </button>
+            </div>
+            @if (!s.lastIp) {
+              <div class="shutoff-help">
+                Waiting for the device's first reading — HomeHub captures the IP on each
+                upload, then can dispatch updates without static IP requirements.
+              </div>
+            } @else if (!isAdmin()) {
+              <div class="shutoff-help">Only admins can dispatch OTA updates.</div>
+            } @else {
+              <div class="shutoff-help">
+                The device will fetch the firmware over LAN, swap to the inactive
+                partition, and reboot. <a routerLink="/firmware" style="color:var(--accent)">Manage releases →</a>
+              </div>
+            }
+            @if (otaMsg()) {
+              <div class="shutoff-help" [style.color]="otaErr() ? '#f87171' : '#4ade80'">{{ otaMsg() }}</div>
+            }
+          }
+        </div>
+
+        <div class="card">
           <h2>Auto-shutoff</h2>
           <div class="shutoff-row">
             <select [(ngModel)]="shutoffDeviceId">
@@ -222,10 +281,12 @@ const SHUTOFF_PILL: Record<ShutoffStatus, { label: string; color: string } | nul
 export class SensorDetailComponent implements OnInit, AfterViewInit, OnDestroy {
   @ViewChild('chart') chartCanvas?: ElementRef<HTMLCanvasElement>;
 
-  private svc    = inject(SensorService);
-  private socket = inject(SocketService);
-  private route  = inject(ActivatedRoute);
-  private http   = inject(HttpClient);
+  private svc      = inject(SensorService);
+  private firmware = inject(FirmwareService);
+  private socket   = inject(SocketService);
+  private route    = inject(ActivatedRoute);
+  private http     = inject(HttpClient);
+  protected auth   = inject(AuthService);
 
   loading = signal(true);
   sensor  = signal<Sensor | null>(null);
@@ -245,6 +306,32 @@ export class SensorDetailComponent implements OnInit, AfterViewInit, OnDestroy {
   cadenceSaving  = signal(false);
   cadenceMsg     = signal('');
   cadenceErr     = signal(false);
+
+  /* Firmware / OTA */
+  releases    = signal<FirmwareRelease[]>([]);
+  selectedReleaseId: number | null = null;
+  otaDispatching = signal(false);
+  otaMsg         = signal('');
+  otaErr         = signal(false);
+
+  isAdmin = computed(() => this.auth.user()?.role === 'admin');
+
+  /* Latest release matching this sensor's target — assumes a single
+   * target until multi-product land. The list is sorted DESC by
+   * uploaded_at on the server so [0] is current. */
+  latestRelease = computed<FirmwareRelease | null>(() => this.releases()[0] ?? null);
+
+  /* True when a newer release exists than what's running on the device.
+   * String compare is good enough for our `<major>.<minor>.<patch>[-suffix]`
+   * format — the API list is sorted by uploaded_at desc so latest wins
+   * when the strings happen to be equal. */
+  updateAvailable = computed(() => {
+    const s = this.sensor();
+    const r = this.latestRelease();
+    if (!s || !r) return false;
+    return s.firmwareVersion !== r.version;
+  });
+
   snoozedActive = computed(() => {
     const s = this.sensor();
     if (!s?.snoozedUntil) return false;
@@ -296,6 +383,39 @@ export class SensorDetailComponent implements OnInit, AfterViewInit, OnDestroy {
       limit: 1000,
     }).subscribe((readings) => this.seedChart(readings));
     this.http.get<Device[]>('/api/devices').subscribe((d) => this.devices.set(d));
+    this.firmware.list().subscribe({
+      next: (rs) => {
+        this.releases.set(rs);
+        // Default the picker to the latest release when nothing's selected.
+        if (this.selectedReleaseId === null && rs[0]) this.selectedReleaseId = rs[0].id;
+      },
+      error: () => { /* non-admin members may get 401/403; the card just hides */ },
+    });
+  }
+
+  dispatchOta(): void {
+    if (!this.selectedReleaseId) return;
+    const release = this.releases().find((r) => r.id === this.selectedReleaseId);
+    if (!release) return;
+    if (!confirm(
+      `Push ${release.target} v${release.version} to ${this.sensor()?.alias}?\n\n` +
+      `The device will fetch ~${Math.round(release.sizeBytes / 1024)} KB and reboot. ` +
+      `Updates take 10–60 seconds.`
+    )) return;
+
+    this.otaDispatching.set(true);
+    this.otaMsg.set(''); this.otaErr.set(false);
+    this.firmware.dispatchOta(this.sensorId, this.selectedReleaseId).subscribe({
+      next: () => {
+        this.otaDispatching.set(false);
+        this.otaMsg.set(`OTA started — device should reconnect in 10–60 s. Watch firmware version below to confirm.`);
+      },
+      error: (err) => {
+        this.otaDispatching.set(false);
+        this.otaErr.set(true);
+        this.otaMsg.set(err?.error?.error ?? err?.message ?? 'OTA dispatch failed');
+      },
+    });
   }
 
   saveShutoffDevice(): void {

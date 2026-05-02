@@ -15,7 +15,20 @@ export interface Sensor {
   pendingState:        'idle' | 'flowing';
   snoozedUntil:        string | null;
   staleSince:          string | null;
+  lastIp:              string | null;
   createdAt:           string;
+}
+
+export interface FirmwareRelease {
+  id:         number;
+  target:     string;
+  version:    string;
+  filename:   string;
+  sha256:     string;
+  sizeBytes:  number;
+  notes:      string | null;
+  uploadedBy: number | null;
+  uploadedAt: string;
 }
 
 export type ShutoffStatus = 'not_fired' | 'fired' | 'verified' | 'failed';
