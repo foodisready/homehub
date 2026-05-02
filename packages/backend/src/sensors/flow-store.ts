@@ -30,6 +30,7 @@ export interface SensorRow {
   pending_count:          number;
   snoozed_until:          string | null;
   stale_since:            string | null;
+  last_ip:                string | null;
   created_at:             string;
 }
 

@@ -225,4 +225,27 @@ function migrate(db: Database.Database): void {
 
   // ── AuraFlow stale-sensor detection ────────────────────────────
   try { db.exec('ALTER TABLE sensors ADD COLUMN stale_since TEXT'); } catch {}
+
+  // ── AuraFlow firmware releases (admin-uploaded .bin store) ─────
+  // Captured on every successful ingestion so HomeHub knows where to POST
+  // /ota when an admin clicks "Update". DHCP-friendly — refreshes on each
+  // reading. Static-IP devices never change.
+  try { db.exec('ALTER TABLE sensors ADD COLUMN last_ip TEXT'); } catch {}
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS firmware_releases (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      target      TEXT    NOT NULL DEFAULT 'auraflow-mainline',
+      version     TEXT    NOT NULL,
+      filename    TEXT    NOT NULL UNIQUE,
+      sha256      TEXT    NOT NULL,
+      size_bytes  INTEGER NOT NULL,
+      notes       TEXT,
+      uploaded_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      uploaded_at TEXT    NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(target, version)
+    );
+    CREATE INDEX IF NOT EXISTS idx_firmware_target_uploaded
+      ON firmware_releases(target, uploaded_at DESC);
+  `);
 }

@@ -18,6 +18,14 @@ internalRouter.use(requireInternalKey);
 
 interface DeviceRow { id: number; alias: string; ip: string; driver_type: string; driver_config: string | null; }
 
+/** Strip IPv4-mapped IPv6 prefix (::ffff:192.168.1.5 → 192.168.1.5) so the
+ *  stored IP is usable directly as a target for outbound HTTP. */
+function stripIpv6Mapped(ip?: string): string | null {
+  if (!ip) return null;
+  const m = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(ip);
+  return m ? m[1] : ip;
+}
+
 // POST /internal/devices/:id/execute  { state: boolean }
 // Called by the scheduler when a scheduled action fires.
 internalRouter.post('/devices/:id/execute', async (req: Request, res: Response) => {
@@ -139,6 +147,11 @@ internalRouter.post('/sensors/flow/readings', (req: Request, res: Response) => {
   // stale_since here is the recovery half of the stale-detection state
   // machine — see sensors/stale-check.ts.
   const wasStale = !!sensor.stale_since;
+  // last_ip is captured here so an admin clicking "Update firmware" on the
+  // dashboard can dispatch to the device without requiring static IP.
+  // Express puts the connecting IP in req.ip; req.ips is the X-Forwarded-For
+  // chain when trust proxy is set. We prefer the immediate hop.
+  const sourceIp = stripIpv6Mapped(req.ip);
   getDb().prepare(`
     UPDATE sensors
        SET last_seen_at        = ?,
@@ -146,7 +159,8 @@ internalRouter.post('/sensors/flow/readings', (req: Request, res: Response) => {
            last_rssi           = COALESCE(?, last_rssi),
            last_uptime_sec     = COALESCE(?, last_uptime_sec),
            last_signal_quality = COALESCE(?, last_signal_quality),
-           firmware_version    = COALESCE(?, firmware_version)
+           firmware_version    = COALESCE(?, firmware_version),
+           last_ip             = COALESCE(?, last_ip)
      WHERE id = ?
   `).run(
     recordedAt.toISOString().replace('T', ' ').replace('Z', ''),
@@ -154,6 +168,7 @@ internalRouter.post('/sensors/flow/readings', (req: Request, res: Response) => {
     body.uptimeSec ?? null,
     body.signalQuality ?? null,
     body.firmwareVersion ?? null,
+    sourceIp,
     sensor.id,
   );
   if (wasStale) {

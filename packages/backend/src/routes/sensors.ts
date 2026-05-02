@@ -24,6 +24,7 @@ function toPublicSensor(row: SensorRow) {
     pendingState:       row.pending_state,
     snoozedUntil:       row.snoozed_until,
     staleSince:         row.stale_since,
+    lastIp:             row.last_ip,
     createdAt:          row.created_at,
   };
 }
@@ -247,6 +248,54 @@ sensorsRouter.delete('/:id/snooze', (req: Request, res: Response) => {
     .run(req.params.id);
   if (result.changes === 0) return res.status(404).json({ error: 'Sensor not found', code: 'NOT_FOUND' });
   res.status(204).end();
+});
+
+// POST /api/sensors/:id/ota — admin only.
+// Dispatches an OTA to the device by POSTing the firmware URL to its
+// /ota endpoint. Body: { releaseId: number }. The URL we post points
+// back at this HomeHub's /firmware/<filename> public route, which the
+// device then pulls over LAN.
+sensorsRouter.post('/:id/ota', requireAdmin, async (req: Request, res: Response) => {
+  const { releaseId } = req.body as { releaseId?: number };
+  if (typeof releaseId !== 'number' || !Number.isInteger(releaseId) || releaseId <= 0) {
+    return res.status(400).json({ error: '`releaseId` (positive integer) is required', code: 'VALIDATION_ERROR' });
+  }
+
+  const sensor = getDb().prepare('SELECT * FROM sensors WHERE id = ?').get(req.params.id) as SensorRow | undefined;
+  if (!sensor) return res.status(404).json({ error: 'Sensor not found', code: 'NOT_FOUND' });
+  if (!sensor.last_ip) {
+    return res.status(409).json({ error: 'Sensor has no last_ip — wait for a reading or check connectivity', code: 'NO_DEVICE_IP' });
+  }
+
+  const release = getDb().prepare('SELECT * FROM firmware_releases WHERE id = ?').get(releaseId) as
+    { id: number; filename: string; version: string } | undefined;
+  if (!release) return res.status(404).json({ error: 'Firmware release not found', code: 'RELEASE_NOT_FOUND' });
+
+  // Build URL the device should fetch. req.protocol is the request's own
+  // scheme; req.get('host') is whatever host:port HomeHub was reached at —
+  // both come from the admin's browser, so they match the LAN interface
+  // the device can also see.
+  const homehubUrl = `${req.protocol}://${req.get('host')}/firmware/${release.filename}`;
+  const deviceOtaUrl = `http://${sensor.last_ip}/ota`;
+
+  try {
+    const r = await fetch(deviceOtaUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: homehubUrl }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    const replyBody = await r.text();
+    if (!r.ok) {
+      logger.warn({ sensorId: sensor.id, ip: sensor.last_ip, status: r.status, replyBody }, 'OTA dispatch rejected by device');
+      return res.status(502).json({ error: 'Device rejected OTA', code: 'DEVICE_REJECTED', deviceStatus: r.status, deviceBody: replyBody });
+    }
+    logger.warn({ sensorId: sensor.id, alias: sensor.alias, version: release.version, ip: sensor.last_ip }, 'OTA dispatched');
+    return res.json({ ok: true, dispatchedTo: deviceOtaUrl, firmwareUrl: homehubUrl, version: release.version });
+  } catch (err) {
+    logger.error({ err, sensorId: sensor.id, ip: sensor.last_ip }, 'OTA dispatch failed');
+    return res.status(502).json({ error: 'Could not reach device', code: 'DEVICE_UNREACHABLE', detail: (err as Error).message });
+  }
 });
 
 // POST /api/sensors/:id/test-shutoff — admin only.
