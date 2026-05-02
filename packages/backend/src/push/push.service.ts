@@ -23,13 +23,10 @@ interface PushSubRow {
   auth:     string;
 }
 
-export function sendPushToAll(title: string, body: string, data?: Record<string, unknown>): void {
+function dispatchToSubs(subs: PushSubRow[], title: string, body: string, data?: Record<string, unknown>): void {
   init();
   if (!initialized) return;
-
-  const db   = getDb();
-  const subs = db.prepare('SELECT endpoint, p256dh, auth FROM push_subscriptions').all() as PushSubRow[];
-
+  const db = getDb();
   const payload = JSON.stringify({ title, body, data });
 
   for (const sub of subs) {
@@ -46,6 +43,23 @@ export function sendPushToAll(title: string, body: string, data?: Record<string,
       }
     });
   }
+}
+
+export function sendPushToAll(title: string, body: string, data?: Record<string, unknown>): void {
+  const subs = getDb()
+    .prepare('SELECT endpoint, p256dh, auth FROM push_subscriptions')
+    .all() as PushSubRow[];
+  dispatchToSubs(subs, title, body, data);
+}
+
+/** Targeted push — used by AuraFlow to fan out to all users who opted into a given channel. */
+export function sendPushToUsers(userIds: number[], title: string, body: string, data?: Record<string, unknown>): void {
+  if (userIds.length === 0) return;
+  const placeholders = userIds.map(() => '?').join(',');
+  const subs = getDb()
+    .prepare(`SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE user_id IN (${placeholders})`)
+    .all(...userIds) as PushSubRow[];
+  dispatchToSubs(subs, title, body, data);
 }
 
 export const vapidPublicKey = () => process.env.VAPID_PUBLIC_KEY ?? '';

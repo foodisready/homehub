@@ -22,7 +22,13 @@ import { energyRouter } from './routes/energy';
 import { pushRouter } from './routes/push';
 import { scenesRouter } from './routes/scenes';
 import { tuyaRouter }   from './routes/tuya';
+import { sensorsRouter } from './routes/sensors';
+import { firmwareApiRouter, firmwarePublicRouter } from './routes/firmware';
+import { notificationsAckRouter } from './routes/notifications-ack';
+import { notificationSettingsRouter } from './routes/notification-settings';
+import { notificationHistoryRouter } from './routes/notification-history';
 import { runBackup } from './db/backup';
+import { checkAllSensors } from './sensors/stale-check';
 import { authenticate } from './middleware/auth';
 import { getDb } from './db';
 import { startPolling } from './kasa/device.cache';
@@ -46,6 +52,15 @@ app.use('/api/auth', authRouter);
 // ── Internal service-to-service routes (key auth, no JWT) ──────
 app.use('/internal', internalRouter);
 
+// ── Public ack endpoint — token IS the auth, single-use, must precede JWT
+app.use('/api/notifications/ack', notificationsAckRouter);
+
+// ── Public firmware fetch — devices on the LAN pull .bin via the URL
+//    HomeHub posted to their /ota endpoint. No JWT (devices have none);
+//    the filename is the only secret, matching the project's existing
+//    LAN-trust posture for sensor traffic.
+app.use('/firmware', firmwarePublicRouter);
+
 // ── All routes below require a valid JWT ──────────────────────
 app.use('/api', (req: Request, res: Response, next: NextFunction) => {
   authenticate(req, res, next);
@@ -59,6 +74,10 @@ app.use('/api/push',      pushRouter);
 app.use('/api/scenes',    scenesRouter);
 app.use('/api/devices',   energyRouter);   // history sub-routes: /api/devices/:id/energy/history
 app.use('/api/tuya',      tuyaRouter);
+app.use('/api/sensors',   sensorsRouter);
+app.use('/api/firmware',  firmwareApiRouter);
+app.use('/api/notifications/settings', notificationSettingsRouter);
+app.use('/api/notifications/history',  notificationHistoryRouter);
 
 // ── Global error handler ───────────────────────────────────────
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
@@ -78,7 +97,31 @@ httpServer.listen(PORT, async () => {
   // Daily DB backup: run once at startup, then every 24 hours
   runBackup();
   setInterval(runBackup, 24 * 60 * 60 * 1000);
+
+  // Hourly prune of flow_readings older than 7 days. flow_events are kept indefinitely.
+  pruneFlowReadings();
+  setInterval(pruneFlowReadings, 60 * 60 * 1000);
+
+  // Stale-sensor check: every 60s, alert if a sensor has stopped reporting.
+  setInterval(() => {
+    try { checkAllSensors(); } catch (err) {
+      logger.error(err, 'stale-check failed');
+    }
+  }, 60 * 1000);
 });
+
+function pruneFlowReadings(): void {
+  try {
+    const r = getDb()
+      .prepare("DELETE FROM flow_readings WHERE recorded_at < datetime('now', '-7 days')")
+      .run();
+    if (r.changes > 0) {
+      logger.info({ deleted: r.changes }, 'Pruned old flow_readings');
+    }
+  } catch (err) {
+    logger.error(err, 'flow_readings prune failed');
+  }
+}
 
 process.on('SIGTERM', () => {
   logger.info('SIGTERM received, shutting down');
