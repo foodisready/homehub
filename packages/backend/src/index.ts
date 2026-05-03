@@ -27,6 +27,7 @@ import { firmwareApiRouter, firmwarePublicRouter } from './routes/firmware';
 import { notificationsAckRouter } from './routes/notifications-ack';
 import { notificationSettingsRouter } from './routes/notification-settings';
 import { notificationHistoryRouter } from './routes/notification-history';
+import { systemRouter } from './routes/system';
 import { runBackup } from './db/backup';
 import { checkAllSensors } from './sensors/stale-check';
 import { authenticate } from './middleware/auth';
@@ -78,6 +79,7 @@ app.use('/api/sensors',   sensorsRouter);
 app.use('/api/firmware',  firmwareApiRouter);
 app.use('/api/notifications/settings', notificationSettingsRouter);
 app.use('/api/notifications/history',  notificationHistoryRouter);
+app.use('/api/system',                 systemRouter);
 
 // ── Global error handler ───────────────────────────────────────
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {

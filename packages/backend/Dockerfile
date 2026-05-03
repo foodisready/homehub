@@ -18,6 +18,11 @@ RUN npm prune --production
 # ── Production stage ─────────────────────────────────────────────
 FROM node:24-alpine AS production
 
+# Set by docker-compose from $HOMEHUB_VERSION so the running container
+# knows what release it is — surfaced via /api/system/version. "dev"
+# means a local build with no upstream comparison.
+ARG HOMEHUB_VERSION=dev
+
 RUN addgroup -S appgroup && adduser -S -G appgroup appuser
 
 WORKDIR /app
@@ -30,6 +35,7 @@ USER appuser
 
 ENV NODE_ENV=production
 ENV PORT=3000
+ENV HOMEHUB_VERSION=$HOMEHUB_VERSION
 EXPOSE $PORT
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \

@@ -5,12 +5,13 @@ import { DecimalPipe } from '@angular/common';
 import { AuthService } from '../../core/auth/auth.service';
 import { SocketService, DeviceStateEvent, DeviceOnlineEvent } from '../../core/socket/socket.service';
 import { DeviceTileComponent, OverrideRequest } from './device-tile/device-tile.component';
+import { SystemStatusComponent } from './system-status.component';
 import { Device } from '../../shared/models/device.model';
 
 @Component({
   selector: 'app-dashboard',
   standalone: true,
-  imports: [DeviceTileComponent, DecimalPipe, RouterLink],
+  imports: [DeviceTileComponent, SystemStatusComponent, DecimalPipe, RouterLink],
   styles: [`
     .topbar {
       display: flex;
@@ -82,6 +83,9 @@ import { Device } from '../../shared/models/device.model';
           <button class="btn-logout" (click)="logout()">Sign out</button>
         </div>
       </div>
+
+      <!-- HomeHub self-update card (shows when an upstream release is available) -->
+      <app-system-status />
 
       <!-- Summary chips -->
       @if (devices().length > 0) {
