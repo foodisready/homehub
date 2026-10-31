@@ -6,6 +6,7 @@ export interface DiscoveredDevice {
   alias: string;
   model: string;
   hasEmeter: boolean;
+  mac: string;
 }
 
 export interface EnergyMetrics {
@@ -31,13 +32,15 @@ export async function discoverDevices(timeoutMs = 7000): Promise<DiscoveredDevic
         alias:     device.alias,
         model:     device.model,
         hasEmeter: plug?.supportsEmeter ?? false,
+        mac:       device.macNormalized,
       });
       logger.debug({ ip: device.host, alias: device.alias }, 'Discovered device');
     };
 
     scanner.on('device-new',    onDevice);
     scanner.on('device-online', onDevice);
-    scanner.startDiscovery({ deviceTypes: ['plug'] });
+    // Repeat the broadcast: a single UDP packet is easily lost on Wi-Fi.
+    scanner.startDiscovery({ deviceTypes: ['plug'], discoveryInterval: 1000 });
 
     setTimeout(() => {
       scanner.stopDiscovery();

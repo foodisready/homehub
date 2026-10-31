@@ -97,6 +97,18 @@ Local-first smart plug automation for Raspberry Pi. No cloud accounts required.
 **Plugs not discovered:**
 The Kasa discovery uses UDP broadcast. If the backend runs in `network_mode: host`, it can reach the LAN directly. If not, add your plug IPs manually in Settings → Devices.
 
+**A lamp shows as offline after a router or power change:**
+Routers can give a device a new IP address, and HomeHub then stops reaching it. To fix it:
+1. Go to **Settings → Devices** and select **+ Discover on network**.
+2. If the lamp is listed as moved, select **Update address**. It should show as online again within about 30 seconds.
+3. To stop it happening again, reserve the device's address in your router's DHCP settings.
+
+Don't add the lamp as a new device, or you'll lose its link to its existing schedules and history.
+
+If the lamp isn't listed as moved, run the scan again, because a scan can occasionally miss a device. If it's still missing, HomeHub couldn't match it. This can happen if you renamed it in HomeHub before it was linked to its MAC address, or if it's a Shelly or Tuya device, which don't support moved-device detection yet. Find its new address in your router's device list, then enter it under **Settings → Devices → Edit**. You can check an address first with **Probe**.
+
+If you see "Another device already uses that name or IP address", an old entry is holding that address. Update that device first. If two lamps swapped addresses, edit one to any unused address, update the other, then correct the first.
+
 **Ollama slow on first chat:**
 The model loads into RAM on first request. Subsequent requests are fast. If RAM is tight, switch to `llama3.2:3b` (the smallest capable tool-calling model) via `OLLAMA_MODEL` in `.env`.
 

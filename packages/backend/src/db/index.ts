@@ -97,6 +97,8 @@ function migrate(db: Database.Database): void {
   try { db.exec('ALTER TABLE devices ADD COLUMN turned_on_at TEXT'); } catch {}
   try { db.exec("ALTER TABLE devices ADD COLUMN driver_type TEXT NOT NULL DEFAULT 'kasa'"); } catch {}
   try { db.exec('ALTER TABLE devices ADD COLUMN driver_config TEXT'); } catch {}
+  try { db.exec('ALTER TABLE devices ADD COLUMN mac TEXT'); } catch {}
+  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_devices_mac ON devices(driver_type, mac) WHERE mac IS NOT NULL');
 
   // Recreate schedules to add auto_off trigger type + duration_minutes column
   const schedCols = db.prepare("PRAGMA table_info(schedules)").all() as { name: string }[];

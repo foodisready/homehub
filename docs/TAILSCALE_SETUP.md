@@ -387,7 +387,7 @@ Over plain `http://` in production, browsers won't send `secure` cookies. Use th
 That's a separate problem from Tailscale, and it's between the Mac and your smart devices.
 
 - **Check Local Network access on macOS.** Open **System Settings → Privacy & Security → Local Network** and turn on the app you start the backend from, such as iTerm or VS Code. Quit that app and start the backend again.
-- **Check for changed IP addresses.** Routers can reassign addresses. Update the device under **Settings → Devices → Edit**, and set DHCP reservations on your router.
+- **Check for changed IP addresses.** Routers can reassign addresses. Run **Settings → Devices → Discover on network** to update moved Kasa lamps, or see [Troubleshooting](./GETTING_STARTED.md#troubleshooting) for other devices. Set DHCP reservations on your router to prevent it.
 
 ## Security notes
 

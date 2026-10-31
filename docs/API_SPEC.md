@@ -170,13 +170,15 @@ Register a device manually (for when discovery is not used).
 ---
 
 ### `PATCH /api/devices/:id` — `admin` only
-Update alias or IP.
+Update alias, IP or MAC address.
 
 **Body** (all fields optional)
 ```json
-{ "alias": "new-alias", "ip": "192.168.1.103" }
+{ "alias": "new-alias", "ip": "192.168.1.103", "mac": "74FECE3576FD" }
 ```
 **Response 200** — updated device object
+
+**Response 409** — another device already uses that alias or IP
 
 ---
 
@@ -186,12 +188,16 @@ Update alias or IP.
 ---
 
 ### `POST /api/devices/discover` — `admin` only
-Triggers subnet broadcast discovery. Returns found devices (not yet saved).
+Triggers subnet broadcast discovery. Returns found devices (not yet saved). Kasa results include `mac`. A result for a registered device now at a different IP includes `moved`; apply it with `PATCH /api/devices/:id`. Registered Kasa devices found at their stored IP under the same name have their MAC saved automatically.
 
 **Response 200**
 ```json
 [
-  { "ip": "192.168.1.105", "alias": "TP-LINK_PLUG_A2B3", "model": "HS103" }
+  { "ip": "192.168.1.105", "alias": "TP-LINK_PLUG_A2B3", "model": "HS103", "mac": "74FECE3576FD" },
+  {
+    "ip": "192.168.1.106", "alias": "office-lamp", "model": "KP115", "mac": "4822542F336F",
+    "moved": { "deviceId": 2, "alias": "office-lamp", "previousIp": "192.168.1.102" }
+  }
 ]
 ```
 

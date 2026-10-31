@@ -5,6 +5,8 @@ export interface DiscoveredDevice {
   hasEmeter:   boolean;
   driverType:  string;
   driverConfig?: Record<string, unknown>;
+  /** Hardware address, normalized by the driver. Identifies a device across IP changes. */
+  mac?:        string;
 }
 
 export interface EnergyMetrics {

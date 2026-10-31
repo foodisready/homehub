@@ -1,5 +1,5 @@
 import { Component, OnInit, signal, computed } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { AuthService } from '../../core/auth/auth.service';
@@ -18,6 +18,8 @@ interface DiscoveredDevice {
   hasEmeter:    boolean;
   driverType:   string;
   driverConfig?: Record<string, unknown>;
+  mac?:         string;
+  moved?:       { deviceId: number; alias: string; previousIp: string };
   // editable before registering
   pendingAlias?:    string;
   pendingKey?:      string;   // Tuya only: local key required for control
@@ -274,6 +276,18 @@ const DRIVER_LABEL: Record<string, string> = {
               </button>
             </div>
             @if (discoverMsg()) { <p class="msg" [class.ok]="!discoverErr()" [class.err]="discoverErr()">{{ discoverMsg() }}</p> }
+
+            <!-- Registered devices that now answer at a different address -->
+            @if (movedDevices().length > 0) {
+              <div class="discover-list">
+                @for (d of movedDevices(); track d.ip) {
+                  <div class="discover-row">
+                    <span class="discover-alias">{{ d.moved?.alias }} moved from {{ d.moved?.previousIp }} to {{ d.ip }}</span>
+                    <button class="btn-sm btn-primary" (click)="applyMove(d)">Update address</button>
+                  </div>
+                }
+              </div>
+            }
 
             <!-- Discovery results -->
             @if (discoveredDevices().length > 0) {
@@ -631,6 +645,8 @@ export class SettingsComponent implements OnInit {
   registering       = signal(false);
   private readonly _discoveredDevices = signal<DiscoveredDevice[]>([]);
   readonly discoveredDevices = this._discoveredDevices.asReadonly();
+  private readonly _movedDevices = signal<DiscoveredDevice[]>([]);
+  readonly movedDevices = this._movedDevices.asReadonly();
   private selectedIps = new Set<string>();
   readonly selectedCount = computed(() => {
     this.discoveredDevices();
@@ -941,6 +957,7 @@ export class SettingsComponent implements OnInit {
     this.discovering.set(true);
     this.discoverMsg.set('');
     this._discoveredDevices.set([]);
+    this._movedDevices.set([]);
     this.selectedIps.clear();
     this.http.post<DiscoveredDevice[]>('/api/devices/discover', {}).subscribe({
       next: (found) => {
@@ -950,11 +967,13 @@ export class SettingsComponent implements OnInit {
           this.discoverErr.set(false);
           return;
         }
+        const moved       = found.filter((f) => f.moved);
         const existingIps = new Set(this._devices().map((d) => d.ip));
         const newDevices  = found
-          .filter((f) => !existingIps.has(f.ip))
+          .filter((f) => !f.moved && !existingIps.has(f.ip))
           .map((f) => ({ ...f, pendingAlias: f.alias && f.alias !== f.ip ? f.alias : '' }));
-        if (newDevices.length === 0) {
+        this._movedDevices.set(moved);
+        if (moved.length === 0 && newDevices.length === 0) {
           this.discoverMsg.set(`Found ${found.length} device(s) — all already registered.`);
           this.discoverErr.set(false);
           return;
@@ -962,10 +981,29 @@ export class SettingsComponent implements OnInit {
         // Pre-select non-Tuya devices (Tuya needs key first)
         newDevices.filter((d) => d.driverType !== 'tuya').forEach((d) => this.selectedIps.add(d.ip));
         this._discoveredDevices.set(newDevices);
-        this.discoverMsg.set(`Found ${newDevices.length} new device(s). Review and register below.`);
+        this.discoverMsg.set([
+          moved.length ? `${moved.length} device(s) changed address.` : '',
+          newDevices.length ? `Found ${newDevices.length} new device(s). Review and register below.` : '',
+        ].join(' ').trim());
         this.discoverErr.set(false);
       },
       error: () => { this.discovering.set(false); this.discoverMsg.set('Discovery failed.'); this.discoverErr.set(true); },
+    });
+  }
+
+  applyMove(d: DiscoveredDevice): void {
+    if (!d.moved) return;
+    this.http.patch<Device>(`/api/devices/${d.moved.deviceId}`, { ip: d.ip, mac: d.mac }).subscribe({
+      next: (updated) => {
+        this._devices.update((list) => list.map((x) => (x.id === updated.id ? updated : x)));
+        this._movedDevices.update((list) => list.filter((x) => x !== d));
+        this.discoverMsg.set(`${updated.alias} updated to ${updated.ip}.`);
+        this.discoverErr.set(false);
+      },
+      error: (err: HttpErrorResponse) => {
+        this.discoverMsg.set(err.error?.error ?? 'Could not update the address.');
+        this.discoverErr.set(true);
+      },
     });
   }
 
@@ -991,6 +1029,7 @@ export class SettingsComponent implements OnInit {
         hasEmeter:    d.hasEmeter ?? false,
         driverType:   d.driverType,
         driverConfig: driverConfig ?? undefined,
+        mac:          d.mac,
       }).subscribe({
         next: (created) => {
           this._devices.update((list) => [...list, created]);

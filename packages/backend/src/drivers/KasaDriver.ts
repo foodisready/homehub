@@ -33,6 +33,7 @@ export class KasaDriver implements DeviceDriver {
         alias:    device.alias,
         model:    device.model,
         hasEmeter: device.supportsEmeter,
+        mac:      device.macNormalized,
       };
     } catch {
       return null;
