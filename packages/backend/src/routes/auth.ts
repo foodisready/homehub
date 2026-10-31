@@ -5,6 +5,7 @@ import {
   verifyRefreshToken,
   findUserById,
 } from '../auth/auth.service';
+import { startLoginAttempt } from '../auth/login-limiter';
 import { logger } from '../logger';
 
 export const authRouter = Router();
@@ -22,8 +23,20 @@ const COOKIE_OPTS = {
 // POST /api/auth/login
 authRouter.post('/login', async (req: Request, res: Response) => {
   const { username, password } = req.body as { username?: string; password?: string };
-  if (!username || !password) {
+  if (!username || !password || typeof username !== 'string' || typeof password !== 'string') {
     return res.status(400).json({ error: 'username and password are required', code: 'VALIDATION_ERROR' });
+  }
+
+  const address = req.socket.remoteAddress ?? 'unknown';
+  const attempt = startLoginAttempt(address, username);
+  if (!attempt.allowed) {
+    const minutes = Math.ceil(attempt.retryAfterSeconds / 60);
+    logger.warn({ username, address }, 'Login blocked by rate limit');
+    res.set('Retry-After', String(attempt.retryAfterSeconds));
+    return res.status(429).json({
+      error: `Too many failed login attempts. Try again in ${minutes} minute${minutes === 1 ? '' : 's'}.`,
+      code:  'RATE_LIMITED',
+    });
   }
 
   const user = await validateCredentials(username, password);
@@ -32,6 +45,7 @@ authRouter.post('/login', async (req: Request, res: Response) => {
     return res.status(401).json({ error: 'Invalid credentials', code: 'UNAUTHORIZED' });
   }
 
+  attempt.succeeded();
   const { accessToken, refreshToken } = issueTokens(user);
   res.cookie(REFRESH_COOKIE, refreshToken, COOKIE_OPTS);
 

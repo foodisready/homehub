@@ -391,7 +391,7 @@ That's a separate problem from Tailscale, and it's between the Mac and your smar
 
 ## Security notes
 
-- **Don't expose HomeHub publicly.** It has no login rate limiting, some routes rely on LAN trust, and it can control real hardware, including water shutoff valves.
+- **Don't expose HomeHub publicly.** Some routes rely on LAN trust, and it can control real hardware, including water shutoff valves. Login rate limiting slows password guessing, but it doesn't make public exposure safe.
 - **Don't forward router ports** to HomeHub.
 - **Anyone on your tailnet can reach exposed ports** on the Mac, including the development backend. Only add people you trust, or restrict access with [Tailscale access controls](https://login.tailscale.com/admin/acls).
 - **Use a strong HomeHub password**, and change the default admin password.

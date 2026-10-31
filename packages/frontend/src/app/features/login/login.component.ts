@@ -1,4 +1,5 @@
 import { Component, signal } from '@angular/core';
+import { HttpErrorResponse } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { AuthService } from '../../core/auth/auth.service';
@@ -113,8 +114,8 @@ export class LoginComponent {
         this.socket.connect();
         this.router.navigate(['/dashboard']);
       },
-      error: () => {
-        this.error.set('Invalid username or password.');
+      error: (err: HttpErrorResponse) => {
+        this.error.set(err.status === 429 ? err.error.error : 'Invalid username or password.');
         this.loading.set(false);
       },
     });
