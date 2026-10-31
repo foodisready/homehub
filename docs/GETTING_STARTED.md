@@ -27,23 +27,21 @@ Local-first smart plug automation for Raspberry Pi. No cloud accounts required.
    cp .env.example .env
    ```
    Edit `.env` — at minimum set:
-   - `JWT_SECRET` and `JWT_REFRESH_SECRET` — generate with `openssl rand -base64 32`
+   - `JWT_SECRET`, `JWT_REFRESH_SECRET` and `INTERNAL_API_KEY` — generate each with `openssl rand -base64 32`
+   - `WATCHTOWER_HTTP_API_TOKEN` — generate with `openssl rand -hex 32`
    - `ADMIN_PASSWORD` — your initial admin password
    - `LATITUDE` / `LONGITUDE` — your home coordinates (for solar scheduling)
    - `TS_AUTHKEY` — your Tailscale auth key (or leave blank if using Headscale)
 
-3. **Create data directory**
+3. **Build and start all services**
    ```bash
-   mkdir -p data/ollama
+   docker compose -f docker-compose.yml up -d --build
    ```
+   Name the file explicitly: a plain `docker compose up` also applies `docker-compose.override.yml`, which runs the development builds.
 
-4. **Pull and start all services**
-   ```bash
-   docker compose up -d
-   ```
    First startup will take several minutes — Ollama needs to pull the LLM model.
 
-5. **Open the dashboard**
+4. **Open the dashboard**
 
    From your home network: `http://<pi-ip>:4200`
    Log in with `admin` and the password you set in `.env`.

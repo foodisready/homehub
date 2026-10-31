@@ -12,6 +12,8 @@ services:
       - "4200:80"
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
+    extra_hosts: &host-gateway
+      - "host.docker.internal:host-gateway"
     depends_on:
       backend:
         condition: service_healthy
@@ -29,6 +31,9 @@ services:
   # send/receive UDP broadcast packets for device discovery.
   # When host networking is active, remove the `networks` key and
   # the `ports` mapping is implicit (binds directly to host port).
+  # Service names don't resolve across that boundary: the backend reaches
+  # other services on localhost through their published ports, and they
+  # reach it on host.docker.internal.
   backend:
     build:
       context: ./packages/backend
@@ -42,8 +47,10 @@ services:
     env_file: .env
     environment:
       - NODE_ENV=production
+      - PORT=3000
       - DB_PATH=/data/db.sqlite
-      - OLLAMA_URL=http://ollama:11434
+      - OLLAMA_URL=http://localhost:11434
+      - SCHEDULER_URL=http://localhost:3002
       # Watchtower sits on the bridged homehub-net; backend uses host
       # networking so it reaches Watchtower via the localhost-bound
       # port mapping (8080) rather than service-name DNS.
@@ -80,9 +87,10 @@ services:
     env_file: .env
     environment:
       - PORT=3001
-      - BACKEND_URL=http://backend:3000
+      - BACKEND_URL=http://host.docker.internal:3000
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
+    extra_hosts: *host-gateway
     depends_on:
       backend:
         condition: service_healthy
@@ -108,11 +116,12 @@ services:
     env_file: .env
     environment:
       - SCHEDULER_PORT=3002
-      - BACKEND_URL=http://backend:3000
+      - BACKEND_URL=http://host.docker.internal:3000
       - SCHEDULER_URL=http://scheduler:3002
       - DB_PATH=/data/db.sqlite
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
+    extra_hosts: *host-gateway
     volumes:
       - homehub-data:/data
     depends_on:
@@ -143,7 +152,7 @@ services:
       ollama pull ${OLLAMA_MODEL:-llama3.2:3b} &&
       wait"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      test: ["CMD", "ollama", "list"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -204,11 +213,6 @@ services:
 
 volumes:
   homehub-data:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ./data
   ollama-models:
   tailscale-state:
 

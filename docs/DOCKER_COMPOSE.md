@@ -1,6 +1,8 @@
 # Docker Compose Reference
 
-Full `docker-compose.yml` specification for HomeHub on Raspberry Pi 5.
+Original `docker-compose.yml` specification for HomeHub on Raspberry Pi 5.
+
+> The `docker-compose.yml` and `packages/frontend/nginx.conf` files in the repo are the source of truth, and they differ from the examples below. Most importantly, the backend uses host networking, so other services reach it at `host.docker.internal:3000` rather than `backend:3000`.
 
 ---
 

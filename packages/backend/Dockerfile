@@ -24,6 +24,8 @@ FROM node:24-alpine AS production
 ARG HOMEHUB_VERSION=dev
 
 RUN addgroup -S appgroup && adduser -S -G appgroup appuser
+# A new named volume inherits this ownership, which lets appuser write the DB.
+RUN mkdir -p /data && chown appuser:appgroup /data
 
 WORKDIR /app
 

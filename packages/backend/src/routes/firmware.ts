@@ -22,7 +22,8 @@ import { logger } from '../logger';
  * matches what the existing internal trust posture allows.
  */
 
-const FIRMWARE_DIR = path.join(process.cwd(), 'data', 'firmware');
+const DB_PATH      = process.env.DB_PATH || path.join(process.cwd(), 'data', 'db.sqlite');
+const FIRMWARE_DIR = path.join(path.dirname(DB_PATH), 'firmware');
 const MAX_BIN_BYTES = 8 * 1024 * 1024;   // 8 MB — well above the ~1 MB current bin
 const FILENAME_RE  = /^[a-zA-Z0-9_.-]+\.bin$/;
 const VERSION_RE   = /^[a-zA-Z0-9._-]+$/;
