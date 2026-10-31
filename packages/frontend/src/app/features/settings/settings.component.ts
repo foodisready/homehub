@@ -209,6 +209,22 @@ const DRIVER_LABEL: Record<string, string> = {
                     </div>
                     <p style="font-size:0.75rem;color:var(--text-muted);margin:0.2rem 0 0">Leave both blank to remove stored credentials.</p>
                   }
+                  @if (d.driverType === 'tuya') {
+                    <div class="edit-row" style="margin-top:0.4rem">
+                      <input type="text" [(ngModel)]="editTuyaDeviceId" placeholder="Device ID (leave blank to keep existing)" autocomplete="off" />
+                      <input type="text" [(ngModel)]="editTuyaKey"      placeholder="Local Key (leave blank to keep existing)" autocomplete="off" />
+                    </div>
+                    <div class="edit-row" style="margin-top:0.4rem">
+                      <select [(ngModel)]="editTuyaVersion">
+                        <option value="3.1">Protocol 3.1</option>
+                        <option value="3.3">Protocol 3.3</option>
+                        <option value="3.4">Protocol 3.4</option>
+                        <option value="3.5">Protocol 3.5</option>
+                      </select>
+                      <span></span>
+                    </div>
+                    <p style="font-size:0.75rem;color:var(--text-muted);margin:0.2rem 0 0">Leave Device ID and Local Key blank to keep existing values.</p>
+                  }
                   <div style="display:flex;gap:0.5rem;margin-top:0.4rem">
                     <button class="btn-sm btn-primary" (click)="saveDevice(d.id, d.driverType)">Save</button>
                     <button class="btn-sm btn-ghost" (click)="cancelDeviceEdit()">Cancel</button>
@@ -221,8 +237,8 @@ const DRIVER_LABEL: Record<string, string> = {
                   <span class="row-meta"> · {{ d.ip }}</span>
                   @if (d.hasEmeter) { <span class="row-meta"> · ⚡</span> }
                 </div>
-                <span class="driver-badge" [class]="'driver-badge ' + (d.driverType ?? 'kasa')">
-                  {{ driverLabel(d.driverType ?? 'kasa') }}
+                <span class="driver-badge" [class]="'driver-badge ' + d.driverType">
+                  {{ driverLabel(d.driverType) }}
                 </span>
                 @if (isAdmin()) {
                   <button class="btn-sm btn-ghost" (click)="startDeviceEdit(d)">Edit</button>
@@ -581,6 +597,9 @@ export class SettingsComponent implements OnInit {
   editAuthUser  = '';
   editAuthPass  = '';
   showAuthPass  = false;
+  editTuyaDeviceId = '';
+  editTuyaKey      = '';
+  editTuyaVersion  = '3.3';
   deviceMsg = signal('');
   deviceErr = signal(false);
 
@@ -803,6 +822,9 @@ export class SettingsComponent implements OnInit {
     this.editAuthUser = auth?.user ?? '';
     this.editAuthPass = auth?.pass ?? '';
     this.showAuthPass = false;
+    this.editTuyaDeviceId = '';
+    this.editTuyaKey      = '';
+    this.editTuyaVersion  = (d.driverConfig as any)?.version ?? '3.3';
     this.deviceMsg.set('');
   }
 
@@ -811,6 +833,9 @@ export class SettingsComponent implements OnInit {
     this.editAuthUser = '';
     this.editAuthPass = '';
     this.showAuthPass = false;
+    this.editTuyaDeviceId = '';
+    this.editTuyaKey      = '';
+    this.editTuyaVersion  = '3.3';
     this.deviceMsg.set('');
   }
 
@@ -825,6 +850,14 @@ export class SettingsComponent implements OnInit {
         baseConfig['auth'] = { user: this.editAuthUser.trim(), pass: this.editAuthPass.trim() };
       } else {
         delete baseConfig['auth'];
+      }
+      // Blank deviceId/key preserve existing — clearing them bricks LAN control.
+      if (driverType === 'tuya') {
+        const newDeviceId = this.editTuyaDeviceId.trim();
+        const newKey      = this.editTuyaKey.trim();
+        if (newDeviceId) baseConfig['deviceId'] = newDeviceId;
+        if (newKey)      baseConfig['key']      = newKey;
+        baseConfig['version'] = this.editTuyaVersion;
       }
       payload['driverConfig'] = baseConfig;
     }
