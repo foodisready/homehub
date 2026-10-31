@@ -378,6 +378,10 @@ The dev server doesn't recognize the address. Follow [Allow the address on the d
 - Wait a minute on the first visit, while the certificate is issued.
 - Turn Tailscale off and on again on the phone.
 
+### Open HomeHub on another phone
+
+Set `HOMEHUB_REMOTE_URL` in `.env` to your HTTPS address and restart the backend. Then select **QR code** on the dashboard and scan it with the phone's camera. The phone still needs Tailscale installed and connected.
+
 ### Login fails or you keep being logged out
 
 Over plain `http://` in production, browsers won't send `secure` cookies. Use the HTTPS address.

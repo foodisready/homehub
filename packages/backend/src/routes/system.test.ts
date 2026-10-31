@@ -127,6 +127,34 @@ describe('GET /api/system/version', () => {
   });
 });
 
+describe('GET /api/system/remote-url', () => {
+  const get = async () => {
+    const r = await fetch(`${baseUrl}/api/system/remote-url`, {
+      headers: { Authorization: `Bearer ${adminToken}` },
+    });
+    assert.equal(r.status, 200);
+    return r.json();
+  };
+
+  it('returns the configured address', async () => {
+    process.env.HOMEHUB_REMOTE_URL = 'https://homehub.example.ts.net';
+    try {
+      assert.deepEqual(await get(), { url: 'https://homehub.example.ts.net' });
+    } finally {
+      delete process.env.HOMEHUB_REMOTE_URL;
+    }
+  });
+
+  it('returns null when no address is configured', async () => {
+    assert.deepEqual(await get(), { url: null });
+  });
+
+  it('requires a login', async () => {
+    const r = await fetch(`${baseUrl}/api/system/remote-url`);
+    assert.equal(r.status, 401);
+  });
+});
+
 describe('POST /api/system/update', () => {
   it('forwards to watchtower with bearer token and returns started=true', async () => {
     const r = await fetch(`${baseUrl}/api/system/update`, {

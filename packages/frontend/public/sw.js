@@ -1,5 +1,5 @@
 // HomeHub service worker — app shell cache + push notifications
-const CACHE    = 'homehub-v3';
+const CACHE    = 'homehub-v4';
 const APP_SHELL = ['/'];
 
 self.addEventListener('install', (event) => {
@@ -41,23 +41,27 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
   // Always fetch API, socket.io, and cross-origin resources from network
-  if (url.pathname.startsWith('/api/') ||
+  if (event.request.method !== 'GET' ||
+      url.pathname.startsWith('/api/') ||
       url.pathname.startsWith('/socket.io/') ||
       url.origin !== self.location.origin) {
     return;
   }
 
-  // App shell: cache-first, falling back to network
+  // Network first, so updates appear straight away. The cache is only the
+  // offline fallback: serving it first would pin the app to an old version.
   event.respondWith(
-    caches.match(event.request).then((cached) => {
+    fetch(event.request).then((response) => {
+      if (response.ok) {
+        const clone = response.clone();
+        caches.open(CACHE).then((cache) => cache.put(event.request, clone));
+      }
+      return response;
+    }).catch(async () => {
+      const cached = await caches.match(event.request);
       if (cached) return cached;
-      return fetch(event.request).then((response) => {
-        if (response.ok && event.request.method === 'GET') {
-          const clone = response.clone();
-          caches.open(CACHE).then((cache) => cache.put(event.request, clone));
-        }
-        return response;
-      });
+      const shell = event.request.mode === 'navigate' ? await caches.match('/') : undefined;
+      return shell ?? Response.error();
     })
   );
 });

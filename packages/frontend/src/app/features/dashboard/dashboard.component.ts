@@ -6,12 +6,13 @@ import { AuthService } from '../../core/auth/auth.service';
 import { SocketService, DeviceStateEvent, DeviceOnlineEvent } from '../../core/socket/socket.service';
 import { DeviceTileComponent, OverrideRequest } from './device-tile/device-tile.component';
 import { SystemStatusComponent } from './system-status.component';
+import { PhoneQrComponent } from './phone-qr.component';
 import { Device } from '../../shared/models/device.model';
 
 @Component({
   selector: 'app-dashboard',
   standalone: true,
-  imports: [DeviceTileComponent, SystemStatusComponent, DecimalPipe, RouterLink],
+  imports: [DeviceTileComponent, SystemStatusComponent, PhoneQrComponent, DecimalPipe, RouterLink],
   styles: [`
     .topbar {
       display: flex;
@@ -80,9 +81,14 @@ import { Device } from '../../shared/models/device.model';
           @if (auth.user(); as u) {
             <span class="user-info">{{ u.name }}</span>
           }
+          <button class="btn-logout" (click)="showQr.set(true)">QR code</button>
           <button class="btn-logout" (click)="logout()">Sign out</button>
         </div>
       </div>
+
+      @if (showQr()) {
+        <app-phone-qr (closed)="showQr.set(false)" />
+      }
 
       <!-- HomeHub self-update card (shows when an upstream release is available) -->
       <app-system-status />
@@ -129,6 +135,8 @@ import { Device } from '../../shared/models/device.model';
   `,
 })
 export class DashboardComponent implements OnInit, OnDestroy {
+  readonly showQr = signal(false);
+
   private readonly _devices  = signal<Device[]>([]);
   private readonly _busyIds  = signal<Set<number>>(new Set());
   private readonly _loading  = signal(true);

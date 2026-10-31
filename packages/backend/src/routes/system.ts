@@ -81,6 +81,14 @@ systemRouter.get('/version', async (_req: Request, res: Response) => {
   });
 });
 
+/* GET /api/system/remote-url
+ * The address for the dashboard's QR code. It's configured rather than
+ * read from the request, so a page opened on localhost still gives a
+ * phone a usable address. Null means the page should use its own origin. */
+systemRouter.get('/remote-url', (_req: Request, res: Response) => {
+  res.json({ url: process.env.HOMEHUB_REMOTE_URL || null });
+});
+
 /* POST /api/system/update
  * Forwards the request to Watchtower. The container-recreate happens
  * after this response is on the wire — the client's TCP connection
