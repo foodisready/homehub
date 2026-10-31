@@ -1,26 +1,43 @@
 import fs from 'fs';
 import path from 'path';
+import { getDb } from './index';
 import { logger } from '../logger';
 
 const DB_PATH    = process.env.DB_PATH || path.join(process.cwd(), 'data', 'db.sqlite');
 const BACKUP_DIR = path.join(path.dirname(DB_PATH), 'backups');
 const KEEP_DAYS  = 7;
 
+/**
+ * Write today's backup, then prune old ones. Never throws: it runs on a timer,
+ * and a failed backup must not take the backend down.
+ *
+ * Uses VACUUM INTO rather than copying the file. The DB runs in WAL mode, so
+ * recent writes live in db.sqlite-wal and a plain copy of db.sqlite misses them.
+ */
 export function runBackup(): void {
-  if (!fs.existsSync(DB_PATH)) {
-    logger.warn({ path: DB_PATH }, 'DB backup skipped — file not found');
-    return;
-  }
-
-  fs.mkdirSync(BACKUP_DIR, { recursive: true });
-
   const date = new Date().toISOString().slice(0, 10);   // YYYY-MM-DD
   const dest = path.join(BACKUP_DIR, `db-${date}.sqlite`);
+  const tmp  = `${dest}.tmp`;
 
-  fs.copyFileSync(DB_PATH, dest);
-  logger.info({ dest }, 'DB backup written');
+  try {
+    fs.mkdirSync(BACKUP_DIR, { recursive: true });
+    fs.rmSync(tmp, { force: true });
 
-  // Prune: keep only the most recent KEEP_DAYS backup files
+    // VACUUM INTO refuses to overwrite, and renaming only once it finishes
+    // means a failure leaves any earlier backup from today intact.
+    getDb().prepare('VACUUM INTO ?').run(tmp);
+    fs.renameSync(tmp, dest);
+    logger.info({ dest }, 'DB backup written');
+
+    pruneBackups();
+  } catch (err) {
+    fs.rmSync(tmp, { force: true });
+    logger.error({ err, dest }, 'DB backup failed');
+  }
+}
+
+/** Keep only the most recent KEEP_DAYS backup files. */
+function pruneBackups(): void {
   const files = fs.readdirSync(BACKUP_DIR)
     .filter((f) => f.startsWith('db-') && f.endsWith('.sqlite'))
     .sort();
