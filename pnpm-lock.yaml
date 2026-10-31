@@ -7,10 +7,6 @@ settings:
 importers:
 
   .:
-    dependencies:
-      bcrypt:
-        specifier: ^5.1.1
-        version: 5.1.1
     devDependencies:
       typescript:
         specifier: ^5.7.0
@@ -25,8 +21,8 @@ importers:
         specifier: ^5.1.1
         version: 5.1.1
       better-sqlite3:
-        specifier: ^11.10.0
-        version: 11.10.0
+        specifier: ^12.11.1
+        version: 12.11.1
       cookie-parser:
         specifier: ^1.4.7
         version: 1.4.7
@@ -217,8 +213,8 @@ importers:
   packages/scheduler:
     dependencies:
       better-sqlite3:
-        specifier: ^11.10.0
-        version: 11.10.0
+        specifier: ^12.11.1
+        version: 12.11.1
       dotenv:
         specifier: ^17.2.3
         version: 17.4.2
@@ -403,6 +399,7 @@ packages:
   '@angular/animations@21.2.11':
     resolution: {integrity: sha512-CpyK3XxcjuYj8cl/eaKZYxrIpVOG7Ci49YSPIzyY5bzxMv7znOoRuPnEMV/EENfiQ12IraWCBh9dd7g37PBjOw==}
     engines: {node: ^20.19.0 || ^22.12.0 || >=24.0.0}
+    deprecated: '@angular/animations is deprecated. Use `animate.enter` and `animate.leave` instead. For more information see: https://v22.angular.dev/guide/animations.'
     peerDependencies:
       '@angular/core': 21.2.11
 
@@ -504,6 +501,7 @@ packages:
   '@angular/platform-browser-dynamic@21.2.11':
     resolution: {integrity: sha512-wdlYzXkc6X6f8mj2jLlaDJlRiwmurffAf37NCXMNqgTTc0j0iD/DLd3JQScMVCJ9bZ0se02EF5X3Z82W0vmmPA==}
     engines: {node: ^20.19.0 || ^22.12.0 || >=24.0.0}
+    deprecated: '@angular/platform-browser-dynamic is deprecated. Use `@angular/platform-browser` instead.'
     peerDependencies:
       '@angular/common': 21.2.11
       '@angular/compiler': 21.2.11
@@ -2697,8 +2695,9 @@ packages:
     resolution: {integrity: sha512-2Imdcw3LznDuxAbJM26RHniOLAzE6WgrK8OuvVXCQtNBS8rsnD9zsSEa3fHl4hHpUY7BYTlrpvtPVbvu9G6neg==}
     engines: {node: '>=18.0.0'}
 
-  better-sqlite3@11.10.0:
-    resolution: {integrity: sha512-EwhOpyXiOEL/lKzHz9AW1msWFNzGc/z+LzeB3/jnFJpxu+th2yqvzsSWas1v9jgs9+xiXJcD5A8CJxAG2TaghQ==}
+  better-sqlite3@12.11.1:
+    resolution: {integrity: sha512-dq9AtApgg5PGFtBzPFSBl3HZQjHok5gaQCM6zh2Yk0aSmDCs1CbnVI8/HgASQkNKsWFpseIO9beg5xxpYhbIfA==}
+    engines: {node: 20.x || 22.x || 23.x || 24.x || 25.x || 26.x}
 
   big.js@5.2.2:
     resolution: {integrity: sha512-vyL2OymJxmarO8gxMr0mhChsO9QGwhynfuu4+MHTAW6czfq9humCB7rKpUjDd9YUiDPU4mzpyupFSvOClAwbmQ==}
@@ -7878,7 +7877,7 @@ snapshots:
       postcss-media-query-parser: 0.2.3
       postcss-safe-parser: 7.0.1(postcss@8.5.12)
 
-  better-sqlite3@11.10.0:
+  better-sqlite3@12.11.1:
     dependencies:
       bindings: 1.5.0
       prebuild-install: 7.1.3
