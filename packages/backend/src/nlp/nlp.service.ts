@@ -4,6 +4,7 @@ import { getCachedState } from '../kasa/device.cache';
 import { getDriver } from '../drivers/registry';
 import { emitDeviceState } from '../socket';
 import { logger } from '../logger';
+import { findDeviceByName } from './find-device';
 
 export interface ChatMessage {
   role: 'user' | 'assistant';
@@ -158,8 +159,9 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
     case 'set_power_state': {
       const alias = String(args.alias ?? '');
       const state = String(args.state ?? '') === 'on';
-      const device = db.prepare('SELECT * FROM devices WHERE alias = ? COLLATE NOCASE').get(alias) as any;
-      if (!device) return { error: `Device "${alias}" not found. Use list_devices to see available devices.` };
+      const match = findDeviceByName(alias);
+      if ('error' in match) return { error: match.error };
+      const device = match.device as any;
       const driverConfig = device.driver_config ? JSON.parse(device.driver_config) : undefined;
       await getDriver(device.driver_type ?? 'kasa').setPower(device.ip, state, driverConfig);
       emitDeviceState(device.id, device.alias, state, getCachedState(device.id)?.wattage ?? null);
@@ -168,8 +170,9 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
 
     case 'get_energy_metrics': {
       const alias = String(args.alias ?? '');
-      const device = db.prepare('SELECT * FROM devices WHERE alias = ? COLLATE NOCASE').get(alias) as any;
-      if (!device) return { error: `Device "${alias}" not found` };
+      const match = findDeviceByName(alias);
+      if ('error' in match) return { error: match.error };
+      const device = match.device as any;
       if (!device.has_emeter) return { error: `"${alias}" does not support energy monitoring` };
       const driverConfig = device.driver_config ? JSON.parse(device.driver_config) : undefined;
       const metrics = await getDriver(device.driver_type ?? 'kasa').getEnergy(device.ip, driverConfig);
@@ -185,8 +188,9 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
       const solarEvent          = args.solar_event ? String(args.solar_event) : null;
       const solarOffsetMinutes  = args.solar_offset_minutes ? parseInt(String(args.solar_offset_minutes), 10) : 0;
 
-      const device = db.prepare('SELECT * FROM devices WHERE alias = ? COLLATE NOCASE').get(alias) as any;
-      if (!device) return { error: `Device "${alias}" not found` };
+      const match = findDeviceByName(alias);
+      if ('error' in match) return { error: match.error };
+      const device = match.device as any;
       if (triggerType === 'cron' && !cronExpression) return { error: 'cron_expression is required for cron schedules' };
       if (triggerType === 'solar' && !solarEvent)    return { error: 'solar_event is required for solar schedules' };
 
