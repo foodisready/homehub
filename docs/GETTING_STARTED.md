@@ -31,6 +31,7 @@ Local-first smart plug automation for Raspberry Pi. No cloud accounts required.
    - `WATCHTOWER_HTTP_API_TOKEN` — generate with `openssl rand -hex 32`
    - `ADMIN_PASSWORD` — your initial admin password
    - `LATITUDE` / `LONGITUDE` — your home coordinates (for solar scheduling)
+   - `TIMEZONE` / `TZ` — your time zone, for example `America/New_York` (fixed-time schedules run in UTC without `TZ`)
    - `TS_AUTHKEY` — your Tailscale auth key (or leave blank if using Headscale)
 
 3. **Build and start all services**

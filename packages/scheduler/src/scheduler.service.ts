@@ -39,6 +39,9 @@ export class SchedulerService {
     this.lon         = parseFloat(process.env.LONGITUDE || '-122.4194');
     this.backendUrl  = process.env.BACKEND_URL   || 'http://backend:3000';
     this.internalKey = process.env.INTERNAL_API_KEY || '';
+    if (this.lat === 37.7749 && this.lon === -122.4194) {
+      logger.warn('LATITUDE and LONGITUDE are the San Francisco example values, so solar schedules will run at the wrong time');
+    }
   }
 
   /** Load all enabled schedules from DB and register their jobs. */
