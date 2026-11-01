@@ -64,6 +64,55 @@ describe('device address updates', () => {
     db.prepare('DELETE FROM devices').run();
   });
 
+  it('stores nicknames without blanks or repeats, and returns them', async () => {
+    const id = register('Brenden desk', '10.0.0.1');
+
+    const res = await send('PATCH', `/${id}`, { nicknames: [' desk lamp', '', 'desk lamp', 'study'] });
+
+    assert.equal(res.status, 200);
+    assert.deepEqual(((await res.json()) as any).nicknames, ['desk lamp', 'study']);
+  });
+
+  it('rejects nicknames that are not a list of names', async () => {
+    const id = register('Lamp', '10.0.0.1');
+
+    assert.equal((await send('PATCH', `/${id}`, { nicknames: 'desk lamp' })).status, 400);
+    assert.equal((await send('PATCH', `/${id}`, { nicknames: [1] })).status, 400);
+  });
+
+  it('turns protection on and off', async () => {
+    const id = register('Heater', '10.0.0.1');
+
+    assert.equal(((await (await send('PATCH', `/${id}`, { isProtected: true })).json()) as any).isProtected, true);
+    assert.equal(((await (await send('PATCH', `/${id}`, { alias: 'Space heater' })).json()) as any).isProtected, true);
+    assert.equal(((await (await send('PATCH', `/${id}`, { isProtected: false })).json()) as any).isProtected, false);
+  });
+
+  it('always reports a valve as protected', async () => {
+    const id = register('Main Valve', '10.0.0.1');
+
+    assert.equal(((await (await send('PATCH', `/${id}`, { isProtected: false })).json()) as any).isProtected, true);
+  });
+
+  it('reports a failed timer and stores nothing', async () => {
+    const id = register('Lamp', '10.0.0.1');
+    const { getDriver } = await import('../drivers/registry');
+    const driver = getDriver('kasa');
+    const original = driver.setPower;
+    driver.setPower = async () => { throw new Error('unreachable'); };
+
+    try {
+      const res = await send('POST', `/${id}/override`, { state: true, durationMinutes: 60 });
+      assert.equal(res.status, 503);
+    } finally {
+      driver.setPower = original;
+    }
+
+    const stored = db.prepare('SELECT override_until, timer_off_at FROM devices WHERE id = ?').get(id) as any;
+    assert.equal(stored.override_until, null);
+    assert.equal(stored.timer_off_at, null);
+  });
+
   it('applies a move and stores the MAC', async () => {
     const id = register('vinyl lamp', '192.168.86.138');
 

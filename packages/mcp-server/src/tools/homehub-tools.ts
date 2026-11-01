@@ -73,14 +73,25 @@ export function registerHomeHubTools(server: McpServer): void {
   server.registerTool(
     'set_power_state',
     {
-      description: 'Turn a smart plug on or off by its alias/name.',
+      description: 'Turn a smart plug on or off by its alias/name, optionally turning it back off after a set time. Protected devices, such as water valves, cannot be switched here.',
       inputSchema: {
         device_alias: z.string().describe('Device name/alias, e.g. "Living Room Lamp"'),
         state:        z.enum(['on', 'off']).describe('"on" to turn on, "off" to turn off'),
+        minutes:      z.number().positive().optional().describe('Only with state "on": turn the device off after this many minutes'),
       },
     },
-    async ({ device_alias, state }) => {
+    async ({ device_alias, state, minutes }) => {
       try {
+        const path = `/api/devices/${encodeURIComponent(device_alias)}`;
+        const device = await apiRequest<any>('GET', path);
+        if (device.isProtected) {
+          return err(`${device.alias} is protected. Ask the user to use its tile on the dashboard.`);
+        }
+        if (minutes !== undefined) {
+          if (state === 'off') return err('minutes only works when turning a device on');
+          await apiRequest<any>('POST', `${path}/override`, { state: true, durationMinutes: minutes });
+          return ok(`Turned ON: ${device.alias}, turning off in ${minutes} minute(s)`);
+        }
         const action = state === 'on' ? 'on' : 'off';
         const result = await apiRequest<any>('POST', `/api/devices/${encodeURIComponent(device_alias)}/${action}`, {});
         return ok(`Turned ${state.toUpperCase()}: ${result.alias ?? device_alias}`);

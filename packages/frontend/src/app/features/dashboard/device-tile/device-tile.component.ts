@@ -138,7 +138,7 @@ export interface OverrideRequest { device: Device; durationMinutes: number; }
           <button
             class="override-btn"
             [class.has-override]="device().overrideUntil"
-            [title]="device().overrideUntil ? 'Override active — click to change' : 'Override schedule'"
+            [title]="device().overrideUntil ? 'Timer active — click to change' : 'Set a timer'"
             (click)="togglePanel(); $event.stopPropagation()">⏱</button>
           <span class="status-dot"
                 [class.online-on]="device().online && device().state"
@@ -150,15 +150,15 @@ export interface OverrideRequest { device: Device; durationMinutes: number; }
 
       @if (device().overrideUntil) {
         <div class="override-badge">
-          <span>Override · until {{ formatUntil(device().overrideUntil!) }}</span>
-          <button class="override-cancel" title="Cancel override" (click)="overrideCancelled.emit(device())">×</button>
+          <span>{{ device().overrideState ? 'Turns off at' : 'Stays off until' }} {{ formatUntil(device().overrideUntil!) }}</span>
+          <button class="override-cancel" title="Cancel timer" (click)="overrideCancelled.emit(device())">×</button>
         </div>
       }
 
       @if (showPanel()) {
         <div class="override-panel">
           <span class="override-panel-label">
-            Keep {{ device().state ? 'ON' : 'OFF' }} for:
+            {{ device().state ? 'Turn off after:' : 'Keep off for:' }}
           </span>
           <div class="override-durations">
             <button class="override-dur-btn" (click)="emitOverride(60)">1h</button>

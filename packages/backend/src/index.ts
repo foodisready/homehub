@@ -33,6 +33,7 @@ import { checkAllSensors } from './sensors/stale-check';
 import { authenticate } from './middleware/auth';
 import { getDb } from './db';
 import { startPolling } from './kasa/device.cache';
+import { startPowerTimers } from './devices/power';
 import { seedAdminIfEmpty } from './auth/auth.service';
 import { initSocket } from './socket';
 
@@ -95,6 +96,7 @@ httpServer.listen(PORT, async () => {
   getDb();                   // init DB + run migrations
   await seedAdminIfEmpty();  // create default admin if DB is empty
   startPolling();            // begin device state polling
+  startPowerTimers();        // turn devices off when their timers end
 
   // Daily DB backup: run once at startup, then every 24 hours
   runBackup();

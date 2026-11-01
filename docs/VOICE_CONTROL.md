@@ -1,6 +1,6 @@
 # Voice Control Plan
 
-This is the plan for controlling HomeHub by voice without Google Home, Alexa or, if possible, Home Assistant. Voice control isn't built yet. Chat commands work, but HomeHub has no microphone input, speech recognition or spoken replies.
+This is the plan for controlling HomeHub by voice without Google Home, Alexa or, if possible, Home Assistant. Voice control isn't built yet. Chat commands and timers work, but HomeHub has no microphone input, speech recognition or spoken replies.
 
 ## Goal
 
@@ -21,19 +21,19 @@ Commands are handled in layers, fastest and most predictable first:
 2. **Decision model (optional):** Julia 1 could resolve wording the rules miss, by choosing from the device list.
 3. **Ollama:** handles open questions, on a machine with a capable GPU.
 
-Main Valve must ask for confirmation before any model-selected action switches it.
+Chat and MCP refuse to switch a protected device, whether a rule or a model picked it. A device is protected if it's marked in Settings, its name contains "valve", or a sensor uses it for automatic shutoff. It can still be switched from its dashboard tile. Voice needs a confirmation step before this can be relaxed.
 
 ## Build order
 
-1. Add a real "on for X time" feature. Store the turn-off time in the database so it survives restarts, and have the backend enforce it.
-2. Add rule-based command handling.
+1. ~~Add a real "on for X time" feature.~~ Done. The backend stores the turn-off time in `devices.timer_off_at` and checks it every 15 seconds, so a timer survives a restart.
+2. ~~Add rule-based command handling.~~ Done, in `packages/backend/src/nlp/commands.ts`. Anything the rules can't read goes to Ollama.
 3. Move HomeHub to the Raspberry Pi.
 4. Time Whisper on the Pi using a recorded phrase.
 5. Test the voice bridge with the Ava app on an Android tablet.
 6. If the bridge works, buy one Home Assistant Voice and test it in the room where it matters most.
 7. Add Julia 1 only if real commands show the rules missing too much.
 
-Steps 1 and 2 don't depend on the Pi, and step 5 can run on a Mac.
+Step 5 can run on a Mac.
 
 ## Connecting a speaker without Home Assistant
 
@@ -107,7 +107,7 @@ A model that hasn't loaded yet can take about 45 seconds on the first command.
 - Julia 1 scored 71.33% on its published choice benchmark, so its reported confidence shouldn't be treated as accuracy.
 - Don't assume published GPU speeds apply to a Pi.
 
-Prefer Julia 1 over Laya if one is needed, because it's smaller. Before relying on it, test about 30 of your own phrases on the Pi and measure accuracy and speed.
+`GET /api/nlp/stats` shows how often the rules miss, and on which messages, so check it before adding a model. Prefer Julia 1 over Laya if one is needed, because it's smaller. Before relying on it, test about 30 of your own phrases on the Pi and measure accuracy and speed.
 
 ### Raspberry Pi expectations
 

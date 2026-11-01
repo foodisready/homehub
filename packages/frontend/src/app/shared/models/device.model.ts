@@ -12,4 +12,6 @@ export interface Device {
   overrideUntil: string | null;   // ISO datetime string, null = no active override
   driverType:   string;
   driverConfig: Record<string, unknown> | null;
+  nicknames:    string[];
+  isProtected:  boolean;
 }

@@ -85,6 +85,13 @@ function migrate(db: Database.Database): void {
       state     INTEGER NOT NULL CHECK(state IN (0, 1))
     );
 
+    CREATE TABLE IF NOT EXISTS chat_commands (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      text       TEXT NOT NULL,
+      handled_by TEXT NOT NULL CHECK(handled_by IN ('rules', 'model')),
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
     CREATE TABLE IF NOT EXISTS settings (
       key   TEXT PRIMARY KEY,
       value TEXT NOT NULL DEFAULT ''
@@ -94,6 +101,9 @@ function migrate(db: Database.Database): void {
   // Additive migrations — safe to re-run (SQLite ignores duplicate column errors)
   try { db.exec('ALTER TABLE devices ADD COLUMN override_state INTEGER'); } catch {}
   try { db.exec('ALTER TABLE devices ADD COLUMN override_until TEXT'); } catch {}
+  try { db.exec('ALTER TABLE devices ADD COLUMN timer_off_at TEXT'); } catch {}
+  try { db.exec('ALTER TABLE devices ADD COLUMN nicknames TEXT'); } catch {}
+  try { db.exec('ALTER TABLE devices ADD COLUMN is_protected INTEGER NOT NULL DEFAULT 0'); } catch {}
   try { db.exec('ALTER TABLE devices ADD COLUMN turned_on_at TEXT'); } catch {}
   try { db.exec("ALTER TABLE devices ADD COLUMN driver_type TEXT NOT NULL DEFAULT 'kasa'"); } catch {}
   try { db.exec('ALTER TABLE devices ADD COLUMN driver_config TEXT'); } catch {}

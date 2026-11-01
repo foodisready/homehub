@@ -119,6 +119,37 @@ Turns device off.
 { "alias": "living-room-lamp", "state": false }
 ```
 
+Turning a device on or off by hand cancels any timer on it.
+
+---
+
+### `POST /api/devices/:id/override`
+Sets a timer and blocks schedules until it ends. With `state: true`, the device turns off when the timer ends, even if the backend restarted in between. With `state: false`, it's only protected from schedules.
+
+**Request**
+```json
+{ "state": true, "durationMinutes": 60 }
+```
+
+**Response 200:** the updated device, including `overrideState` and `overrideUntil`.
+
+---
+
+### `DELETE /api/devices/:id/override`
+Cancels the timer and leaves the device as it is.
+
+**Response 204**
+
+---
+
+### `GET /api/nlp/stats`
+Shows how many of the last 1,000 Chat messages the rules answered, and the latest messages they passed to the model.
+
+**Response 200**
+```json
+{ "total": 12, "rules": 9, "model": 3, "recentModel": [{ "text": "lights out", "createdAt": "2026-11-01T01:00:00Z" }] }
+```
+
 ---
 
 ### `GET /api/devices/:id/energy`

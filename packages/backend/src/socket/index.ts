@@ -48,6 +48,14 @@ export function emitDeviceState(
   _io?.emit('device:state', { id: deviceId, alias, state, wattage });
 }
 
+export function emitDeviceOverride(
+  deviceId: number,
+  overrideState: boolean | null,
+  overrideUntil: string | null,
+): void {
+  _io?.emit('device:override', { id: deviceId, overrideState, overrideUntil });
+}
+
 export function emitDeviceEnergy(
   deviceId: number,
   alias: string,

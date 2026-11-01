@@ -1,8 +1,14 @@
 import { Router, Request, Response } from 'express';
 import { processMessage, processMessageStream, type ChatMessage } from '../nlp/nlp.service';
+import { getCommandStats } from '../nlp/command-log';
 import { logger } from '../logger';
 
 export const nlpRouter = Router();
+
+// GET /api/nlp/stats  (how often the rules answered, and what they missed)
+nlpRouter.get('/stats', (_req: Request, res: Response) => {
+  res.json(getCommandStats());
+});
 
 // POST /api/nlp  (non-streaming, kept for compatibility)
 nlpRouter.post('/', async (req: Request, res: Response) => {

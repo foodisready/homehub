@@ -3,7 +3,7 @@ import { HttpClient } from '@angular/common/http';
 import { Router, RouterLink } from '@angular/router';
 import { DecimalPipe } from '@angular/common';
 import { AuthService } from '../../core/auth/auth.service';
-import { SocketService, DeviceStateEvent, DeviceOnlineEvent } from '../../core/socket/socket.service';
+import { SocketService, DeviceStateEvent, DeviceOnlineEvent, DeviceOverrideEvent } from '../../core/socket/socket.service';
 import { DeviceTileComponent, OverrideRequest } from './device-tile/device-tile.component';
 import { SystemStatusComponent } from './system-status.component';
 import { PhoneQrComponent } from './phone-qr.component';
@@ -18,10 +18,12 @@ import { Device } from '../../shared/models/device.model';
       display: flex;
       align-items: center;
       justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 0.75rem 1rem;
       margin-bottom: 1.5rem;
     }
     .topbar h1 { font-size: 1.4rem; font-weight: 700; }
-    .topbar-right { display: flex; align-items: center; gap: 1rem; }
+    .topbar-right { display: flex; align-items: center; flex-wrap: wrap; gap: 0.6rem 1rem; }
     .user-info { font-size: 0.85rem; color: var(--text-muted); }
     .btn-logout {
       background: transparent;
@@ -152,6 +154,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
   private unsubState?:  () => void;
   private unsubOnline?: () => void;
+  private unsubOverride?: () => void;
 
   constructor(
     readonly auth:   AuthService,
@@ -168,6 +171,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
   ngOnDestroy(): void {
     this.unsubState?.();
     this.unsubOnline?.();
+    this.unsubOverride?.();
   }
 
   private loadDevices(): void {
@@ -187,6 +191,14 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.unsubOnline = this.socket.onDeviceOnline((ev: DeviceOnlineEvent) => {
       this._devices.update((list) =>
         list.map((d) => d.id === ev.id ? { ...d, online: ev.online } : d)
+      );
+    });
+
+    this.unsubOverride = this.socket.onDeviceOverride((ev: DeviceOverrideEvent) => {
+      this._devices.update((list) =>
+        list.map((d) => d.id === ev.id
+          ? { ...d, overrideState: ev.overrideState, overrideUntil: ev.overrideUntil }
+          : d)
       );
     });
   }

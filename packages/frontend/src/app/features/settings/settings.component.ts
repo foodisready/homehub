@@ -5,6 +5,13 @@ import { RouterLink } from '@angular/router';
 import { AuthService } from '../../core/auth/auth.service';
 import { Device } from '../../shared/models/device.model';
 
+interface ChatStats {
+  total: number;
+  rules: number;
+  model: number;
+  recentModel: { text: string; createdAt: string }[];
+}
+
 interface UserRow {
   id:   number;
   name: string;
@@ -188,6 +195,14 @@ const DRIVER_LABEL: Record<string, string> = {
                     <input type="text" [(ngModel)]="editAlias" placeholder="Alias" />
                     <input type="text" [(ngModel)]="editIp"    placeholder="IP address" />
                   </div>
+                  <div class="edit-row" style="margin-top:0.4rem">
+                    <input type="text" [(ngModel)]="editNicknames" placeholder="Nicknames for Chat, separated by commas" autocomplete="off" />
+                  </div>
+                  <label style="display:flex;align-items:center;gap:0.4rem;margin-top:0.4rem;font-size:0.85rem">
+                    <input type="checkbox" style="width:auto" [(ngModel)]="editProtected" />
+                    Don't let Chat or AI assistants switch this device
+                  </label>
+                  <p style="font-size:0.75rem;color:var(--text-muted);margin:0.2rem 0 0">Valves and automatic shutoff devices are always protected.</p>
                   @if (d.driverType === 'shelly' || d.driverType === 'tuya') {
                     <div class="edit-row" style="margin-top:0.4rem">
                       <input type="text"     [(ngModel)]="editAuthUser" placeholder="Username (leave blank to clear)" autocomplete="off" />
@@ -565,6 +580,26 @@ const DRIVER_LABEL: Record<string, string> = {
 
       <!-- ── Preferences ───────────────────────────────────────── -->
       <div class="section">
+        <div class="section-title">Chat commands</div>
+        <div class="card">
+          @if (chatStats(); as stats) {
+            <p style="margin:0">
+              <strong>{{ stats.rules }}</strong> of {{ stats.total }} answered instantly by rules ·
+              <strong>{{ stats.model }}</strong> sent to the AI model
+            </p>
+            @if (stats.recentModel.length) {
+              <p style="font-size:0.75rem;color:var(--text-muted);margin:0.75rem 0 0.25rem">Latest messages sent to the AI model:</p>
+              @for (item of stats.recentModel.slice(0, 10); track $index) {
+                <div style="font-size:0.85rem;padding:0.15rem 0;overflow-wrap:anywhere">{{ item.text }}</div>
+              }
+            }
+          } @else {
+            <p style="margin:0;color:var(--text-muted)">No stats available.</p>
+          }
+        </div>
+      </div>
+
+      <div class="section">
         <div class="section-title">Preferences</div>
         <div class="card">
           <div class="pref-row">
@@ -604,10 +639,14 @@ export class SettingsComponent implements OnInit {
   readonly isAdmin = computed(() => this.auth.user()?.role === 'admin');
   readonly currentUser = computed(() => this.auth.user()?.name ?? '');
 
+  chatStats = signal<ChatStats | null>(null);
+
   // Device editing
   editingDeviceId = signal<number | null>(null);
   editAlias    = '';
   editIp       = '';
+  editNicknames = '';
+  editProtected = false;
   editAuthUser  = '';
   editAuthPass  = '';
   showAuthPass  = false;
@@ -710,6 +749,7 @@ export class SettingsComponent implements OnInit {
   constructor(readonly auth: AuthService, private http: HttpClient) {}
 
   ngOnInit(): void {
+    this.http.get<ChatStats>('/api/nlp/stats').subscribe({ next: (stats) => this.chatStats.set(stats) });
     this.http.get<Device[]>('/api/devices').subscribe((d) => this._devices.set(d));
     if (this.isAdmin()) {
       this.http.get<UserRow[]>('/api/users').subscribe((u) => this._users.set(u));
@@ -833,6 +873,8 @@ export class SettingsComponent implements OnInit {
     this.editingDeviceId.set(d.id);
     this.editAlias    = d.alias;
     this.editIp       = d.ip;
+    this.editNicknames = d.nicknames.join(', ');
+    this.editProtected = d.isProtected;
     // Pre-fill credentials if already stored
     const auth = (d.driverConfig as any)?.auth;
     this.editAuthUser = auth?.user ?? '';
@@ -857,7 +899,12 @@ export class SettingsComponent implements OnInit {
 
   saveDevice(id: number, driverType?: string): void {
     const device  = this.devices().find((d) => d.id === id);
-    const payload: Record<string, unknown> = { alias: this.editAlias, ip: this.editIp };
+    const payload: Record<string, unknown> = {
+      alias:     this.editAlias,
+      ip:        this.editIp,
+      nicknames: this.editNicknames.split(','),
+    };
+    if (this.editProtected !== device?.isProtected) payload['isProtected'] = this.editProtected;
 
     // For Shelly/Tuya, merge auth into driverConfig
     if (driverType === 'shelly' || driverType === 'tuya') {

@@ -57,6 +57,15 @@ describe('findDeviceByName', () => {
     assert.equal(foundAlias('office'), 'My office lamp');
   });
 
+  it('matches whole words only', () => {
+    assert.equal(foundAlias('it'), null);
+    assert.equal(foundAlias('off'), null);
+  });
+
+  it('treats singular and plural as the same word', () => {
+    assert.equal(foundAlias('kitchen light'), 'Kitchen lights');
+  });
+
   it('prefers an exact match over a longer name containing it', () => {
     assert.equal(foundAlias('long lamp'), 'Long Lamp');
   });
@@ -66,6 +75,35 @@ describe('findDeviceByName', () => {
     assert.ok('error' in match);
     assert.match(match.error, /"My office lamp"/);
     assert.match(match.error, /"Media long lamp"/);
+  });
+
+  it('finds a device by a nickname', () => {
+    db.prepare("UPDATE devices SET nicknames = ? WHERE alias = 'Long Lamp'")
+      .run(JSON.stringify(['Reading light', 'tall lamp']));
+
+    assert.equal(foundAlias('reading light'), 'Long Lamp');
+    assert.equal(foundAlias('the tall lamp'), 'Long Lamp');
+    assert.equal(foundAlias('reading'), 'Long Lamp');
+  });
+
+  it('refuses to guess when a nickname is another device\'s name', () => {
+    db.prepare("UPDATE devices SET nicknames = ? WHERE alias = 'Main Valve'")
+      .run(JSON.stringify(['Kitchen lights']));
+
+    const match = find('kitchen lights');
+    db.prepare("UPDATE devices SET nicknames = NULL WHERE alias = 'Main Valve'").run();
+
+    assert.ok('error' in match);
+    assert.deepEqual(match.candidates, ['"Main Valve"', '"Kitchen lights"']);
+  });
+
+  it('ignores a damaged nickname value', () => {
+    db.prepare("UPDATE devices SET nicknames = 'not json' WHERE alias = 'Kitchen lights'").run();
+
+    const alias = foundAlias('kitchen lights');
+    db.prepare("UPDATE devices SET nicknames = NULL WHERE alias = 'Kitchen lights'").run();
+
+    assert.equal(alias, 'Kitchen lights');
   });
 
   it('reports an unknown name', () => {

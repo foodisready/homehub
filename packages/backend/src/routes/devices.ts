@@ -6,6 +6,7 @@ import { getCachedState, getAllCachedStates } from '../kasa/device.cache';
 import { getDriver, getAllDrivers } from '../drivers/registry';
 import { emitDeviceState } from '../socket';
 import { logger } from '../logger';
+import { cancelPowerTimer, clearOverride, isProtectedDevice, setOverride } from '../devices/power';
 
 function confirmStateAsync(
   deviceId: number,
@@ -44,6 +45,8 @@ interface DeviceRow {
   driver_type: string;
   driver_config: string | null;
   mac: string | null;
+  nicknames: string | null;
+  is_protected: number;
 }
 
 function mergeWithCache(device: DeviceRow) {
@@ -64,6 +67,8 @@ function mergeWithCache(device: DeviceRow) {
       : null,
     driverType:   device.driver_type ?? 'kasa',
     driverConfig: device.driver_config ? JSON.parse(device.driver_config) : null,
+    nicknames:    device.nicknames ? JSON.parse(device.nicknames) as string[] : [],
+    isProtected:  isProtectedDevice(device),
   };
 }
 
@@ -94,6 +99,7 @@ devicesRouter.post('/:id/on', async (req: Request, res: Response) => {
     const config = device.driver_config ? JSON.parse(device.driver_config) : undefined;
     await getDriver(device.driver_type ?? 'kasa').setPower(device.ip, true, config);
     db.prepare("UPDATE devices SET turned_on_at = datetime('now') WHERE id = ?").run(device.id);
+    cancelPowerTimer(device.id);
     emitDeviceState(device.id, device.alias, true, getCachedState(device.id)?.wattage ?? null);
     confirmStateAsync(device.id, device.alias, device.driver_type ?? 'kasa', device.ip, config, true);
     res.json({ alias: device.alias, state: true });
@@ -114,6 +120,7 @@ devicesRouter.post('/:id/off', async (req: Request, res: Response) => {
     const config = device.driver_config ? JSON.parse(device.driver_config) : undefined;
     await getDriver(device.driver_type ?? 'kasa').setPower(device.ip, false, config);
     db.prepare('UPDATE devices SET turned_on_at = NULL WHERE id = ?').run(device.id);
+    cancelPowerTimer(device.id);
     emitDeviceState(device.id, device.alias, false, null);
     confirmStateAsync(device.id, device.alias, device.driver_type ?? 'kasa', device.ip, config, false);
     res.json({ alias: device.alias, state: false });
@@ -223,10 +230,17 @@ devicesRouter.patch('/:id', (req: Request, res: Response) => {
     .get(req.params.id, req.params.id) as DeviceRow | undefined;
   if (!device) return res.status(404).json({ error: 'Device not found', code: 'DEVICE_NOT_FOUND' });
 
-  const { alias, ip, icon, driverType, driverConfig, mac } = req.body as {
+  const { alias, ip, icon, driverType, driverConfig, mac, nicknames, isProtected } = req.body as {
     alias?: string; ip?: string; icon?: string;
     driverType?: string; driverConfig?: Record<string, unknown> | null; mac?: string;
+    nicknames?: string[]; isProtected?: boolean;
   };
+  if (nicknames !== undefined && (!Array.isArray(nicknames) || nicknames.some((n) => typeof n !== 'string'))) {
+    return res.status(400).json({ error: 'nicknames must be a list of names', code: 'VALIDATION_ERROR' });
+  }
+  if (isProtected !== undefined && typeof isProtected !== 'boolean') {
+    return res.status(400).json({ error: 'isProtected must be true or false', code: 'VALIDATION_ERROR' });
+  }
   const newAlias        = alias       ?? device.alias;
   const newIp           = ip          ?? device.ip;
   const newIcon         = icon        ?? device.icon;
@@ -235,10 +249,17 @@ devicesRouter.patch('/:id', (req: Request, res: Response) => {
     ? (driverConfig ? JSON.stringify(driverConfig) : null)
     : device.driver_config;
   const newMac          = mac         ?? device.mac;
+  const newNicknames    = nicknames
+    ? JSON.stringify([...new Set(nicknames.map((n) => n.trim()).filter(Boolean))])
+    : device.nicknames;
+  const newProtected    = isProtected === undefined ? device.is_protected : (isProtected ? 1 : 0);
 
   try {
-    db.prepare('UPDATE devices SET alias = ?, ip = ?, icon = ?, driver_type = ?, driver_config = ?, mac = ? WHERE id = ?')
-      .run(newAlias, newIp, newIcon, newDriverType, newDriverConfig, newMac, device.id);
+    db.prepare(`
+      UPDATE devices
+         SET alias = ?, ip = ?, icon = ?, driver_type = ?, driver_config = ?, mac = ?, nicknames = ?, is_protected = ?
+       WHERE id = ?
+    `).run(newAlias, newIp, newIcon, newDriverType, newDriverConfig, newMac, newNicknames, newProtected, device.id);
   } catch (err: any) {
     if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
       return res.status(409).json({ error: 'Another device already uses that name or IP address', code: 'CONFLICT' });
@@ -250,10 +271,10 @@ devicesRouter.patch('/:id', (req: Request, res: Response) => {
   res.json(mergeWithCache(updated));
 });
 
-// POST /api/devices/:id/override — freeze device in current state for N minutes
+// POST /api/devices/:id/override — hold a state for N minutes; a device held on then turns off
 devicesRouter.post('/:id/override', async (req: Request, res: Response) => {
   const { state, durationMinutes } = req.body as { state?: boolean; durationMinutes?: number };
-  if (typeof state !== 'boolean' || !durationMinutes || durationMinutes <= 0) {
+  if (typeof state !== 'boolean' || !Number.isFinite(durationMinutes) || durationMinutes! <= 0) {
     return res.status(400).json({ error: 'state (boolean) and durationMinutes (>0) are required', code: 'VALIDATION_ERROR' });
   }
 
@@ -262,9 +283,7 @@ devicesRouter.post('/:id/override', async (req: Request, res: Response) => {
     .get(req.params.id, req.params.id) as DeviceRow | undefined;
   if (!device) return res.status(404).json({ error: 'Device not found', code: 'DEVICE_NOT_FOUND' });
 
-  // Store until-time in SQLite datetime format (UTC) for easy comparison
-  db.prepare("UPDATE devices SET override_state = ?, override_until = datetime('now', ? || ' minutes') WHERE id = ?")
-    .run(state ? 1 : 0, String(durationMinutes), device.id);
+  setOverride(device.id, state, durationMinutes!);
 
   try {
     const config = device.driver_config ? JSON.parse(device.driver_config) : undefined;
@@ -272,6 +291,11 @@ devicesRouter.post('/:id/override', async (req: Request, res: Response) => {
     emitDeviceState(device.id, device.alias, state, getCachedState(device.id)?.wattage ?? null);
   } catch (err) {
     logger.warn({ ip: device.ip }, 'Could not apply override state immediately');
+    // A timer on a lamp that never came on would report something untrue.
+    if (state) {
+      clearOverride(device.id);
+      return res.status(503).json({ error: 'Device unreachable', code: 'DEVICE_UNREACHABLE' });
+    }
   }
 
   const updated = db.prepare('SELECT * FROM devices WHERE id = ?').get(device.id) as DeviceRow;
@@ -282,10 +306,10 @@ devicesRouter.post('/:id/override', async (req: Request, res: Response) => {
 // DELETE /api/devices/:id/override — cancel active override
 devicesRouter.delete('/:id/override', (req: Request, res: Response) => {
   const db = getDb();
-  const result = db.prepare(
-    'UPDATE devices SET override_state = NULL, override_until = NULL WHERE id = ? OR alias = ?'
-  ).run(req.params.id, req.params.id);
-  if (result.changes === 0) return res.status(404).json({ error: 'Device not found', code: 'DEVICE_NOT_FOUND' });
+  const device = db.prepare('SELECT id FROM devices WHERE id = ? OR alias = ?')
+    .get(req.params.id, req.params.id) as { id: number } | undefined;
+  if (!device) return res.status(404).json({ error: 'Device not found', code: 'DEVICE_NOT_FOUND' });
+  clearOverride(device.id);
   res.status(204).send();
 });
 

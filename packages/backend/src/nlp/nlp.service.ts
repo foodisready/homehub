@@ -2,9 +2,11 @@ import SunCalc from 'suncalc';
 import { getDb } from '../db';
 import { getCachedState } from '../kasa/device.cache';
 import { getDriver } from '../drivers/registry';
-import { emitDeviceState } from '../socket';
+import { applyPower, isProtectedDevice, type PowerDevice } from '../devices/power';
 import { logger } from '../logger';
 import { findDeviceByName } from './find-device';
+import { runPowerCommand } from './commands';
+import { recordCommand } from './command-log';
 
 export interface ChatMessage {
   role: 'user' | 'assistant';
@@ -54,12 +56,13 @@ const TOOLS: OllamaTool[] = [
     type: 'function',
     function: {
       name: 'set_power_state',
-      description: 'Turn a smart plug on or off by its name/alias',
+      description: 'Turn a smart plug on or off by its name/alias, optionally turning it back off after a set time',
       parameters: {
         type: 'object',
         properties: {
           alias: { type: 'string', description: 'Device alias (name). Use list_devices first if unsure.' },
           state: { type: 'string', enum: ['on', 'off'], description: '"on" to turn on, "off" to turn off' },
+          minutes: { type: 'string', description: 'Only with state "on": turn the device off after this many minutes, e.g. "60" for an hour' },
         },
         required: ['alias', 'state'],
       },
@@ -161,11 +164,15 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
       const state = String(args.state ?? '') === 'on';
       const match = findDeviceByName(alias);
       if ('error' in match) return { error: match.error };
-      const device = match.device as any;
-      const driverConfig = device.driver_config ? JSON.parse(device.driver_config) : undefined;
-      await getDriver(device.driver_type ?? 'kasa').setPower(device.ip, state, driverConfig);
-      emitDeviceState(device.id, device.alias, state, getCachedState(device.id)?.wattage ?? null);
-      return { success: true, alias: device.alias, state: state ? 'on' : 'off' };
+      const device = match.device as unknown as PowerDevice;
+      if (isProtectedDevice(device)) {
+        return { error: `${device.alias} is protected. Tell the user to use its tile on the dashboard.` };
+      }
+      const minutes = args.minutes ? Number(args.minutes) : undefined;
+      if (minutes !== undefined && !(minutes > 0)) return { error: 'minutes must be a positive number' };
+      if (minutes !== undefined && !state) return { error: 'minutes only works when turning a device on' };
+      await applyPower(device, state, minutes);
+      return { success: true, alias: device.alias, state: state ? 'on' : 'off', ...(minutes ? { minutes } : {}) };
     }
 
     case 'get_energy_metrics': {
@@ -339,6 +346,10 @@ export async function processMessage(
   userMessage: string,
   history: ChatMessage[],
 ): Promise<{ response: string; actions: ActionTaken[] }> {
+  const handled = await runPowerCommand(userMessage);
+  recordCommand(userMessage, handled ? 'rules' : 'model');
+  if (handled) return handled;
+
   const { messages, actions } = await resolveTools(userMessage, history);
 
   // The last message is already a text response (no tool calls) — return it directly
@@ -363,6 +374,15 @@ export async function* processMessageStream(
   userMessage: string,
   history: ChatMessage[],
 ): AsyncGenerator<StreamEvent> {
+  const handled = await runPowerCommand(userMessage);
+  recordCommand(userMessage, handled ? 'rules' : 'model');
+  if (handled) {
+    for (const action of handled.actions) yield { type: 'action', action };
+    yield { type: 'token', content: handled.response };
+    yield { type: 'done' };
+    return;
+  }
+
   const ollamaUrl = process.env.OLLAMA_URL ?? 'http://localhost:11434';
   const model     = process.env.OLLAMA_MODEL ?? 'llama3.2:3b';
 

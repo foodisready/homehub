@@ -15,6 +15,12 @@ export interface DeviceOnlineEvent {
   online: boolean;
 }
 
+export interface DeviceOverrideEvent {
+  id: number;
+  overrideState: boolean | null;
+  overrideUntil: string | null;
+}
+
 export interface SensorReadingEvent {
   id:           number;       // sensors.id
   sensorId:     string;       // sensors.sensor_id (the human key)
@@ -74,6 +80,11 @@ export class SocketService implements OnDestroy {
   onDeviceOnline(callback: (event: DeviceOnlineEvent) => void): () => void {
     this.socket?.on('device:online', callback);
     return () => this.socket?.off('device:online', callback);
+  }
+
+  onDeviceOverride(callback: (event: DeviceOverrideEvent) => void): () => void {
+    this.socket?.on('device:override', callback);
+    return () => this.socket?.off('device:override', callback);
   }
 
   onSensorReading(callback: (event: SensorReadingEvent) => void): () => void {
