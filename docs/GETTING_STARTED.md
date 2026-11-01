@@ -89,6 +89,7 @@ Local-first smart plug automation for Raspberry Pi. No cloud accounts required.
 | [KASA_SMART_PLUG.md](./KASA_SMART_PLUG.md) | Kasa local API research and MCP integration notes |
 | [REMOTE_ACCESS.md](./REMOTE_ACCESS.md) | Tailscale and Headscale setup, ACLs, member onboarding |
 | [mcp-connection.md](./mcp-connection.md) | Claude Desktop MCP connection config |
+| [VOICE_CONTROL.md](./VOICE_CONTROL.md) | Plan for local voice control, hardware options and AI models |
 
 ---
 
