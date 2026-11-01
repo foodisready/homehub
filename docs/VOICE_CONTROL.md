@@ -97,7 +97,7 @@ A model that hasn't loaded yet can take about 45 seconds on the first command.
 
 ### Decision models
 
-[Julia 1](https://huggingface.co/SupersonicLabs/Julia-1), [Laya](https://github.com/NandhaKishorM/laya) and Autotrust's JEV family choose from options you supply rather than generating text. They suit the Pi better than a chat model, but neither Julia 1 nor Laya has been tested here.
+[Julia 1](https://huggingface.co/SupersonicLabs/Julia-1), [Laya](https://github.com/NandhaKishorM/laya) and Autotrust's JEV family choose from options you supply rather than generating text. They suit the Pi better than a chat model. Julia 1 has been tested here, as described below. Laya hasn't.
 
 - They choose between fixed options, so they can't return free-form text or an arbitrary duration. Julia 1 can answer named questions, such as which tool, which device, on or off, and which of a fixed set of durations.
 - They always pick an option, even for a request that matches none of them, so the options need a "none of these" choice.
@@ -107,7 +107,26 @@ A model that hasn't loaded yet can take about 45 seconds on the first command.
 - Julia 1 scored 71.33% on its published choice benchmark, so its reported confidence shouldn't be treated as accuracy.
 - Don't assume published GPU speeds apply to a Pi.
 
-`GET /api/nlp/stats` shows how often the rules miss, and on which messages, so check it before adding a model. Prefer Julia 1 over Laya if one is needed, because it's smaller. Before relying on it, test about 30 of your own phrases on the Pi and measure accuracy and speed.
+`GET /api/nlp/stats` shows how often the rules miss, and on which messages, so check it before adding a model. Prefer Julia 1 over Laya if one is needed, because it's smaller. Before relying on it, measure its speed on the Pi.
+
+### Julia 1 test results
+
+Tested on an Apple M1 CPU on 2026-10-31, with 14 device names, 45 phrases written before the first run, and no connection to real devices. Of those, 27 phrases should switch a device: typos, speech errors and reworded commands. The other 18 match nothing or are unclear.
+
+| Question | First attempt | Reworded attempt |
+|---|---|---|
+| Which device, for the 27 commands | 19 right, 1 wrong, 7 "none" | Same |
+| Picks "none" for 12 unrelated requests | 12 of 12 | 12 of 12 |
+| On or off, for the 27 commands | 15 right | 11 right |
+| How long, for the 27 commands | 2 right | 1 right |
+| Of the commands it would run | 12 of 19 right | 7 of 21 right |
+
+- It's good at choosing a device and at refusing unrelated requests.
+- It isn't safe for on or off. It read "kill the kitchen lights" as on at 98% confidence, and a confidence cutoff doesn't fix this: at 95%, 2 of 6 actions were still wrong.
+- It can't be used for durations.
+- It took about 80 ms per command and about 600 MB of memory on the M1. Expect it to be slower on a Pi.
+
+If it's used, use it only to pick the device, and take on or off and the duration from rules. That combined design hasn't been tested yet.
 
 ### Raspberry Pi expectations
 
