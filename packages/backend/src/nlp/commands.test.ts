@@ -144,6 +144,135 @@ describe('chat commands', () => {
       assert.deepEqual(calls, []);
     });
 
+    describe('scenes', () => {
+      let sceneId: number;
+      const addAction = (alias: string, state: number) => db.prepare(
+        'INSERT INTO scene_actions (scene_id, device_id, state) SELECT ?, id, ? FROM devices WHERE alias = ?',
+      ).run(sceneId, state, alias);
+
+      beforeEach(() => {
+        db.prepare('DELETE FROM scenes').run();
+        sceneId = Number(db.prepare("INSERT INTO scenes (name) VALUES ('Goodnight')").run().lastInsertRowid);
+        addAction('My office lamp', 0);
+        addAction('Media long lamp', 1);
+      });
+      after(() => { db.prepare('DELETE FROM scenes').run(); });
+
+      for (const text of [
+        'run goodnight', 'goodnight', 'good night', 'Goodnight.', 'start the goodnight scene',
+        'activate scene goodnight', 'turn on goodnight',
+      ]) {
+        it(`runs a scene from "${text}"`, async () => {
+          const result = await commands.runPowerCommand(text);
+
+          assert.equal(result?.response, 'Ran Goodnight.');
+          assert.deepEqual(new Set(calls.map((call) => `${call.ip}=${call.state}`)),
+            new Set(['10.0.0.1=false', '10.0.0.3=true']));
+        });
+      }
+
+      it('needs the whole scene name', async () => {
+        assert.equal(await commands.runPowerCommand('run good'), null);
+        assert.deepEqual(calls, []);
+      });
+
+      it('does not turn "turn off" into running a scene', async () => {
+        assert.equal(await commands.runPowerCommand('turn off goodnight'), null);
+        assert.deepEqual(calls, []);
+      });
+
+      it('skips a protected device', async () => {
+        addAction('Main Valve', 0);
+        const result = await commands.runPowerCommand('run goodnight');
+
+        assert.equal(calls.length, 2);
+        assert.equal(result?.response, 'Ran part of Goodnight. Main Valve is protected, so I left it alone.');
+      });
+
+      it('reports a device it could not reach', async () => {
+        failing = true;
+        const result = await commands.runPowerCommand('run goodnight');
+        assert.match(result!.response, /^Ran part of Goodnight\. I couldn't reach/);
+      });
+
+      it('says when a scene has no devices', async () => {
+        db.prepare('DELETE FROM scene_actions').run();
+        const result = await commands.runPowerCommand('run goodnight');
+        assert.equal(result?.response, 'Goodnight has no devices in it.');
+      });
+    });
+
+    describe('devices sharing a nickname', () => {
+      const setNicknames = (alias: string, nicknames: string[]) =>
+        db.prepare('UPDATE devices SET nicknames = ? WHERE alias = ?').run(JSON.stringify(nicknames), alias);
+
+      beforeEach(() => {
+        setNicknames('My office lamp', ['upstairs lights']);
+        setNicknames('Media long lamp', ['upstairs lights']);
+      });
+      after(() => {
+        db.prepare("UPDATE devices SET nicknames = NULL WHERE alias IN ('My office lamp', 'Media long lamp', 'Main Valve')").run();
+      });
+
+      it('switches all of them', async () => {
+        const result = await commands.runPowerCommand('turn off the upstairs lights');
+
+        assert.equal(result?.actions.length, 2);
+        assert.match(result!.response, /^Turned off .+ and .+\.$/);
+        assert.equal(calls.length, 2);
+        assert.ok(calls.every((call) => call.state === false));
+      });
+
+      it('accepts the singular form of the nickname', async () => {
+        await commands.runPowerCommand('turn on upstairs light');
+        assert.equal(calls.length, 2);
+      });
+
+      it('applies a timer to each device', async () => {
+        const result = await commands.runPowerCommand('turn on the upstairs lights for an hour');
+        assert.match(result!.response, /for 1 hour\.$/);
+        const rows = db.prepare("SELECT timer_off_at FROM devices WHERE nicknames LIKE '%upstairs%'").all() as any[];
+        assert.ok(rows.every((row) => row.timer_off_at));
+      });
+
+      it('still asks when only part of the nickname is given', async () => {
+        const result = await commands.runPowerCommand('turn on the lamp');
+        assert.match(result!.response, /Which one/);
+        assert.deepEqual(calls, []);
+      });
+
+      it('never switches a protected device in the group', async () => {
+        setNicknames('Main Valve', ['upstairs lights']);
+        const result = await commands.runPowerCommand('turn off the upstairs lights');
+
+        assert.equal(calls.length, 2);
+        assert.match(result!.response, /Main Valve is protected/);
+        setNicknames('Main Valve', []);
+      });
+
+      it('reports the device it could not reach', async () => {
+        failing = true;
+        const result = await commands.runPowerCommand('turn off the upstairs lights');
+        assert.match(result!.response, /I couldn't reach/);
+      });
+
+      it('asks rather than grouping when the name is also a real device name', async () => {
+        setNicknames('Media long lamp', ['my office lamp']);
+        setNicknames('Long Lamp', ['my office lamp']);
+        const result = await commands.runPowerCommand('turn off my office lamp');
+
+        assert.match(result!.response, /Which one/);
+        assert.deepEqual(calls, []);
+        setNicknames('Long Lamp', []);
+      });
+
+      it('does not treat a single nickname as a group', async () => {
+        setNicknames('Media long lamp', []);
+        const result = await commands.runPowerCommand('turn off upstairs lights');
+        assert.equal(result?.response, 'Turned off My office lamp.');
+      });
+    });
+
     it('leaves an unknown name for the model', async () => {
       assert.equal(await commands.runPowerCommand('turn off the garage door'), null);
       assert.deepEqual(calls, []);

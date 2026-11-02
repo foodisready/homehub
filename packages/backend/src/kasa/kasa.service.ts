@@ -74,9 +74,11 @@ export async function getEnergyMetrics(ip: string): Promise<EnergyMetrics | null
   const plug = await getPlug(ip);
   if (!plug.supportsEmeter) return null;
 
-  const raw = (await plug.emeter.getRealtime()) as RealtimeNormalized;
+  return normalizeRealtime((await plug.emeter.getRealtime()) as RealtimeNormalized);
+}
 
-  // Normalise: v1 uses `power`, `voltage`, `current`; v2 uses `*_mw`, `*_mv`, `*_ma`
+/** v1 plugs report `power`, `voltage`, `current`; v2 report `*_mw`, `*_mv`, `*_ma`. */
+export function normalizeRealtime(raw: RealtimeNormalized): EnergyMetrics {
   const wattage = raw.power  ?? (raw.power_mw  != null ? raw.power_mw  / 1000 : null);
   const voltage = raw.voltage ?? (raw.voltage_mv != null ? raw.voltage_mv / 1000 : null);
   const current = raw.current ?? (raw.current_ma != null ? raw.current_ma / 1000 : null);

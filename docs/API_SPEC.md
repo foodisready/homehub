@@ -143,11 +143,18 @@ Cancels the timer and leaves the device as it is.
 ---
 
 ### `GET /api/nlp/stats`
-Shows how many of the last 1,000 Chat messages the rules answered, and the latest messages they passed to the model.
+Shows how many of the last 1,000 Chat messages the rules answered, and the latest messages they passed to the model. `voice` covers the last 1,000 spoken commands and lists the latest misses as speech recognition heard them.
 
 **Response 200**
 ```json
-{ "total": 12, "rules": 9, "model": 3, "recentModel": [{ "text": "lights out", "createdAt": "2026-11-01T01:00:00Z" }] }
+{
+  "total": 12, "rules": 9, "model": 3,
+  "recentModel": [{ "text": "lights out", "createdAt": "2026-11-01T01:00:00Z" }],
+  "voice": {
+    "total": 8, "understood": 7, "missed": 1,
+    "recentMissed": [{ "text": "office lamp", "createdAt": "2026-11-01T13:05:46Z" }]
+  }
+}
 ```
 
 ---
@@ -220,6 +227,29 @@ Update alias, IP or MAC address.
 
 ### `POST /api/devices/discover` — `admin` only
 Triggers subnet broadcast discovery. Returns found devices (not yet saved). Kasa results include `mac`. A result for a registered device now at a different IP includes `moved`; apply it with `PATCH /api/devices/:id`. Registered Kasa devices found at their stored IP under the same name have their MAC saved automatically.
+
+A device HomeHub found but can't log in to includes `needsLogin: true`. Newer Kasa plugs need the TP-Link account they were set up with, saved with `PUT /api/kasa/login`. Their results include `driverConfig: { "protocol": "klap" }`, which must be sent when registering them. Until the login works they're listed as `Kasa plug` plus the last four MAC characters. A Shelly login is stored per device in `driverConfig.auth`.
+
+### `GET /api/kasa/login` — `admin` only
+Returns `{ "username": string | null }`. The password is never returned.
+
+### `PUT /api/kasa/login` — `admin` only
+Body: `{ "username": string, "password": string }`. Checks the login on a plug, then saves it for every Kasa plug that needs a login. Returns `{ username, verified }`, where `verified` is false if no plug answered. Returns `422` with `KASA_LOGIN_REJECTED` if a plug refuses it, and nothing is saved. HomeHub stores hashes of the login, not the password.
+
+### `DELETE /api/kasa/login` — `admin` only
+Forgets the saved login.
+
+### `/api/motion` — `admin` only
+Motion rules turn a light off after a room has had no motion for `offAfterMinutes`, and turn it on when motion starts if `turnOnWithMotion` is true. A rule does nothing until its sensor first reports.
+
+- `GET /api/motion` lists rules.
+- `POST /api/motion` takes `{ name, deviceId, offAfterMinutes, turnOnWithMotion }`. Protected devices are refused.
+- `PATCH /api/motion/:id` takes any of `{ name, deviceId, offAfterMinutes, turnOnWithMotion }`. The sensor doesn't need reconnecting.
+- `DELETE /api/motion/:id` removes a rule.
+- `POST /api/motion/:id/connect` takes `{ sensorIp, username, password }` and sets a Gen 1 Shelly Motion's `motion_on` and `motion_off` actions. The login is saved unless the sensor rejects it, a blank password reuses the saved one, and the password is never returned.
+
+### `GET /motion/:token/on` and `GET /motion/:token/off`
+Called by the sensor. The token is the auth, so these need no login. Returns `204`, or `404` for an unknown token.
 
 **Response 200**
 ```json

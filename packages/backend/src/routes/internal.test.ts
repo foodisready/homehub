@@ -21,6 +21,7 @@ process.env.JWT_REFRESH_SECRET = 'test-refresh-secret-test-refresh-secret';
 
 import { getDb } from '../db';
 import { internalRouter } from './internal';
+import { getDriver } from '../drivers/registry';
 
 let server: http.Server;
 let baseUrl: string;
@@ -169,4 +170,75 @@ describe('POST /internal/sensors/flow/readings — meterReachable handling', () 
     assert.equal(eventsAfter, eventsBefore, 'heartbeat path did not open or close events');
   });
 
+});
+
+describe('/internal/voice', () => {
+  const key = { 'X-Internal-Key': 'test-internal-key', 'Content-Type': 'application/json' };
+  const calls: { ip: string; state: boolean }[] = [];
+
+  const say = async (text: unknown) => {
+    const res = await fetch(`${baseUrl}/internal/voice/command`, {
+      method: 'POST', headers: key, body: JSON.stringify({ text }),
+    });
+    return { status: res.status, body: await res.json() as any };
+  };
+
+  before(() => {
+    getDriver('kasa').setPower = async (ip: string, state: boolean) => { calls.push({ ip, state }); };
+    const add = getDb().prepare('INSERT INTO devices (alias, ip, nicknames) VALUES (?, ?, ?)');
+    add.run('My office lamp', '10.9.0.1', '["desk light"]');
+    add.run('Main Valve', '10.9.0.2', '[]');
+  });
+
+  beforeEach(() => { calls.length = 0; });
+
+  it('runs a command the rules understand, including trailing punctuation', async () => {
+    const { body } = await say('Turn on my office lamp.');
+    assert.equal(body.handled, true);
+    assert.equal(body.response, 'Turned on My office lamp.');
+    assert.deepEqual(calls, [{ ip: '10.9.0.1', state: true }]);
+  });
+
+  it('accepts a command whose first word was cut off', async () => {
+    const { body } = await say('off my office lamp.');
+    assert.equal(body.response, 'Turned off My office lamp.');
+    assert.deepEqual(calls, [{ ip: '10.9.0.1', state: false }]);
+  });
+
+  it('accepts a spoken possessive', async () => {
+    getDb().prepare('INSERT INTO devices (alias, ip) VALUES (?, ?)').run('Brenden bed lamp', '10.9.0.3');
+    const { body } = await say("Turn on Brenden's bed lamp.");
+    assert.equal(body.response, 'Turned on Brenden bed lamp.');
+  });
+
+  it('does nothing for wording the rules cannot read', async () => {
+    const { body } = await say('Turn on my office lens.');
+    assert.equal(body.handled, false);
+    assert.deepEqual(calls, []);
+
+    const missed = getDb().prepare('SELECT text FROM voice_commands WHERE understood = 0 ORDER BY id DESC').get();
+    assert.deepEqual(missed, { text: 'Turn on my office lens.' });
+  });
+
+  it('refuses a protected device', async () => {
+    const { body } = await say('turn off the main valve');
+    assert.match(body.response, /protected/);
+    assert.deepEqual(calls, []);
+  });
+
+  it('rejects empty text', async () => {
+    assert.equal((await say('  ')).status, 400);
+    assert.equal((await say(5)).status, 400);
+  });
+
+  it('needs the internal key', async () => {
+    const res = await fetch(`${baseUrl}/internal/voice/device-names`);
+    assert.equal(res.status, 401);
+  });
+
+  it('lists names and nicknames', async () => {
+    const res = await fetch(`${baseUrl}/internal/voice/device-names`, { headers: key });
+    const { names } = await res.json() as { names: string[] };
+    for (const name of ['My office lamp', 'desk light', 'Main Valve']) assert.ok(names.includes(name));
+  });
 });

@@ -23,6 +23,21 @@ const foundAlias = (name: string) => {
 };
 
 describe('findDeviceByName', () => {
+  it('treats light and lamp as the same word when nothing else matches', () => {
+    assert.equal(foundAlias('my office light'), 'My office lamp');
+    assert.equal(foundAlias('office lights'), 'My office lamp');
+    assert.equal(foundAlias('kitchen lamp'), 'Kitchen lights');
+  });
+
+  it('asks when light could mean several lamps', () => {
+    const match = find('long light');
+    assert.deepEqual('candidates' in match ? match.candidates : null, ['"Long Lamp"', '"Media long lamp"']);
+  });
+
+  it('does not make a valve match by swapping words', () => {
+    assert.equal(foundAlias('valve light'), null);
+  });
+
   before(async () => {
     process.env.DB_PATH = path.join(TMP_BASE, 'db.sqlite');
     const { getDb } = await import('../db');

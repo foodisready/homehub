@@ -52,13 +52,14 @@ const SCENE_ICONS = ['💡','🌙','🌅','🎬','🏠','🎉','😴','🔒','�
 
     /* Create form */
     .form-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.6); display:flex; align-items:center; justify-content:center; padding:1rem; z-index:100; }
-    .form-card { width:100%; max-width:500px; }
+    .form-card { width:100%; max-width:500px; max-height:100%; overflow-y:auto; overscroll-behavior:contain; }
     .form-card h2 { font-size:1.2rem; font-weight:700; margin-bottom:1.25rem; }
     .field { margin-bottom:1rem; }
     label { display:block; font-size:0.82rem; font-weight:500; color:var(--text-muted); margin-bottom:0.3rem; }
     .icon-picker { display:flex; flex-wrap:wrap; gap:0.4rem; }
     .icon-btn {
-      width:2.2rem; height:2.2rem; font-size:1.2rem;
+      width:2.2rem; height:2.2rem; font-size:1.2rem; padding:0;
+      display:flex; align-items:center; justify-content:center;
       background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
     }
     .icon-btn.selected { border-color:var(--accent); background:rgba(59,130,246,0.15); }

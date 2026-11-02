@@ -1,6 +1,6 @@
 # Voice Control Plan
 
-This is the plan for controlling HomeHub by voice without Google Home, Alexa or, if possible, Home Assistant. Voice control isn't built yet. Chat commands and timers work, but HomeHub has no microphone input, speech recognition or spoken replies.
+This is the plan for controlling HomeHub by voice without Google Home, Alexa or, if possible, Home Assistant. A full voice loop has worked with Ava on an Android tablet through a test bridge, but that bridge isn't part of HomeHub yet.
 
 ## Goal
 
@@ -39,10 +39,18 @@ Step 5 can run on a Mac.
 
 ESPHome voice devices connect through the same protocol, so one bridge could serve several device types. The [`aioesphomeapi`](https://github.com/esphome/aioesphomeapi) Python library includes `subscribe_voice_assistant` and a way to send audio back, so a small HomeHub service should be able to receive voice directly.
 
-This hasn't been run against a real device. Two things need proving:
+Ava accepts a connection from a custom bridge. Tested on 2026-11-01 with [`brownard/Ava`](https://github.com/brownard/Ava) v0.6.2 on an Android tablet and `aioesphomeapi` 46.25.0 on an Apple M1, without Home Assistant:
 
-- Whether Ava accepts a connection from a custom bridge.
-- How to handle the Home Assistant Voice encryption key, because [its firmware](https://github.com/esphome/home-assistant-voice-pe) expects Home Assistant to set it.
+- The bridge connected and subscribed to voice with no password. Ava's port is unauthenticated.
+- The "Okay Nabu" wake word started a run, and audio arrived about 50 ms later as 16 kHz 16-bit mono.
+- With `base.en` on the M1 CPU, Whisper took under 1 second on a 10-second recording. It heard "office lens" until it was given the device names as a prompt, then heard "office lamp". That's one recording, so it isn't an accuracy measurement.
+- An earlier recording was almost silent and the cause wasn't found. The working one was made about 1 foot from the tablet. Distance needs testing, and Ava's microphone source setting may help.
+
+The full loop then worked: the wake word, Whisper, HomeHub's rules and a spoken Piper reply. HomeHub's reply was ready about 1 second after speech ended, on the Mac. Ava only streams after it detects the wake word, so people need to pause for about a second before speaking. HomeHub's voice route uses rules only, never a model, and records what it misses in `GET /api/nlp/stats`.
+
+Voice and Chat can switch several devices that share a nickname, and run a scene by its whole name, such as "run Goodnight". Protected devices are skipped in both cases.
+
+How to handle the Home Assistant Voice encryption key still needs proving, because [its firmware](https://github.com/esphome/home-assistant-voice-pe) expects Home Assistant to set it. The Ava test doesn't answer that.
 
 ### Rough effort
 

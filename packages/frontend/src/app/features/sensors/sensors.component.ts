@@ -7,11 +7,12 @@ import { SensorService } from '../../core/services/sensor.service';
 import { FirmwareService } from '../../core/services/firmware.service';
 import { SocketService } from '../../core/socket/socket.service';
 import type { Sensor, FirmwareRelease } from '../../shared/models/sensor.model';
+import { MotionRulesComponent } from './motion-rules.component';
 
 @Component({
   selector: 'app-sensors',
   standalone: true,
-  imports: [RouterLink, DatePipe, DecimalPipe, FormsModule],
+  imports: [RouterLink, DatePipe, DecimalPipe, FormsModule, MotionRulesComponent],
   styles: [`
     .topbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.5rem; }
     .topbar h1 { font-size: 1.4rem; font-weight: 700; }
@@ -135,6 +136,10 @@ import type { Sensor, FirmwareRelease } from '../../shared/models/sensor.model';
             </a>
           }
         </div>
+      }
+
+      @if (auth.user()?.role === 'admin') {
+        <app-motion-rules />
       }
     </div>
   `,

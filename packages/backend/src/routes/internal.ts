@@ -11,6 +11,9 @@ import { notify } from '../notifications/router';
 import { maybeFireShutoff } from '../sensors/shutoff';
 import { realInvoker, realNotifier } from '../sensors/shutoff-runtime';
 import { notifyStaleRecovery } from '../sensors/stale-check';
+import { runPowerCommand } from '../nlp/commands';
+import { recordVoiceCommand } from '../nlp/command-log';
+import { listDeviceNames, listSceneNames } from '../nlp/find-device';
 
 export const internalRouter = Router();
 
@@ -25,6 +28,30 @@ function stripIpv6Mapped(ip?: string): string | null {
   const m = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(ip);
   return m ? m[1] : ip;
 }
+
+// GET /internal/voice/device-names
+// Lets the voice bridge tell speech recognition which names to expect.
+internalRouter.get('/voice/device-names', (_req: Request, res: Response) => {
+  res.json({ names: [...listDeviceNames(), ...listSceneNames()] });
+});
+
+// POST /internal/voice/command  { text: string }
+// Rules only. Spoken text can be misheard, so a model never gets to guess a device from it.
+internalRouter.post('/voice/command', async (req: Request, res: Response) => {
+  const { text } = req.body as { text?: unknown };
+  if (typeof text !== 'string' || !text.trim()) {
+    return res.status(400).json({ error: '`text` is required', code: 'VALIDATION_ERROR' });
+  }
+
+  // The wake word can swallow the first word, leaving "off my office lamp".
+  const spoken = text.trim().replace(/^(on|off)\s/i, 'turn $1 ');
+
+  const handled = await runPowerCommand(spoken);
+  recordVoiceCommand(text.trim(), handled !== null);
+  if (!handled) return res.json({ handled: false, response: "Sorry, I didn't understand that.", actions: [] });
+
+  res.json({ handled: true, ...handled });
+});
 
 // POST /internal/devices/:id/execute  { state: boolean }
 // Called by the scheduler when a scheduled action fires.

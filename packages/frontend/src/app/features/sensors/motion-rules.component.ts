@@ -1,0 +1,229 @@
+import { Component, OnInit, computed, inject, signal } from '@angular/core';
+import { DatePipe } from '@angular/common';
+import { HttpClient } from '@angular/common/http';
+import { FormsModule } from '@angular/forms';
+import type { Device } from '../../shared/models/device.model';
+
+interface MotionRule {
+  id:              number;
+  name:            string;
+  deviceId:        number;
+  deviceAlias:     string;
+  offAfterMinutes: number;
+  turnOnWithMotion: boolean;
+  sensorIp:        string | null;
+  sensorUsername:  string | null;
+  hasSensorPassword: boolean;
+  occupied:        boolean;
+  lastMotionAt:    string | null;
+}
+
+@Component({
+  selector: 'app-motion-rules',
+  standalone: true,
+  imports: [DatePipe, FormsModule],
+  styles: [`
+    .title { font-size: 1.1rem; font-weight: 700; margin: 2rem 0 0.25rem; }
+    .sub { color: var(--text-muted); font-size: 0.85rem; margin-bottom: 0.75rem; }
+    .rule, .form {
+      display: flex; flex-direction: column; gap: 0.6rem;
+      padding: 1rem; margin-bottom: 0.75rem;
+      border: 1px solid var(--border); border-radius: 8px; background: var(--surface);
+    }
+    .head { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; }
+    .head input.name { flex: 1 1 12rem; min-width: 0; width: auto; font-weight: 600; }
+    .meta { color: var(--text-muted); font-size: 0.82rem; }
+    .fields { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+    .fields input, .fields select { flex: 1 1 10rem; min-width: 0; width: auto; }
+    .fields input.minutes { flex: 0 1 6rem; }
+    select {
+      font-family: inherit; font-size: 1rem; background: var(--bg); color: var(--text);
+      border: 1px solid var(--border); border-radius: var(--radius); padding: 0.6rem 0.9rem;
+    }
+    .check { display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; }
+    .check input { width: auto; }
+    .ok { color: #4ade80; font-size: 0.85rem; }
+    .err { color: #f87171; font-size: 0.85rem; }
+    .btn-remove { background: transparent; border: 1px solid var(--border); color: var(--text-muted); padding: 0.3rem 0.7rem; font-size: 0.8rem; }
+  `],
+  template: `
+    <h2 class="title">Motion lights</h2>
+    <p class="sub">Turns a light off when a room has had no motion for a while, and can turn it on when motion starts.</p>
+
+    @for (rule of rules(); track rule.id) {
+      <div class="rule">
+        <div class="head">
+          <input class="name" [ngModel]="rule.name" aria-label="Rule name" autocomplete="off"
+                 (change)="save(rule, { name: value($event) })" />
+          <button class="btn-remove" (click)="remove(rule)">Remove</button>
+        </div>
+        <div class="meta">
+          @if (rule.lastMotionAt) {
+            {{ rule.occupied ? 'Motion now' : 'Last motion ' + (rule.lastMotionAt | date:'short') }}
+          } @else {
+            Waiting for the sensor's first report, so this rule isn't active yet
+          }
+        </div>
+        <div class="fields">
+          <select [ngModel]="rule.deviceId" aria-label="Light" (ngModelChange)="save(rule, { deviceId: $event })">
+            @for (device of lights(); track device.id) {
+              <option [ngValue]="device.id">{{ device.alias }}</option>
+            }
+          </select>
+        </div>
+        <div class="fields">
+          <label class="meta" [for]="'minutes-' + rule.id">Turn off after (minutes)</label>
+          <input class="minutes" type="number" min="1" max="1440" [id]="'minutes-' + rule.id"
+                 [ngModel]="rule.offAfterMinutes" (change)="save(rule, { offAfterMinutes: toNumber($event) })" />
+        </div>
+        <label class="check">
+          <input type="checkbox" [checked]="rule.turnOnWithMotion" (change)="save(rule, { turnOnWithMotion: checked($event) })" />
+          Turn on when motion starts
+        </label>
+        @if (connecting() === rule.id) {
+          <div class="fields">
+            <input [(ngModel)]="sensorIp" placeholder="Sensor IP address" autocomplete="off" />
+            <input [(ngModel)]="username" placeholder="Sensor username" autocomplete="off" />
+            <input [(ngModel)]="password" type="password" autocomplete="new-password"
+                   [placeholder]="rule.hasSensorPassword ? 'Password saved' : 'Sensor password'" />
+            <button class="btn-primary" [disabled]="!sensorIp.trim() || busy()" (click)="connect(rule)">
+              {{ busy() ? 'Connecting…' : 'Connect' }}
+            </button>
+          </div>
+          <span class="meta">Press the sensor's button first to wake it. HomeHub saves this login, so you won't need to enter it again.</span>
+        } @else {
+          <div><button class="btn-remove" (click)="startConnect(rule)">Connect sensor</button></div>
+        }
+        @if (messageFor() === rule.id && message()) {
+          <span [class]="failed() ? 'err' : 'ok'">{{ message() }}</span>
+        }
+      </div>
+    }
+
+    <div class="form">
+      <div class="fields">
+        <input [(ngModel)]="newName" placeholder="Name, such as Kitchen" autocomplete="off" />
+        <select [(ngModel)]="newDeviceId">
+          <option [ngValue]="null">Choose a light</option>
+          @for (device of lights(); track device.id) {
+            <option [ngValue]="device.id">{{ device.alias }}</option>
+          }
+        </select>
+        <input class="minutes" type="number" min="1" max="1440" [(ngModel)]="newMinutes" aria-label="Minutes without motion" />
+        <button class="btn-primary" [disabled]="!newName.trim() || !newDeviceId" (click)="create()">Add</button>
+      </div>
+      <label class="check">
+        <input type="checkbox" [(ngModel)]="newTurnOn" />
+        Turn on when motion starts
+      </label>
+      @if (createError()) { <span class="err">{{ createError() }}</span> }
+    </div>
+  `,
+})
+export class MotionRulesComponent implements OnInit {
+  private http = inject(HttpClient);
+
+  readonly rules   = signal<MotionRule[]>([]);
+  private devices  = signal<Device[]>([]);
+  readonly lights  = computed(() =>
+    this.devices().filter((d) => !d.isProtected).sort((a, b) => a.alias.localeCompare(b.alias)));
+
+  newName = '';
+  newDeviceId: number | null = null;
+  newMinutes = 10;
+  newTurnOn = true;
+  readonly createError = signal('');
+
+  sensorIp = '';
+  username = '';
+  password = '';
+  readonly connecting = signal<number | null>(null);
+  readonly busy       = signal(false);
+  readonly message    = signal('');
+  readonly messageFor = signal<number | null>(null);
+  readonly failed     = signal(false);
+
+  ngOnInit(): void {
+    this.load();
+    this.http.get<Device[]>('/api/devices').subscribe((devices) => this.devices.set(devices));
+  }
+
+  private load(): void {
+    this.http.get<MotionRule[]>('/api/motion').subscribe((rules) => this.rules.set(rules));
+  }
+
+  private show(rule: MotionRule, text: string, failed: boolean): void {
+    this.messageFor.set(rule.id);
+    this.message.set(text);
+    this.failed.set(failed);
+  }
+
+  create(): void {
+    this.createError.set('');
+    this.http.post('/api/motion', {
+      name: this.newName.trim(), deviceId: this.newDeviceId,
+      offAfterMinutes: Number(this.newMinutes), turnOnWithMotion: this.newTurnOn,
+    }).subscribe({
+      next: () => {
+        this.newName = '';
+        this.newDeviceId = null;
+        this.newMinutes = 10;
+        this.load();
+      },
+      error: (err) => this.createError.set(err.error?.error ?? 'Could not add the rule.'),
+    });
+  }
+
+  value(event: Event): string {
+    return (event.target as HTMLInputElement).value;
+  }
+
+  toNumber(event: Event): number {
+    return Number(this.value(event));
+  }
+
+  checked(event: Event): boolean {
+    return (event.target as HTMLInputElement).checked;
+  }
+
+  save(rule: MotionRule, changes: Partial<MotionRule>): void {
+    this.http.patch(`/api/motion/${rule.id}`, changes).subscribe({
+      next: () => { this.show(rule, 'Saved', false); this.load(); },
+      error: (err) => {
+        this.show(rule, err.error?.error ?? 'Could not save.', true);
+        this.load();
+      },
+    });
+  }
+
+  remove(rule: MotionRule): void {
+    this.http.delete(`/api/motion/${rule.id}`).subscribe(() => this.load());
+  }
+
+  startConnect(rule: MotionRule): void {
+    this.connecting.set(rule.id);
+    this.message.set('');
+    this.sensorIp = rule.sensorIp ?? '';
+    this.username = rule.sensorUsername ?? '';
+    this.password = '';
+  }
+
+  connect(rule: MotionRule): void {
+    this.busy.set(true);
+    this.http.post(`/api/motion/${rule.id}/connect`, {
+      sensorIp: this.sensorIp.trim(), username: this.username.trim(), password: this.password,
+    }).subscribe({
+      next: () => {
+        this.busy.set(false);
+        this.password = '';
+        this.connecting.set(null);
+        this.load();
+        this.show(rule, 'Sensor connected. Wave at it to activate this rule.', false);
+      },
+      error: (err) => {
+        this.busy.set(false);
+        this.show(rule, err.error?.error ?? 'Could not connect the sensor.', true);
+      },
+    });
+  }
+}

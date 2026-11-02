@@ -32,6 +32,26 @@ describe('chat command log', () => {
 
   beforeEach(() => {
     db.prepare('DELETE FROM chat_commands').run();
+    db.prepare('DELETE FROM voice_commands').run();
+  });
+
+  it('counts voice commands apart from Chat and lists what was misheard, newest first', () => {
+    log.recordVoiceCommand('turn on lamp', true);
+    log.recordVoiceCommand('i love my lamp', false);
+    log.recordVoiceCommand('office lamp', false);
+
+    const stats = log.getCommandStats();
+
+    assert.equal(stats.total, 0);
+    assert.equal(stats.voice.total, 3);
+    assert.equal(stats.voice.understood, 1);
+    assert.equal(stats.voice.missed, 2);
+    assert.deepEqual(stats.voice.recentMissed.map((r) => r.text), ['office lamp', 'i love my lamp']);
+  });
+
+  it('reports no voice commands on an empty log', () => {
+    const { voice } = log.getCommandStats();
+    assert.deepEqual(voice, { total: 0, understood: 0, missed: 0, recentMissed: [] });
   });
 
   it('counts each handler and lists what the model received, newest first', () => {

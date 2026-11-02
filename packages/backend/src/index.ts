@@ -22,6 +22,8 @@ import { energyRouter } from './routes/energy';
 import { pushRouter } from './routes/push';
 import { scenesRouter } from './routes/scenes';
 import { tuyaRouter }   from './routes/tuya';
+import { kasaRouter }   from './routes/kasa';
+import { motionEventsRouter, motionRouter } from './routes/motion';
 import { sensorsRouter } from './routes/sensors';
 import { firmwareApiRouter, firmwarePublicRouter } from './routes/firmware';
 import { notificationsAckRouter } from './routes/notifications-ack';
@@ -30,10 +32,11 @@ import { notificationHistoryRouter } from './routes/notification-history';
 import { systemRouter } from './routes/system';
 import { runBackup } from './db/backup';
 import { checkAllSensors } from './sensors/stale-check';
-import { authenticate } from './middleware/auth';
+import { authenticate, requireAdmin } from './middleware/auth';
 import { getDb } from './db';
 import { startPolling } from './kasa/device.cache';
 import { startPowerTimers } from './devices/power';
+import { startMotionRules } from './sensors/motion';
 import { seedAdminIfEmpty } from './auth/auth.service';
 import { initSocket } from './socket';
 
@@ -63,6 +66,9 @@ app.use('/api/notifications/ack', notificationsAckRouter);
 //    LAN-trust posture for sensor traffic.
 app.use('/firmware', firmwarePublicRouter);
 
+// ── Public motion events — sensors can't log in, so the URL's token is the auth.
+app.use('/motion', motionEventsRouter);
+
 // ── All routes below require a valid JWT ──────────────────────
 app.use('/api', (req: Request, res: Response, next: NextFunction) => {
   authenticate(req, res, next);
@@ -76,6 +82,8 @@ app.use('/api/push',      pushRouter);
 app.use('/api/scenes',    scenesRouter);
 app.use('/api/devices',   energyRouter);   // history sub-routes: /api/devices/:id/energy/history
 app.use('/api/tuya',      tuyaRouter);
+app.use('/api/kasa',      requireAdmin, kasaRouter);
+app.use('/api/motion',    requireAdmin, motionRouter);
 app.use('/api/sensors',   sensorsRouter);
 app.use('/api/firmware',  firmwareApiRouter);
 app.use('/api/notifications/settings', notificationSettingsRouter);
@@ -97,6 +105,7 @@ httpServer.listen(PORT, async () => {
   await seedAdminIfEmpty();  // create default admin if DB is empty
   startPolling();            // begin device state polling
   startPowerTimers();        // turn devices off when their timers end
+  startMotionRules();        // turn lights off when a room has been empty long enough
 
   // Daily DB backup: run once at startup, then every 24 hours
   runBackup();

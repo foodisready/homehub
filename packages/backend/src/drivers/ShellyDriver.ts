@@ -19,6 +19,15 @@ function localSubnets(): string[] {
 interface ShellyConfig {
   gen?: 1 | 2;
   auth?: { user: string; pass: string };
+  /** Which relay to use on a multi-channel Shelly, such as the 2.5. Defaults to the first. */
+  channel?: number;
+}
+
+const channelOf = ({ channel }: ShellyConfig) => (Number.isInteger(channel) && channel! > 0 ? channel! : 0);
+
+/** Gen 2 devices report `auth_en` and Gen 1 report `auth`, both without a login. */
+function loginRequired(info: { auth_en?: boolean; auth?: boolean }): boolean {
+  return info.auth_en === true || info.auth === true;
 }
 
 async function shellyFetch(url: string, options: RequestInit = {}, auth?: ShellyConfig['auth']): Promise<any> {
@@ -40,14 +49,15 @@ export class ShellyDriver implements DeviceDriver {
 
   async setPower(ip: string, on: boolean, config?: Record<string, unknown>): Promise<void> {
     const { gen, auth } = (config ?? {}) as ShellyConfig;
+    const channel = channelOf(config ?? {});
     if (gen === 2) {
       await shellyFetch(`http://${ip}/rpc/Switch.Set`, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ id: 0, on }),
+        body:    JSON.stringify({ id: channel, on }),
       }, auth);
     } else {
-      const result = await shellyFetch(`http://${ip}/relay/0?turn=${on ? 'on' : 'off'}`, {}, auth);
+      const result = await shellyFetch(`http://${ip}/relay/${channel}?turn=${on ? 'on' : 'off'}`, {}, auth);
       logger.debug({ ip, on, ison: result?.ison }, 'Shelly Gen1 relay response');
       if (result && 'ison' in result && result.ison !== on) {
         throw new Error(`Shelly relay did not switch: expected ${on}, device reports ison=${result.ison}`);
@@ -57,27 +67,29 @@ export class ShellyDriver implements DeviceDriver {
 
   async getPower(ip: string, config?: Record<string, unknown>): Promise<boolean> {
     const { gen, auth } = (config ?? {}) as ShellyConfig;
+    const channel = channelOf(config ?? {});
     if (gen === 2) {
       const status = await shellyFetch(`http://${ip}/rpc/Switch.GetStatus`, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ id: 0 }),
+        body:    JSON.stringify({ id: channel }),
       }, auth);
       return status.output === true;
     } else {
-      const relay = await shellyFetch(`http://${ip}/relay/0`, {}, auth);
+      const relay = await shellyFetch(`http://${ip}/relay/${channel}`, {}, auth);
       return relay.ison === true;
     }
   }
 
   async getEnergy(ip: string, config?: Record<string, unknown>): Promise<EnergyMetrics | null> {
     const { gen, auth } = (config ?? {}) as ShellyConfig;
+    const channel = channelOf(config ?? {});
     try {
       if (gen === 2) {
         const status = await shellyFetch(`http://${ip}/rpc/Switch.GetStatus`, {
           method:  'POST',
           headers: { 'Content-Type': 'application/json' },
-          body:    JSON.stringify({ id: 0 }),
+          body:    JSON.stringify({ id: channel }),
         }, auth);
         if (!('apower' in status)) return null;
         return {
@@ -86,7 +98,7 @@ export class ShellyDriver implements DeviceDriver {
           current: status.current ?? null,
         };
       } else {
-        const meter = await shellyFetch(`http://${ip}/meter/0`, {}, auth);
+        const meter = await shellyFetch(`http://${ip}/meter/${channel}`, {}, auth);
         if (!meter.is_valid) return null;
         return {
           wattage: meter.power   ?? null,
@@ -121,6 +133,7 @@ export class ShellyDriver implements DeviceDriver {
           model:       info.model ?? info.app ?? 'Shelly',
           hasEmeter,
           driverConfig: { gen: 2, ...(auth ? { auth } : {}) },
+          ...(!auth && loginRequired(info) ? { needsLogin: true } : {}),
         };
       }
     } catch {}
@@ -140,6 +153,7 @@ export class ShellyDriver implements DeviceDriver {
           model:       info.type ?? 'Shelly',
           hasEmeter,
           driverConfig: { gen: 1, ...(auth ? { auth } : {}) },
+          ...(!auth && loginRequired(info) ? { needsLogin: true } : {}),
         };
       }
     } catch {}
@@ -193,7 +207,7 @@ export class ShellyDriver implements DeviceDriver {
           }).then((r) => r.json());
           hasEmeter = 'apower' in status;
         } catch {}
-        return { ip, alias: info.name ?? info.id ?? ip, model: info.model ?? info.app ?? 'Shelly', hasEmeter, driverConfig: { gen: 2 } };
+        return { ip, alias: info.name ?? info.id ?? ip, model: info.model ?? info.app ?? 'Shelly', hasEmeter, driverConfig: { gen: 2 }, ...(loginRequired(info) ? { needsLogin: true } : {}) };
       }
     } catch {}
 
@@ -208,7 +222,7 @@ export class ShellyDriver implements DeviceDriver {
           const meter: any = await fetch(`http://${ip}/meter/0`, { signal: AbortSignal.timeout(timeoutMs) }).then((r) => r.json());
           hasEmeter = meter.is_valid === true;
         } catch {}
-        return { ip, alias: info.hostname ?? ip, model: info.type ?? 'Shelly', hasEmeter, driverConfig: { gen: 1 } };
+        return { ip, alias: info.hostname ?? ip, model: info.type ?? 'Shelly', hasEmeter, driverConfig: { gen: 1 }, ...(loginRequired(info) ? { needsLogin: true } : {}) };
       }
     } catch {}
 

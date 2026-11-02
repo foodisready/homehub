@@ -92,13 +92,35 @@ function migrate(db: Database.Database): void {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS voice_commands (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      text       TEXT NOT NULL,
+      understood INTEGER NOT NULL CHECK(understood IN (0, 1)),
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
     CREATE TABLE IF NOT EXISTS settings (
       key   TEXT PRIMARY KEY,
       value TEXT NOT NULL DEFAULT ''
     );
+
+    CREATE TABLE IF NOT EXISTS motion_rules (
+      id                INTEGER PRIMARY KEY AUTOINCREMENT,
+      name              TEXT    NOT NULL UNIQUE,
+      token             TEXT    NOT NULL UNIQUE,
+      device_id         INTEGER NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+      off_after_minutes INTEGER NOT NULL,
+      occupied          INTEGER NOT NULL DEFAULT 0 CHECK(occupied IN (0, 1)),
+      last_motion_at    TEXT,
+      created_at        TEXT    NOT NULL DEFAULT (datetime('now'))
+    );
   `);
 
   // Additive migrations — safe to re-run (SQLite ignores duplicate column errors)
+  try { db.exec('ALTER TABLE motion_rules ADD COLUMN turn_on_with_motion INTEGER NOT NULL DEFAULT 0'); } catch {}
+  try { db.exec('ALTER TABLE motion_rules ADD COLUMN sensor_ip TEXT'); } catch {}
+  try { db.exec('ALTER TABLE motion_rules ADD COLUMN sensor_username TEXT'); } catch {}
+  try { db.exec('ALTER TABLE motion_rules ADD COLUMN sensor_password TEXT'); } catch {}
   try { db.exec('ALTER TABLE devices ADD COLUMN override_state INTEGER'); } catch {}
   try { db.exec('ALTER TABLE devices ADD COLUMN override_until TEXT'); } catch {}
   try { db.exec('ALTER TABLE devices ADD COLUMN timer_off_at TEXT'); } catch {}

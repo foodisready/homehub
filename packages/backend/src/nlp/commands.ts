@@ -1,5 +1,6 @@
 import { applyPower, isProtectedDevice, type PowerDevice } from '../devices/power';
-import { findDeviceByName } from './find-device';
+import { findDeviceByName, findDeviceGroup, findScene, type NamedScene } from './find-device';
+import { getDb } from '../db';
 import type { ActionTaken } from './nlp.service';
 
 export interface PowerCommand {
@@ -96,16 +97,97 @@ export function formatDuration(minutes: number): string {
   return rest ? `${unit(hours, 'hour')} ${unit(rest, 'minute')}` : unit(hours, 'hour');
 }
 
+const joinNames = (names: string[]) =>
+  names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+
+/** Switches every device sharing a nickname. A protected device is left alone. */
+async function runGroupCommand(
+  devices: PowerDevice[],
+  { state, minutes }: PowerCommand,
+): Promise<{ response: string; actions: ActionTaken[] }> {
+  const allowed   = devices.filter((d) => !isProtectedDevice(d));
+  const protectedNames = devices.filter(isProtectedDevice).map((d) => d.alias);
+  const action = state ? 'on' : 'off';
+
+  const results = await Promise.allSettled(allowed.map((d) => applyPower(d, state, minutes)));
+  const actions: ActionTaken[] = results.map((result, i) => {
+    const args = { alias: allowed[i].alias, state: action, ...(minutes ? { minutes } : {}) };
+    return result.status === 'fulfilled'
+      ? { tool: 'set_power_state', args, result: { success: true, ...args } }
+      : { tool: 'set_power_state', args, result: { error: String(result.reason?.message ?? result.reason) } };
+  });
+
+  const switched = allowed.filter((_, i) => results[i].status === 'fulfilled').map((d) => d.alias);
+  const failed   = allowed.filter((_, i) => results[i].status === 'rejected').map((d) => d.alias);
+  const duration = minutes ? ` for ${formatDuration(minutes)}` : '';
+  const response = [
+    switched.length ? `Turned ${action} ${joinNames(switched)}${duration}.` : '',
+    failed.length ? `I couldn't reach ${joinNames(failed)}.` : '',
+    protectedNames.length ? `${joinNames(protectedNames)} is protected, so I left it alone.` : '',
+  ].filter(Boolean).join(' ');
+  return { response, actions };
+}
+
+type SceneAction = PowerDevice & { scene_state: number };
+
+/** Runs a scene for Chat or voice, which must leave protected devices alone. */
+async function runScene(scene: NamedScene): Promise<{ response: string; actions: ActionTaken[] }> {
+  const devices = getDb().prepare(`
+    SELECT d.*, sa.state AS scene_state
+    FROM scene_actions sa JOIN devices d ON d.id = sa.device_id
+    WHERE sa.scene_id = ?
+  `).all(scene.id) as SceneAction[];
+  if (!devices.length) return { response: `${scene.name} has no devices in it.`, actions: [] };
+
+  const allowed = devices.filter((d) => !isProtectedDevice(d));
+  const protectedNames = devices.filter(isProtectedDevice).map((d) => d.alias);
+
+  const results = await Promise.allSettled(allowed.map((d) => applyPower(d, d.scene_state === 1)));
+  const actions: ActionTaken[] = results.map((result, i) => {
+    const args = { alias: allowed[i].alias, state: allowed[i].scene_state === 1 ? 'on' : 'off' };
+    return result.status === 'fulfilled'
+      ? { tool: 'set_power_state', args, result: { success: true, ...args } }
+      : { tool: 'set_power_state', args, result: { error: String(result.reason?.message ?? result.reason) } };
+  });
+
+  const failed = allowed.filter((_, i) => results[i].status === 'rejected').map((d) => d.alias);
+  const ran = failed.length || protectedNames.length ? `Ran part of ${scene.name}.` : `Ran ${scene.name}.`;
+  const response = [
+    ran,
+    failed.length ? `I couldn't reach ${joinNames(failed)}.` : '',
+    protectedNames.length ? `${joinNames(protectedNames)} is protected, so I left it alone.` : '',
+  ].filter(Boolean).join(' ');
+  return { response, actions };
+}
+
+/** Reads "run goodnight", "activate the movie scene" or just "goodnight". */
+function sceneFromText(text: string): NamedScene | null {
+  const match = cleanUp(text).match(
+    /^(?:(?:run|start|activate|trigger|set)\s+)?(?:the\s+)?(?:scene\s+)?(.+?)(?:\s+scene)?$/
+  );
+  return match ? findScene(match[1]) : null;
+}
+
 /** Answer a simple command without the chat model. Returns null if the model should handle it. */
 export async function runPowerCommand(
   text: string,
 ): Promise<{ response: string; actions: ActionTaken[] } | null> {
+  const namedScene = sceneFromText(text);
+  if (namedScene) return runScene(namedScene);
+
   const command = parsePowerCommand(text);
   if (!command) return null;
 
+  const group = findDeviceGroup(command.name);
+  if (group.length) return runGroupCommand(group as unknown as PowerDevice[], command);
+
   const match = findDeviceByName(command.name);
   if ('error' in match) {
-    if (!match.candidates) return null;
+    if (!match.candidates) {
+      // "Turn on movie time" means the scene if no device has that name.
+      const scene = command.state && !command.minutes ? findScene(command.name) : null;
+      return scene ? runScene(scene) : null;
+    }
     return { response: `Which one do you mean: ${match.candidates.join(', ')}?`, actions: [] };
   }
 

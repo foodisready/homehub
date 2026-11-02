@@ -10,6 +10,12 @@ interface ChatStats {
   rules: number;
   model: number;
   recentModel: { text: string; createdAt: string }[];
+  voice: {
+    total: number;
+    understood: number;
+    missed: number;
+    recentMissed: { text: string; createdAt: string }[];
+  };
 }
 
 interface UserRow {
@@ -26,11 +32,14 @@ interface DiscoveredDevice {
   driverType:   string;
   driverConfig?: Record<string, unknown>;
   mac?:         string;
+  needsLogin?:  boolean;
   moved?:       { deviceId: number; alias: string; previousIp: string };
   // editable before registering
   pendingAlias?:    string;
   pendingKey?:      string;   // Tuya only: local key required for control
   pendingDeviceId?: string;   // Tuya only: deviceId (from TCP scan, no UDP gwId)
+  pendingUser?:     string;   // Only for devices that need a login
+  pendingPass?:     string;
 }
 
 const DRIVER_LABEL: Record<string, string> = {
@@ -198,6 +207,7 @@ const DRIVER_LABEL: Record<string, string> = {
                   <div class="edit-row" style="margin-top:0.4rem">
                     <input type="text" [(ngModel)]="editNicknames" placeholder="Nicknames for Chat, separated by commas" autocomplete="off" />
                   </div>
+                  <p style="font-size:0.75rem;color:var(--text-muted);margin:0.2rem 0 0">Give several devices the same nickname to switch them together by Chat or voice.</p>
                   <label style="display:flex;align-items:center;gap:0.4rem;margin-top:0.4rem;font-size:0.85rem">
                     <input type="checkbox" style="width:auto" [(ngModel)]="editProtected" />
                     Don't let Chat or AI assistants switch this device
@@ -225,6 +235,20 @@ const DRIVER_LABEL: Record<string, string> = {
                       </div>
                     </div>
                     <p style="font-size:0.75rem;color:var(--text-muted);margin:0.2rem 0 0">Leave both blank to remove stored credentials.</p>
+                  }
+                  @if (usesKasaLogin(d)) {
+                    <div class="edit-row" style="margin-top:0.4rem">
+                      <input type="email" [(ngModel)]="editKasaUser" placeholder="TP-Link email" autocomplete="off" />
+                      <input type="password" [(ngModel)]="editKasaPass" placeholder="TP-Link password" autocomplete="new-password" />
+                      <button class="btn-sm btn-ghost" (click)="saveEditedKasaLogin()"
+                              [disabled]="!editKasaUser.trim() || !editKasaPass || kasaLoginSaving()">
+                        {{ kasaLoginSaving() ? 'Checking…' : 'Save login' }}
+                      </button>
+                    </div>
+                    <p style="font-size:0.75rem;color:var(--text-muted);margin:0.2rem 0 0">
+                      The account used in the Kasa app. It's shared by every Kasa plug that needs a login.
+                    </p>
+                    @if (kasaLoginMsg()) { <p class="msg" [class.ok]="!kasaLoginErr()" [class.err]="kasaLoginErr()">{{ kasaLoginMsg() }}</p> }
                   }
                   @if (d.driverType === 'tuya') {
                     <div class="edit-row" style="margin-top:0.4rem">
@@ -317,6 +341,22 @@ const DRIVER_LABEL: Record<string, string> = {
                     <span class="discover-ip">{{ d.ip }}</span>
                     @if (d.model && d.model !== d.ip) { <span class="discover-model">{{ d.model }}</span> }
                     <span class="driver-badge" [class]="'driver-badge ' + d.driverType">{{ driverLabel(d.driverType) }}</span>
+                    @if (d.needsLogin) {
+                      <div class="discover-key">
+                        <span class="discover-key-label">{{ d.driverType === 'kasa' ? 'TP-Link email' : 'Username' }}</span>
+                        <input type="text" [(ngModel)]="d.pendingUser" autocomplete="off" />
+                      </div>
+                      <div class="discover-key">
+                        <span class="discover-key-label">Password</span>
+                        <input type="password" [(ngModel)]="d.pendingPass" autocomplete="new-password" />
+                      </div>
+                      @if (d.driverType === 'kasa') {
+                        <button class="btn-sm btn-primary" (click)="saveDiscoveredKasaLogin(d)"
+                                [disabled]="!d.pendingUser?.trim() || !d.pendingPass || kasaLoginSaving()">
+                          {{ kasaLoginSaving() ? 'Checking…' : 'Save login' }}
+                        </button>
+                      }
+                    }
                     @if (d.driverType === 'tuya') {
                       @if (tuyaCloudDevices.length > 0) {
                         <div class="discover-key" style="min-width:180px">
@@ -599,6 +639,26 @@ const DRIVER_LABEL: Record<string, string> = {
         </div>
       </div>
 
+      @if (chatStats()?.voice; as voice) {
+        @if (voice.total > 0) {
+          <div class="section">
+            <div class="section-title">Voice commands</div>
+            <div class="card">
+              <p style="margin:0">
+                <strong>{{ voice.understood }}</strong> of {{ voice.total }} understood ·
+                <strong>{{ voice.missed }}</strong> missed
+              </p>
+              @if (voice.recentMissed.length) {
+                <p style="font-size:0.75rem;color:var(--text-muted);margin:0.75rem 0 0.25rem">Latest misses, as speech recognition heard them:</p>
+                @for (item of voice.recentMissed.slice(0, 10); track $index) {
+                  <div style="font-size:0.85rem;padding:0.15rem 0;overflow-wrap:anywhere">{{ item.text }}</div>
+                }
+              }
+            </div>
+          </div>
+        }
+      }
+
       <div class="section">
         <div class="section-title">Preferences</div>
         <div class="card">
@@ -650,10 +710,16 @@ export class SettingsComponent implements OnInit {
   editAuthUser  = '';
   editAuthPass  = '';
   showAuthPass  = false;
+  editKasaUser  = '';
+  editKasaPass  = '';
+  kasaLoginSaving = signal(false);
+  kasaLoginMsg    = signal('');
+  kasaLoginErr    = signal(false);
   editTuyaDeviceId = '';
   editTuyaKey      = '';
   editTuyaVersion  = '3.3';
   deviceMsg = signal('');
+  private kasaUsername = '';
   deviceErr = signal(false);
 
   // User editing
@@ -757,6 +823,9 @@ export class SettingsComponent implements OnInit {
         this.tuyaAccessId  = c.accessId;
         this.tuyaRegion    = c.region;
         this.tuyaCloudReady.set(!!c.accessId && c.hasSecret);
+      });
+      this.http.get<{ username: string | null }>('/api/kasa/login').subscribe((login) => {
+        this.kasaUsername = login.username ?? '';
       });
       this.loadNotificationSettings();
     }
@@ -880,6 +949,9 @@ export class SettingsComponent implements OnInit {
     this.editAuthUser = auth?.user ?? '';
     this.editAuthPass = auth?.pass ?? '';
     this.showAuthPass = false;
+    this.editKasaUser = this.kasaUsername;
+    this.editKasaPass = '';
+    this.kasaLoginMsg.set('');
     this.editTuyaDeviceId = '';
     this.editTuyaKey      = '';
     this.editTuyaVersion  = (d.driverConfig as any)?.version ?? '3.3';
@@ -895,6 +967,45 @@ export class SettingsComponent implements OnInit {
     this.editTuyaKey      = '';
     this.editTuyaVersion  = '3.3';
     this.deviceMsg.set('');
+  }
+
+  usesKasaLogin(d: Device): boolean {
+    return d.driverType === 'kasa' && d.driverConfig?.['protocol'] === 'klap';
+  }
+
+  /** The plug checks the login before it's saved. Only hashes of it are stored. */
+  private saveKasaLogin(username: string, password: string, onSaved: () => void, onFailed: (message: string) => void): void {
+    this.kasaLoginSaving.set(true);
+    this.http.put<{ username: string; verified: boolean }>('/api/kasa/login', { username, password }).subscribe({
+      next: (login) => {
+        this.kasaLoginSaving.set(false);
+        this.kasaUsername = login.username;
+        onSaved();
+      },
+      error: (err) => {
+        this.kasaLoginSaving.set(false);
+        onFailed(err.error?.error ?? 'Could not save the login.');
+      },
+    });
+  }
+
+  saveEditedKasaLogin(): void {
+    this.kasaLoginMsg.set('');
+    this.saveKasaLogin(this.editKasaUser.trim(), this.editKasaPass, () => {
+      this.editKasaPass = '';
+      this.kasaLoginMsg.set('Login saved');
+      this.kasaLoginErr.set(false);
+    }, (message) => {
+      this.kasaLoginMsg.set(message);
+      this.kasaLoginErr.set(true);
+    });
+  }
+
+  saveDiscoveredKasaLogin(d: DiscoveredDevice): void {
+    this.saveKasaLogin(d.pendingUser?.trim() ?? '', d.pendingPass ?? '', () => this.discover(), (message) => {
+      this.discoverMsg.set(message);
+      this.discoverErr.set(true);
+    });
   }
 
   saveDevice(id: number, driverType?: string): void {
@@ -1067,6 +1178,9 @@ export class SettingsComponent implements OnInit {
         driverConfig = { ...driverConfig };
         if (d.pendingDeviceId?.trim()) driverConfig['deviceId'] = d.pendingDeviceId.trim();
         if (d.pendingKey?.trim())      driverConfig['key']      = d.pendingKey.trim();
+      }
+      if (d.driverType === 'shelly' && d.pendingUser?.trim() && d.pendingPass) {
+        driverConfig = { ...driverConfig, auth: { user: d.pendingUser.trim(), pass: d.pendingPass } };
       }
 
       this.http.post<Device>('/api/devices', {

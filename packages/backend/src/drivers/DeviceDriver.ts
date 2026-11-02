@@ -7,6 +7,8 @@ export interface DiscoveredDevice {
   driverConfig?: Record<string, unknown>;
   /** Hardware address, normalized by the driver. Identifies a device across IP changes. */
   mac?:        string;
+  /** Found on the network, but HomeHub has no working login for it yet. */
+  needsLogin?: boolean;
 }
 
 export interface EnergyMetrics {
