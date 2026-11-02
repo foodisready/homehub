@@ -278,6 +278,8 @@ Choose one:
 - **Invite them to your tailnet:** on the [Users page](https://login.tailscale.com/admin/users), invite them, and they sign in with their own account. Check your plan's user limit first.
 - **Share only the HomeHub machine:** on the [Machines page](https://login.tailscale.com/admin/machines), open the machine's menu and choose **Share**. They can reach that machine from their own tailnet, and nothing else on yours.
 
+If they've accepted the share but HomeHub still won't load for them, reconnect Tailscale on the HomeHub machine: **Disconnect**, then **Connect** in the Tailscale menu. It can keep using a device list from before the share was accepted, and ignore their connection until it refreshes.
+
 Then create a HomeHub account for them under **Settings → Users**, with the member role unless they need admin access.
 
 They need to repeat the phone setup: install, sign in, Always-on VPN and battery settings.
