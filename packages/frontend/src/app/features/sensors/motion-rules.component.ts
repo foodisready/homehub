@@ -17,7 +17,10 @@ interface MotionRule {
   hasSensorPassword: boolean;
   occupied:        boolean;
   lastMotionAt:    string | null;
+  status:          { kind: string; offAt?: string };
 }
+
+const REFRESH_MS = 5000;
 
 @Component({
   selector: 'app-motion-rules',
@@ -43,6 +46,7 @@ interface MotionRule {
     }
     .check { display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; }
     .check input { width: auto; }
+    .countdown { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
     .ok { color: #4ade80; font-size: 0.85rem; }
     .err { color: #f87171; font-size: 0.85rem; }
     .btn-remove { background: transparent; border: 1px solid var(--border); color: var(--text-muted); padding: 0.3rem 0.7rem; font-size: 0.8rem; }
@@ -59,10 +63,14 @@ interface MotionRule {
           <button class="btn-remove" (click)="remove(rule)">Remove</button>
         </div>
         <div class="meta">
-          @if (rule.lastMotionAt) {
-            {{ rule.occupied ? 'Motion now' : 'Last motion ' + (rule.lastMotionAt | date:'short') }}
-          } @else {
-            Waiting for the sensor's first report, so this rule isn't active yet
+          @switch (rule.status.kind) {
+            @case ('waiting') { Waiting for the sensor's first report, so this rule isn't active yet }
+            @case ('occupied') { Motion detected. The light stays on. }
+            @case ('counting') { <span class="countdown">Turns off in {{ countdown(rule) }}</span> }
+            @case ('off_cooldown') { Light is off. The sensor needs about a minute without motion before motion can turn it on again. }
+            @case ('held') { The light is on a keep-on timer, so this rule won't turn it off yet. }
+            @case ('offline') { The light is offline. }
+            @default { Light is off. Last motion {{ rule.lastMotionAt | date:'short' }} }
           }
         </div>
         <div class="fields">
@@ -131,6 +139,8 @@ export class MotionRulesComponent implements OnInit, OnDestroy {
   private http   = inject(HttpClient);
   private socket = inject(SocketService);
   private stopWatching?: () => void;
+  private timers: ReturnType<typeof setInterval>[] = [];
+  private now = signal(Date.now());
 
   readonly rules   = signal<MotionRule[]>([]);
   private devices  = signal<Device[]>([]);
@@ -156,6 +166,11 @@ export class MotionRulesComponent implements OnInit, OnDestroy {
   ngOnInit(): void {
     this.load();
     this.loadDevices();
+    // Sensor reports arrive at the backend, so check back for a new status.
+    this.timers = [
+      setInterval(() => this.now.set(Date.now()), 1000),
+      setInterval(() => this.load(), REFRESH_MS),
+    ];
     // A light switched by motion should show here, along with the rule's new status.
     this.stopWatching = this.socket.onDeviceState((event) => {
       this.devices.update((list) => list.map((d) => d.id === event.id ? { ...d, state: event.state } : d));
@@ -165,6 +180,12 @@ export class MotionRulesComponent implements OnInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.stopWatching?.();
+    this.timers.forEach(clearInterval);
+  }
+
+  countdown(rule: MotionRule): string {
+    const seconds = Math.max(0, Math.ceil((Date.parse(rule.status.offAt ?? '') - this.now()) / 1000));
+    return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
   }
 
   private loadDevices(): void {

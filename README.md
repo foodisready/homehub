@@ -1,95 +1,30 @@
-# homehub
+# HomeHub
 
-MCP (Model Context Protocol) server for homehub.
+HomeHub is a free smart home hub that runs on your own hardware, such as a Raspberry Pi. It controls your plugs and lights over your home network, with no HomeHub account.
 
-## Features
+## What it does
 
-- [Add your features here]
+- Controls TP-Link Kasa, Shelly and Tuya devices from one dashboard
+- Runs schedules, including sunrise and sunset
+- Runs scenes that set several devices at once
+- Turns lights on with motion and off when a room is empty
+- Takes plain-language commands in Chat, such as "turn on the porch light for an hour"
+- Tracks energy use on supported devices
+- Connects to AI assistants through MCP
 
-## Installation
+## Get started
 
-```bash
-npm install
-```
+- **[Install HomeHub](docs/INSTALL.md):** set up Docker and get HomeHub running
+- **[User Guide](docs/USER_GUIDE.md):** add devices and use each feature
+- **[Remote Access](docs/REMOTE_ACCESS.md):** reach HomeHub away from home
 
-## Configuration
+## For developers
 
-Create a `.env` file based on `.env.example`:
-
-```bash
-cp .env.example .env
-```
-
-Edit the `.env` file with your configuration:
-
-```env
-PORT=3000
-# Add your configuration variables here
-```
-
-## Usage
-
-### Development
-
-```bash
-npm run dev
-```
-
-### Production
-
-```bash
-npm run build
-npm start
-```
-
-### Health Check
-
-```bash
-curl http://localhost:3000/mcp/health
-```
-
-## Tools
-
-### example-tool
-
-[Describe your tool here]
-
-## Prompts
-
-### example-prompt
-
-[Describe your prompt here]
-
-## Resources
-
-- **server-status**: Check server status
-
-## Development
-
-### Build
-
-```bash
-npm run build
-```
-
-### Run Tests
-
-```bash
-npm test
-```
-
-### Docker Build
-
-```bash
-# For ARM64 (Apple Silicon)
-npm run build:docker:arm64
-
-# For AMD64 (Intel/AMD)
-npm run build:docker:amd64
-```
+- [Getting Started](docs/GETTING_STARTED.md) covers local development
+- [Architecture](docs/ARCHITECTURE.md) describes the system design
+- [API reference](docs/API_SPEC.md) lists the REST API
+- [Voice control plan](docs/VOICE_CONTROL.md) covers the voice work in progress
 
 ## License
 
 ISC
-
-## Made with Bob

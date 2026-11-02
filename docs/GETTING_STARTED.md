@@ -2,6 +2,8 @@
 
 Local-first smart plug automation for Raspberry Pi. No cloud accounts required.
 
+To install HomeHub at home, follow [INSTALL.md](./INSTALL.md) instead. This page is mainly for developers.
+
 ---
 
 ## Prerequisites
@@ -83,6 +85,8 @@ Local-first smart plug automation for Raspberry Pi. No cloud accounts required.
 
 | Doc | Description |
 |---|---|
+| [INSTALL.md](./INSTALL.md) | Step-by-step install for end users |
+| [USER_GUIDE.md](./USER_GUIDE.md) | Adding devices and using each feature |
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | System design, data flows, service breakdown |
 | [IMPLEMENTATION_PLAN.md](./IMPLEMENTATION_PLAN.md) | Phase-by-phase build plan with task checklists |
 | [DOCKER_COMPOSE.md](./DOCKER_COMPOSE.md) | Full Docker Compose reference and Dockerfiles |

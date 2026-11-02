@@ -6,7 +6,7 @@ import { getCachedState, getAllCachedStates } from '../kasa/device.cache';
 import { getDriver, getAllDrivers } from '../drivers/registry';
 import { emitDeviceState } from '../socket';
 import { logger } from '../logger';
-import { cancelPowerTimer, clearOverride, isProtectedDevice, setOverride } from '../devices/power';
+import { cancelPowerTimer, clearOverride, isProtectedDevice, notifyPowerOff, setOverride } from '../devices/power';
 
 function confirmStateAsync(
   deviceId: number,
@@ -122,6 +122,7 @@ devicesRouter.post('/:id/off', async (req: Request, res: Response) => {
     db.prepare('UPDATE devices SET turned_on_at = NULL WHERE id = ?').run(device.id);
     cancelPowerTimer(device.id);
     emitDeviceState(device.id, device.alias, false, null);
+    notifyPowerOff(device.id);
     confirmStateAsync(device.id, device.alias, device.driver_type ?? 'kasa', device.ip, config, false);
     res.json({ alias: device.alias, state: false });
   } catch (err) {

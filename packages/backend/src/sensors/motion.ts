@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import os from 'node:os';
 import { getDb } from '../db';
-import { applyPower, isProtectedDevice, type PowerDevice } from '../devices/power';
+import { applyPower, isProtectedDevice, onPowerOff, type PowerDevice } from '../devices/power';
 import { getCachedState } from '../kasa/device.cache';
 import { logger } from '../logger';
 
@@ -9,6 +9,7 @@ const SWEEP_INTERVAL_MS = 15_000;
 // A lost "clear" event must not keep a room occupied forever.
 const OCCUPIED_LIMIT_MS = 2 * 60 * 60 * 1000;
 const SHELLY_TIMEOUT_MS = 15_000;
+const REARM_PAUSE_MS = 500;
 
 export interface MotionRuleRow {
   id:                number;
@@ -24,8 +25,7 @@ export interface MotionRuleRow {
   sensor_password:   string | null;
 }
 
-type RuleWithDevice = MotionRuleRow & PowerDevice & {
-  rule_id:         number;
+export type RuleWithDevice = MotionRuleRow & PowerDevice & {
   turned_on_at:    string | null;
   override_until:  string | null;
   timer_off_at:    string | null;
@@ -68,11 +68,11 @@ export async function handleMotion(token: string, occupied: boolean, now = new D
   `).get(token) as RuleWithDevice;
   if (!rule.turn_on_with_motion || isProtectedDevice(rule)) return true;
 
-  const cached = getCachedState(rule.device_id);
-  if (!cached?.online || cached.state) return true;
   // Someone chose to hold this light in its current state.
-  if (toMs(rule.override_until) > now.getTime()) return true;
+  if (rule.timer_off_at || toMs(rule.override_until) > now.getTime()) return true;
 
+  // Don't rely on the cached state: it can be a minute old, so a light just
+  // switched off at the wall would look on. Turning on a lit light is harmless.
   try {
     await applyPower({ ...rule, id: rule.device_id }, true);
     logger.info({ rule: rule.name, device: rule.alias }, 'Motion, light turned on');
@@ -82,23 +82,41 @@ export async function handleMotion(token: string, occupied: boolean, now = new D
   return true;
 }
 
-function shouldTurnOff(rule: RuleWithDevice, now: number): boolean {
+export type MotionStatus =
+  | { kind: 'waiting' | 'off' | 'off_cooldown' | 'offline' | 'held' | 'occupied' }
+  | { kind: 'counting'; offAt: string };
+
+/** What a rule is doing now, for both the turn-off sweep and the Sensors page. */
+export function motionStatus(rule: RuleWithDevice, now: number): MotionStatus {
   // Until the sensor reports, no motion says nothing about the room.
-  if (!rule.last_motion_at) return false;
-  if (isProtectedDevice({ id: rule.device_id, alias: rule.alias, is_protected: rule.is_protected })) return false;
+  if (!rule.last_motion_at) return { kind: 'waiting' };
 
   const cached = getCachedState(rule.device_id);
-  if (!cached?.online || !cached.state) return false;
-
-  // A keep-on timer is a deliberate choice, so it wins.
-  if (rule.timer_off_at || toMs(rule.override_until) > now) return false;
+  if (cached && !cached.online) return { kind: 'offline' };
 
   const lastMotion = toMs(rule.last_motion_at);
-  if (rule.occupied && now - lastMotion < OCCUPIED_LIMIT_MS) return false;
+  const stillOccupied = rule.occupied === 1 && now - lastMotion < OCCUPIED_LIMIT_MS;
+
+  // A light switched off clears turned_on_at straight away, and a poll catches the wall switch.
+  // A device added moments ago has no cached state until its first poll.
+  if ((cached && !cached.state) || !rule.turned_on_at) return { kind: stillOccupied ? 'off_cooldown' : 'off' };
+
+  if (isProtectedDevice({ id: rule.device_id, alias: rule.alias, is_protected: rule.is_protected })) {
+    return { kind: 'held' };
+  }
+
+  // A keep-on timer is a deliberate choice, so it wins.
+  if (rule.timer_off_at || toMs(rule.override_until) > now) return { kind: 'held' };
+  if (stillOccupied) return { kind: 'occupied' };
 
   // Lights switched on in an empty room still get the full time.
   const start = Math.max(lastMotion, toMs(rule.turned_on_at));
-  return now - start >= rule.off_after_minutes * 60_000;
+  return { kind: 'counting', offAt: new Date(start + rule.off_after_minutes * 60_000).toISOString() };
+}
+
+function shouldTurnOff(rule: RuleWithDevice, now: number): boolean {
+  const status = motionStatus(rule, now);
+  return status.kind === 'counting' && Date.parse(status.offAt) <= now;
 }
 
 let sweeping = false;
@@ -108,7 +126,7 @@ export async function sweepMotionRules(now = Date.now()): Promise<void> {
   sweeping = true;
   try {
     const rules = getDb().prepare(`
-      SELECT d.*, r.id AS rule_id, r.device_id, r.off_after_minutes, r.occupied, r.last_motion_at, r.name
+      SELECT d.*, r.device_id, r.off_after_minutes, r.occupied, r.last_motion_at, r.name
       FROM motion_rules r JOIN devices d ON d.id = r.device_id
     `).all() as RuleWithDevice[];
 
@@ -125,7 +143,52 @@ export async function sweepMotionRules(now = Date.now()): Promise<void> {
   }
 }
 
+const authHeaders = (username: string, password: string): Record<string, string> =>
+  username ? { Authorization: `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}` } : {};
+
+async function setDetection(rule: MotionRuleRow, enabled: boolean): Promise<void> {
+  const response = await fetch(`http://${rule.sensor_ip}/settings?motion_enable=${enabled}`, {
+    headers: authHeaders(rule.sensor_username ?? '', rule.sensor_password ?? ''),
+    signal: AbortSignal.timeout(SHELLY_TIMEOUT_MS),
+  });
+  if (!response.ok) throw new Error(`The sensor answered ${response.status}`);
+}
+
+const rearming = new Set<number>();
+
+/**
+ * A sensor ignores motion for its blind time, at least a minute, so a light
+ * switched off in that time wouldn't come back on. Shelly doesn't document this,
+ * but switching detection off and on ends the blind time, tested on an SHMOS-01.
+ */
+export async function rearmSensors(deviceId: number): Promise<void> {
+  const rules = getDb().prepare(
+    'SELECT * FROM motion_rules WHERE device_id = ? AND occupied = 1 AND sensor_ip IS NOT NULL',
+  ).all(deviceId) as MotionRuleRow[];
+
+  await Promise.all(rules.filter((rule) => !rearming.has(rule.id)).map(async (rule) => {
+    rearming.add(rule.id);
+    try {
+      await setDetection(rule, false);
+      await new Promise((resolve) => setTimeout(resolve, REARM_PAUSE_MS));
+    } catch (err) {
+      logger.warn({ rule: rule.name, reason: (err as Error).message }, 'Could not reset motion sensor');
+    } finally {
+      // Whatever happened above, the sensor must not be left unable to detect motion.
+      try {
+        await setDetection(rule, true);
+      } catch (err) {
+        logger.error({ rule: rule.name, reason: (err as Error).message }, 'Motion detection may be left off');
+      }
+      rearming.delete(rule.id);
+    }
+  }));
+}
+
 export function startMotionRules(): void {
+  onPowerOff((deviceId) => {
+    rearmSensors(deviceId).catch((err) => logger.warn({ err }, 'Could not reset motion sensors'));
+  });
   setInterval(() => {
     sweepMotionRules().catch((err) => logger.error(err, 'Motion sweep failed'));
   }, SWEEP_INTERVAL_MS);
@@ -160,9 +223,7 @@ export async function connectSensor(
   if (!hub) throw new SensorResponseError(`HomeHub isn't on the same network as ${sensorIp}.`);
 
   const base = `http://${hub}:${process.env.PORT || 3000}/motion/${rule.token}`;
-  const headers: Record<string, string> = username
-    ? { Authorization: `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}` }
-    : {};
+  const headers = authHeaders(username, password);
 
   const request = async (path: string): Promise<string> => {
     const response = await fetch(`http://${sensorIp}${path}`, {

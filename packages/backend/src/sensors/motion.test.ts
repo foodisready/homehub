@@ -111,6 +111,20 @@ describe('motion rules', () => {
       assert.deepEqual(calls, [{ ip: '10.0.0.1', state: true }]);
     });
 
+    it('turns the light on even if the cached state says it is on', async () => {
+      cache.set(lightId, { state: true, wattage: null, online: true, lastPolled: new Date() });
+      await motion.handleMotion(token, true);
+      assert.deepEqual(calls, [{ ip: '10.0.0.1', state: true }]);
+    });
+
+    it('leaves a light on a keep-on timer alone', async () => {
+      setLight({ timer_off_at: sqlite(60) });
+      await motion.handleMotion(token, true);
+      assert.deepEqual(calls, []);
+      const row = db.prepare('SELECT timer_off_at FROM devices WHERE id = ?').get(lightId) as any;
+      assert.ok(row.timer_off_at);
+    });
+
     it('does nothing when the clear event arrives', async () => {
       await motion.handleMotion(token, false);
       assert.deepEqual(calls, []);
@@ -142,6 +156,60 @@ describe('motion rules', () => {
 
     it('reports an unknown token', async () => {
       assert.equal(await motion.handleMotion('wrong', true), false);
+    });
+  });
+
+  describe('motionStatus', () => {
+    const status = (now: number) => motion.motionStatus(db.prepare(`
+      SELECT d.*, r.* FROM motion_rules r JOIN devices d ON d.id = r.device_id
+    `).get() as never, now);
+
+    it('waits for the first report', () => {
+      assert.equal(status(at(1)).kind, 'waiting');
+    });
+
+    it('counts down from the last motion', () => {
+      motion.recordMotion(token, false, new Date(at(1)));
+      assert.deepEqual(status(at(5)), { kind: 'counting', offAt: iso(11) });
+    });
+
+    it('has no countdown while the room is occupied', () => {
+      motion.recordMotion(token, true, new Date(at(1)));
+      assert.equal(status(at(5)).kind, 'occupied');
+    });
+
+    it('clears the countdown as soon as the light is switched off', () => {
+      motion.recordMotion(token, false, new Date(at(1)));
+      setLight({ turned_on_at: null });
+      assert.equal(status(at(5)).kind, 'off');
+    });
+
+    it('clears the countdown when a poll finds the light off', () => {
+      motion.recordMotion(token, false, new Date(at(1)));
+      cache.set(lightId, { state: false, wattage: null, online: true, lastPolled: new Date() });
+      assert.equal(status(at(5)).kind, 'off');
+    });
+
+    it('shows when the sensor is still in its cooldown', () => {
+      motion.recordMotion(token, true, new Date(at(1)));
+      setLight({ turned_on_at: null });
+      assert.equal(status(at(1.5)).kind, 'off_cooldown');
+    });
+
+    it('treats a light with no poll yet by its turned-on time', () => {
+      motion.recordMotion(token, false, new Date(at(1)));
+      cache.delete(lightId);
+      assert.equal(status(at(5)).kind, 'counting');
+      setLight({ turned_on_at: null });
+      assert.equal(status(at(5)).kind, 'off');
+    });
+
+    it('shows a held light and an offline one', () => {
+      motion.recordMotion(token, false, new Date(at(1)));
+      setLight({ timer_off_at: sqlite(60) });
+      assert.equal(status(at(5)).kind, 'held');
+      cache.set(lightId, { state: true, wattage: null, online: false, lastPolled: new Date() });
+      assert.equal(status(at(5)).kind, 'offline');
     });
   });
 
@@ -314,6 +382,48 @@ describe('motion rules', () => {
     it('reports a sensor it cannot reach', async () => {
       const response = await send('POST', `/api/motion/${ruleId()}/connect`, { sensorIp: '127.0.0.1' });
       assert.ok([400, 502].includes(response.status));
+    });
+  });
+
+  describe('rearmSensors', () => {
+    const sensorAddress = () => `127.0.0.1:${(sensor.address() as { port: number }).port}`;
+    const useSensor = (password: string) => db.prepare(
+      "UPDATE motion_rules SET sensor_ip = ?, sensor_username = 'admin', sensor_password = ?",
+    ).run(sensorAddress(), password);
+    const detection = () => sensorRequests.map(({ url }) => url);
+
+    it('switches detection off and on while the sensor is in its cooldown', async () => {
+      useSensor('right');
+      motion.recordMotion(token, true);
+      await motion.rearmSensors(lightId);
+      assert.deepEqual(detection(), ['/settings?motion_enable=false', '/settings?motion_enable=true']);
+    });
+
+    it('leaves a sensor alone when the room is clear', async () => {
+      useSensor('right');
+      motion.recordMotion(token, false);
+      await motion.rearmSensors(lightId);
+      assert.deepEqual(detection(), []);
+    });
+
+    it('leaves a sensor alone when it has no saved address', async () => {
+      motion.recordMotion(token, true);
+      await motion.rearmSensors(lightId);
+      assert.deepEqual(detection(), []);
+    });
+
+    it('only resets sensors for that light', async () => {
+      useSensor('right');
+      motion.recordMotion(token, true);
+      await motion.rearmSensors(lightId + 1000);
+      assert.deepEqual(detection(), []);
+    });
+
+    it('still tries to turn detection back on after a failure', async () => {
+      useSensor('wrong');
+      motion.recordMotion(token, true);
+      await motion.rearmSensors(lightId);
+      assert.equal(detection().at(-1), '/settings?motion_enable=true');
     });
   });
 

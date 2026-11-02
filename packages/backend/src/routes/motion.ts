@@ -3,12 +3,18 @@ import { getDb } from '../db';
 import { isProtectedDevice, type PowerDevice } from '../devices/power';
 import { logger } from '../logger';
 import {
-  SensorLoginError, SensorResponseError, connectSensor, createMotionRule, handleMotion, type MotionRuleRow,
+  SensorLoginError, SensorResponseError, connectSensor, createMotionRule, handleMotion, motionStatus,
+  type RuleWithDevice,
 } from '../sensors/motion';
 
 const MAX_MINUTES = 24 * 60;
 
-const toPublic = (rule: MotionRuleRow & { alias: string }) => ({
+// Devices have their own id, so the rule's comes last and wins.
+const RULE_SELECT = `
+  SELECT d.*, r.* FROM motion_rules r JOIN devices d ON d.id = r.device_id
+`;
+
+const toPublic = (rule: RuleWithDevice) => ({
   id:              rule.id,
   name:            rule.name,
   deviceId:        rule.device_id,
@@ -20,11 +26,11 @@ const toPublic = (rule: MotionRuleRow & { alias: string }) => ({
   hasSensorPassword: !!rule.sensor_password,
   occupied:        rule.occupied === 1,
   lastMotionAt:    rule.last_motion_at,
+  status:          motionStatus(rule, Date.now()),
 });
 
-const readRule = (id: unknown) => getDb().prepare(`
-  SELECT r.*, d.alias FROM motion_rules r JOIN devices d ON d.id = r.device_id WHERE r.id = ?
-`).get(id) as (MotionRuleRow & { alias: string }) | undefined;
+const readRule = (id: unknown) =>
+  getDb().prepare(`${RULE_SELECT} WHERE r.id = ?`).get(id) as RuleWithDevice | undefined;
 
 const validMinutes = (value: unknown): value is number =>
   Number.isInteger(value) && (value as number) >= 1 && (value as number) <= MAX_MINUTES;
@@ -43,9 +49,7 @@ export const motionRouter = Router();
 
 // GET /api/motion
 motionRouter.get('/', (_req: Request, res: Response) => {
-  const rules = getDb().prepare(`
-    SELECT r.*, d.alias FROM motion_rules r JOIN devices d ON d.id = r.device_id ORDER BY r.name
-  `).all() as (MotionRuleRow & { alias: string })[];
+  const rules = getDb().prepare(`${RULE_SELECT} ORDER BY r.name`).all() as RuleWithDevice[];
   res.json(rules.map(toPublic));
 });
 

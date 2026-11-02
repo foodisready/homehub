@@ -17,6 +17,17 @@ const SWEEP_INTERVAL_MS = 15_000;
 
 const toIso = (sqlite: string | null) => (sqlite ? sqlite.replace(' ', 'T') + 'Z' : null);
 
+const powerOffListeners: ((deviceId: number) => void)[] = [];
+
+/** Runs after HomeHub turns a device off. Motion sensors use this to stop waiting. */
+export function onPowerOff(listener: (deviceId: number) => void): void {
+  powerOffListeners.push(listener);
+}
+
+export function notifyPowerOff(deviceId: number): void {
+  powerOffListeners.forEach((listener) => listener(deviceId));
+}
+
 async function sendPower(device: PowerDevice, state: boolean): Promise<void> {
   const config = device.driver_config ? JSON.parse(device.driver_config) : undefined;
   await getDriver(device.driver_type ?? 'kasa').setPower(device.ip, state, config);
@@ -31,6 +42,7 @@ async function sendPower(device: PowerDevice, state: boolean): Promise<void> {
   const cached = getAllCachedStates().get(device.id);
   if (cached) cached.state = state;
   emitDeviceState(device.id, device.alias, state, cached?.wattage ?? null);
+  if (!state) notifyPowerOff(device.id);
 }
 
 /** Block schedules for a period. A device kept on also turns off when it ends. */
