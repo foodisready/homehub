@@ -1,7 +1,8 @@
-import { Component, OnInit, computed, inject, signal } from '@angular/core';
+import { Component, OnDestroy, OnInit, computed, inject, signal } from '@angular/core';
 import { DatePipe } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
+import { SocketService } from '../../core/socket/socket.service';
 import type { Device } from '../../shared/models/device.model';
 
 interface MotionRule {
@@ -70,6 +71,12 @@ interface MotionRule {
               <option [ngValue]="device.id">{{ device.alias }}</option>
             }
           </select>
+          @if (deviceFor(rule); as device) {
+            <span class="meta">{{ !device.online ? 'Offline' : device.state ? 'On' : 'Off' }}</span>
+            <button class="btn-remove" [disabled]="switching() === device.id" (click)="switchLight(rule, device, !device.state)">
+              {{ device.state ? 'Turn off' : 'Turn on' }}
+            </button>
+          }
         </div>
         <div class="fields">
           <label class="meta" [for]="'minutes-' + rule.id">Turn off after (minutes)</label>
@@ -120,8 +127,10 @@ interface MotionRule {
     </div>
   `,
 })
-export class MotionRulesComponent implements OnInit {
-  private http = inject(HttpClient);
+export class MotionRulesComponent implements OnInit, OnDestroy {
+  private http   = inject(HttpClient);
+  private socket = inject(SocketService);
+  private stopWatching?: () => void;
 
   readonly rules   = signal<MotionRule[]>([]);
   private devices  = signal<Device[]>([]);
@@ -142,10 +151,43 @@ export class MotionRulesComponent implements OnInit {
   readonly message    = signal('');
   readonly messageFor = signal<number | null>(null);
   readonly failed     = signal(false);
+  readonly switching  = signal<number | null>(null);
 
   ngOnInit(): void {
     this.load();
+    this.loadDevices();
+    // A light switched by motion should show here, along with the rule's new status.
+    this.stopWatching = this.socket.onDeviceState((event) => {
+      this.devices.update((list) => list.map((d) => d.id === event.id ? { ...d, state: event.state } : d));
+      this.load();
+    });
+  }
+
+  ngOnDestroy(): void {
+    this.stopWatching?.();
+  }
+
+  private loadDevices(): void {
     this.http.get<Device[]>('/api/devices').subscribe((devices) => this.devices.set(devices));
+  }
+
+  deviceFor(rule: MotionRule): Device | undefined {
+    return this.devices().find((d) => d.id === rule.deviceId);
+  }
+
+  switchLight(rule: MotionRule, device: Device, on: boolean): void {
+    this.switching.set(device.id);
+    this.http.post(`/api/devices/${device.id}/${on ? 'on' : 'off'}`, {}).subscribe({
+      next: () => {
+        this.switching.set(null);
+        this.devices.update((list) => list.map((d) => d.id === device.id ? { ...d, state: on } : d));
+      },
+      error: (err) => {
+        this.switching.set(null);
+        this.show(rule, err.error?.error ?? `Could not reach ${device.alias}.`, true);
+        this.loadDevices();
+      },
+    });
   }
 
   private load(): void {

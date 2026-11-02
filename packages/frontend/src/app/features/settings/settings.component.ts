@@ -1,8 +1,9 @@
-import { Component, OnInit, signal, computed } from '@angular/core';
+import { Component, OnInit, signal, computed, OnDestroy } from '@angular/core';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { AuthService } from '../../core/auth/auth.service';
+import { SocketService } from '../../core/socket/socket.service';
 import { Device } from '../../shared/models/device.model';
 
 interface ChatStats {
@@ -107,6 +108,8 @@ const DRIVER_LABEL: Record<string, string> = {
       color:var(--text-muted);
     }
     .btn-ghost:hover { background:var(--surface); color:var(--text); }
+    .device-switch { min-width:3.2rem; }
+    .device-switch.on { color:#4ade80; border-color:#4ade80; }
     .btn-danger {
       background:transparent;
       border:1px solid transparent;
@@ -281,6 +284,13 @@ const DRIVER_LABEL: Record<string, string> = {
                 <span class="driver-badge" [class]="'driver-badge ' + d.driverType">
                   {{ driverLabel(d.driverType) }}
                 </span>
+                @if (!d.isProtected) {
+                  <button class="btn-sm btn-ghost device-switch" [class.on]="d.state && d.online"
+                          [disabled]="!d.online || switchingId() === d.id" (click)="switchDevice(d)"
+                          [attr.aria-label]="(d.state ? 'Turn off ' : 'Turn on ') + d.alias">
+                    {{ !d.online ? 'Offline' : d.state ? 'On' : 'Off' }}
+                  </button>
+                }
                 @if (isAdmin()) {
                   <button class="btn-sm btn-ghost" (click)="startDeviceEdit(d)">Edit</button>
                   <button class="btn-sm btn-danger" (click)="deleteDevice(d.id, d.alias)">✕</button>
@@ -690,7 +700,7 @@ const DRIVER_LABEL: Record<string, string> = {
     </div>
   `,
 })
-export class SettingsComponent implements OnInit {
+export class SettingsComponent implements OnInit, OnDestroy {
   private readonly _devices = signal<Device[]>([]);
   private readonly _users   = signal<UserRow[]>([]);
 
@@ -719,6 +729,9 @@ export class SettingsComponent implements OnInit {
   editTuyaKey      = '';
   editTuyaVersion  = '3.3';
   deviceMsg = signal('');
+  switchingId = signal<number | null>(null);
+  private stopWatchingDevices?: () => void;
+  private stopWatchingOnline?: () => void;
   private kasaUsername = '';
   deviceErr = signal(false);
 
@@ -812,9 +825,35 @@ export class SettingsComponent implements OnInit {
   // kWh rate
   kwhRateDraft = localStorage.getItem('kwhRate') ?? '0.15';
 
-  constructor(readonly auth: AuthService, private http: HttpClient) {}
+  constructor(readonly auth: AuthService, private http: HttpClient, private socket: SocketService) {}
+
+  switchDevice(device: Device): void {
+    const on = !device.state;
+    this.switchingId.set(device.id);
+    this.http.post(`/api/devices/${device.id}/${on ? 'on' : 'off'}`, {}).subscribe({
+      next: () => {
+        this.switchingId.set(null);
+        this._devices.update((list) => list.map((d) => d.id === device.id ? { ...d, state: on } : d));
+      },
+      error: () => {
+        this.switchingId.set(null);
+        this._devices.update((list) => list.map((d) => d.id === device.id ? { ...d, online: false } : d));
+      },
+    });
+  }
+
+  ngOnDestroy(): void {
+    this.stopWatchingDevices?.();
+    this.stopWatchingOnline?.();
+  }
 
   ngOnInit(): void {
+    this.stopWatchingDevices = this.socket.onDeviceState((event) => {
+      this._devices.update((list) => list.map((d) => d.id === event.id ? { ...d, state: event.state } : d));
+    });
+    this.stopWatchingOnline = this.socket.onDeviceOnline((event) => {
+      this._devices.update((list) => list.map((d) => d.id === event.id ? { ...d, online: event.online } : d));
+    });
     this.http.get<ChatStats>('/api/nlp/stats').subscribe({ next: (stats) => this.chatStats.set(stats) });
     this.http.get<Device[]>('/api/devices').subscribe((d) => this._devices.set(d));
     if (this.isAdmin()) {
