@@ -23,6 +23,16 @@ export function getAllCachedStates(): Map<number, DeviceState> {
   return cache;
 }
 
+/**
+ * Records a switch HomeHub just made, so the device list shows it straight
+ * away rather than after the read-back a moment later. Wattage is kept when
+ * turning on, since the next poll measures it.
+ */
+export function noteState(deviceId: number, state: boolean): void {
+  const prev = cache.get(deviceId);
+  cache.set(deviceId, { state, wattage: state ? prev?.wattage ?? null : null, online: true, lastPolled: new Date() });
+}
+
 /** Poll a single device, update the cache, and emit socket events. */
 // Tuya devices use a stateful TCP connection that gets confused by frequent polling.
 // Poll them at most once every 5 minutes — state is updated via confirmStateAsync after toggles.
@@ -46,9 +56,12 @@ async function pollDevice(
 
   const prev   = cache.get(id);
   const driver = getDriver(driverType);
+  const started = Date.now();
   try {
     const state  = await driver.getPower(ip, driverConfig);
     const energy = hasEmeter ? await driver.getEnergy(ip, driverConfig) : null;
+    // A switch landed while this read was in flight: its state is newer, so keep it.
+    if ((cache.get(id)?.lastPolled.getTime() ?? 0) > started) return;
     cache.set(id, { state, wattage: energy?.wattage ?? null, online: true, lastPolled: new Date() });
 
     // Track when device was turned on/off (for auto-off schedules)
@@ -97,6 +110,15 @@ async function pollAll(): Promise<void> {
       return pollDevice(d.id, d.ip, d.alias, d.has_emeter === 1, d.driver_type ?? 'kasa', config);
     })
   );
+}
+
+/** Checks one device now, e.g. right after it's added, instead of waiting for the next poll. */
+export async function pollDeviceNow(id: number): Promise<void> {
+  const d = getDb().prepare('SELECT id, ip, alias, has_emeter, driver_type, driver_config FROM devices WHERE id = ?').get(id) as
+    { id: number; ip: string; alias: string; has_emeter: number; driver_type: string; driver_config: string | null } | undefined;
+  if (!d) return;
+  const config = d.driver_config ? JSON.parse(d.driver_config) : undefined;
+  await pollDevice(d.id, d.ip, d.alias, d.has_emeter === 1, d.driver_type ?? 'kasa', config);
 }
 
 /** Forget cached states and poll again, after the device list was replaced (e.g. a restore). */

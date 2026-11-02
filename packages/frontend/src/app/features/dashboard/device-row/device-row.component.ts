@@ -89,7 +89,7 @@ export interface OverrideRequest { device: Device; durationMinutes: number; }
           {{ device().model ?? device().driverType }}
           @if (device().hasEmeter && device().wattage != null) { · {{ device().wattage | number:'1.1-1' }} W }
         </span>
-        <span class="panel-label">{{ isDoor() ? (device().state ? 'Close after' : 'Keep closed for') : (device().state ? 'Turn off after' : 'Keep off for') }}</span>
+        <span class="panel-label">{{ isDoor() ? (device().state ? 'Close after' : 'Keep closed for') : isCamera() ? (device().state ? 'Pause after' : 'Keep paused for') : (device().state ? 'Turn off after' : 'Keep off for') }}</span>
         <div class="buttons">
           @for (hours of [1, 2, 4]; track hours) {
             <button class="small" type="button" (click)="setTimer(hours * 60)">{{ hours }}h</button>
@@ -101,6 +101,7 @@ export interface OverrideRequest { device: Device; durationMinutes: number; }
         <div class="links">
           <a routerLink="/schedules">Schedules</a>
           @if (device().hasEmeter) { <a routerLink="/energy">Energy</a> }
+          @if (isCamera()) { <a routerLink="/cameras">Live view and snapshots</a> }
         </div>
       </div>
     }
@@ -119,6 +120,8 @@ export class DeviceRowComponent {
 
   /** Garage door openers: "on" means open. */
   readonly isDoor = computed(() => this.device().driverType === 'meross');
+  /** Wyze cameras: "on" means watching, "off" paused. */
+  readonly isCamera = computed(() => this.device().driverType === 'wyze');
 
   readonly detail = computed(() => {
     const device = this.device();
@@ -129,6 +132,7 @@ export class DeviceRowComponent {
       return `${device.overrideState ? 'Off at' : 'Off until'} ${time}`;
     }
     if (this.isDoor()) return device.state ? 'Open' : 'Closed';
+    if (this.isCamera()) return device.state ? 'Watching' : 'Paused';
     if (device.hasEmeter && device.state && device.wattage != null) return `${device.wattage.toFixed(1)} W`;
     return '';
   });
@@ -136,12 +140,14 @@ export class DeviceRowComponent {
   readonly confirmQuestion = computed(() => {
     const d = this.device();
     if (this.isDoor()) return `${d.state ? 'Close' : 'Open'} ${d.alias}?`;
+    if (this.isCamera()) return `Pause ${d.alias}? It stops watching until you resume it.`;
     return `${d.alias} is protected. Turn it ${d.state ? 'off' : 'on'}?`;
   });
 
   readonly confirmAction = computed(() => {
     const d = this.device();
     if (this.isDoor()) return d.state ? 'Close' : 'Open';
+    if (this.isCamera()) return 'Pause';
     return `Turn ${d.state ? 'off' : 'on'}`;
   });
 
@@ -151,7 +157,9 @@ export class DeviceRowComponent {
 
   /** A compact switch is easy to hit by accident, which matters for a water valve. */
   tapSwitch(): void {
-    if (this.device().isProtected) this.confirming.set(true);
+    // Resuming a camera is safe; pausing it, or switching another protected device, is confirmed.
+    const resumingCamera = this.isCamera() && !this.device().state;
+    if (this.device().isProtected && !resumingCamera) this.confirming.set(true);
     else this.toggled.emit(this.device());
   }
 

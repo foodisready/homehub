@@ -3,12 +3,14 @@ import { KasaDriver }   from './KasaDriver';
 import { ShellyDriver } from './ShellyDriver';
 import { TuyaDriver }   from './TuyaDriver';
 import { MerossDriver } from './MerossDriver';
+import { WyzeDriver }   from './WyzeDriver';
 
 const drivers = new Map<string, DeviceDriver>([
   ['kasa',   new KasaDriver()],
   ['shelly', new ShellyDriver()],
   ['tuya',   new TuyaDriver()],
   ['meross', new MerossDriver()],
+  ['wyze',   new WyzeDriver()],
 ]);
 
 export function getDriver(driverType: string): DeviceDriver {

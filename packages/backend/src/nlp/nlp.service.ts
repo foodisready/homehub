@@ -2,7 +2,7 @@ import SunCalc from 'suncalc';
 import { getDb } from '../db';
 import { getCachedState } from '../kasa/device.cache';
 import { getDriver } from '../drivers/registry';
-import { applyPower, isProtectedDevice, type PowerDevice } from '../devices/power';
+import { applyPower, assistantMaySwitch, type PowerDevice } from '../devices/power';
 import { logger } from '../logger';
 import { findDeviceByName } from './find-device';
 import { runPowerCommand } from './commands';
@@ -165,7 +165,7 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
       const match = findDeviceByName(alias);
       if ('error' in match) return { error: match.error };
       const device = match.device as unknown as PowerDevice;
-      if (isProtectedDevice(device)) {
+      if (!assistantMaySwitch(device, state)) {
         return { error: `${device.alias} is protected. Tell the user to use its tile on the dashboard.` };
       }
       const minutes = args.minutes ? Number(args.minutes) : undefined;

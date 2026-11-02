@@ -10,7 +10,7 @@ import { getDb } from '../db';
 import { getDriver } from '../drivers/registry';
 import { logger } from '../logger';
 import { emitDeviceState } from '../socket';
-import { getCachedState } from '../kasa/device.cache';
+import { getCachedState, noteState } from '../kasa/device.cache';
 import { notifyShutoffFailure, notifyShutoffSuccess } from '../notifications/router';
 import type { ShutoffInvoker, ShutoffNotifier } from './shutoff';
 
@@ -35,6 +35,7 @@ export const realInvoker: ShutoffInvoker = {
 
     const config = device.driver_config ? JSON.parse(device.driver_config) : undefined;
     await getDriver(device.driver_type ?? 'kasa').setPower(device.ip, false, config);
+    noteState(device.id, false);
 
     // Update local state so the dashboard reflects the close.
     db.prepare("UPDATE devices SET turned_on_at = NULL WHERE id = ?").run(device.id);

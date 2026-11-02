@@ -91,6 +91,10 @@ docker compose -f docker-compose.yml ps
 
 HomeHub is ready when `backend` and `frontend` both show as running.
 
+### Optional: Wyze cameras
+
+To use Wyze cameras, set `COMPOSE_PROFILES=cameras` and `WYZE_BRIDGE_API_KEY` in `.env` before starting, as the [User Guide](./USER_GUIDE.md#cameras) explains. To add them later, set those and run the start command again.
+
 ## Step 5: Sign in
 
 1. Find your Pi's address with `hostname -I`.
@@ -156,6 +160,7 @@ HomeHub uses these ports, so make sure nothing else on the computer does:
 | 3002 | Scheduler |
 | 8080 | Self-update helper |
 | 11434 | Local AI model |
+| 5050, 8888 | Wyze camera bridge, if turned on. Only HomeHub itself can reach these. |
 
 Don't forward these ports through your router. For access away from home, use [Remote Access](./REMOTE_ACCESS.md).
 

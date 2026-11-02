@@ -471,6 +471,28 @@ Cannot delete your own account.
 
 ---
 
+## Cameras (Wyze)
+
+Cameras are devices with `driverType: "wyze"` and `driverConfig: { cam: "<bridge name>" }`. `POST /api/devices/:id/on` resumes one and `/off` pauses it. They're always protected; Chat and voice may resume them but not pause them.
+
+| Method | Path | Who | Does |
+|---|---|---|---|
+| `GET` | `/api/cameras/bridge` | any | `{ state }`: `not-configured`, `unreachable`, `signed-out`, `unauthorized` or `ready` (with `cameras`) |
+| `POST` | `/api/cameras/bridge/login` | admin | Body: `{ email, password, keyId, apiKey }`. Passed to the bridge's `/login`, not stored. Returns the new state. |
+| `GET` | `/api/cameras/bridge/cameras` | admin | Cameras on the Wyze account: `[{ cam, name, model, ip, mac, streaming, added }]` |
+| `GET` | `/api/cameras` | any | Added cameras: `{ bridgeError, cameras: [{ deviceId, name, room, cam, model, watching, online, streaming, lastMotionAt, latestSnapshot }] }` |
+| `GET` | `/api/cameras/:deviceId/live.jpg` | any | A picture now. `?cached=1` allows one up to a minute old. `404` when paused or offline. |
+| `POST` | `/api/cameras/:deviceId/snapshots` | any | Saves a picture now. Returns the snapshot. |
+| `GET` | `/api/cameras/:deviceId/hls/<file>` | any | Live HLS video relayed from the bridge, starting at `index.m3u8` |
+| `GET` | `/api/cameras/snapshots` | any | Newest first. Query: `deviceId`, `before` (an id, for paging), `limit` (max 200) |
+| `GET` | `/api/cameras/snapshots/:id/image` | any | The JPEG |
+| `DELETE` | `/api/cameras/snapshots/:id` | admin | Deletes it. Returns `204`. |
+| `GET` / `PUT` | `/api/cameras/settings` | any / admin | `{ motionSnapshots, notify, keepDays (1–365), cooldownSeconds (5–3600) }` |
+
+A `camera:snapshot` socket event announces each new snapshot. The backend reaches the bridge at `WYZE_BRIDGE_URL` and `WYZE_BRIDGE_HLS_URL`, sending `WYZE_BRIDGE_API_KEY` in the `api` header.
+
+---
+
 ## Discovery networks
 
 | Method | Path | Does |

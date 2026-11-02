@@ -1,6 +1,6 @@
 import { getDb } from '../db';
 import { getDriver } from '../drivers/registry';
-import { getAllCachedStates } from '../kasa/device.cache';
+import { getAllCachedStates, noteState } from '../kasa/device.cache';
 import { emitDeviceOverride, emitDeviceState } from '../socket';
 import { logger } from '../logger';
 
@@ -31,6 +31,7 @@ export function notifyPowerOff(deviceId: number): void {
 async function sendPower(device: PowerDevice, state: boolean): Promise<void> {
   const config = device.driver_config ? JSON.parse(device.driver_config) : undefined;
   await getDriver(device.driver_type ?? 'kasa').setPower(device.ip, state, config);
+  noteState(device.id, state);
 
   const db = getDb();
   if (state) {
@@ -91,8 +92,14 @@ export async function applyPower(device: PowerDevice, state: boolean, minutes?: 
  * dashboard. Anything that looks like a water valve is protected without being
  * marked, because forgetting the setting shouldn't let a model cut the water.
  */
-/** Garage doors are always protected: opening one by mistake leaves the house open. */
-const ALWAYS_PROTECTED_DRIVERS = new Set(['meross']);
+/**
+ * Always protected: opening a garage door by mistake leaves the house open,
+ * and pausing a camera by mistake stops it watching.
+ */
+const ALWAYS_PROTECTED_DRIVERS = new Set(['meross', 'wyze']);
+
+/** Protected devices that Chat, voice and AI assistants may still turn ON: resuming a camera is safe. */
+const ASSISTANT_MAY_TURN_ON = new Set(['wyze']);
 
 export function isProtectedDevice(
   device: Pick<PowerDevice, 'id' | 'alias' | 'is_protected'> & { driver_type?: string },
@@ -109,6 +116,15 @@ export function isProtectedDevice(
       return false;
     }
   });
+}
+
+/** Whether Chat, voice or an AI assistant may switch this device to this state. */
+export function assistantMaySwitch(
+  device: Pick<PowerDevice, 'id' | 'alias' | 'is_protected'> & { driver_type?: string },
+  on: boolean,
+): boolean {
+  if (!isProtectedDevice(device)) return true;
+  return on && !!device.driver_type && ASSISTANT_MAY_TURN_ON.has(device.driver_type) && device.is_protected !== 1;
 }
 
 const unreachable = new Set<number>();

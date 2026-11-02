@@ -55,6 +55,9 @@ services:
       # networking so it reaches Watchtower via the localhost-bound
       # port mapping (8080) rather than service-name DNS.
       - WATCHTOWER_URL=http://localhost:8080
+      # Wyze camera bridge, on its localhost-bound ports (profile: cameras)
+      - WYZE_BRIDGE_URL=http://localhost:5050
+      - WYZE_BRIDGE_HLS_URL=http://localhost:8888
       - WATCHTOWER_HTTP_API_TOKEN=${WATCHTOWER_HTTP_API_TOKEN:-}
     labels:
       # Tell Watchtower this container is eligible for auto-recreation
@@ -193,6 +196,41 @@ services:
     networks:
       - homehub-net
 
+  # ── Wyze camera bridge (optional: COMPOSE_PROFILES=cameras) ──
+  # Connects to Wyze cameras with your Wyze account and serves their
+  # video locally. HomeHub signs it in, relays live video, pauses
+  # cameras and saves motion snapshots through it.
+  #
+  # Its ports are bound to 127.0.0.1, so only this machine reaches it.
+  # The backend (host networking) uses them; its sign-in page is never
+  # exposed to the network. Port 5050 avoids macOS's AirPlay on 5000.
+  wyze-bridge:
+    image: mrlt8/wyze-bridge:2.10.3
+    profiles:
+      - cameras
+    ports:
+      - "127.0.0.1:5050:5000"   # API and sign-in
+      - "127.0.0.1:8888:8888"   # HLS live video
+    environment:
+      - WB_AUTH=true
+      # HomeHub sends this in the `api` header. The same value is
+      # WYZE_BRIDGE_API_KEY in .env for the backend.
+      - WB_API=${WYZE_BRIDGE_API_KEY:-}
+      # Report motion from the Wyze account, for motion snapshots.
+      - MOTION_API=true
+      # Keep streams connected, so a motion snapshot is near-instant.
+      - ON_DEMAND=false
+      - TZ=${TZ:-UTC}
+    volumes:
+      - wyze-tokens:/tokens
+      - wyze-img:/img
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+    restart: unless-stopped
+    logging: *default-logging
+    networks:
+      - homehub-net
+
   # ── Tailscale sidecar (remote access) ─────────────────────────
   tailscale:
     image: tailscale/tailscale:latest
@@ -217,6 +255,8 @@ volumes:
   homehub-data:
   ollama-models:
   tailscale-state:
+  wyze-tokens:
+  wyze-img:
 
 networks:
   homehub-net:

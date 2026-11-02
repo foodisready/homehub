@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import { requireInternalKey } from '../middleware/internal';
 import { getDb } from '../db';
 import { getDriver } from '../drivers/registry';
-import { getCachedState } from '../kasa/device.cache';
+import { getCachedState, noteState } from '../kasa/device.cache';
 import { emitDeviceState, emitSensorReading, emitSensorAlert } from '../socket';
 import { logger } from '../logger';
 import { ingestReading, getSensorByKey, parseSensorConfig } from '../sensors/flow-store';
@@ -82,6 +82,7 @@ internalRouter.post('/devices/:id/execute', async (req: Request, res: Response) 
   try {
     const config = device.driver_config ? JSON.parse(device.driver_config) : undefined;
     await getDriver(device.driver_type ?? 'kasa').setPower(device.ip, state, config);
+    noteState(device.id, state);
     if (state) {
       db.prepare("UPDATE devices SET turned_on_at = datetime('now') WHERE id = ?").run(device.id);
     } else {

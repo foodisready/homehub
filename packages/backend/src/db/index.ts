@@ -272,6 +272,22 @@ function migrate(db: Database.Database): void {
   // diagnostic heartbeats).
   try { db.exec('ALTER TABLE sensors ADD COLUMN last_meter_reachable INTEGER'); } catch {}
 
+  // ── Camera snapshots (files under data/snapshots) ──────────────
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS camera_snapshots (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      device_id   INTEGER REFERENCES devices(id) ON DELETE SET NULL,
+      camera      TEXT    NOT NULL,
+      camera_name TEXT    NOT NULL,
+      file        TEXT    NOT NULL UNIQUE,
+      trigger     TEXT    NOT NULL CHECK(trigger IN ('motion', 'manual')),
+      size_bytes  INTEGER NOT NULL,
+      taken_at    TEXT    NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_camera_snapshots_taken ON camera_snapshots(taken_at);
+    CREATE INDEX IF NOT EXISTS idx_camera_snapshots_device ON camera_snapshots(device_id, taken_at);
+  `);
+
   db.exec(`
     CREATE TABLE IF NOT EXISTS firmware_releases (
       id          INTEGER PRIMARY KEY AUTOINCREMENT,

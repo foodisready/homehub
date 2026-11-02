@@ -48,6 +48,11 @@ export function emitDeviceState(
   _io?.emit('device:state', { id: deviceId, alias, state, wattage });
 }
 
+/** A camera snapshot was saved (motion or manual). */
+export function emitCameraSnapshot(snapshot: { id: number; deviceId: number | null; cameraName: string; trigger: string; takenAt: string }): void {
+  _io?.emit('camera:snapshot', snapshot);
+}
+
 export function emitDeviceOverride(
   deviceId: number,
   overrideState: boolean | null,

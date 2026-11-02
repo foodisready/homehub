@@ -1,4 +1,4 @@
-import { applyPower, isProtectedDevice, type PowerDevice } from '../devices/power';
+import { applyPower, assistantMaySwitch, type PowerDevice } from '../devices/power';
 import { findDeviceByName, findDeviceGroup, findScene, type NamedScene } from './find-device';
 import { getDb } from '../db';
 import type { ActionTaken } from './nlp.service';
@@ -105,8 +105,8 @@ async function runGroupCommand(
   devices: PowerDevice[],
   { state, minutes }: PowerCommand,
 ): Promise<{ response: string; actions: ActionTaken[] }> {
-  const allowed   = devices.filter((d) => !isProtectedDevice(d));
-  const protectedNames = devices.filter(isProtectedDevice).map((d) => d.alias);
+  const allowed   = devices.filter((d) => assistantMaySwitch(d, state));
+  const protectedNames = devices.filter((d) => !assistantMaySwitch(d, state)).map((d) => d.alias);
   const action = state ? 'on' : 'off';
 
   const results = await Promise.allSettled(allowed.map((d) => applyPower(d, state, minutes)));
@@ -139,8 +139,8 @@ async function runScene(scene: NamedScene): Promise<{ response: string; actions:
   `).all(scene.id) as SceneAction[];
   if (!devices.length) return { response: `${scene.name} has no devices in it.`, actions: [] };
 
-  const allowed = devices.filter((d) => !isProtectedDevice(d));
-  const protectedNames = devices.filter(isProtectedDevice).map((d) => d.alias);
+  const allowed = devices.filter((d) => assistantMaySwitch(d, d.scene_state === 1));
+  const protectedNames = devices.filter((d) => !assistantMaySwitch(d, d.scene_state === 1)).map((d) => d.alias);
 
   const results = await Promise.allSettled(allowed.map((d) => applyPower(d, d.scene_state === 1)));
   const actions: ActionTaken[] = results.map((result, i) => {
@@ -192,7 +192,7 @@ export async function runPowerCommand(
   }
 
   const device = match.device as unknown as PowerDevice;
-  if (isProtectedDevice(device)) {
+  if (!assistantMaySwitch(device, command.state)) {
     return {
       response: `${device.alias} is protected, so Chat won't switch it. Use its tile on the dashboard.`,
       actions:  [],

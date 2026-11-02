@@ -32,6 +32,8 @@ import { notificationSettingsRouter } from './routes/notification-settings';
 import { notificationHistoryRouter } from './routes/notification-history';
 import { systemRouter } from './routes/system';
 import { backupsRouter } from './routes/backups';
+import { camerasRouter } from './routes/cameras';
+import { startCameraWatch } from './cameras/watch';
 import { runBackup } from './db/backup';
 import { checkAllSensors } from './sensors/stale-check';
 import { authenticate, requireAdmin } from './middleware/auth';
@@ -94,6 +96,7 @@ app.use('/api/notifications/settings', notificationSettingsRouter);
 app.use('/api/notifications/history',  notificationHistoryRouter);
 app.use('/api/system',                 systemRouter);
 app.use('/api/backups',                requireAdmin, backupsRouter);
+app.use('/api/cameras',                camerasRouter);
 
 // ── Global error handler ───────────────────────────────────────
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
@@ -111,6 +114,7 @@ httpServer.listen(PORT, async () => {
   startPolling();            // begin device state polling
   startPowerTimers();        // turn devices off when their timers end
   startMotionRules();        // turn lights off when a room has been empty long enough
+  startCameraWatch();        // save snapshots when Wyze cameras see motion
 
   // Daily DB backup: run once at startup, then every 24 hours
   runBackup();

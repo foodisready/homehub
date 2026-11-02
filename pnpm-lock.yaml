@@ -138,6 +138,9 @@ importers:
       chart.js:
         specifier: ^4.5.1
         version: 4.5.1
+      hls.js:
+        specifier: 1.6.19
+        version: 1.6.19
       qrcode-generator:
         specifier: ^2.0.4
         version: 2.0.4
@@ -3443,6 +3446,9 @@ packages:
 
   help-me@5.0.0:
     resolution: {integrity: sha512-7xgomUX6ADmcYzFik0HzAxh/73YlKR9bmFzf51CZwR+b6YtzU2m0u49hQCqV6SvlqIqsaxovfwdvbnsw3b/zpg==}
+
+  hls.js@1.6.19:
+    resolution: {integrity: sha512-A//aZeaAgM5rgUCbTURD4gkfyw5Uag2/4Jky7CfDOukL/DN+P5DjbgK2BYteyP3/KnCkPfkGVkbLxQG2T0AbUQ==}
 
   hono@4.12.16:
     resolution: {integrity: sha512-jN0ZewiNAWSe5khM3EyCmBb250+b40wWbwNILNfEvq84VREWwOIkuUsFONk/3i3nqkz7Oe1PcpM2mwQEK2L9Kg==}
@@ -8714,6 +8720,8 @@ snapshots:
       function-bind: 1.1.2
 
   help-me@5.0.0: {}
+
+  hls.js@1.6.19: {}
 
   hono@4.12.16: {}
 

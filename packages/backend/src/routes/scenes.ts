@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import { getDb } from '../db';
 import { getDriver } from '../drivers/registry';
 import { emitDeviceState } from '../socket';
-import { getCachedState } from '../kasa/device.cache';
+import { getCachedState, noteState } from '../kasa/device.cache';
 import { logger } from '../logger';
 
 export const scenesRouter = Router();
@@ -77,6 +77,7 @@ scenesRouter.post('/:id/run', async (req: Request, res: Response) => {
     actions.map(async (a) => {
       const config = a.driver_config ? JSON.parse(a.driver_config) : undefined;
       await getDriver(a.driver_type ?? 'kasa').setPower(a.ip, a.state === 1, config);
+      noteState(a.id, a.state === 1);
       emitDeviceState(a.id, a.alias, a.state === 1, getCachedState(a.id)?.wattage ?? null);
       return { alias: a.alias, state: a.state === 1 };
     })

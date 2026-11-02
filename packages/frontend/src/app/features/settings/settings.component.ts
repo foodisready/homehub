@@ -54,6 +54,7 @@ const DRIVER_LABEL: Record<string, string> = {
   shelly: 'Shelly',
   tuya:   'Tuya',
   meross: 'Meross',
+  wyze:   'Wyze',
 };
 
 @Component({
@@ -126,6 +127,7 @@ const DRIVER_LABEL: Record<string, string> = {
     .driver-badge.shelly { border-color:#b45309; color:#fbbf24; }
     .driver-badge.tuya   { border-color:#15803d; color:#4ade80; }
     .driver-badge.meross { border-color:#7c3aed; color:#c4b5fd; }
+    .driver-badge.wyze   { border-color:#0e7490; color:#67e8f9; }
 
     .btn-sm {
       padding:0.3rem 0.75rem;
@@ -262,7 +264,7 @@ const DRIVER_LABEL: Record<string, string> = {
                       <input type="checkbox" style="width:auto" [(ngModel)]="editProtected" />
                       Don't let Chat or AI assistants switch this device
                     </label>
-                    <p style="font-size:0.75rem;color:var(--text-muted);margin:0.2rem 0 0">Valves and automatic shutoff devices are always protected.</p>
+                    <p style="font-size:0.75rem;color:var(--text-muted);margin:0.2rem 0 0">Valves, garage doors, cameras and automatic shutoff devices are always protected.</p>
                     @if (d.driverType === 'shelly' || d.driverType === 'tuya') {
                       <div class="edit-row" style="margin-top:0.4rem">
                         <input type="text"     [(ngModel)]="editAuthUser" placeholder="Username (clear to remove the login)" autocomplete="off" aria-label="Username" />

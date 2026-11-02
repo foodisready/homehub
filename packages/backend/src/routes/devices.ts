@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import { reconcileDiscovered } from '../drivers/reconcile';
 import type { DiscoveredDevice } from '../drivers/DeviceDriver';
 import { getDb } from '../db';
-import { getCachedState, getAllCachedStates } from '../kasa/device.cache';
+import { getCachedState, getAllCachedStates, noteState, pollDeviceNow } from '../kasa/device.cache';
 import { getDriver, getAllDrivers } from '../drivers/registry';
 import { emitDeviceState } from '../socket';
 import { logger } from '../logger';
@@ -114,6 +114,7 @@ devicesRouter.post('/:id/on', async (req: Request, res: Response) => {
   try {
     const config = device.driver_config ? JSON.parse(device.driver_config) : undefined;
     await getDriver(device.driver_type ?? 'kasa').setPower(device.ip, true, config);
+    noteState(device.id, true);
     db.prepare("UPDATE devices SET turned_on_at = datetime('now') WHERE id = ?").run(device.id);
     cancelPowerTimer(device.id);
     emitDeviceState(device.id, device.alias, true, getCachedState(device.id)?.wattage ?? null);
@@ -135,6 +136,7 @@ devicesRouter.post('/:id/off', async (req: Request, res: Response) => {
   try {
     const config = device.driver_config ? JSON.parse(device.driver_config) : undefined;
     await getDriver(device.driver_type ?? 'kasa').setPower(device.ip, false, config);
+    noteState(device.id, false);
     db.prepare('UPDATE devices SET turned_on_at = NULL WHERE id = ?').run(device.id);
     cancelPowerTimer(device.id);
     emitDeviceState(device.id, device.alias, false, null);
@@ -260,6 +262,8 @@ devicesRouter.post('/', requireAdmin, (req: Request, res: Response) => {
       'INSERT INTO devices (alias, ip, model, has_emeter, driver_type, driver_config, mac, room) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
     ).run(alias, ip, model ?? null, hasEmeter ? 1 : 0, driverType, driverConfig ? JSON.stringify(driverConfig) : null, mac ?? null, cleanRoom(room) ?? null);
     const device = db.prepare('SELECT * FROM devices WHERE id = ?').get(result.lastInsertRowid) as DeviceRow;
+    // Learn its state now rather than at the next poll; a slow device mustn't hold up the reply.
+    pollDeviceNow(device.id).catch(() => undefined);
     res.status(201).json(mergeWithCache(device));
   } catch (err: any) {
     if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
@@ -339,6 +343,7 @@ devicesRouter.post('/:id/override', async (req: Request, res: Response) => {
   try {
     const config = device.driver_config ? JSON.parse(device.driver_config) : undefined;
     await getDriver(device.driver_type ?? 'kasa').setPower(device.ip, state, config);
+    noteState(device.id, state);
     emitDeviceState(device.id, device.alias, state, getCachedState(device.id)?.wattage ?? null);
   } catch (err) {
     logger.warn({ ip: device.ip }, 'Could not apply override state immediately');

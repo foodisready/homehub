@@ -13,6 +13,7 @@ HomeHub controls devices directly over your home network. All of them are switch
 | **Shelly Motion** | First-generation motion sensor | Used by motion lights |
 | **Tuya** | Wi-Fi smart plugs | Needs a Device ID and Local Key |
 | **Meross** | MSG100 and MSG200 garage door openers | Needs a one-time Meross sign-in |
+| **Wyze** | Cameras, such as Cam v2, v3 and Pan v3 | Needs the camera bridge and a Wyze API key. See [Cameras](#cameras) |
 
 Zigbee and Philips Hue devices aren't supported. "Works with Google or Alexa" on a box doesn't mean it works with HomeHub, so check the brand first.
 
@@ -87,6 +88,45 @@ If Discover doesn't find it, HomeHub tells you which openers on your Meross acco
 HomeHub keeps only the key that Meross returns, not your password, plus a sign-in token it uses to read device names. The opener is then controlled over your home network, without the internet. The key works for every Meross device on that account.
 
 Garage doors are always protected. The dashboard shows **Open** or **Closed** and asks you to confirm, and Chat and voice can't switch them. While the door is closing, it still shows **Open** until it's all the way down, which takes about 25 seconds to update.
+
+## Cameras
+
+HomeHub can show Wyze cameras live, pause them while you're home, and save a snapshot when one sees motion. It works through the camera bridge, an optional extra service, and needs a free Wyze developer API key.
+
+### Turn on the camera bridge
+
+1. Create an API key at the [Wyze developer console](https://developer-api-console.wyze.com/), signed in with your Wyze account. Keep the key and its ID handy.
+2. In HomeHub's `.env`, set `COMPOSE_PROFILES=cameras` and `WYZE_BRIDGE_API_KEY` to a random value. Create one with `openssl rand -hex 24`.
+3. Restart HomeHub: `docker compose -f docker-compose.yml up -d`.
+4. Open **Cameras** (under **More** on a phone), and sign in with your Wyze email, password, API key ID and API key. HomeHub passes these to the bridge and doesn't keep them.
+5. Select **Add** next to each camera, or **Add all**. Then give each one a room in **Settings → Devices**.
+
+Cameras on another Wi-Fi network work too, because the bridge finds them through your Wyze account.
+
+### Watch, pause and resume
+
+On the **Cameras** page, select a camera's picture or **Live** to watch. Live video can be a few seconds behind.
+
+**Pause** stops a camera watching, using Wyze's own off switch, and asks you to confirm. **Resume** turns it back on. A camera works like any other device, so you can also pause or resume it from the dashboard, a scene or a schedule. For example, make an "I'm home" scene that pauses your cameras and a "Leaving" scene that resumes them.
+
+Cameras are protected: Chat and voice can resume a camera but can't pause one.
+
+### Motion snapshots
+
+When a camera reports motion through your Wyze account, HomeHub saves a picture from it. Snapshots appear on the **Cameras** page, newest first, and you can filter them by camera. They're saved as JPG files in HomeHub's data folder, under `snapshots/<camera>/<date>/`.
+
+Administrators can change these settings at the bottom of the page:
+
+- **Save a snapshot on motion:** on by default.
+- **Notify my phone:** sends a notification with each motion snapshot.
+- **Keep snapshots for:** 30 days by default. Older ones are deleted automatically.
+- **Wait between snapshots:** 30 seconds by default, so one visit doesn't fill the folder.
+
+Motion is reported through Wyze's servers, so a snapshot can come a few seconds after the motion. Paused cameras don't report motion. Select **Snapshot** on a camera to save a picture yourself at any time.
+
+Snapshots are history, so JSON backups leave them out. The install guide's full backup copies them.
+
+The camera bridge is unofficial, and a Wyze firmware update can stop it working until the bridge is updated.
 
 ## Control your devices
 
@@ -198,6 +238,10 @@ Voice control is experimental and isn't included in the install. The test setup 
 **The motion sensor says it can't be reached:** press its button to wake it, then try again. It can take up to a minute to respond.
 
 **A motion rule says it's waiting for the first report:** select **Connect sensor** and wait for "Sensor connected", then wave at it. It ignores new motion for a short time after each report.
+
+**The Cameras page says the bridge isn't set up or can't be reached:** check `COMPOSE_PROFILES=cameras` and `WYZE_BRIDGE_API_KEY` in `.env`, then restart HomeHub. The bridge can take a minute to start.
+
+**A camera shows no picture:** it may be paused, offline or still connecting. Wyze cameras connect to the bridge a little while after it starts.
 
 **A schedule runs at the wrong time:** check that `TZ` in `.env` matches your time zone. Sun schedules also need the right `LATITUDE` and `LONGITUDE`. Restart HomeHub after changing them.
 

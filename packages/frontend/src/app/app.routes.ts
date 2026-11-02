@@ -48,6 +48,11 @@ export const routes: Routes = [
     canActivate: [authGuard],
   },
   {
+    path: 'cameras',
+    loadComponent: () => import('./features/cameras/cameras.component').then((m) => m.CamerasComponent),
+    canActivate: [authGuard],
+  },
+  {
     path: 'firmware',
     loadComponent: () => import('./features/firmware/firmware.component').then((m) => m.FirmwareComponent),
     canActivate: [authGuard],
