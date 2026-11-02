@@ -182,6 +182,8 @@ services:
       - WATCHTOWER_LABEL_ENABLE=true
       - WATCHTOWER_CLEANUP=true
       - WATCHTOWER_ROLLING_RESTART=true
+      # Watchtower 1.7.1 defaults to an API version Docker 29 refuses.
+      - DOCKER_API_VERSION=1.44
       - TZ=${TZ:-UTC}
     command: ["--interval", "31536000"]
     ports:
