@@ -10,6 +10,7 @@ import { cancelPowerTimer, clearOverride, isProtectedDevice, notifyPowerOff, set
 import { requireAdmin } from '../middleware/auth';
 import { keepSecrets, withoutSecrets } from '../devices/secrets';
 import { lastChanges, recordPower, type LastChange } from '../activity/activity';
+import { pendingAutoOff, type AutoOff } from '../devices/auto-off';
 import {
   MAX_EXTRA_NETWORKS, displayNetwork, extraNetworks, ownNetworks, saveExtraNetworks, suggestedNetworks,
 } from '../discovery/networks';
@@ -65,7 +66,11 @@ function cleanRoom(room: unknown): string | null | undefined {
   return room.trim() || null;
 }
 
-function mergeWithCache(device: DeviceRow, changes: Map<number, LastChange> = lastChanges()) {
+function mergeWithCache(
+  device: DeviceRow,
+  changes: Map<number, LastChange> = lastChanges(),
+  autoOff: Map<number, AutoOff> = pendingAutoOff(),
+) {
   const cached = getCachedState(device.id);
   const { config, savedSecrets } = withoutSecrets(device.driver_config ? JSON.parse(device.driver_config) : null);
   return {
@@ -90,6 +95,8 @@ function mergeWithCache(device: DeviceRow, changes: Map<number, LastChange> = la
     isProtected:  isProtectedDevice(device),
     /** The latest on/off change and what caused it, from Activity. */
     lastChange:   changes.get(device.id) ?? null,
+    /** When it will next turn itself off, and why, if it will. */
+    autoOff:      autoOff.get(device.id) ?? null,
   };
 }
 
@@ -98,7 +105,13 @@ devicesRouter.get('/', (_req: Request, res: Response) => {
   const db = getDb();
   const devices = db.prepare('SELECT * FROM devices ORDER BY alias').all() as DeviceRow[];
   const changes = lastChanges();
-  res.json(devices.map((d) => mergeWithCache(d, changes)));
+  const autoOff = pendingAutoOff();
+  res.json(devices.map((d) => mergeWithCache(d, changes, autoOff)));
+});
+
+// GET /api/devices/auto-off — { [deviceId]: AutoOff } for devices that will turn themselves off
+devicesRouter.get('/auto-off', (_req: Request, res: Response) => {
+  res.json(Object.fromEntries(pendingAutoOff()));
 });
 
 // GET /api/devices/:id

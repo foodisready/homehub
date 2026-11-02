@@ -207,6 +207,9 @@ export class DashboardComponent implements OnInit, OnDestroy {
   private unsubState?:  () => void;
   private unsubOnline?: () => void;
   private unsubOverride?: () => void;
+  private unsubMotion?: () => void;
+  private autoOffTimer?: ReturnType<typeof setTimeout>;
+  private autoOffInterval?: ReturnType<typeof setInterval>;
 
   constructor(
     readonly auth:   AuthService,
@@ -218,12 +221,31 @@ export class DashboardComponent implements OnInit, OnDestroy {
   ngOnInit(): void {
     this.loadDevices();
     this.subscribeSocket();
+    // Schedules and motion rules can start a countdown on their own.
+    this.autoOffInterval = setInterval(() => { if (!document.hidden) this.refreshAutoOff(0); }, 60_000);
   }
 
   ngOnDestroy(): void {
     this.unsubState?.();
     this.unsubOnline?.();
     this.unsubOverride?.();
+    this.unsubMotion?.();
+    clearTimeout(this.autoOffTimer);
+    clearInterval(this.autoOffInterval);
+  }
+
+  /**
+   * Turn-off times move when a device switches, a timer is set or a motion
+   * sensor reports. Several often arrive together, so wait a moment.
+   */
+  private refreshAutoOff(delayMs = 600): void {
+    clearTimeout(this.autoOffTimer);
+    this.autoOffTimer = setTimeout(() => {
+      this.http.get<Record<string, Device['autoOff']>>('/api/devices/auto-off').subscribe({
+        next: (map) => this._devices.update((list) => list.map((d) => ({ ...d, autoOff: map[d.id] ?? null }))),
+        error: () => undefined,
+      });
+    }, delayMs);
   }
 
   private loadDevices(): void {
@@ -238,7 +260,10 @@ export class DashboardComponent implements OnInit, OnDestroy {
       this._devices.update((list) =>
         list.map((d) => d.id === ev.id ? { ...d, state: ev.state, wattage: ev.wattage, lastChange: changed(d, ev.state) } : d)
       );
+      this.refreshAutoOff();
     });
+
+    this.unsubMotion = this.socket.onMotion(() => this.refreshAutoOff());
 
     this.unsubOnline = this.socket.onDeviceOnline((ev: DeviceOnlineEvent) => {
       this._devices.update((list) =>
@@ -252,6 +277,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
           ? { ...d, overrideState: ev.overrideState, overrideUntil: ev.overrideUntil }
           : d)
       );
+      this.refreshAutoOff();
     });
   }
 

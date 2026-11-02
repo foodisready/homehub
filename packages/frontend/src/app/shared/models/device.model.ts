@@ -1,5 +1,13 @@
 import type { LastChange } from '../activity/activity-text';
 
+export interface AutoOff {
+  /** null while a motion rule waits for the room to empty */
+  at: string | null;
+  cause: 'timer' | 'motion' | 'schedule';
+  detail: string | null;
+  afterMinutes?: number;
+}
+
 export interface Device {
   id: number;
   alias: string;
@@ -19,6 +27,8 @@ export interface Device {
   savedSecrets?: string[];
   /** The latest on/off change and its cause, from Activity. */
   lastChange?: LastChange | null;
+  /** When it will next turn itself off, and why. */
+  autoOff?: AutoOff | null;
   nicknames:    string[];
   room:         string | null;
   isProtected:  boolean;

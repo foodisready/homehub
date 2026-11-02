@@ -1,4 +1,4 @@
-import { Component, computed, inject, input, output, signal } from '@angular/core';
+import { Component, OnDestroy, computed, effect, inject, input, output, signal } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { DecimalPipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
@@ -68,9 +68,9 @@ export interface OverrideRequest { device: Device; durationMinutes: number; }
       <span class="dot" [class.on]="device().online && device().state" [class.door]="isDoor()" [class.offline]="!device().online"></span>
       <button class="name" type="button" [attr.aria-expanded]="open()" (click)="togglePanel()">
         <span class="alias">{{ device().alias }}</span>
-        @if (detail(); as text) { <span class="detail" [class.timer]="device().overrideUntil" [class.door-open]="isDoor() && device().online && device().state && !device().overrideUntil">{{ text }}</span> }
+        @if (detail(); as text) { <span class="detail" [class.timer]="device().overrideUntil || autoOffText()" [class.door-open]="isDoor() && device().online && device().state && !device().overrideUntil && !autoOffText()">{{ text }}</span> }
       </button>
-      <button class="timer-btn" type="button" [class.active]="device().overrideUntil"
+      <button class="timer-btn" type="button" [class.active]="device().overrideUntil || device().autoOff"
               [attr.aria-label]="'Timer for ' + device().alias" (click)="togglePanel()">⏱</button>
       <button class="switch" type="button" role="switch" [class.on]="device().state"
               [attr.aria-checked]="device().state" [attr.aria-label]="device().alias"
@@ -120,7 +120,7 @@ export interface OverrideRequest { device: Device; durationMinutes: number; }
     }
   `,
 })
-export class DeviceRowComponent {
+export class DeviceRowComponent implements OnDestroy {
   device = input.required<Device>();
   busy   = input(false);
 
@@ -136,9 +136,44 @@ export class DeviceRowComponent {
   /** Wyze cameras: "on" means watching, "off" paused. */
   readonly isCamera = computed(() => this.device().driverType === 'wyze');
 
+  /** Ticks while a turn-off is coming, so the countdown moves. */
+  private readonly now = signal(Date.now());
+  private ticker?: ReturnType<typeof setInterval>;
+
+  constructor() {
+    effect(() => {
+      const timed = !!this.device().autoOff?.at;
+      if (timed && !this.ticker) this.ticker = setInterval(() => this.now.set(Date.now()), 1000);
+      if (!timed && this.ticker) { clearInterval(this.ticker); this.ticker = undefined; }
+    });
+  }
+
+  ngOnDestroy(): void {
+    if (this.ticker) clearInterval(this.ticker);
+  }
+
+  /**
+   * "Off in 8 min · no motion", "Off at 9:30 PM · timer", or for a motion rule
+   * still waiting for the room to empty, "On · off 10 min after motion stops".
+   */
+  readonly autoOffText = computed(() => {
+    const d = this.device(), a = d.autoOff;
+    if (!a || !d.online || !d.state) return '';
+    const cause = a.cause === 'motion' ? 'no motion' : a.cause;
+    const verb = this.isDoor() ? 'Closes' : this.isCamera() ? 'Pauses' : 'Off';
+    if (a.at === null) return `On · off ${a.afterMinutes ?? ''} min after motion stops`.replace('  ', ' ');
+    const left = Date.parse(a.at) - this.now();
+    if (left <= 0) return this.isDoor() ? 'Closing…' : this.isCamera() ? 'Pausing…' : 'Turning off…';
+    if (left < 60_000) return `${verb} in ${Math.ceil(left / 1000)} s · ${cause}`;
+    if (left <= 60 * 60_000) return `${verb} in ${Math.ceil(left / 60_000)} min · ${cause}`;
+    return `${verb} at ${clock(a.at)} · ${cause}`;
+  });
+
   readonly detail = computed(() => {
     const device = this.device();
     if (!device.online) return 'Offline';
+    const autoOff = this.autoOffText();
+    if (autoOff) return autoOff;
     if (device.overrideUntil) {
       const time = new Date(device.overrideUntil).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
       if (this.isDoor()) return `${device.overrideState ? 'Closes at' : 'Closed until'} ${time}`;

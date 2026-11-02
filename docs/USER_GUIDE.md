@@ -139,6 +139,15 @@ On a phone, the tabs at the bottom take you to Home, Scenes, Chat and Schedules.
 
 Set up a timer in Chat by adding a time, such as "turn on my office lamp for an hour".
 
+When something will turn a device off by itself, its dashboard row says when and why, and the timer icon turns blue:
+
+- **"Off in 8 min · no motion":** a motion rule, counting down since the room emptied. Moving resets it.
+- **"On · off 10 min after motion stops":** a motion rule waiting for the room to empty.
+- **"Off in 45 min · timer":** a timer you set. In the last minute it counts seconds.
+- **"Off at 9:30 PM · schedule":** a "turn off after" schedule. More than an hour away, it shows the time instead of a countdown.
+
+If more than one applies, it shows whichever comes first. Garage doors say "Closes in" and cameras "Pauses in".
+
 ## Activity
 
 **Activity** (under **More** on a phone) lists every device change, newest first: what changed, when, and what caused it. For example:

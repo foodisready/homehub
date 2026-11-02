@@ -48,6 +48,11 @@ export function emitDeviceState(
   _io?.emit('device:state', { id: deviceId, alias, state, wattage });
 }
 
+/** A motion sensor reported, so a light's turn-off time may have moved. */
+export function emitMotion(deviceId: number, occupied: boolean): void {
+  _io?.emit('motion', { deviceId, occupied });
+}
+
 /** A camera snapshot was saved (motion or manual). */
 export function emitCameraSnapshot(snapshot: { id: number; deviceId: number | null; cameraName: string; trigger: string; takenAt: string }): void {
   _io?.emit('camera:snapshot', snapshot);

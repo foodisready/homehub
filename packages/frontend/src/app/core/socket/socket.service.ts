@@ -77,6 +77,12 @@ export class SocketService implements OnDestroy {
     return () => this.socket?.off('device:state', callback);
   }
 
+  /** A motion sensor reported. */
+  onMotion(callback: (event: { deviceId: number; occupied: boolean }) => void): () => void {
+    this.socket?.on('motion', callback);
+    return () => this.socket?.off('motion', callback);
+  }
+
   /** A camera snapshot was saved. */
   onCameraSnapshot(callback: (event: { id: number; deviceId: number | null; cameraName: string; trigger: string; takenAt: string }) => void): () => void {
     this.socket?.on('camera:snapshot', callback);

@@ -482,6 +482,8 @@ Every device change and its cause. Anyone signed in can read it.
 
 `source` is one of `app`, `scene`, `schedule`, `timer`, `motion`, `chat`, `voice`, `assistant`, `shutoff`, `outside` or `homehub`. `detail` names the scene, schedule or motion rule. `via` says what started a scene, such as `chat`. Repeating a device's current state isn't recorded.
 
+`GET /api/devices` also includes `autoOff`: when a device that's on will turn itself off, as `{ at, cause, detail, afterMinutes? }`. `cause` is `timer`, `motion` or `schedule`; `detail` names the motion rule or schedule. `at` is null while a motion rule waits for the room to empty, with `afterMinutes` set. The earliest applies. `GET /api/devices/auto-off` returns just these, keyed by device id, and a `motion` socket event (`{ deviceId, occupied }`) signals that one may have moved.
+
 `GET /api/devices` includes `lastChange`: each device's latest on/off entry. Requests with the header `x-homehub-client: mcp` are recorded as `assistant`; the MCP server sends it. The scheduler sends the schedule's `label` to `/internal/devices/:id/execute`.
 
 ---

@@ -5,6 +5,7 @@ import { applyPower, isProtectedDevice, onPowerOff, type PowerDevice } from '../
 import { getCachedState } from '../kasa/device.cache';
 import { logger } from '../logger';
 import { withActivity } from '../activity/activity';
+import { emitMotion } from '../socket';
 
 const SWEEP_INTERVAL_MS = 15_000;
 // A lost "clear" event must not keep a room occupied forever.
@@ -55,6 +56,10 @@ export function recordMotion(token: string, occupied: boolean, now = new Date())
   const result = getDb().prepare(
     'UPDATE motion_rules SET occupied = ?, last_motion_at = ? WHERE token = ?',
   ).run(occupied ? 1 : 0, now.toISOString(), token);
+  if (result.changes > 0) {
+    const rule = getDb().prepare('SELECT device_id FROM motion_rules WHERE token = ?').get(token) as { device_id: number } | undefined;
+    if (rule) emitMotion(rule.device_id, occupied);
+  }
   return result.changes > 0;
 }
 
