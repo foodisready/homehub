@@ -3,6 +3,7 @@ import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { AuthService } from '../../core/auth/auth.service';
+import { SystemService } from '../../core/services/system.service';
 import { SocketService } from '../../core/socket/socket.service';
 import { DeviceFilterComponent, matchesDevice, type DeviceFilter } from '../../shared/device-filter/device-filter.component';
 import { Device } from '../../shared/models/device.model';
@@ -803,6 +804,16 @@ const DRIVER_LABEL: Record<string, string> = {
                 <div class="pref-sub">Latitude / Longitude — used for solar scheduling. Edit <code>LATITUDE</code> and <code>LONGITUDE</code> in <code>.env</code> to update.</div>
               </div>
             </div>
+
+            <div class="pref-row">
+              <div class="pref-label">
+                Version
+                <div class="pref-sub">
+                  {{ appVersion() === 'dev' ? 'Development build, running outside Docker' : 'Installed release' }}
+                </div>
+              </div>
+              <span style="font-size:0.9rem">{{ appVersion() || '…' }}</span>
+            </div>
           </div>
         }
       </div>
@@ -1007,7 +1018,7 @@ export class SettingsComponent implements OnInit, OnDestroy {
   // kWh rate
   kwhRateDraft = localStorage.getItem('kwhRate') ?? '0.15';
 
-  constructor(readonly auth: AuthService, private http: HttpClient, private socket: SocketService) {}
+  constructor(readonly auth: AuthService, private http: HttpClient, private socket: SocketService, private system: SystemService) {}
 
   switchDevice(device: Device): void {
     const on = !device.state;
@@ -1038,6 +1049,7 @@ export class SettingsComponent implements OnInit, OnDestroy {
     });
     this.http.get<ChatStats>('/api/nlp/stats').subscribe({ next: (stats) => this.chatStats.set(stats) });
     this.http.get<Device[]>('/api/devices').subscribe((d) => this._devices.set(d));
+    this.system.version().subscribe({ next: (v) => this.appVersion.set(v.running), error: () => undefined });
     if (this.isAdmin()) {
       this.http.get<UserRow[]>('/api/users').subscribe((u) => this._users.set(u));
       this.http.get<{ accessId: string; region: string; hasSecret: boolean }>('/api/tuya/credentials').subscribe((c) => {
@@ -1297,6 +1309,7 @@ export class SettingsComponent implements OnInit, OnDestroy {
   // ── Probe ──────────────────────────────────────────────────
 
   readonly merossOpenRequest = signal(0);
+  readonly appVersion = signal('');
   readonly otherNetworks = viewChild(OtherNetworksComponent);
   readonly unreachedMeross = signal<MerossAccountDevice[]>([]);
 

@@ -33,6 +33,8 @@ export function matchesDevice(device: Device, search: string, filter: DeviceFilt
       color: var(--text-muted); font-size: 0.8rem; padding: 0.35rem 0.85rem;
     }
     .chip.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+    /* "On 2": green while something is on, unless it's the selected filter. */
+    .chip.lit:not(.active) { border-color: var(--green); color: #4ade80; font-weight: 600; }
   `],
   template: `
     <div class="search">
@@ -45,6 +47,7 @@ export function matchesDevice(device: Device, search: string, filter: DeviceFilt
     <div class="chips" role="group" aria-label="Filter devices">
       @for (option of options(); track option.value) {
         <button class="chip" type="button" [class.active]="filter() === option.value"
+                [class.lit]="option.value === 'on' && option.count > 0"
                 [attr.aria-pressed]="filter() === option.value" (click)="filter.set(option.value)">
           {{ option.label }} {{ option.count }}
         </button>

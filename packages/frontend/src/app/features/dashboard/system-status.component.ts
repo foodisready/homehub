@@ -47,7 +47,9 @@ const UPDATE_DEADLINE = 5 * 60_000;
     .msg.muted { color: var(--text-muted); }
   `],
   template: `
+    <!-- Only shown when there's something to act on; the version itself is in Settings → Preferences. -->
     @if (version(); as v) {
+      @if (v.updateAvailable || updating() || msg()) {
       <div class="card" [class.update]="v.updateAvailable && !done()" [class.error]="errored()">
         <div class="info">
           <span class="label">HomeHub <strong>{{ v.running }}</strong></span>
@@ -74,6 +76,7 @@ const UPDATE_DEADLINE = 5 * 60_000;
           }
         </div>
       </div>
+      }
     }
   `,
 })

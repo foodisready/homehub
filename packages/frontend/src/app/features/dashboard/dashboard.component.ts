@@ -19,6 +19,8 @@ interface DeviceSection {
   devices: Device[];
   count: string;
   canTurnOff: boolean;
+  /** Something in the room is on, which tints the card green. */
+  anyOn: boolean;
 }
 
 function loadCollapsed(): Set<string> {
@@ -73,11 +75,17 @@ function loadCollapsed(): Set<string> {
     .chevron.closed { transform: rotate(-90deg); }
     .room-name { font-weight: 700; font-size: 0.95rem; }
     .room-count { color: var(--text-muted); font-size: 0.78rem; white-space: nowrap; }
+    /* A room with something on: green edge and count, so it stands out even when folded. */
+    .room.lit { box-shadow: inset 3px 0 0 var(--green); }
+    .room.lit .room-count { color: #4ade80; font-weight: 600; }
     .all-off {
       background: transparent; border: 1px solid var(--border); color: var(--text-muted);
       font-size: 0.75rem; padding: 0.3rem 0.65rem; flex-shrink: 0;
     }
     .all-off:hover:not(:disabled) { color: var(--text); }
+    /* Outlined, not filled: a solid green button would read as "turn on". */
+    .room.lit .all-off { border-color: var(--green); color: #4ade80; }
+    .room.lit .all-off:hover:not(:disabled) { background: rgba(34, 197, 94, 0.12); color: #86efac; }
 
     .empty {
       text-align: center;
@@ -133,7 +141,7 @@ function loadCollapsed(): Set<string> {
 
         <div class="rooms">
           @for (section of sections(); track section.name) {
-            <section class="card room">
+            <section class="card room" [class.lit]="section.anyOn">
               <div class="room-head">
                 <button class="room-toggle" type="button" [attr.aria-expanded]="isOpen(section.name)"
                         (click)="toggleSection(section.name)">
@@ -201,12 +209,13 @@ export class DashboardComponent implements OnInit, OnDestroy {
         devices,
         count: `${on} of ${devices.length} on`,
         canTurnOff: devices.some((d) => d.state && !d.isProtected),
+        anyOn: on > 0,
       };
     });
 
     const offline = matching.filter((d) => !d.online);
     if (offline.length) {
-      sections.push({ name: OFFLINE, devices: offline, count: String(offline.length), canTurnOff: false });
+      sections.push({ name: OFFLINE, devices: offline, count: String(offline.length), canTurnOff: false, anyOn: false });
     }
     return sections;
   });
