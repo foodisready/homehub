@@ -9,6 +9,7 @@ import { logger } from '../logger';
 import { cancelPowerTimer, clearOverride, isProtectedDevice, notifyPowerOff, setOverride } from '../devices/power';
 import { requireAdmin } from '../middleware/auth';
 import { keepSecrets, withoutSecrets } from '../devices/secrets';
+import { lastChanges, recordPower, type LastChange } from '../activity/activity';
 import {
   MAX_EXTRA_NETWORKS, displayNetwork, extraNetworks, ownNetworks, saveExtraNetworks, suggestedNetworks,
 } from '../discovery/networks';
@@ -28,6 +29,8 @@ function confirmStateAsync(
       const prev   = states.get(deviceId);
       states.set(deviceId, { state: actual, wattage: prev?.wattage ?? null, online: true, lastPolled: new Date() });
       if (actual !== expectedState) {
+        // The device didn't do what HomeHub asked, so Activity mustn't say it did.
+        recordPower(deviceId, actual, { source: 'homehub', detail: "didn't respond to the switch" });
         emitDeviceState(deviceId, alias, actual, prev?.wattage ?? null);
         logger.warn({ deviceId, alias, expectedState, actual }, 'Device state mismatch after setPower — corrected');
       }
@@ -62,7 +65,7 @@ function cleanRoom(room: unknown): string | null | undefined {
   return room.trim() || null;
 }
 
-function mergeWithCache(device: DeviceRow) {
+function mergeWithCache(device: DeviceRow, changes: Map<number, LastChange> = lastChanges()) {
   const cached = getCachedState(device.id);
   const { config, savedSecrets } = withoutSecrets(device.driver_config ? JSON.parse(device.driver_config) : null);
   return {
@@ -85,6 +88,8 @@ function mergeWithCache(device: DeviceRow) {
     nicknames:    device.nicknames ? JSON.parse(device.nicknames) as string[] : [],
     room:         device.room,
     isProtected:  isProtectedDevice(device),
+    /** The latest on/off change and what caused it, from Activity. */
+    lastChange:   changes.get(device.id) ?? null,
   };
 }
 
@@ -92,7 +97,8 @@ function mergeWithCache(device: DeviceRow) {
 devicesRouter.get('/', (_req: Request, res: Response) => {
   const db = getDb();
   const devices = db.prepare('SELECT * FROM devices ORDER BY alias').all() as DeviceRow[];
-  res.json(devices.map(mergeWithCache));
+  const changes = lastChanges();
+  res.json(devices.map((d) => mergeWithCache(d, changes)));
 });
 
 // GET /api/devices/:id

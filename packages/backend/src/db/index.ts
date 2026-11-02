@@ -272,6 +272,24 @@ function migrate(db: Database.Database): void {
   // diagnostic heartbeats).
   try { db.exec('ALTER TABLE sensors ADD COLUMN last_meter_reachable INTEGER'); } catch {}
 
+  // ── Activity: device changes and their causes ─────────────────
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS device_events (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      device_id    INTEGER REFERENCES devices(id) ON DELETE SET NULL,
+      device_alias TEXT    NOT NULL,
+      kind         TEXT    NOT NULL CHECK(kind IN ('power', 'online')),
+      state        INTEGER NOT NULL CHECK(state IN (0, 1)),
+      source       TEXT    NOT NULL,
+      detail       TEXT,
+      via          TEXT,
+      user_name    TEXT,             -- kept as text, so it survives the user being removed
+      at           TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_device_events_device ON device_events(device_id, kind, id);
+    CREATE INDEX IF NOT EXISTS idx_device_events_at ON device_events(at);
+  `);
+
   // ── Camera snapshots (files under data/snapshots) ──────────────
   db.exec(`
     CREATE TABLE IF NOT EXISTS camera_snapshots (

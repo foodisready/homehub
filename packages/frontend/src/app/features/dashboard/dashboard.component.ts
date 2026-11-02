@@ -30,6 +30,15 @@ function loadCollapsed(): Set<string> {
   return new Set([OFFLINE]);
 }
 
+/**
+ * A state change just arrived: keep "since" right without reloading. The
+ * cause isn't sent with the change, and the row only shows the time.
+ */
+function changed(d: Device, state: boolean): Device['lastChange'] {
+  if (d.state === state && d.lastChange) return d.lastChange;
+  return { state, source: 'homehub', detail: null, via: null, userName: null, at: new Date().toISOString() };
+}
+
 @Component({
   selector: 'app-dashboard',
   standalone: true,
@@ -227,7 +236,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
   private subscribeSocket(): void {
     this.unsubState = this.socket.onDeviceState((ev: DeviceStateEvent) => {
       this._devices.update((list) =>
-        list.map((d) => d.id === ev.id ? { ...d, state: ev.state, wattage: ev.wattage } : d)
+        list.map((d) => d.id === ev.id ? { ...d, state: ev.state, wattage: ev.wattage, lastChange: changed(d, ev.state) } : d)
       );
     });
 

@@ -43,6 +43,8 @@ export async function apiRequest<T = unknown>(
     headers: {
       'Content-Type':  'application/json',
       'Authorization': `Bearer ${token}`,
+      // Lets HomeHub's Activity show changes as made by an AI assistant.
+      'x-homehub-client': 'mcp',
     },
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });

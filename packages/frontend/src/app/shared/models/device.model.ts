@@ -1,3 +1,5 @@
+import type { LastChange } from '../activity/activity-text';
+
 export interface Device {
   id: number;
   alias: string;
@@ -15,6 +17,8 @@ export interface Device {
   driverConfig: Record<string, unknown> | null;
   /** Which secrets are saved, as paths into driverConfig, e.g. "auth.pass". */
   savedSecrets?: string[];
+  /** The latest on/off change and its cause, from Activity. */
+  lastChange?: LastChange | null;
   nicknames:    string[];
   room:         string | null;
   isProtected:  boolean;

@@ -3,6 +3,7 @@ import { getDriver } from '../drivers/registry';
 import { emitDeviceState, emitDeviceOnline, emitDeviceEnergy } from '../socket';
 import { sendPushToAll } from '../push/push.service';
 import { logger } from '../logger';
+import { lastPowerState, recordOnline, recordPower } from '../activity/activity';
 
 export interface DeviceState {
   state: boolean;
@@ -31,6 +32,7 @@ export function getAllCachedStates(): Map<number, DeviceState> {
 export function noteState(deviceId: number, state: boolean): void {
   const prev = cache.get(deviceId);
   cache.set(deviceId, { state, wattage: state ? prev?.wattage ?? null : null, online: true, lastPolled: new Date() });
+  recordPower(deviceId, state);   // with the cause of the work that made the switch
 }
 
 /** Poll a single device, update the cache, and emit socket events. */
@@ -64,6 +66,13 @@ async function pollDevice(
     if ((cache.get(id)?.lastPolled.getTime() ?? 0) > started) return;
     cache.set(id, { state, wattage: energy?.wattage ?? null, online: true, lastPolled: new Date() });
 
+    // HomeHub records its own switches as it makes them, so a change seen here
+    // came from outside: a wall switch, the device's app, or while HomeHub was off.
+    if (prev?.online ? prev.state !== state : lastPowerState(id) !== null && lastPowerState(id) !== state) {
+      recordPower(id, state, { source: 'outside' });
+    }
+    if (prev && !prev.online) recordOnline(id, true);
+
     // Track when device was turned on/off (for auto-off schedules)
     const db = getDb();
     if (state) {
@@ -90,6 +99,7 @@ async function pollDevice(
     }
   } catch {
     cache.set(id, { state: prev?.state ?? false, wattage: null, online: false, lastPolled: new Date() });
+    if (!prev || prev.online) recordOnline(id, false);
     if (!prev || prev.online) {
       emitDeviceOnline(id, alias, false);
       sendPushToAll('Device offline', `${alias} is no longer reachable`, { deviceId: id });

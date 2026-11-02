@@ -139,6 +139,22 @@ On a phone, the tabs at the bottom take you to Home, Scenes, Chat and Schedules.
 
 Set up a timer in Chat by adding a time, such as "turn on my office lamp for an hour".
 
+## Activity
+
+**Activity** (under **More** on a phone) lists every device change, newest first: what changed, when, and what caused it. For example:
+
+- "Porch turned on, by alice"
+- "Kitchen lights turned on, by scene Evening, from Chat"
+- "Porch turned off, by schedule Lights out, was on for 4 h 12 min"
+- "Garage door opened, outside HomeHub"
+- "Hall lamp went offline"
+
+Causes include someone in the app, a scene, a schedule, a timer, a motion rule, Chat, voice, an AI assistant and automatic water shutoff. **Outside HomeHub** means a wall switch, the device's own app, or a change made while HomeHub was off. HomeHub notices those at its next check, within about a minute, and can't tell who made them.
+
+Filter by device or cause at the top. On the dashboard, a device that's on shows when it came on, and its details panel shows its recent activity.
+
+Activity is kept for 90 days. Administrators can change this at the bottom of the page, from 7 days to 2 years. JSON backups leave it out, since it's history.
+
 ## Rooms
 
 Rooms keep the dashboard short. Open **Settings → Devices**, select **Edit** on a device, and enter a room. Devices with no room appear under **Unassigned**.

@@ -2,8 +2,12 @@ import { Router, Request, Response } from 'express';
 import { processMessage, processMessageStream, type ChatMessage } from '../nlp/nlp.service';
 import { getCommandStats } from '../nlp/command-log';
 import { logger } from '../logger';
+import { activityMiddleware } from '../activity/activity';
 
 export const nlpRouter = Router();
+
+// Changes made from Chat are recorded as such in Activity.
+nlpRouter.use(activityMiddleware('chat'));
 
 // GET /api/nlp/stats  (how often the rules answered, and what they missed)
 nlpRouter.get('/stats', (_req: Request, res: Response) => {

@@ -4,6 +4,7 @@ import { getDb } from '../db';
 import { applyPower, isProtectedDevice, onPowerOff, type PowerDevice } from '../devices/power';
 import { getCachedState } from '../kasa/device.cache';
 import { logger } from '../logger';
+import { withActivity } from '../activity/activity';
 
 const SWEEP_INTERVAL_MS = 15_000;
 // A lost "clear" event must not keep a room occupied forever.
@@ -74,7 +75,7 @@ export async function handleMotion(token: string, occupied: boolean, now = new D
   // Don't rely on the cached state: it can be a minute old, so a light just
   // switched off at the wall would look on. Turning on a lit light is harmless.
   try {
-    await applyPower({ ...rule, id: rule.device_id }, true);
+    await withActivity({ source: 'motion', detail: rule.name }, () => applyPower({ ...rule, id: rule.device_id }, true));
     logger.info({ rule: rule.name, device: rule.alias }, 'Motion, light turned on');
   } catch (err) {
     logger.warn({ err, rule: rule.name }, 'Could not turn on light after motion');
@@ -132,7 +133,7 @@ export async function sweepMotionRules(now = Date.now()): Promise<void> {
 
     await Promise.all(rules.filter((rule) => shouldTurnOff(rule, now)).map(async (rule) => {
       try {
-        await applyPower({ ...rule, id: rule.device_id }, false);
+        await withActivity({ source: 'motion', detail: rule.name }, () => applyPower({ ...rule, id: rule.device_id }, false));
         logger.info({ rule: rule.name, device: rule.alias }, 'No motion, light turned off');
       } catch (err) {
         logger.warn({ err, rule: rule.name }, 'Could not turn off light after no motion');

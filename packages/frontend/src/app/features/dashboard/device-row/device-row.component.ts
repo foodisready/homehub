@@ -1,7 +1,9 @@
-import { Component, computed, input, output, signal } from '@angular/core';
+import { Component, computed, inject, input, output, signal } from '@angular/core';
+import { HttpClient } from '@angular/common/http';
 import { DecimalPipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import type { Device } from '../../../shared/models/device.model';
+import { type ActivityEvent, actionWord, causeText, clock, when } from '../../../shared/activity/activity-text';
 
 export interface OverrideRequest { device: Device; durationMinutes: number; }
 
@@ -57,7 +59,9 @@ export interface OverrideRequest { device: Device; durationMinutes: number; }
       font-size: 0.8rem; padding: 0.4rem 0.8rem; border-radius: var(--radius);
     }
     .small.danger { background: var(--red); border-color: var(--red); color: #fff; font-weight: 600; }
-    .links { display: flex; gap: 1rem; font-size: 0.8rem; }
+    .links { display: flex; gap: 1rem; font-size: 0.8rem; flex-wrap: wrap; }
+    .recent { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.78rem; color: var(--text-muted); }
+    .recent b { color: var(--text); font-weight: 500; }
   `],
   template: `
     <div class="row" [class.offline]="!device().online">
@@ -98,7 +102,16 @@ export interface OverrideRequest { device: Device; durationMinutes: number; }
             <button class="small" type="button" (click)="overrideCancelled.emit(device())">Cancel timer</button>
           }
         </div>
+        @if (recent().length) {
+          <span class="panel-label">Recent activity</span>
+          <div class="recent">
+            @for (e of recent(); track e.id) {
+              <span><b>{{ time(e.at) }}</b> · {{ recentText(e) }}</span>
+            }
+          </div>
+        }
         <div class="links">
+          <a routerLink="/activity" [queryParams]="{ deviceId: device().id }">All activity</a>
           <a routerLink="/schedules">Schedules</a>
           @if (device().hasEmeter) { <a routerLink="/energy">Energy</a> }
           @if (isCamera()) { <a routerLink="/cameras">Live view and snapshots</a> }
@@ -131,9 +144,12 @@ export class DeviceRowComponent {
       if (this.isDoor()) return `${device.overrideState ? 'Closes at' : 'Closed until'} ${time}`;
       return `${device.overrideState ? 'Off at' : 'Off until'} ${time}`;
     }
-    if (this.isDoor()) return device.state ? 'Open' : 'Closed';
-    if (this.isCamera()) return device.state ? 'Watching' : 'Paused';
-    if (device.hasEmeter && device.state && device.wattage != null) return `${device.wattage.toFixed(1)} W`;
+    const since = this.since();
+    if (this.isDoor()) return (device.state ? 'Open' : 'Closed') + (device.state && since ? ` since ${since}` : '');
+    if (this.isCamera()) return (device.state ? 'Watching' : 'Paused') + (!device.state && since ? ` since ${since}` : '');
+    const watts = device.hasEmeter && device.state && device.wattage != null ? `${device.wattage.toFixed(1)} W` : '';
+    if (device.state && since) return watts ? `${watts} · since ${since}` : `On since ${since}`;
+    if (watts) return watts;
     return '';
   });
 
@@ -151,8 +167,29 @@ export class DeviceRowComponent {
     return `Turn ${d.state ? 'off' : 'on'}`;
   });
 
+  /** When the device last changed to its current state, if Activity knows. */
+  private readonly since = computed(() => {
+    const d = this.device(), c = d.lastChange;
+    return c && c.state === d.state ? when(c.at) : null;
+  });
+
+  readonly recent = signal<ActivityEvent[]>([]);
+  private readonly http = inject(HttpClient);
+
   togglePanel(): void {
     this.open.update((open) => !open);
+    if (this.open()) {
+      this.http.get<ActivityEvent[]>(`/api/activity?deviceId=${this.device().id}&kind=power&limit=4`).subscribe({
+        next: (list) => this.recent.set(list),
+        error: () => this.recent.set([]),
+      });
+    }
+  }
+
+  time = clock;
+
+  recentText(e: ActivityEvent): string {
+    return `${actionWord(e.driverType, e.state)} ${causeText(e)}`;
   }
 
   /** A compact switch is easy to hit by accident, which matters for a water valve. */

@@ -14,6 +14,7 @@ import { notifyStaleRecovery } from '../sensors/stale-check';
 import { runPowerCommand } from '../nlp/commands';
 import { recordVoiceCommand } from '../nlp/command-log';
 import { listDeviceNames, listSceneNames } from '../nlp/find-device';
+import { withActivity } from '../activity/activity';
 
 export const internalRouter = Router();
 
@@ -46,7 +47,7 @@ internalRouter.post('/voice/command', async (req: Request, res: Response) => {
   // The wake word can swallow the first word, leaving "off my office lamp".
   const spoken = text.trim().replace(/^(on|off)\s/i, 'turn $1 ');
 
-  const handled = await runPowerCommand(spoken);
+  const handled = await withActivity({ source: 'voice' }, () => runPowerCommand(spoken));
   recordVoiceCommand(text.trim(), handled !== null);
   if (!handled) return res.json({ handled: false, response: "Sorry, I didn't understand that.", actions: [] });
 
@@ -64,7 +65,7 @@ internalRouter.post('/devices/:id/execute', async (req: Request, res: Response) 
     return res.status(404).json({ error: 'Device not found', code: 'DEVICE_NOT_FOUND' });
   }
 
-  const { state } = req.body as { state: boolean };
+  const { state, label } = req.body as { state: boolean; label?: unknown };
   if (typeof state !== 'boolean') {
     return res.status(400).json({ error: '`state` must be a boolean', code: 'VALIDATION_ERROR' });
   }
@@ -82,7 +83,7 @@ internalRouter.post('/devices/:id/execute', async (req: Request, res: Response) 
   try {
     const config = device.driver_config ? JSON.parse(device.driver_config) : undefined;
     await getDriver(device.driver_type ?? 'kasa').setPower(device.ip, state, config);
-    noteState(device.id, state);
+    withActivity({ source: 'schedule', detail: typeof label === 'string' ? label : null }, () => noteState(device.id, state));
     if (state) {
       db.prepare("UPDATE devices SET turned_on_at = datetime('now') WHERE id = ?").run(device.id);
     } else {

@@ -471,6 +471,21 @@ Cannot delete your own account.
 
 ---
 
+## Activity
+
+Every device change and its cause. Anyone signed in can read it.
+
+| Method | Path | Does |
+|---|---|---|
+| `GET` | `/api/activity` | Newest first. Query: `deviceId`, `room` (empty for no room), `source`, `kind` (`power` or `online`), `before` (an id, for paging), `limit` (max 200). Each entry: `{ id, deviceId, deviceName, driverType, room, kind, state, source, detail, via, userName, at, onForSeconds }`. `onForSeconds` is set on a power-off that followed a power-on. |
+| `GET` / `PUT` | `/api/activity/settings` | `{ keepDays }`, 7–730, default 90. `PUT` is admin only. |
+
+`source` is one of `app`, `scene`, `schedule`, `timer`, `motion`, `chat`, `voice`, `assistant`, `shutoff`, `outside` or `homehub`. `detail` names the scene, schedule or motion rule. `via` says what started a scene, such as `chat`. Repeating a device's current state isn't recorded.
+
+`GET /api/devices` includes `lastChange`: each device's latest on/off entry. Requests with the header `x-homehub-client: mcp` are recorded as `assistant`; the MCP server sends it. The scheduler sends the schedule's `label` to `/internal/devices/:id/execute`.
+
+---
+
 ## Cameras (Wyze)
 
 Cameras are devices with `driverType: "wyze"` and `driverConfig: { cam: "<bridge name>" }`. `POST /api/devices/:id/on` resumes one and `/off` pauses it. They're always protected; Chat and voice may resume them but not pause them.

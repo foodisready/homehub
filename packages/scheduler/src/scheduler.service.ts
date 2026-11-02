@@ -199,7 +199,8 @@ export class SchedulerService {
         'Content-Type':   'application/json',
         'x-internal-key': this.internalKey,
       },
-      body: JSON.stringify({ state: row.state === 1 }),
+      // The label shows in HomeHub's Activity as the cause.
+      body: JSON.stringify({ state: row.state === 1, label: row.label }),
     });
 
     if (!res.ok) {

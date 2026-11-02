@@ -3,6 +3,7 @@ import { getDriver } from '../drivers/registry';
 import { getAllCachedStates, noteState } from '../kasa/device.cache';
 import { emitDeviceOverride, emitDeviceState } from '../socket';
 import { logger } from '../logger';
+import { withActivity } from '../activity/activity';
 
 export interface PowerDevice {
   id:            number;
@@ -131,7 +132,7 @@ const unreachable = new Set<number>();
 
 async function expireTimer(device: PowerDevice & { timer_off_at: string }): Promise<void> {
   try {
-    await sendPower(device, false);
+    await withActivity({ source: 'timer' }, () => sendPower(device, false));
   } catch (err) {
     // The timer stays set, so the next sweep tries again.
     if (!unreachable.has(device.id)) {

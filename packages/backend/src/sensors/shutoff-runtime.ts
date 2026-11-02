@@ -13,6 +13,7 @@ import { emitDeviceState } from '../socket';
 import { getCachedState, noteState } from '../kasa/device.cache';
 import { notifyShutoffFailure, notifyShutoffSuccess } from '../notifications/router';
 import type { ShutoffInvoker, ShutoffNotifier } from './shutoff';
+import { withActivity } from '../activity/activity';
 
 interface DeviceRow {
   id:            number;
@@ -35,7 +36,7 @@ export const realInvoker: ShutoffInvoker = {
 
     const config = device.driver_config ? JSON.parse(device.driver_config) : undefined;
     await getDriver(device.driver_type ?? 'kasa').setPower(device.ip, false, config);
-    noteState(device.id, false);
+    withActivity({ source: 'shutoff', detail: 'leak detected' }, () => noteState(device.id, false));
 
     // Update local state so the dashboard reflects the close.
     db.prepare("UPDATE devices SET turned_on_at = NULL WHERE id = ?").run(device.id);

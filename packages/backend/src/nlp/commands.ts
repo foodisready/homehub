@@ -2,6 +2,7 @@ import { applyPower, assistantMaySwitch, type PowerDevice } from '../devices/pow
 import { findDeviceByName, findDeviceGroup, findScene, type NamedScene } from './find-device';
 import { getDb } from '../db';
 import type { ActionTaken } from './nlp.service';
+import { withActivity } from '../activity/activity';
 
 export interface PowerCommand {
   name:     string;
@@ -142,7 +143,8 @@ async function runScene(scene: NamedScene): Promise<{ response: string; actions:
   const allowed = devices.filter((d) => assistantMaySwitch(d, d.scene_state === 1));
   const protectedNames = devices.filter((d) => !assistantMaySwitch(d, d.scene_state === 1)).map((d) => d.alias);
 
-  const results = await Promise.allSettled(allowed.map((d) => applyPower(d, d.scene_state === 1)));
+  const results = await withActivity({ source: 'scene', detail: scene.name }, () =>
+    Promise.allSettled(allowed.map((d) => applyPower(d, d.scene_state === 1))));
   const actions: ActionTaken[] = results.map((result, i) => {
     const args = { alias: allowed[i].alias, state: allowed[i].scene_state === 1 ? 'on' : 'off' };
     return result.status === 'fulfilled'

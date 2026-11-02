@@ -34,6 +34,8 @@ import { systemRouter } from './routes/system';
 import { backupsRouter } from './routes/backups';
 import { camerasRouter } from './routes/cameras';
 import { startCameraWatch } from './cameras/watch';
+import { activityMiddleware, startActivityPruning } from './activity/activity';
+import { activityRouter } from './routes/activity';
 import { runBackup } from './db/backup';
 import { checkAllSensors } from './sensors/stale-check';
 import { authenticate, requireAdmin } from './middleware/auth';
@@ -79,6 +81,9 @@ app.use('/api', (req: Request, res: Response, next: NextFunction) => {
   authenticate(req, res, next);
 });
 
+// Activity records who made each change. The AI assistant server identifies itself.
+app.use('/api', activityMiddleware((req) => (req.headers['x-homehub-client'] === 'mcp' ? 'assistant' : 'app')));
+
 app.use('/api/devices',   devicesRouter);
 app.use('/api/schedules', schedulesRouter);
 app.use('/api/users',     usersRouter);
@@ -97,6 +102,7 @@ app.use('/api/notifications/history',  notificationHistoryRouter);
 app.use('/api/system',                 systemRouter);
 app.use('/api/backups',                requireAdmin, backupsRouter);
 app.use('/api/cameras',                camerasRouter);
+app.use('/api/activity',               activityRouter);
 
 // ── Global error handler ───────────────────────────────────────
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
@@ -115,6 +121,7 @@ httpServer.listen(PORT, async () => {
   startPowerTimers();        // turn devices off when their timers end
   startMotionRules();        // turn lights off when a room has been empty long enough
   startCameraWatch();        // save snapshots when Wyze cameras see motion
+  startActivityPruning();    // delete activity older than the keep setting
 
   // Daily DB backup: run once at startup, then every 24 hours
   runBackup();
