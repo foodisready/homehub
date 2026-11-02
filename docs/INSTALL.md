@@ -131,7 +131,9 @@ docker compose -f docker-compose.yml up -d --build
 
 ## Back up your data
 
-Your devices, schedules and logins are stored in a Docker volume. This creates a backup file in the current folder:
+For everyday backups, use **Settings → Backups** in HomeHub. See the [User Guide](./USER_GUIDE.md#backups).
+
+To copy all of HomeHub's data, including history and backups, off the Pi, run this. It creates a backup file in the current folder:
 
 ```bash
 docker compose -f docker-compose.yml stop backend scheduler

@@ -225,6 +225,8 @@ Update alias, IP or MAC address.
 
 ---
 
+Devices also have a `room`, a name or `null`, which can be set on `POST /api/devices` and `PATCH /api/devices/:id`. An empty value clears it.
+
 ### `POST /api/devices/discover` — `admin` only
 Triggers subnet broadcast discovery. Returns found devices (not yet saved). Kasa results include `mac`. A result for a registered device now at a different IP includes `moved`; apply it with `PATCH /api/devices/:id`. Registered Kasa devices found at their stored IP under the same name have their MAC saved automatically.
 
@@ -462,6 +464,49 @@ Cannot delete your own account.
 }
 ```
 **Response 200** — updated settings object
+
+---
+
+## Discovery networks
+
+| Method | Path | Does |
+|---|---|---|
+| `GET` | `/api/devices/discover/networks` | `{ own, extra, suggested, max }`, each a list like `"192.168.1.x"` |
+| `PUT` | `/api/devices/discover/networks` | `admin` only. Body: `{ networks: ["192.168.1.x"] }`. Accepts `192.168.1.x`, `192.168.1.0/24` or `192.168.1`. Private /24s only, up to `max`. HomeHub's own networks are dropped. |
+
+`POST /api/devices/discover` searches HomeHub's own networks and these. Kasa, Shelly, Tuya and Meross devices are found there by asking each address directly, since broadcasts don't cross routers.
+
+---
+
+## Meross — `admin` only
+
+| Method | Path | Does |
+|---|---|---|
+| `GET` | `/api/meross/login` | `{ email, signedIn }` |
+| `PUT` | `/api/meross/login` | Body: `{ email, password, code? }`. Signs in to the Meross cloud and stores only the account key (`settings.meross_key`). Returns `{ email, signedIn, rejectedBy }`, where `rejectedBy` lists registered Meross devices that refused the key. `422` with code `MEROSS_CODE_REQUIRED` when Meross wants a verification code, or `MEROSS_LOGIN_REJECTED`. `502` if Meross can't be reached. |
+| `DELETE` | `/api/meross/login` | Forgets the key and token. Returns `204`. |
+| `GET` | `/api/meross/devices` | Garage door openers on the Meross account: `[{ uuid, name, type, online, registered }]`. Empty without a token from a recent sign-in. |
+
+`GET /api/meross/login` and `PUT` also return `hasNames`, which is true when HomeHub has the token it uses to read device names.
+
+Meross garage doors use `driverType: "meross"`. `state: true` means open. They're always protected.
+
+---
+
+## Backups — `admin` only
+
+JSON backups of settings tables (users, devices, sensors, scenes, scene_actions, schedules, motion_rules, settings, notification_preferences, push_subscriptions), stored in `data/backups`. History tables aren't included.
+
+| Method | Path | Does |
+|---|---|---|
+| `GET` | `/api/backups` | Lists backups, newest first: `{ name, createdAt, note, size, counts }` |
+| `POST` | `/api/backups` | Creates one. Body: `{ note? }`. Returns `201` with the entry. |
+| `GET` | `/api/backups/:name` | `{ name, content }`, where secrets in `content` are `"<hidden>"` |
+| `PUT` | `/api/backups/:name` | Saves edited text. Body: `{ content }`. `"<hidden>"` values are filled back in from the saved file by row id. The edit is test-restored and rolled back first; a failure returns `400` with the reason. |
+| `POST` | `/api/backups/:name/restore` | Saves the current state as `before-restore-*.json`, then replaces each table present in the file. Returns `{ counts, removed, safetyBackup }`. |
+| `DELETE` | `/api/backups/:name` | Deletes it. Returns `204`. |
+
+Names must match `^[A-Za-z0-9][A-Za-z0-9._-]*\.json$`. A restore removes history rows whose device, sensor or user isn't in the backup.
 
 ---
 

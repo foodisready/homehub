@@ -202,6 +202,31 @@ describe('chat commands', () => {
       });
     });
 
+    describe('rooms', () => {
+      beforeEach(() => {
+        db.prepare("UPDATE devices SET room = 'Living room' WHERE alias IN ('My office lamp', 'Media long lamp', 'Main Valve')").run();
+      });
+      after(() => { db.prepare('UPDATE devices SET room = NULL').run(); });
+
+      it('switches everything in a room except protected devices', async () => {
+        const result = await commands.runPowerCommand('turn off the living room');
+
+        assert.equal(calls.length, 2);
+        assert.match(result!.response, /Main Valve is protected/);
+      });
+
+      it('lists room names for speech recognition', async () => {
+        const { listDeviceNames } = await import('./find-device');
+        assert.ok(listDeviceNames().includes('Living room'));
+      });
+
+      it('prefers a device with that exact name', async () => {
+        db.prepare("UPDATE devices SET room = 'Kitchen lights' WHERE alias = 'Long Lamp'").run();
+        await commands.runPowerCommand('turn off the kitchen lights');
+        assert.deepEqual(calls, [{ ip: '10.0.0.5', state: false }]);
+      });
+    });
+
     describe('devices sharing a nickname', () => {
       const setNicknames = (alias: string, nicknames: string[]) =>
         db.prepare('UPDATE devices SET nicknames = ? WHERE alias = ?').run(JSON.stringify(nicknames), alias);

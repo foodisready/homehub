@@ -351,8 +351,12 @@ function broadcastAddresses(): string[] {
   return [...addresses];
 }
 
-/** Finds plugs that need a login. They don't reply to the older broadcast. */
-export function discoverKlap(timeoutMs = DISCOVERY_TIMEOUT_MS): Promise<KlapDiscovered[]> {
+/**
+ * Finds plugs that need a login. They don't reply to the older broadcast.
+ * `unicast` lists extra addresses to ask one by one, for networks a broadcast
+ * can't reach.
+ */
+export function discoverKlap(timeoutMs = DISCOVERY_TIMEOUT_MS, unicast: string[] = []): Promise<KlapDiscovered[]> {
   return new Promise((resolve) => {
     const found = new Map<string, KlapDiscovered>();
     const socket = dgram.createSocket('udp4');
@@ -380,7 +384,7 @@ export function discoverKlap(timeoutMs = DISCOVERY_TIMEOUT_MS): Promise<KlapDisc
       // Repeat the query: a single UDP packet is easily lost on Wi-Fi.
       for (const delay of [0, 500, 1000]) {
         timers.push(setTimeout(() => {
-          for (const address of broadcastAddresses()) {
+          for (const address of [...broadcastAddresses(), ...unicast]) {
             socket.send(DISCOVERY_QUERY, DISCOVERY_PORT, address, () => undefined);
           }
         }, delay));

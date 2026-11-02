@@ -1,10 +1,14 @@
-import { Component, OnInit, signal, computed, OnDestroy } from '@angular/core';
+import { Component, OnInit, signal, computed, OnDestroy, viewChild } from '@angular/core';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { AuthService } from '../../core/auth/auth.service';
 import { SocketService } from '../../core/socket/socket.service';
+import { DeviceFilterComponent, matchesDevice, type DeviceFilter } from '../../shared/device-filter/device-filter.component';
 import { Device } from '../../shared/models/device.model';
+import { BackupsComponent } from './backups.component';
+import { MerossLoginComponent } from './meross-login.component';
+import { OtherNetworksComponent } from './other-networks.component';
 
 interface ChatStats {
   total: number;
@@ -43,16 +47,19 @@ interface DiscoveredDevice {
   pendingPass?:     string;
 }
 
+interface MerossAccountDevice { uuid: string; name: string; type: string; online: boolean; registered: boolean }
+
 const DRIVER_LABEL: Record<string, string> = {
   kasa:   'Kasa',
   shelly: 'Shelly',
   tuya:   'Tuya',
+  meross: 'Meross',
 };
 
 @Component({
   selector: 'app-settings',
   standalone: true,
-  imports: [FormsModule, RouterLink],
+  imports: [FormsModule, RouterLink, DeviceFilterComponent, BackupsComponent, MerossLoginComponent, OtherNetworksComponent],
   styles: [`
     .topbar { display:flex; align-items:center; justify-content:space-between; margin-bottom:1.5rem; }
     .topbar h1 { font-size:1.4rem; font-weight:700; }
@@ -78,6 +85,15 @@ const DRIVER_LABEL: Record<string, string> = {
       flex-wrap:wrap;
     }
     .row-item:last-child { border-bottom:none; }
+    .group-title {
+      font-size:0.72rem; font-weight:700; letter-spacing:0.06em; text-transform:uppercase;
+      color:var(--text-muted); padding:0.9rem 0 0.2rem; border-bottom:1px solid var(--border);
+    }
+    .group-title:first-of-type { padding-top:0.2rem; }
+    .group-count { font-weight:500; letter-spacing:0; opacity:0.75; margin-left:0.25rem; }
+    .row-label .row-name, .row-label .row-sub { display:block; overflow:hidden; text-overflow:ellipsis; }
+    .row-sub .offline { color:var(--red); }
+    .link-btn { background:none; border:none; padding:0; color:var(--accent); font-size:inherit; cursor:pointer; text-decoration:underline; }
     .row-label { flex:1; min-width:0; font-size:0.9rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
     .row-meta  { font-size:0.78rem; color:var(--text-muted); }
     .role-badge {
@@ -97,6 +113,7 @@ const DRIVER_LABEL: Record<string, string> = {
     .driver-badge.kasa   { border-color:#1d4ed8; color:#60a5fa; }
     .driver-badge.shelly { border-color:#b45309; color:#fbbf24; }
     .driver-badge.tuya   { border-color:#15803d; color:#4ade80; }
+    .driver-badge.meross { border-color:#7c3aed; color:#c4b5fd; }
 
     .btn-sm {
       padding:0.3rem 0.75rem;
@@ -199,7 +216,15 @@ const DRIVER_LABEL: Record<string, string> = {
       <div class="section">
         <div class="section-title">Devices</div>
         <div class="card">
-          @for (d of devices(); track d.id) {
+          @if (devices().length > 0) {
+            <app-device-filter style="margin-bottom:0.75rem" [devices]="devices()"
+                               [(search)]="deviceSearch" [(filter)]="deviceFilter" />
+          }
+          @for (group of deviceGroups(); track group.name) {
+            @if (group.name) {
+              <div class="group-title">{{ group.name }} <span class="group-count">{{ group.devices.length }}</span></div>
+            }
+          @for (d of group.devices; track d.id) {
             <div class="row-item">
               @if (editingDeviceId() === d.id) {
                 <div style="flex:1; width:100%">
@@ -208,6 +233,10 @@ const DRIVER_LABEL: Record<string, string> = {
                     <input type="text" [(ngModel)]="editIp"    placeholder="IP address" />
                   </div>
                   <div class="edit-row" style="margin-top:0.4rem">
+                    <input type="text" [(ngModel)]="editRoom" placeholder="Room" list="device-rooms" autocomplete="off" aria-label="Room" />
+                    <datalist id="device-rooms">
+                      @for (room of roomNames(); track room) { <option [value]="room"></option> }
+                    </datalist>
                     <input type="text" [(ngModel)]="editNicknames" placeholder="Nicknames for Chat, separated by commas" autocomplete="off" />
                   </div>
                   <p style="font-size:0.75rem;color:var(--text-muted);margin:0.2rem 0 0">Give several devices the same nickname to switch them together by Chat or voice.</p>
@@ -277,9 +306,12 @@ const DRIVER_LABEL: Record<string, string> = {
                 </div>
               } @else {
                 <div class="row-label">
-                  {{ d.alias }}
-                  <span class="row-meta"> · {{ d.ip }}</span>
-                  @if (d.hasEmeter) { <span class="row-meta"> · ⚡</span> }
+                  <span class="row-name">{{ d.alias }}</span>
+                  <span class="row-meta row-sub">
+                    {{ d.ip }}
+                    @if (d.hasEmeter) { · ⚡ }
+                    @if (!d.online && d.isProtected) { <span class="offline"> · Offline</span> }
+                  </span>
                 </div>
                 <span class="driver-badge" [class]="'driver-badge ' + d.driverType">
                   {{ driverLabel(d.driverType) }}
@@ -297,6 +329,11 @@ const DRIVER_LABEL: Record<string, string> = {
                 }
               }
             </div>
+          }
+          }
+
+          @if (devices().length > 0 && filteredDevices().length === 0) {
+            <p style="color:var(--text-muted);font-size:0.85rem;padding:0.5rem 0">No devices match.</p>
           }
 
           @if (devices().length === 0) {
@@ -325,6 +362,14 @@ const DRIVER_LABEL: Record<string, string> = {
               </button>
             </div>
             @if (discoverMsg()) { <p class="msg" [class.ok]="!discoverErr()" [class.err]="discoverErr()">{{ discoverMsg() }}</p> }
+            @for (m of unreachedMeross(); track m.uuid) {
+              <p class="msg err">
+                {{ m.name }} ({{ m.type }}) is on your Meross account, but HomeHub couldn't reach it.
+                @if (!m.online) { Meross says it's offline. }
+                <button type="button" class="link-btn" (click)="otherNetworks()?.open()">Is it on another Wi-Fi network?</button>
+              </p>
+            }
+            <div style="margin-top:0.5rem"><app-other-networks /></div>
 
             <!-- Registered devices that now answer at a different address -->
             @if (movedDevices().length > 0) {
@@ -344,14 +389,16 @@ const DRIVER_LABEL: Record<string, string> = {
                 @for (d of discoveredDevices(); track d.ip) {
                   <div class="discover-row">
                     <input type="checkbox" [checked]="isSelected(d.ip)" (change)="toggleSelect(d.ip)"
-                           [disabled]="d.driverType === 'tuya' && (!d.pendingKey?.trim() || (!d.driverConfig?.['deviceId'] && !d.pendingDeviceId?.trim()))" />
+                           [disabled]="(d.driverType === 'meross' && d.needsLogin) || (d.driverType === 'tuya' && (!d.pendingKey?.trim() || (!d.driverConfig?.['deviceId'] && !d.pendingDeviceId?.trim())))" />
                     <div class="discover-alias">
                       <input type="text" [(ngModel)]="d.pendingAlias" placeholder="Alias" />
                     </div>
                     <span class="discover-ip">{{ d.ip }}</span>
                     @if (d.model && d.model !== d.ip) { <span class="discover-model">{{ d.model }}</span> }
                     <span class="driver-badge" [class]="'driver-badge ' + d.driverType">{{ driverLabel(d.driverType) }}</span>
-                    @if (d.needsLogin) {
+                    @if (d.needsLogin && d.driverType === 'meross') {
+                      <span class="discover-key-label">Sign in under Integrations → Meross, then Discover again</span>
+                    } @else if (d.needsLogin) {
                       <div class="discover-key">
                         <span class="discover-key-label">{{ d.driverType === 'kasa' ? 'TP-Link email' : 'Username' }}</span>
                         <input type="text" [(ngModel)]="d.pendingUser" autocomplete="off" />
@@ -469,6 +516,11 @@ const DRIVER_LABEL: Record<string, string> = {
                 </div>
               </div>
             }
+          </div>
+
+          <!-- ── Meross ────────────────────────────────────────────── -->
+          <div class="card">
+            <app-meross-login (signedInChange)="onMerossSignIn($event)" />
           </div>
 
           <!-- ── Email (BYOK SMTP) ────────────────────────────────── -->
@@ -669,6 +721,16 @@ const DRIVER_LABEL: Record<string, string> = {
         }
       }
 
+      <!-- ── Backups (admin only) ──────────────────────────────── -->
+      @if (isAdmin()) {
+        <div class="section">
+          <div class="section-title">Backups</div>
+          <div class="card">
+            <app-backups (restored)="reloadAfterRestore()" />
+          </div>
+        </div>
+      }
+
       <div class="section">
         <div class="section-title">Preferences</div>
         <div class="card">
@@ -716,6 +778,9 @@ export class SettingsComponent implements OnInit, OnDestroy {
   editAlias    = '';
   editIp       = '';
   editNicknames = '';
+  editRoom = '';
+  deviceSearch = signal('');
+  deviceFilter = signal<DeviceFilter>('all');
   editProtected = false;
   editAuthUser  = '';
   editAuthPass  = '';
@@ -729,6 +794,25 @@ export class SettingsComponent implements OnInit, OnDestroy {
   editTuyaKey      = '';
   editTuyaVersion  = '3.3';
   deviceMsg = signal('');
+  readonly filteredDevices = computed(() =>
+    this.devices().filter((d) => matchesDevice(d, this.deviceSearch(), this.deviceFilter())));
+  /**
+   * Devices by room, like the dashboard, but Unassigned comes first: here it's
+   * the list of devices still to set up. Offline devices stay in their room,
+   * since they're often the ones being fixed. With no rooms at all, one
+   * untitled group.
+   */
+  readonly deviceGroups = computed(() => {
+    const list = this.filteredDevices();
+    const rooms = [...new Set(list.flatMap((d) => d.room ?? []))].sort((a, b) => a.localeCompare(b));
+    if (!this.devices().some((d) => d.room)) return [{ name: '', devices: list }];
+    return [
+      { name: 'Unassigned', devices: list.filter((d) => !d.room) },
+      ...rooms.map((room) => ({ name: room, devices: list.filter((d) => d.room === room) })),
+    ].filter((g) => g.devices.length > 0);
+  });
+  readonly roomNames = computed(() =>
+    [...new Set(this.devices().flatMap((d) => d.room ?? []))].sort((a, b) => a.localeCompare(b)));
   switchingId = signal<number | null>(null);
   private stopWatchingDevices?: () => void;
   private stopWatchingOnline?: () => void;
@@ -752,6 +836,9 @@ export class SettingsComponent implements OnInit, OnDestroy {
   newDeviceIp         = '';
   newDeviceDriverType = 'kasa';
   newDeviceDriverConfig: Record<string, unknown> | null = null;
+  /** Found by Probe, kept so Add stores them too. */
+  private newDeviceModel: string | null = null;
+  private newDeviceMac: string | null = null;
   probing   = signal(false);
   probeMsg  = signal('');
   probeErr  = signal(false);
@@ -871,6 +958,12 @@ export class SettingsComponent implements OnInit, OnDestroy {
     this.checkPushStatus();
   }
 
+  /** A restore can replace devices and users, so fetch both again. */
+  reloadAfterRestore(): void {
+    this.http.get<Device[]>('/api/devices').subscribe((d) => this._devices.set(d));
+    this.http.get<UserRow[]>('/api/users').subscribe((u) => this._users.set(u));
+  }
+
   private loadNotificationSettings(): void {
     this.http.get<Record<string, string | boolean>>('/api/notifications/settings').subscribe((s) => {
       this.smtpHost        = String(s['smtp_host']        ?? '');
@@ -982,6 +1075,7 @@ export class SettingsComponent implements OnInit, OnDestroy {
     this.editAlias    = d.alias;
     this.editIp       = d.ip;
     this.editNicknames = d.nicknames.join(', ');
+    this.editRoom = d.room ?? '';
     this.editProtected = d.isProtected;
     // Pre-fill credentials if already stored
     const auth = (d.driverConfig as any)?.auth;
@@ -1053,6 +1147,7 @@ export class SettingsComponent implements OnInit, OnDestroy {
       alias:     this.editAlias,
       ip:        this.editIp,
       nicknames: this.editNicknames.split(','),
+      room:      this.editRoom,
     };
     if (this.editProtected !== device?.isProtected) payload['isProtected'] = this.editProtected;
 
@@ -1095,6 +1190,15 @@ export class SettingsComponent implements OnInit, OnDestroy {
 
   // ── Probe ──────────────────────────────────────────────────
 
+  private readonly merossLogin = viewChild(MerossLoginComponent);
+  readonly otherNetworks = viewChild(OtherNetworksComponent);
+  readonly unreachedMeross = signal<MerossAccountDevice[]>([]);
+
+  /** After signing in to Meross, finish identifying the device the user was adding. */
+  onMerossSignIn(signedIn: boolean): void {
+    if (signedIn && this.newDeviceIp.trim()) this.probeIp();
+  }
+
   probeIp(): void {
     const ip = this.newDeviceIp.trim();
     if (!ip) return;
@@ -1106,8 +1210,16 @@ export class SettingsComponent implements OnInit, OnDestroy {
         this.probing.set(false);
         this.newDeviceDriverType   = result.driverType ?? 'kasa';
         this.newDeviceDriverConfig = result.driverConfig ?? null;
+        this.newDeviceModel        = result.model ?? null;
+        this.newDeviceMac          = result.mac ?? null;
         if (!this.newDeviceAlias.trim()) {
           this.newDeviceAlias = result.alias && result.alias !== ip ? result.alias : '';
+        }
+        if (result.needsLogin && result.driverType === 'meross') {
+          this.probeMsg.set('Found a Meross device. Sign in to Meross under Integrations, then select Probe again.');
+          this.probeErr.set(true);
+          this.merossLogin()?.open();
+          return;
         }
         this.probeMsg.set(`Detected: ${result.model ?? result.driverType} (${this.driverLabel(result.driverType)})`);
       },
@@ -1115,6 +1227,8 @@ export class SettingsComponent implements OnInit, OnDestroy {
         this.probing.set(false);
         this.newDeviceDriverType   = 'kasa';
         this.newDeviceDriverConfig = null;
+        this.newDeviceModel        = null;
+        this.newDeviceMac          = null;
         this.probeMsg.set('Could not detect device — it may be offline or use an unsupported protocol.');
         this.probeErr.set(true);
       },
@@ -1160,10 +1274,12 @@ export class SettingsComponent implements OnInit, OnDestroy {
       next: (found) => {
         this.discovering.set(false);
         if (found.length === 0) {
-          this.discoverMsg.set('No new devices found. Kasa uses UDP broadcast; Shelly/Tuya must be added via IP probe.');
+          this.discoverMsg.set('No new devices found. If a device is on another Wi-Fi network, add that network below.');
           this.discoverErr.set(false);
+          this.checkMerossAccount([]);
           return;
         }
+        this.checkMerossAccount(found);
         const moved       = found.filter((f) => f.moved);
         const existingIps = new Set(this._devices().map((d) => d.ip));
         const newDevices  = found
@@ -1175,8 +1291,9 @@ export class SettingsComponent implements OnInit, OnDestroy {
           this.discoverErr.set(false);
           return;
         }
-        // Pre-select non-Tuya devices (Tuya needs key first)
-        newDevices.filter((d) => d.driverType !== 'tuya').forEach((d) => this.selectedIps.add(d.ip));
+        // Pre-select devices that are ready: Tuya needs a key, and Meross a sign-in, first
+        newDevices.filter((d) => d.driverType !== 'tuya' && !(d.driverType === 'meross' && d.needsLogin))
+          .forEach((d) => this.selectedIps.add(d.ip));
         this._discoveredDevices.set(newDevices);
         this.discoverMsg.set([
           moved.length ? `${moved.length} device(s) changed address.` : '',
@@ -1185,6 +1302,20 @@ export class SettingsComponent implements OnInit, OnDestroy {
         this.discoverErr.set(false);
       },
       error: () => { this.discovering.set(false); this.discoverMsg.set('Discovery failed.'); this.discoverErr.set(true); },
+    });
+  }
+
+  /**
+   * Openers on the Meross account that are neither registered nor found by
+   * this search: probably on a network HomeHub doesn't search yet.
+   */
+  private checkMerossAccount(found: DiscoveredDevice[]): void {
+    this.unreachedMeross.set([]);
+    if (!this.isAdmin()) return;
+    const foundUuids = new Set(found.map((f) => f.driverConfig?.['uuid']).filter(Boolean));
+    this.http.get<MerossAccountDevice[]>('/api/meross/devices').subscribe({
+      next: (list) => this.unreachedMeross.set(list.filter((m) => !m.registered && !foundUuids.has(m.uuid))),
+      error: () => this.unreachedMeross.set([]),
     });
   }
 
@@ -1259,6 +1390,8 @@ export class SettingsComponent implements OnInit, OnDestroy {
       ip:           this.newDeviceIp.trim(),
       driverType:   this.newDeviceDriverType,
       driverConfig: this.newDeviceDriverConfig ?? undefined,
+      model:        this.newDeviceModel ?? undefined,
+      mac:          this.newDeviceMac ?? undefined,
     }).subscribe({
       next: (created) => {
         this._devices.update((list) => [...list, created]);
@@ -1266,6 +1399,8 @@ export class SettingsComponent implements OnInit, OnDestroy {
         this.newDeviceIp          = '';
         this.newDeviceDriverType  = 'kasa';
         this.newDeviceDriverConfig = null;
+        this.newDeviceModel        = null;
+        this.newDeviceMac          = null;
         this.probeMsg.set(`"${created.alias}" added.`);
         this.probeErr.set(false);
         setTimeout(() => this.probeMsg.set(''), 2000);

@@ -4,15 +4,35 @@ import { Router, RouterLink } from '@angular/router';
 import { DecimalPipe } from '@angular/common';
 import { AuthService } from '../../core/auth/auth.service';
 import { SocketService, DeviceStateEvent, DeviceOnlineEvent, DeviceOverrideEvent } from '../../core/socket/socket.service';
-import { DeviceTileComponent, OverrideRequest } from './device-tile/device-tile.component';
+import { DeviceRowComponent, OverrideRequest } from './device-row/device-row.component';
+import { DeviceFilterComponent, matchesDevice, type DeviceFilter } from '../../shared/device-filter/device-filter.component';
 import { SystemStatusComponent } from './system-status.component';
 import { PhoneQrComponent } from './phone-qr.component';
 import { Device } from '../../shared/models/device.model';
 
+const COLLAPSED_KEY = 'homehub.dashboard.collapsed';
+const OFFLINE = 'Offline';
+const UNASSIGNED = 'Unassigned';
+
+interface DeviceSection {
+  name: string;
+  devices: Device[];
+  count: string;
+  canTurnOff: boolean;
+}
+
+function loadCollapsed(): Set<string> {
+  try {
+    const saved = localStorage.getItem(COLLAPSED_KEY);
+    if (saved) return new Set(JSON.parse(saved) as string[]);
+  } catch { /* storage can be unavailable, so use the default */ }
+  return new Set([OFFLINE]);
+}
+
 @Component({
   selector: 'app-dashboard',
   standalone: true,
-  imports: [DeviceTileComponent, SystemStatusComponent, PhoneQrComponent, DecimalPipe, RouterLink],
+  imports: [DeviceRowComponent, DeviceFilterComponent, SystemStatusComponent, PhoneQrComponent, DecimalPipe, RouterLink],
   styles: [`
     .topbar {
       display: flex;
@@ -34,27 +54,30 @@ import { Device } from '../../shared/models/device.model';
     }
     .btn-logout:hover { background: var(--surface); color: var(--text); }
 
-    .summary {
-      display: flex;
-      gap: 1rem;
-      margin-bottom: 1.5rem;
-      flex-wrap: wrap;
-    }
-    .summary-chip {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 999px;
-      padding: 0.3rem 0.9rem;
-      font-size: 0.8rem;
-      color: var(--text-muted);
-    }
-    .summary-chip strong { color: var(--text); }
+    app-device-filter { margin-bottom: 1rem; }
+    .total { color: var(--text-muted); font-size: 0.8rem; margin-bottom: 0.75rem; }
 
-    .grid {
+    .rooms {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
-      gap: 1rem;
+      grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr));
+      gap: 0.75rem;
+      align-items: start;
     }
+    .room { padding: 0.35rem 1rem; }
+    .room-head { display: flex; align-items: center; gap: 0.5rem; min-height: 2.8rem; }
+    .room-toggle {
+      flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 0.5rem;
+      padding: 0.4rem 0; background: transparent; color: var(--text); text-align: left;
+    }
+    .chevron { color: var(--text-muted); font-size: 0.75rem; transition: transform 0.15s; }
+    .chevron.closed { transform: rotate(-90deg); }
+    .room-name { font-weight: 700; font-size: 0.95rem; }
+    .room-count { color: var(--text-muted); font-size: 0.78rem; white-space: nowrap; }
+    .all-off {
+      background: transparent; border: 1px solid var(--border); color: var(--text-muted);
+      font-size: 0.75rem; padding: 0.3rem 0.65rem; flex-shrink: 0;
+    }
+    .all-off:hover:not(:disabled) { color: var(--text); }
 
     .empty {
       text-align: center;
@@ -95,24 +118,6 @@ import { Device } from '../../shared/models/device.model';
       <!-- HomeHub self-update card (shows when an upstream release is available) -->
       <app-system-status />
 
-      <!-- Summary chips -->
-      @if (devices().length > 0) {
-        <div class="summary">
-          <span class="summary-chip">
-            <strong>{{ onCount() }}</strong> / {{ devices().length }} on
-          </span>
-          <span class="summary-chip">
-            <strong>{{ onlineCount() }}</strong> online
-          </span>
-          @if (totalWattage() > 0) {
-            <span class="summary-chip">
-              <strong>{{ totalWattage() | number:'1.1-1' }} W</strong> total
-            </span>
-          }
-        </div>
-      }
-
-      <!-- Device grid -->
       @if (loading()) {
         <div class="loading">Loading devices…</div>
       } @else if (devices().length === 0) {
@@ -121,14 +126,38 @@ import { Device } from '../../shared/models/device.model';
           <p>Add a Kasa plug by IP in Settings, or run discovery.</p>
         </div>
       } @else {
-        <div class="grid">
-          @for (device of devices(); track device.id) {
-            <app-device-tile
-              [device]="device"
-              [busy]="busyIds().has(device.id)"
-              (toggled)="toggle($event)"
-              (overrideSet)="setOverride($event)"
-              (overrideCancelled)="cancelOverride($event)" />
+        <app-device-filter [devices]="devices()" [(search)]="search" [(filter)]="filter" />
+        @if (totalWattage() > 0) {
+          <div class="total">{{ totalWattage() | number:'1.1-1' }} W in use</div>
+        }
+
+        <div class="rooms">
+          @for (section of sections(); track section.name) {
+            <section class="card room">
+              <div class="room-head">
+                <button class="room-toggle" type="button" [attr.aria-expanded]="isOpen(section.name)"
+                        (click)="toggleSection(section.name)">
+                  <span class="chevron" [class.closed]="!isOpen(section.name)">▼</span>
+                  <span class="room-name">{{ section.name }}</span>
+                  <span class="room-count">{{ section.count }}</span>
+                </button>
+                @if (section.canTurnOff) {
+                  <button class="all-off" type="button" (click)="allOff(section.devices)">All off</button>
+                }
+              </div>
+              @if (isOpen(section.name)) {
+                @for (device of section.devices; track device.id) {
+                  <app-device-row
+                    [device]="device"
+                    [busy]="busyIds().has(device.id)"
+                    (toggled)="toggle($event)"
+                    (overrideSet)="setOverride($event)"
+                    (overrideCancelled)="cancelOverride($event)" />
+                }
+              }
+            </section>
+          } @empty {
+            <div class="empty">No devices match.</div>
           }
         </div>
       }
@@ -146,8 +175,42 @@ export class DashboardComponent implements OnInit, OnDestroy {
   readonly devices     = this._devices.asReadonly();
   readonly busyIds     = this._busyIds.asReadonly();
   readonly loading     = this._loading.asReadonly();
-  readonly onCount     = computed(() => this._devices().filter((d) => d.state).length);
-  readonly onlineCount = computed(() => this._devices().filter((d) => d.online).length);
+  readonly search = signal('');
+  readonly filter = signal<DeviceFilter>('all');
+  private readonly collapsed = signal(loadCollapsed());
+
+  /** Rooms in name order, then devices with no room, then offline devices. */
+  readonly sections = computed<DeviceSection[]>(() => {
+    const matching = this._devices()
+      .filter((d) => matchesDevice(d, this.search(), this.filter()))
+      .sort((a, b) => a.alias.localeCompare(b.alias));
+
+    const rooms = new Map<string, Device[]>();
+    for (const device of matching.filter((d) => d.online)) {
+      const room = device.room ?? UNASSIGNED;
+      rooms.set(room, [...(rooms.get(room) ?? []), device]);
+    }
+    const names = [...rooms.keys()].sort((a, b) =>
+      Number(a === UNASSIGNED) - Number(b === UNASSIGNED) || a.localeCompare(b));
+
+    const sections = names.map((name) => {
+      const devices = rooms.get(name)!;
+      const on = devices.filter((d) => d.state).length;
+      return {
+        name,
+        devices,
+        count: `${on} of ${devices.length} on`,
+        canTurnOff: devices.some((d) => d.state && !d.isProtected),
+      };
+    });
+
+    const offline = matching.filter((d) => !d.online);
+    if (offline.length) {
+      sections.push({ name: OFFLINE, devices: offline, count: String(offline.length), canTurnOff: false });
+    }
+    return sections;
+  });
+
   readonly totalWattage = computed(() =>
     this._devices().reduce((sum, d) => sum + (d.wattage ?? 0), 0)
   );
@@ -201,6 +264,25 @@ export class DashboardComponent implements OnInit, OnDestroy {
           : d)
       );
     });
+  }
+
+  /** Results stay visible while searching or filtering, whatever was collapsed. */
+  isOpen(name: string): boolean {
+    return !!this.search().trim() || this.filter() !== 'all' || !this.collapsed().has(name);
+  }
+
+  toggleSection(name: string): void {
+    const next = new Set(this.collapsed());
+    if (next.has(name)) next.delete(name);
+    else next.add(name);
+    this.collapsed.set(next);
+    try {
+      localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...next]));
+    } catch { /* collapsing still works for this visit */ }
+  }
+
+  allOff(devices: Device[]): void {
+    devices.filter((d) => d.state && !d.isProtected).forEach((d) => this.toggle(d));
   }
 
   toggle(device: Device): void {

@@ -99,6 +99,13 @@ async function pollAll(): Promise<void> {
   );
 }
 
+/** Forget cached states and poll again, after the device list was replaced (e.g. a restore). */
+export async function refreshDevices(): Promise<void> {
+  cache.clear();
+  tuyaLastPolled.clear();
+  await pollAll();
+}
+
 /** Delete energy readings older than 90 days. */
 function pruneOldReadings(): void {
   try {

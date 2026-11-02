@@ -23,6 +23,7 @@ import { pushRouter } from './routes/push';
 import { scenesRouter } from './routes/scenes';
 import { tuyaRouter }   from './routes/tuya';
 import { kasaRouter }   from './routes/kasa';
+import { merossRouter } from './routes/meross';
 import { motionEventsRouter, motionRouter } from './routes/motion';
 import { sensorsRouter } from './routes/sensors';
 import { firmwareApiRouter, firmwarePublicRouter } from './routes/firmware';
@@ -30,6 +31,7 @@ import { notificationsAckRouter } from './routes/notifications-ack';
 import { notificationSettingsRouter } from './routes/notification-settings';
 import { notificationHistoryRouter } from './routes/notification-history';
 import { systemRouter } from './routes/system';
+import { backupsRouter } from './routes/backups';
 import { runBackup } from './db/backup';
 import { checkAllSensors } from './sensors/stale-check';
 import { authenticate, requireAdmin } from './middleware/auth';
@@ -47,7 +49,8 @@ const httpServer = createServer(app);
 initSocket(httpServer);
 
 app.use(cors({ origin: process.env.CORS_ORIGIN || 'http://localhost:4200', credentials: true }));
-app.use(express.json());
+// Edited JSON backups (Settings → Backups) can pass the default 100 kB.
+app.use(express.json({ limit: '5mb' }));
 app.use(cookieParser());
 
 // ── Public routes ──────────────────────────────────────────────
@@ -83,12 +86,14 @@ app.use('/api/scenes',    scenesRouter);
 app.use('/api/devices',   energyRouter);   // history sub-routes: /api/devices/:id/energy/history
 app.use('/api/tuya',      tuyaRouter);
 app.use('/api/kasa',      requireAdmin, kasaRouter);
+app.use('/api/meross',    requireAdmin, merossRouter);
 app.use('/api/motion',    requireAdmin, motionRouter);
 app.use('/api/sensors',   sensorsRouter);
 app.use('/api/firmware',  firmwareApiRouter);
 app.use('/api/notifications/settings', notificationSettingsRouter);
 app.use('/api/notifications/history',  notificationHistoryRouter);
 app.use('/api/system',                 systemRouter);
+app.use('/api/backups',                requireAdmin, backupsRouter);
 
 // ── Global error handler ───────────────────────────────────────
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {

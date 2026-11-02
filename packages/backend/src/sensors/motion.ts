@@ -101,7 +101,7 @@ export function motionStatus(rule: RuleWithDevice, now: number): MotionStatus {
   // A device added moments ago has no cached state until its first poll.
   if ((cached && !cached.state) || !rule.turned_on_at) return { kind: stillOccupied ? 'off_cooldown' : 'off' };
 
-  if (isProtectedDevice({ id: rule.device_id, alias: rule.alias, is_protected: rule.is_protected })) {
+  if (isProtectedDevice({ id: rule.device_id, alias: rule.alias, is_protected: rule.is_protected, driver_type: rule.driver_type })) {
     return { kind: 'held' };
   }
 

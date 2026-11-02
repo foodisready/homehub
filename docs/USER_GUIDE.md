@@ -12,6 +12,7 @@ HomeHub controls devices directly over your home network. All of them are switch
 | **Shelly** | Wi-Fi relays and switches | Generation 1 and 2 |
 | **Shelly Motion** | First-generation motion sensor | Used by motion lights |
 | **Tuya** | Wi-Fi smart plugs | Needs a Device ID and Local Key |
+| **Meross** | MSG100 and MSG200 garage door openers | Needs a one-time Meross sign-in |
 
 Zigbee and Philips Hue devices aren't supported. "Works with Google or Alexa" on a box doesn't mean it works with HomeHub, so check the brand first.
 
@@ -25,6 +26,24 @@ Set up every device in its own app first, so it's on your home Wi-Fi. Then:
 4. Select **Register Selected**.
 
 If a device isn't found, type its IP address in the add form, select **Probe**, then **Add**.
+
+Settings lists your devices by room, with **Unassigned** at the top, since those are the ones still to set up.
+
+### Devices on another Wi-Fi network
+
+Some homes have a second Wi-Fi network, such as a garage access point with its own router. Discover only searches HomeHub's own network at first. To search another one:
+
+1. Under **Discover on network**, select **Devices on another Wi-Fi network?**
+2. Add the other network, such as `192.168.1.x`, or tap one of the common networks. You'll find a device's address in its app, and `192.168.1.20` is on `192.168.1.x`.
+3. Select **Discover on network** again.
+
+This works when HomeHub's router is plugged into the router that runs the other Wi-Fi. It can't work the other way round: a second router plugged into your main network blocks HomeHub from reaching the devices behind it. To fix that:
+
+- **Best:** set the other router or access point to **bridge** or **access point mode**, so its devices join your main network.
+- Move the device to your main Wi-Fi, if it can connect.
+- As a last resort, forward port 80 on the other router to the device, and add the router's address. Only do this on a router inside your home, never on the one connected to the internet.
+
+You can always add a device by its IP address with **Probe**.
 
 Reserve each device's address in your router's settings, so it doesn't change.
 
@@ -56,13 +75,36 @@ Tuya plugs need a **Device ID** and **Local Key**. The easiest way to get them i
 
 If you remove a plug and pair it again, its Local Key changes, so you'll need to update it in HomeHub.
 
+### Meross garage door openers
+
+1. Set up the opener in the Meross app, and reserve its address on your router.
+2. Open **Settings → Integrations → Meross**, enter your Meross email and password, and select **Sign in**. If Meross emails you a code, enter it and sign in again.
+3. Select **Discover on network**. The opener appears with the name you gave it in the Meross app.
+4. Select **Register Selected**.
+
+If Discover doesn't find it, HomeHub tells you which openers on your Meross account it couldn't reach. The opener may be on another Wi-Fi network, so see [Devices on another Wi-Fi network](#devices-on-another-wi-fi-network). You can also type its IP address and select **Probe**. The Meross app shows the address under the device's **Device info**.
+
+HomeHub keeps only the key that Meross returns, not your password, plus a sign-in token it uses to read device names. The opener is then controlled over your home network, without the internet. The key works for every Meross device on that account.
+
+Garage doors are always protected. The dashboard shows **Open** or **Closed** and asks you to confirm, and Chat and voice can't switch them. While the door is closing, it still shows **Open** until it's all the way down, which takes about 25 seconds to update.
+
 ## Control your devices
 
-- **Dashboard:** tap a tile to switch a device.
+- **Dashboard:** tap a device's switch. Tap its name or timer icon for timers and details.
 - **Settings → Devices:** tap **On** or **Off** to test a light.
 - **Chat:** type a command, such as "turn on the porch light".
 
 Set up a timer in Chat by adding a time, such as "turn on my office lamp for an hour".
+
+## Rooms
+
+Rooms keep the dashboard short. Open **Settings → Devices**, select **Edit** on a device, and enter a room. Devices with no room appear under **Unassigned**.
+
+On the dashboard, you can collapse a room, and **All off** turns off everything in it except protected devices. Offline devices move to their own group at the bottom.
+
+Search by device name, nickname or room, or use the **On** and **Offline** filters. The same search is in **Settings → Devices**. On a computer, press `/` to jump to search.
+
+You can also use rooms in Chat and voice, such as "turn off the living room".
 
 ## Names and groups
 
@@ -111,9 +153,20 @@ A light on a keep-on timer stays on, and protected devices can't be used. If a s
 
 ## Protected devices
 
-Marking a device as protected stops Chat, voice and AI assistants from switching it. Open **Settings → Devices**, select **Edit**, and tick **Don't let Chat or AI assistants switch this device**.
+Marking a device as protected stops Chat, voice and AI assistants from switching it, and the dashboard asks you to confirm before switching it. Open **Settings → Devices**, select **Edit**, and tick **Don't let Chat or AI assistants switch this device**.
 
-Devices with "valve" in their name, and devices used for automatic water shutoff, are always protected. Protected devices can still be switched from their dashboard tile.
+Garage doors, devices with "valve" in their name, and devices used for automatic water shutoff are always protected. Protected devices can still be switched from their dashboard tile.
+
+## Backups
+
+Open **Settings → Backups** and select **Back up now**, with an optional note such as "before moving to the Pi". HomeHub saves your devices, rooms, schedules, scenes, motion rules, users and logins as a JSON file in its `data/backups` folder. Energy history isn't included.
+
+- **View / Edit** opens the file. Passwords and keys show as `<hidden>`, and HomeHub keeps the real values when you save. Saving checks your changes against the current database first, so a mistake, such as two devices with the same name, is caught before you restore.
+- **Restore** replaces your current settings with the backup. HomeHub saves your current settings as a `before-restore` backup first, so you can undo it. To leave something alone, remove its whole table from the file before restoring. For example, delete `"users"` to keep your current users and passwords.
+
+A restore also removes energy history for devices that aren't in the backup.
+
+HomeHub also makes a full copy of its database once a day and keeps the last 7. Those include history, and you restore them from the command line.
 
 ## Household members
 

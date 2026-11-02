@@ -1,23 +1,12 @@
 import * as dgram   from 'dgram';
 import * as net     from 'net';
-import * as os      from 'os';
 import * as crypto  from 'crypto';
 import { DeviceDriver, DiscoveredDevice, EnergyMetrics } from './DeviceDriver';
 import { logger } from '../logger';
+import { searchNetworks } from '../discovery/networks';
 
-/** Return unique /24 subnet prefixes for all non-loopback IPv4 interfaces */
-function localSubnets(): string[] {
-  const prefixes = new Set<string>();
-  for (const addrs of Object.values(os.networkInterfaces())) {
-    for (const addr of addrs ?? []) {
-      if (addr.family === 'IPv4' && !addr.internal) {
-        const p = addr.address.split('.');
-        prefixes.add(`${p[0]}.${p[1]}.${p[2]}`);
-      }
-    }
-  }
-  return [...prefixes];
-}
+/** HomeHub's own /24s plus any other networks added in Settings, e.g. ["192.168.0", "192.168.1"]. */
+const localSubnets = searchNetworks;
 
 /** Check if TCP port 6668 is open on an IP within timeoutMs. */
 function probeTuyaPort(ip: string, timeoutMs: number): Promise<boolean> {

@@ -179,4 +179,10 @@ describe('power timers', () => {
     assert.equal(power.isProtectedDevice(device(heater)), true);
     assert.equal(power.isProtectedDevice(device(lamp)), false);
   });
+
+  it('always protects garage doors', () => {
+    const garage = addDevice('Garage', '10.0.0.5');
+    db.prepare("UPDATE devices SET driver_type = 'meross' WHERE id = ?").run(garage);
+    assert.equal(power.isProtectedDevice(device(garage)), true);
+  });
 });

@@ -91,8 +91,14 @@ export async function applyPower(device: PowerDevice, state: boolean, minutes?: 
  * dashboard. Anything that looks like a water valve is protected without being
  * marked, because forgetting the setting shouldn't let a model cut the water.
  */
-export function isProtectedDevice(device: Pick<PowerDevice, 'id' | 'alias' | 'is_protected'>): boolean {
+/** Garage doors are always protected: opening one by mistake leaves the house open. */
+const ALWAYS_PROTECTED_DRIVERS = new Set(['meross']);
+
+export function isProtectedDevice(
+  device: Pick<PowerDevice, 'id' | 'alias' | 'is_protected'> & { driver_type?: string },
+): boolean {
   if (device.is_protected === 1 || /\bvalve\b/i.test(device.alias)) return true;
+  if (device.driver_type && ALWAYS_PROTECTED_DRIVERS.has(device.driver_type)) return true;
 
   const sensors = getDb().prepare('SELECT config FROM sensors WHERE config IS NOT NULL')
     .all() as { config: string }[];

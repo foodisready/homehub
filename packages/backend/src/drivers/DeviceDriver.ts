@@ -36,6 +36,9 @@ export interface DeviceDriver {
    */
   probe(ip: string, config?: Record<string, unknown>): Promise<Omit<DiscoveredDevice, 'driverType'> | null>;
 
+  /** How long after a switch to read the state back. Defaults to 1.2 s; a garage door needs to finish moving. */
+  readonly confirmAfterMs?: number;
+
   /** Network-level broadcast/scan discovery. */
   discover(): Promise<DiscoveredDevice[]>;
 }

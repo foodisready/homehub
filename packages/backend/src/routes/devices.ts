@@ -7,6 +7,10 @@ import { getDriver, getAllDrivers } from '../drivers/registry';
 import { emitDeviceState } from '../socket';
 import { logger } from '../logger';
 import { cancelPowerTimer, clearOverride, isProtectedDevice, notifyPowerOff, setOverride } from '../devices/power';
+import { requireAdmin } from '../middleware/auth';
+import {
+  MAX_EXTRA_NETWORKS, displayNetwork, extraNetworks, ownNetworks, saveExtraNetworks, suggestedNetworks,
+} from '../discovery/networks';
 
 function confirmStateAsync(
   deviceId: number,
@@ -27,7 +31,7 @@ function confirmStateAsync(
         logger.warn({ deviceId, alias, expectedState, actual }, 'Device state mismatch after setPower — corrected');
       }
     } catch { /* device offline — next poll will handle it */ }
-  }, 1200);
+  }, getDriver(driverType).confirmAfterMs ?? 1200);
 }
 
 export const devicesRouter = Router();
@@ -46,7 +50,15 @@ interface DeviceRow {
   driver_config: string | null;
   mac: string | null;
   nicknames: string | null;
+  room: string | null;
   is_protected: number;
+}
+
+/** Blank means no room. Returns undefined for anything that isn't a room name. */
+function cleanRoom(room: unknown): string | null | undefined {
+  if (room === null) return null;
+  if (typeof room !== 'string') return undefined;
+  return room.trim() || null;
 }
 
 function mergeWithCache(device: DeviceRow) {
@@ -68,6 +80,7 @@ function mergeWithCache(device: DeviceRow) {
     driverType:   device.driver_type ?? 'kasa',
     driverConfig: device.driver_config ? JSON.parse(device.driver_config) : null,
     nicknames:    device.nicknames ? JSON.parse(device.nicknames) as string[] : [],
+    room:         device.room,
     isProtected:  isProtectedDevice(device),
   };
 }
@@ -166,6 +179,35 @@ devicesRouter.get('/energy/summary', (_req: Request, res: Response) => {
   res.json({ totalWattage, deviceCount: devices.length, onlineCount, readings });
 });
 
+/** The networks Discover searches, as "192.168.1.x". */
+function networksView() {
+  return {
+    own: ownNetworks().map(displayNetwork),
+    extra: extraNetworks().map(displayNetwork),
+    suggested: suggestedNetworks().map(displayNetwork),
+    max: MAX_EXTRA_NETWORKS,
+  };
+}
+
+// GET /api/devices/discover/networks
+devicesRouter.get('/discover/networks', (_req: Request, res: Response) => {
+  res.json(networksView());
+});
+
+// PUT /api/devices/discover/networks { networks: ["192.168.1.x"] } — other networks for Discover to search
+devicesRouter.put('/discover/networks', requireAdmin, (req: Request, res: Response) => {
+  const { networks } = req.body as { networks?: unknown };
+  if (!Array.isArray(networks) || networks.some((n) => typeof n !== 'string')) {
+    return res.status(400).json({ error: 'networks must be a list of addresses', code: 'VALIDATION_ERROR' });
+  }
+  try {
+    saveExtraNetworks(networks as string[]);
+    res.json(networksView());
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message, code: 'VALIDATION_ERROR' });
+  }
+});
+
 // POST /api/devices/discover — fan out discovery across all registered drivers
 devicesRouter.post('/discover', async (_req: Request, res: Response) => {
   try {
@@ -203,17 +245,17 @@ devicesRouter.post('/probe', async (req: Request, res: Response) => {
 
 // POST /api/devices — manually register a device
 devicesRouter.post('/', (req: Request, res: Response) => {
-  const { alias, ip, model, hasEmeter = false, driverType = 'kasa', driverConfig, mac } = req.body as {
+  const { alias, ip, model, hasEmeter = false, driverType = 'kasa', driverConfig, mac, room = null } = req.body as {
     alias: string; ip: string; model?: string; hasEmeter?: boolean;
-    driverType?: string; driverConfig?: Record<string, unknown>; mac?: string;
+    driverType?: string; driverConfig?: Record<string, unknown>; mac?: string; room?: string | null;
   };
   if (!alias || !ip) return res.status(400).json({ error: 'alias and ip are required', code: 'VALIDATION_ERROR' });
 
   const db = getDb();
   try {
     const result = db.prepare(
-      'INSERT INTO devices (alias, ip, model, has_emeter, driver_type, driver_config, mac) VALUES (?, ?, ?, ?, ?, ?, ?)'
-    ).run(alias, ip, model ?? null, hasEmeter ? 1 : 0, driverType, driverConfig ? JSON.stringify(driverConfig) : null, mac ?? null);
+      'INSERT INTO devices (alias, ip, model, has_emeter, driver_type, driver_config, mac, room) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+    ).run(alias, ip, model ?? null, hasEmeter ? 1 : 0, driverType, driverConfig ? JSON.stringify(driverConfig) : null, mac ?? null, cleanRoom(room) ?? null);
     const device = db.prepare('SELECT * FROM devices WHERE id = ?').get(result.lastInsertRowid) as DeviceRow;
     res.status(201).json(mergeWithCache(device));
   } catch (err: any) {
@@ -231,11 +273,14 @@ devicesRouter.patch('/:id', (req: Request, res: Response) => {
     .get(req.params.id, req.params.id) as DeviceRow | undefined;
   if (!device) return res.status(404).json({ error: 'Device not found', code: 'DEVICE_NOT_FOUND' });
 
-  const { alias, ip, icon, driverType, driverConfig, mac, nicknames, isProtected } = req.body as {
+  const { alias, ip, icon, driverType, driverConfig, mac, nicknames, isProtected, room } = req.body as {
     alias?: string; ip?: string; icon?: string;
     driverType?: string; driverConfig?: Record<string, unknown> | null; mac?: string;
-    nicknames?: string[]; isProtected?: boolean;
+    nicknames?: string[]; isProtected?: boolean; room?: string | null;
   };
+  if (room !== undefined && cleanRoom(room) === undefined) {
+    return res.status(400).json({ error: 'room must be text', code: 'VALIDATION_ERROR' });
+  }
   if (nicknames !== undefined && (!Array.isArray(nicknames) || nicknames.some((n) => typeof n !== 'string'))) {
     return res.status(400).json({ error: 'nicknames must be a list of names', code: 'VALIDATION_ERROR' });
   }
@@ -254,13 +299,14 @@ devicesRouter.patch('/:id', (req: Request, res: Response) => {
     ? JSON.stringify([...new Set(nicknames.map((n) => n.trim()).filter(Boolean))])
     : device.nicknames;
   const newProtected    = isProtected === undefined ? device.is_protected : (isProtected ? 1 : 0);
+  const newRoom         = room === undefined ? device.room : cleanRoom(room);
 
   try {
     db.prepare(`
       UPDATE devices
-         SET alias = ?, ip = ?, icon = ?, driver_type = ?, driver_config = ?, mac = ?, nicknames = ?, is_protected = ?
+         SET alias = ?, ip = ?, icon = ?, driver_type = ?, driver_config = ?, mac = ?, nicknames = ?, is_protected = ?, room = ?
        WHERE id = ?
-    `).run(newAlias, newIp, newIcon, newDriverType, newDriverConfig, newMac, newNicknames, newProtected, device.id);
+    `).run(newAlias, newIp, newIcon, newDriverType, newDriverConfig, newMac, newNicknames, newProtected, newRoom, device.id);
   } catch (err: any) {
     if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
       return res.status(409).json({ error: 'Another device already uses that name or IP address', code: 'CONFLICT' });

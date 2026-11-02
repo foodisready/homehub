@@ -125,6 +125,7 @@ function migrate(db: Database.Database): void {
   try { db.exec('ALTER TABLE devices ADD COLUMN override_until TEXT'); } catch {}
   try { db.exec('ALTER TABLE devices ADD COLUMN timer_off_at TEXT'); } catch {}
   try { db.exec('ALTER TABLE devices ADD COLUMN nicknames TEXT'); } catch {}
+  try { db.exec('ALTER TABLE devices ADD COLUMN room TEXT'); } catch {}
   try { db.exec('ALTER TABLE devices ADD COLUMN is_protected INTEGER NOT NULL DEFAULT 0'); } catch {}
   try { db.exec('ALTER TABLE devices ADD COLUMN turned_on_at TEXT'); } catch {}
   try { db.exec("ALTER TABLE devices ADD COLUMN driver_type TEXT NOT NULL DEFAULT 'kasa'"); } catch {}

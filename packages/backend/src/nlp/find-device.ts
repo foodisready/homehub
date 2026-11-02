@@ -35,7 +35,8 @@ const deviceNames = (device: NamedDevice) => namesOf(device).map(normalize);
 /** Every name and nickname, as typed. Speech recognition uses these as hints. */
 export function listDeviceNames(): string[] {
   const devices = getDb().prepare('SELECT * FROM devices').all() as NamedDevice[];
-  return [...new Set(devices.flatMap(namesOf))];
+  const rooms = devices.map((d) => d.room).filter((room): room is string => typeof room === 'string');
+  return [...new Set([...devices.flatMap(namesOf), ...rooms])];
 }
 
 export interface NamedScene {
@@ -60,8 +61,8 @@ export function findScene(name: string): NamedScene | null {
 }
 
 /**
- * Devices that share a nickname, such as two plugs both called "living room
- * lights". Sharing one is deliberate, so unlike an unclear partial name it means
+ * Devices in a room, or sharing a nickname such as "living room lights".
+ * Sharing one is deliberate, so unlike an unclear partial name it means
  * all of them. A name that's also a device's real name is never a group.
  */
 export function findDeviceGroup(name: string): NamedDevice[] {
@@ -70,6 +71,9 @@ export function findDeviceGroup(name: string): NamedDevice[] {
 
   const devices = getDb().prepare('SELECT * FROM devices').all() as NamedDevice[];
   if (devices.some((d) => normalize(d.alias) === wanted)) return [];
+
+  const room = devices.filter((d) => typeof d.room === 'string' && normalize(d.room) === wanted);
+  if (room.length) return room;
 
   const group = devices.filter((d) =>
     namesOf(d).slice(1).some((nickname) => singular(normalize(nickname)) === singular(wanted)));

@@ -13,5 +13,6 @@ export interface Device {
   driverType:   string;
   driverConfig: Record<string, unknown> | null;
   nicknames:    string[];
+  room:         string | null;
   isProtected:  boolean;
 }

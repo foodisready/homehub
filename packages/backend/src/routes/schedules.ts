@@ -182,7 +182,7 @@ schedulesRouter.delete('/:id', requireAdmin, (req: Request, res: Response) => {
 });
 
 /** Tell the scheduler service to reload its jobs after a change. Fire-and-forget. */
-function notifyScheduler(): void {
+export function notifyScheduler(): void {
   const url = `${process.env.SCHEDULER_URL || 'http://scheduler:3002'}/reload`;
   const key  = process.env.INTERNAL_API_KEY || '';
   fetch(url, { method: 'POST', headers: { 'x-internal-key': key } })
