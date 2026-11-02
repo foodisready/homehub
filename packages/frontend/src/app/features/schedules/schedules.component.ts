@@ -4,6 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { AuthService } from '../../core/auth/auth.service';
 import { Device } from '../../shared/models/device.model';
+import { SOLAR_EVENTS, describeTiming, timingOrder } from './schedule-text';
 
 interface Schedule {
   id: number;
@@ -19,14 +20,22 @@ interface Schedule {
   enabled: boolean;
 }
 
-const SOLAR_EVENTS = [
-  { value: 'sunrise',    label: 'Sunrise' },
-  { value: 'sunset',     label: 'Sunset' },
-  { value: 'dawn',       label: 'Dawn' },
-  { value: 'dusk',       label: 'Dusk' },
-  { value: 'goldenHour', label: 'Golden Hour' },
-  { value: 'solarNoon',  label: 'Solar Noon' },
-];
+interface ScheduleGroup {
+  deviceId: number;
+  deviceAlias: string;
+  schedules: Schedule[];
+}
+
+const COLLAPSED_KEY = 'homehub.schedules.collapsed';
+
+function loadCollapsed(): Set<number> {
+  try {
+    const ids: unknown = JSON.parse(localStorage.getItem(COLLAPSED_KEY) ?? '[]');
+    return new Set(Array.isArray(ids) ? ids.filter((id) => typeof id === 'number') : []);
+  } catch {
+    return new Set();
+  }
+}
 
 const CRON_PRESETS = [
   { label: 'Every day at midnight',  value: '0 0 * * *' },
@@ -41,7 +50,7 @@ const CRON_PRESETS = [
   standalone: true,
   imports: [FormsModule, RouterLink],
   styles: [`
-    .topbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.5rem; }
+    .topbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.75rem; margin-bottom: 1.5rem; }
     .topbar h1 { font-size: 1.4rem; font-weight: 700; }
     .back-link { color: var(--text-muted); font-size: 0.9rem; }
     .back-link:hover { color: var(--text); }
@@ -56,15 +65,60 @@ const CRON_PRESETS = [
 
     /* Schedule list */
     .schedule-list { display: flex; flex-direction: column; gap: 0.75rem; }
+    .group-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+    }
+    .group-name { flex: 1; font-size: 1.05rem; font-weight: 700; min-width: 0; }
+    .group-toggle {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      width: 100%;
+      background: transparent;
+      border: none;
+      color: var(--text);
+      font: inherit;
+      text-align: left;
+      padding: 0.2rem 0;
+    }
+    .group-toggle:hover { color: var(--accent); }
+    .group-chevron { color: var(--text-muted); transition: transform 0.15s; }
+    .group-chevron.open { transform: rotate(90deg); }
+    .group-alias { min-width: 0; overflow-wrap: anywhere; }
+    .group-count {
+      background: var(--bg);
+      border-radius: 999px;
+      color: var(--text-muted);
+      font-size: 0.75rem;
+      font-weight: 600;
+      padding: 0.1rem 0.5rem;
+    }
+    .group-add {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--accent);
+      padding: 0.3rem 0.8rem;
+      font-size: 0.8rem;
+      flex-shrink: 0;
+    }
+    .group-add:hover { background: var(--surface); }
     .schedule-row {
       display: flex;
       align-items: center;
-      gap: 1rem;
+      gap: 0.5rem 1rem;
       flex-wrap: wrap;
+      margin-top: 0.75rem;
+      padding-top: 0.75rem;
+      border-top: 1px solid var(--border);
     }
-    .schedule-info { flex: 1; min-width: 0; }
-    .schedule-label { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .schedule-meta { font-size: 0.8rem; color: var(--text-muted); margin-top: 0.2rem; }
+    .schedule-row.disabled .schedule-info { opacity: 0.55; }
+    .schedule-info { flex: 1 1 14rem; min-width: 0; }
+    .schedule-actions { display: flex; align-items: center; gap: 0.5rem; margin-left: auto; }
+    .schedule-label { font-weight: 600; overflow-wrap: anywhere; }
+    .schedule-meta { font-size: 0.8rem; color: var(--text-muted); margin-top: 0.2rem; overflow-wrap: anywhere; }
     .badge {
       display: inline-block;
       padding: 0.15rem 0.6rem;
@@ -113,7 +167,7 @@ const CRON_PRESETS = [
       display: flex; align-items: center; justify-content: center;
       padding: 1rem; z-index: 100;
     }
-    .form-card { width: 100%; max-width: 480px; }
+    .form-card { width: 100%; max-width: 480px; max-height: 100%; overflow-y: auto; overscroll-behavior: contain; }
     .form-card h2 { font-size: 1.2rem; font-weight: 700; margin-bottom: 1.25rem; }
     .field { margin-bottom: 1rem; }
     label { display: block; font-size: 0.82rem; font-weight: 500; color: var(--text-muted); margin-bottom: 0.3rem; }
@@ -185,50 +239,62 @@ const CRON_PRESETS = [
           <h1>Schedules</h1>
         </div>
         @if (auth.user()?.role === 'admin') {
-          <button class="btn-add" (click)="showForm.set(true)">+ New Schedule</button>
+          <button class="btn-add" (click)="openCreate()">+ New Schedule</button>
         }
       </div>
 
-      <!-- List -->
-      @if (schedules().length === 0) {
+      <!-- List, grouped by device -->
+      @if (groups().length === 0) {
         <div class="empty">No schedules yet. Create one to automate your plugs.</div>
       } @else {
         <div class="schedule-list">
-          @for (s of schedules(); track s.id) {
-            <div class="card schedule-row">
-              <div class="schedule-info">
-                <div class="schedule-label">
-                  {{ s.label }}
-                  <span class="badge" [class.badge-on]="s.state" [class.badge-off]="!s.state">
-                    {{ s.state ? 'ON' : 'OFF' }}
-                  </span>
-                </div>
-                <div class="schedule-meta">
-                  {{ s.deviceAlias }} ·
-                  @if (s.triggerType === 'cron') {
-                    {{ s.cronExpression }}
-                  } @else if (s.triggerType === 'solar') {
-                    {{ solarLabel(s.solarEvent) }}
-                    @if (s.solarOffsetMinutes !== 0) {
-                      {{ s.solarOffsetMinutes > 0 ? '+' : '' }}{{ s.solarOffsetMinutes }}min
-                    }
-                  } @else {
-                    Auto-off after {{ s.durationMinutes }}min
-                  }
-                </div>
+          @for (group of groups(); track group.deviceId) {
+            <section class="card">
+              <div class="group-header">
+                <h2 class="group-name">
+                  <button
+                    class="group-toggle"
+                    [attr.aria-expanded]="!isCollapsed(group.deviceId)"
+                    (click)="toggleGroup(group.deviceId)">
+                    <span class="group-chevron" [class.open]="!isCollapsed(group.deviceId)">▸</span>
+                    <span class="group-alias">{{ group.deviceAlias }}</span>
+                    <span class="group-count">{{ group.schedules.length }}</span>
+                  </button>
+                </h2>
+                @if (auth.user()?.role === 'admin') {
+                  <button class="group-add" (click)="openCreate(group.deviceId)">+ Add</button>
+                }
               </div>
 
-              @if (auth.user()?.role === 'admin') {
-                <button
-                  class="toggle-btn"
-                  [class.active]="s.enabled"
-                  (click)="toggleEnabled(s)">
-                  {{ s.enabled ? 'Enabled' : 'Disabled' }}
-                </button>
-                <button class="edit-btn" title="Edit" (click)="openEdit(s)">✎</button>
-                <button class="delete-btn" title="Delete" (click)="deleteSchedule(s)">✕</button>
+              @for (s of visibleSchedules(group); track s.id) {
+                <div class="schedule-row" [class.disabled]="!s.enabled">
+                  <div class="schedule-info">
+                    <div class="schedule-label">
+                      {{ timing(s) }}
+                      <span class="badge" [class.badge-on]="s.state" [class.badge-off]="!s.state">
+                        {{ s.state ? 'ON' : 'OFF' }}
+                      </span>
+                    </div>
+                    @if (s.label !== timing(s)) {
+                      <div class="schedule-meta">{{ s.label }}</div>
+                    }
+                  </div>
+
+                  @if (auth.user()?.role === 'admin') {
+                    <div class="schedule-actions">
+                      <button
+                        class="toggle-btn"
+                        [class.active]="s.enabled"
+                        (click)="toggleEnabled(s)">
+                        {{ s.enabled ? 'Enabled' : 'Disabled' }}
+                      </button>
+                      <button class="edit-btn" title="Edit" (click)="openEdit(s)">✎</button>
+                      <button class="delete-btn" title="Delete" (click)="deleteSchedule(s)">✕</button>
+                    </div>
+                  }
+                </div>
               }
-            </div>
+            </section>
           }
         </div>
       }
@@ -251,7 +317,7 @@ const CRON_PRESETS = [
           </div>
 
           <div class="field">
-            <label>Label</label>
+            <label>Label (optional)</label>
             <input type="text" [(ngModel)]="form.label" placeholder="e.g. Porch on at sunset" />
           </div>
 
@@ -361,9 +427,22 @@ export class SchedulesComponent implements OnInit {
 
   private readonly _schedules = signal<Schedule[]>([]);
   private readonly _devices   = signal<Device[]>([]);
+  private readonly _collapsed = signal(loadCollapsed());
 
-  readonly schedules  = this._schedules.asReadonly();
   readonly devices    = this._devices.asReadonly();
+  readonly groups     = computed<ScheduleGroup[]>(() => {
+    const byDevice = new Map<number, ScheduleGroup>();
+    for (const s of this._schedules()) {
+      const group = byDevice.get(s.deviceId)
+        ?? { deviceId: s.deviceId, deviceAlias: s.deviceAlias, schedules: [] };
+      group.schedules.push(s);
+      byDevice.set(s.deviceId, group);
+    }
+    const groups = [...byDevice.values()];
+    groups.sort((a, b) => a.deviceAlias.localeCompare(b.deviceAlias));
+    groups.forEach((g) => g.schedules.sort((a, b) => timingOrder(a) - timingOrder(b)));
+    return groups;
+  });
   readonly showForm      = signal(false);
   readonly saving        = signal(false);
   readonly formError     = signal('');
@@ -402,13 +481,42 @@ export class SchedulesComponent implements OnInit {
     this.showCronHelp.update((v) => !v);
   }
 
+  isCollapsed(deviceId: number): boolean {
+    return this._collapsed().has(deviceId);
+  }
+
+  visibleSchedules(group: ScheduleGroup): Schedule[] {
+    return this.isCollapsed(group.deviceId) ? [] : group.schedules;
+  }
+
+  toggleGroup(deviceId: number): void {
+    this.setCollapsed(deviceId, !this.isCollapsed(deviceId));
+  }
+
+  private setCollapsed(deviceId: number, collapsed: boolean): void {
+    const next = new Set(this._collapsed());
+    if (collapsed) next.add(deviceId); else next.delete(deviceId);
+    this._collapsed.set(next);
+    try {
+      localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...next]));
+    } catch {
+      // Without storage, the choice just lasts until the page is reloaded.
+    }
+  }
+
+  openCreate(deviceId?: number): void {
+    this.form = { ...this.blankForm(), deviceId: deviceId ?? '' };
+    this.showForm.set(true);
+  }
+
   openEdit(s: Schedule): void {
     this.editingId.set(s.id);
     const expr = s.cronExpression ?? '';
     const matchedPreset = CRON_PRESETS.find((p) => p.value !== '' && p.value === expr);
     this.form = {
       deviceId:           s.deviceId,
-      label:              s.label,
+      // An automatic label is left blank so it follows any change to the time.
+      label:              s.label === this.timing(s) ? '' : s.label,
       triggerType:        s.triggerType,
       state:              s.state,
       solarEvent:         s.solarEvent ?? 'sunset',
@@ -434,18 +542,26 @@ export class SchedulesComponent implements OnInit {
     if (val !== '') this.form.cronExpression = val;
   }
 
-  solarLabel(event: string | null): string {
-    return SOLAR_EVENTS.find((e) => e.value === event)?.label ?? event ?? '';
+  timing(s: Schedule): string {
+    return describeTiming(s);
   }
 
   save(): void {
-    const { deviceId, label, triggerType, state, solarEvent, solarOffsetMinutes, cronExpression, durationMinutes } = this.form;
-    if (!deviceId || !label) { this.formError.set('Device and label are required.'); return; }
+    const { deviceId, triggerType, state, solarEvent, solarOffsetMinutes, cronExpression, durationMinutes } = this.form;
+    if (!deviceId) { this.formError.set('Device is required.'); return; }
     if (triggerType === 'cron' && !cronExpression) { this.formError.set('Cron expression is required.'); return; }
     if (triggerType === 'auto_off' && (!durationMinutes || durationMinutes <= 0)) { this.formError.set('Duration must be greater than 0.'); return; }
 
     this.saving.set(true);
     this.formError.set('');
+
+    const label = this.form.label.trim() || describeTiming({
+      triggerType,
+      cronExpression,
+      solarEvent,
+      solarOffsetMinutes: Number(solarOffsetMinutes),
+      durationMinutes: Number(durationMinutes),
+    });
 
     const payload = {
       deviceId: Number(deviceId), label, triggerType,
@@ -467,6 +583,7 @@ export class SchedulesComponent implements OnInit {
         } else {
           this._schedules.update((list) => [result, ...list]);
         }
+        this.setCollapsed(result.deviceId, false); // Show what was just saved.
         this.closeForm();
         this.saving.set(false);
       },
