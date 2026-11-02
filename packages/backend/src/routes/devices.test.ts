@@ -22,10 +22,10 @@ let server: http.Server;
 let baseUrl: string;
 let db: Database.Database;
 
-const send = (method: string, url: string, body: unknown) => fetch(`${baseUrl}/api/devices${url}`, {
+const send = (method: string, url: string, body: unknown, role = 'admin') => fetch(`${baseUrl}/api/devices${url}`, {
   method,
-  headers: { 'Content-Type': 'application/json' },
-  body:    JSON.stringify(body),
+  headers: { 'Content-Type': 'application/json', 'x-test-role': role },
+  body:    method === 'GET' ? undefined : JSON.stringify(body),
 });
 
 const row = (id: number) => db.prepare('SELECT ip, mac FROM devices WHERE id = ?').get(id);
@@ -43,6 +43,11 @@ describe('device address updates', () => {
 
     const app = express();
     app.use(express.json());
+    // Stands in for the JWT check: admin unless a test says otherwise.
+    app.use((req, _res, next) => {
+      req.user = { userId: 1, username: 't', role: (req.headers['x-test-role'] as string) ?? 'admin' } as never;
+      next();
+    });
     app.use('/api/devices', devicesRouter);
     await new Promise<void>((resolve) => {
       server = app.listen(0, '127.0.0.1', () => {
@@ -146,5 +151,33 @@ describe('device address updates', () => {
     assert.equal(res.status, 201);
     const { id } = await res.json() as { id: number };
     assert.deepEqual(row(id), { ip: '192.168.86.77', mac: MAC });
+  });
+
+  it('lets only admins add, change or delete devices', async () => {
+    const id = register('Lamp', '10.0.0.9');
+    assert.equal((await send('PATCH', `/${id}`, { alias: 'Renamed' }, 'member')).status, 403);
+    assert.equal((await send('DELETE', `/${id}`, {}, 'member')).status, 403);
+    assert.equal((await send('POST', '/', { alias: 'New', ip: '10.0.0.10' }, 'member')).status, 403);
+    assert.equal((await send('POST', '/probe', { ip: '10.0.0.10' }, 'member')).status, 403);
+    assert.equal((await send('POST', '/discover', {}, 'member')).status, 403);
+    assert.equal((await send('GET', '', undefined, 'member')).status, 200, 'members can still see devices');
+    assert.equal(db.prepare('SELECT alias FROM devices WHERE id = ?').pluck().get(id), 'Lamp');
+  });
+
+  it("never sends a device's password or key, and keeps it on edit", async () => {
+    const id = Number(db.prepare("INSERT INTO devices (alias, ip, driver_type, driver_config) VALUES ('Porch', '10.0.0.11', 'shelly', ?)")
+      .run(JSON.stringify({ gen: 1, auth: { user: 'admin', pass: 'secret-pw' } })).lastInsertRowid);
+
+    const listed = await (await send('GET', '', undefined, 'member')).json() as any[];
+    const porch = listed.find((d) => d.id === id);
+    assert.deepEqual(porch.driverConfig, { gen: 1, auth: { user: 'admin' } });
+    assert.deepEqual(porch.savedSecrets, ['auth.pass']);
+    assert.ok(!JSON.stringify(listed).includes('secret-pw'));
+
+    const res = await send('PATCH', `/${id}`, { alias: 'Front porch', driverConfig: porch.driverConfig });
+    assert.equal(res.status, 200);
+    assert.ok(!JSON.stringify(await res.json()).includes('secret-pw'));
+    const stored = JSON.parse(db.prepare('SELECT driver_config FROM devices WHERE id = ?').pluck().get(id) as string);
+    assert.equal(stored.auth.pass, 'secret-pw');
   });
 });

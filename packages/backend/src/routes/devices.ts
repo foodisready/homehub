@@ -8,6 +8,7 @@ import { emitDeviceState } from '../socket';
 import { logger } from '../logger';
 import { cancelPowerTimer, clearOverride, isProtectedDevice, notifyPowerOff, setOverride } from '../devices/power';
 import { requireAdmin } from '../middleware/auth';
+import { keepSecrets, withoutSecrets } from '../devices/secrets';
 import {
   MAX_EXTRA_NETWORKS, displayNetwork, extraNetworks, ownNetworks, saveExtraNetworks, suggestedNetworks,
 } from '../discovery/networks';
@@ -63,6 +64,7 @@ function cleanRoom(room: unknown): string | null | undefined {
 
 function mergeWithCache(device: DeviceRow) {
   const cached = getCachedState(device.id);
+  const { config, savedSecrets } = withoutSecrets(device.driver_config ? JSON.parse(device.driver_config) : null);
   return {
     id:            device.id,
     alias:         device.alias,
@@ -78,7 +80,8 @@ function mergeWithCache(device: DeviceRow) {
       ? device.override_until.replace(' ', 'T') + 'Z'
       : null,
     driverType:   device.driver_type ?? 'kasa',
-    driverConfig: device.driver_config ? JSON.parse(device.driver_config) : null,
+    driverConfig: config,
+    savedSecrets,
     nicknames:    device.nicknames ? JSON.parse(device.nicknames) as string[] : [],
     room:         device.room,
     isProtected:  isProtectedDevice(device),
@@ -209,7 +212,7 @@ devicesRouter.put('/discover/networks', requireAdmin, (req: Request, res: Respon
 });
 
 // POST /api/devices/discover — fan out discovery across all registered drivers
-devicesRouter.post('/discover', async (_req: Request, res: Response) => {
+devicesRouter.post('/discover', requireAdmin, async (_req: Request, res: Response) => {
   try {
     // One driver at a time: the Shelly and Tuya subnet sweeps flood the network
     // enough to lose the UDP replies that Kasa discovery depends on.
@@ -229,7 +232,7 @@ devicesRouter.post('/discover', async (_req: Request, res: Response) => {
 });
 
 // POST /api/devices/probe — probe a single IP to identify its device type and metadata
-devicesRouter.post('/probe', async (req: Request, res: Response) => {
+devicesRouter.post('/probe', requireAdmin, async (req: Request, res: Response) => {
   const { ip, driverType } = req.body as { ip?: string; driverType?: string };
   if (!ip) return res.status(400).json({ error: 'ip is required', code: 'VALIDATION_ERROR' });
 
@@ -244,7 +247,7 @@ devicesRouter.post('/probe', async (req: Request, res: Response) => {
 });
 
 // POST /api/devices — manually register a device
-devicesRouter.post('/', (req: Request, res: Response) => {
+devicesRouter.post('/', requireAdmin, (req: Request, res: Response) => {
   const { alias, ip, model, hasEmeter = false, driverType = 'kasa', driverConfig, mac, room = null } = req.body as {
     alias: string; ip: string; model?: string; hasEmeter?: boolean;
     driverType?: string; driverConfig?: Record<string, unknown>; mac?: string; room?: string | null;
@@ -267,7 +270,7 @@ devicesRouter.post('/', (req: Request, res: Response) => {
 });
 
 // PATCH /api/devices/:id — update alias or ip
-devicesRouter.patch('/:id', (req: Request, res: Response) => {
+devicesRouter.patch('/:id', requireAdmin, (req: Request, res: Response) => {
   const db = getDb();
   const device = db.prepare('SELECT * FROM devices WHERE id = ? OR alias = ?')
     .get(req.params.id, req.params.id) as DeviceRow | undefined;
@@ -291,8 +294,9 @@ devicesRouter.patch('/:id', (req: Request, res: Response) => {
   const newIp           = ip          ?? device.ip;
   const newIcon         = icon        ?? device.icon;
   const newDriverType   = driverType  ?? device.driver_type;
+  // The browser never sees saved passwords and keys, so an edit that leaves one out keeps it.
   const newDriverConfig = driverConfig !== undefined
-    ? (driverConfig ? JSON.stringify(driverConfig) : null)
+    ? (driverConfig ? JSON.stringify(keepSecrets(driverConfig, device.driver_config ? JSON.parse(device.driver_config) : null)) : null)
     : device.driver_config;
   const newMac          = mac         ?? device.mac;
   const newNicknames    = nicknames
@@ -361,7 +365,7 @@ devicesRouter.delete('/:id/override', (req: Request, res: Response) => {
 });
 
 // DELETE /api/devices/:id
-devicesRouter.delete('/:id', (req: Request, res: Response) => {
+devicesRouter.delete('/:id', requireAdmin, (req: Request, res: Response) => {
   const db = getDb();
   const result = db.prepare('DELETE FROM devices WHERE id = ? OR alias = ?')
     .run(req.params.id, req.params.id);

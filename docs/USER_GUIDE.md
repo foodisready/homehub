@@ -27,7 +27,7 @@ Set up every device in its own app first, so it's on your home Wi-Fi. Then:
 
 If a device isn't found, type its IP address in the add form, select **Probe**, then **Add**.
 
-Settings lists your devices by room, with **Unassigned** at the top, since those are the ones still to set up.
+Settings lists your devices by room, with **Unassigned** at the top, since those are the ones still to set up. Rooms start folded, except Unassigned. Select a room's name to open or fold it, and HomeHub remembers your choice on each browser. Searching or filtering shows every match, even in folded rooms.
 
 ### Devices on another Wi-Fi network
 
@@ -64,7 +64,7 @@ HomeHub saves one TP-Link login for all your Kasa plugs, stored as a hash rather
 
 ### Shelly devices
 
-If a Shelly is password-protected, Discover shows **Username** and **Password** fields. To change them later, select **Edit** on the device. Shelly needs the real password, so it's stored unencrypted in HomeHub's database.
+If a Shelly is password-protected, Discover shows **Username** and **Password** fields. To change them later, select **Edit** on the device. A saved password is never shown, so leave the field blank to keep it, or clear the username to remove the login. Shelly needs the real password, so it's stored unencrypted in HomeHub's database, but it isn't sent to anyone's browser.
 
 ### Tuya plugs
 
@@ -170,7 +170,9 @@ HomeHub also makes a full copy of its database once a day and keeps the last 7. 
 
 ## Household members
 
-Open **Settings → Users** to add people. Administrators can change devices and settings.
+Open **Settings → Users** to add people. Everyone can switch devices and set timers. Only administrators can add, edit or remove devices, or change settings.
+
+Settings sections fold away. Select a section's name to open or close it. Devices starts open, and HomeHub remembers your choice on each browser.
 
 ## Remote access
 

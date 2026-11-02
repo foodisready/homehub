@@ -1,4 +1,4 @@
-import { Component, OnInit, inject, output, signal } from '@angular/core';
+import { Component, OnInit, effect, inject, input, output, signal } from '@angular/core';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
 
@@ -69,6 +69,19 @@ interface MerossLogin { email: string | null; signedIn: boolean; hasNames?: bool
 export class MerossLoginComponent implements OnInit {
   private readonly http = inject(HttpClient);
 
+  /**
+   * Bumped by the page to open the card, e.g. when a Meross device was found
+   * but HomeHub isn't signed in yet. An input rather than a method, so it also
+   * works when the card is only just being shown.
+   */
+  readonly openRequest = input(0);
+
+  constructor() {
+    effect(() => {
+      if (this.openRequest() > 0) this.expanded.set(true);
+    });
+  }
+
   /** Fired after a successful sign-in, so the page can probe again. */
   readonly signedInChange = output<boolean>();
 
@@ -91,11 +104,6 @@ export class MerossLoginComponent implements OnInit {
       this.noNames.set(login.signedIn && login.hasNames === false);
       this.email = login.email ?? '';
     });
-  }
-
-  /** Opens the card, e.g. when a Meross device was found but HomeHub isn't signed in yet. */
-  open(): void {
-    this.expanded.set(true);
   }
 
   save(): void {

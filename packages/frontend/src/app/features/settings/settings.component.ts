@@ -66,7 +66,13 @@ const DRIVER_LABEL: Record<string, string> = {
     .back-link { color:var(--text-muted); font-size:0.9rem; }
     .back-link:hover { color:var(--text); }
 
-    .section { margin-bottom:2rem; }
+    .section { margin-bottom:1.25rem; }
+    .section-toggle {
+      display:flex; align-items:center; gap:0.4rem; width:100%; background:none; border:none;
+      padding:0.35rem 0; cursor:pointer; text-align:left; font-family:inherit;
+    }
+    .section-toggle:hover { color:var(--text); }
+    .section-toggle .chev { width:0.8rem; font-size:0.8rem; }
     .section-title {
       font-size:0.7rem;
       font-weight:700;
@@ -90,6 +96,12 @@ const DRIVER_LABEL: Record<string, string> = {
       color:var(--text-muted); padding:0.9rem 0 0.2rem; border-bottom:1px solid var(--border);
     }
     .group-title:first-of-type { padding-top:0.2rem; }
+    .group-toggle {
+      display:flex; align-items:center; gap:0.35rem; width:100%; background:none; border:none;
+      border-bottom:1px solid var(--border); border-radius:0; cursor:pointer; text-align:left; font-family:inherit;
+    }
+    .group-toggle:hover { color:var(--text); }
+    .group-toggle .chev { width:0.75rem; }
     .group-count { font-weight:500; letter-spacing:0; opacity:0.75; margin-left:0.25rem; }
     .row-label .row-name, .row-label .row-sub { display:block; overflow:hidden; text-overflow:ellipsis; }
     .row-sub .offline { color:var(--red); }
@@ -214,509 +226,537 @@ const DRIVER_LABEL: Record<string, string> = {
 
       <!-- ── Devices ───────────────────────────────────────────── -->
       <div class="section">
-        <div class="section-title">Devices</div>
-        <div class="card">
-          @if (devices().length > 0) {
-            <app-device-filter style="margin-bottom:0.75rem" [devices]="devices()"
-                               [(search)]="deviceSearch" [(filter)]="deviceFilter" />
-          }
-          @for (group of deviceGroups(); track group.name) {
-            @if (group.name) {
-              <div class="group-title">{{ group.name }} <span class="group-count">{{ group.devices.length }}</span></div>
+        <button type="button" class="section-title section-toggle" (click)="toggleSection('devices')" [attr.aria-expanded]="isSectionOpen('devices')">
+          <span class="chev">{{ isSectionOpen('devices') ? '▾' : '▸' }}</span> Devices
+        </button>
+        @if (isSectionOpen('devices')) {
+          <div class="card">
+            @if (devices().length > 0) {
+              <app-device-filter style="margin-bottom:0.75rem" [devices]="devices()"
+                                 [(search)]="deviceSearch" [(filter)]="deviceFilter" />
             }
-          @for (d of group.devices; track d.id) {
-            <div class="row-item">
-              @if (editingDeviceId() === d.id) {
-                <div style="flex:1; width:100%">
-                  <div class="edit-row">
-                    <input type="text" [(ngModel)]="editAlias" placeholder="Alias" />
-                    <input type="text" [(ngModel)]="editIp"    placeholder="IP address" />
-                  </div>
-                  <div class="edit-row" style="margin-top:0.4rem">
-                    <input type="text" [(ngModel)]="editRoom" placeholder="Room" list="device-rooms" autocomplete="off" aria-label="Room" />
-                    <datalist id="device-rooms">
-                      @for (room of roomNames(); track room) { <option [value]="room"></option> }
-                    </datalist>
-                    <input type="text" [(ngModel)]="editNicknames" placeholder="Nicknames for Chat, separated by commas" autocomplete="off" />
-                  </div>
-                  <p style="font-size:0.75rem;color:var(--text-muted);margin:0.2rem 0 0">Give several devices the same nickname to switch them together by Chat or voice.</p>
-                  <label style="display:flex;align-items:center;gap:0.4rem;margin-top:0.4rem;font-size:0.85rem">
-                    <input type="checkbox" style="width:auto" [(ngModel)]="editProtected" />
-                    Don't let Chat or AI assistants switch this device
-                  </label>
-                  <p style="font-size:0.75rem;color:var(--text-muted);margin:0.2rem 0 0">Valves and automatic shutoff devices are always protected.</p>
-                  @if (d.driverType === 'shelly' || d.driverType === 'tuya') {
+            @for (group of deviceGroups(); track group.name) {
+              @if (group.name) {
+                <button type="button" class="group-title group-toggle" (click)="toggleGroup(group.name)"
+                        [attr.aria-expanded]="isGroupOpen(group.name)">
+                  <span class="chev">{{ isGroupOpen(group.name) ? '▾' : '▸' }}</span>
+                  {{ group.name }} <span class="group-count">{{ group.devices.length }}</span>
+                </button>
+              }
+            @for (d of (!group.name || isGroupOpen(group.name) ? group.devices : []); track d.id) {
+              <div class="row-item">
+                @if (editingDeviceId() === d.id) {
+                  <div style="flex:1; width:100%">
+                    <div class="edit-row">
+                      <input type="text" [(ngModel)]="editAlias" placeholder="Alias" />
+                      <input type="text" [(ngModel)]="editIp"    placeholder="IP address" />
+                    </div>
                     <div class="edit-row" style="margin-top:0.4rem">
-                      <input type="text"     [(ngModel)]="editAuthUser" placeholder="Username (leave blank to clear)" autocomplete="off" />
-                      <div class="pass-wrap">
-                        <input [type]="showAuthPass ? 'text' : 'password'" [(ngModel)]="editAuthPass" placeholder="Password (leave blank to clear)" autocomplete="new-password" />
-                        <button type="button" class="pass-eye" (click)="showAuthPass = !showAuthPass" [attr.aria-label]="showAuthPass ? 'Hide password' : 'Show password'">
-                          @if (showAuthPass) {
-                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                              <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
-                              <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
-                              <line x1="1" y1="1" x2="23" y2="23"/>
-                            </svg>
-                          } @else {
-                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-                              <circle cx="12" cy="12" r="3"/>
-                            </svg>
-                          }
+                      <input type="text" [(ngModel)]="editRoom" placeholder="Room" list="device-rooms" autocomplete="off" aria-label="Room" />
+                      <datalist id="device-rooms">
+                        @for (room of roomNames(); track room) { <option [value]="room"></option> }
+                      </datalist>
+                      <input type="text" [(ngModel)]="editNicknames" placeholder="Nicknames for Chat, separated by commas" autocomplete="off" />
+                    </div>
+                    <p style="font-size:0.75rem;color:var(--text-muted);margin:0.2rem 0 0">Give several devices the same nickname to switch them together by Chat or voice.</p>
+                    <label style="display:flex;align-items:center;gap:0.4rem;margin-top:0.4rem;font-size:0.85rem">
+                      <input type="checkbox" style="width:auto" [(ngModel)]="editProtected" />
+                      Don't let Chat or AI assistants switch this device
+                    </label>
+                    <p style="font-size:0.75rem;color:var(--text-muted);margin:0.2rem 0 0">Valves and automatic shutoff devices are always protected.</p>
+                    @if (d.driverType === 'shelly' || d.driverType === 'tuya') {
+                      <div class="edit-row" style="margin-top:0.4rem">
+                        <input type="text"     [(ngModel)]="editAuthUser" placeholder="Username (clear to remove the login)" autocomplete="off" aria-label="Username" />
+                        <div class="pass-wrap">
+                          <input [type]="showAuthPass ? 'text' : 'password'" [(ngModel)]="editAuthPass" [placeholder]="hasSavedPassword(d) ? 'Saved (leave blank to keep)' : 'Password'" autocomplete="new-password" aria-label="Password" />
+                          <button type="button" class="pass-eye" (click)="showAuthPass = !showAuthPass" [attr.aria-label]="showAuthPass ? 'Hide password' : 'Show password'">
+                            @if (showAuthPass) {
+                              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
+                                <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
+                                <line x1="1" y1="1" x2="23" y2="23"/>
+                              </svg>
+                            } @else {
+                              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                                <circle cx="12" cy="12" r="3"/>
+                              </svg>
+                            }
+                          </button>
+                        </div>
+                      </div>
+                      <p style="font-size:0.75rem;color:var(--text-muted);margin:0.2rem 0 0">Leave both blank to remove stored credentials.</p>
+                    }
+                    @if (usesKasaLogin(d)) {
+                      <div class="edit-row" style="margin-top:0.4rem">
+                        <input type="email" [(ngModel)]="editKasaUser" placeholder="TP-Link email" autocomplete="off" />
+                        <input type="password" [(ngModel)]="editKasaPass" placeholder="TP-Link password" autocomplete="new-password" />
+                        <button class="btn-sm btn-ghost" (click)="saveEditedKasaLogin()"
+                                [disabled]="!editKasaUser.trim() || !editKasaPass || kasaLoginSaving()">
+                          {{ kasaLoginSaving() ? 'Checking…' : 'Save login' }}
                         </button>
                       </div>
+                      <p style="font-size:0.75rem;color:var(--text-muted);margin:0.2rem 0 0">
+                        The account used in the Kasa app. It's shared by every Kasa plug that needs a login.
+                      </p>
+                      @if (kasaLoginMsg()) { <p class="msg" [class.ok]="!kasaLoginErr()" [class.err]="kasaLoginErr()">{{ kasaLoginMsg() }}</p> }
+                    }
+                    @if (d.driverType === 'tuya') {
+                      <div class="edit-row" style="margin-top:0.4rem">
+                        <input type="text" [(ngModel)]="editTuyaDeviceId" placeholder="Device ID (leave blank to keep existing)" autocomplete="off" />
+                        <input type="text" [(ngModel)]="editTuyaKey"      placeholder="Local Key (leave blank to keep existing)" autocomplete="off" />
+                      </div>
+                      <div class="edit-row" style="margin-top:0.4rem">
+                        <select [(ngModel)]="editTuyaVersion">
+                          <option value="3.1">Protocol 3.1</option>
+                          <option value="3.3">Protocol 3.3</option>
+                          <option value="3.4">Protocol 3.4</option>
+                          <option value="3.5">Protocol 3.5</option>
+                        </select>
+                        <span></span>
+                      </div>
+                      <p style="font-size:0.75rem;color:var(--text-muted);margin:0.2rem 0 0">Leave Device ID and Local Key blank to keep existing values.</p>
+                    }
+                    <div style="display:flex;gap:0.5rem;margin-top:0.4rem">
+                      <button class="btn-sm btn-primary" (click)="saveDevice(d.id, d.driverType)">Save</button>
+                      <button class="btn-sm btn-ghost" (click)="cancelDeviceEdit()">Cancel</button>
+                      @if (deviceMsg()) { <span class="msg" [class.ok]="!deviceErr()" [class.err]="deviceErr()">{{ deviceMsg() }}</span> }
                     </div>
-                    <p style="font-size:0.75rem;color:var(--text-muted);margin:0.2rem 0 0">Leave both blank to remove stored credentials.</p>
-                  }
-                  @if (usesKasaLogin(d)) {
-                    <div class="edit-row" style="margin-top:0.4rem">
-                      <input type="email" [(ngModel)]="editKasaUser" placeholder="TP-Link email" autocomplete="off" />
-                      <input type="password" [(ngModel)]="editKasaPass" placeholder="TP-Link password" autocomplete="new-password" />
-                      <button class="btn-sm btn-ghost" (click)="saveEditedKasaLogin()"
-                              [disabled]="!editKasaUser.trim() || !editKasaPass || kasaLoginSaving()">
-                        {{ kasaLoginSaving() ? 'Checking…' : 'Save login' }}
-                      </button>
-                    </div>
-                    <p style="font-size:0.75rem;color:var(--text-muted);margin:0.2rem 0 0">
-                      The account used in the Kasa app. It's shared by every Kasa plug that needs a login.
-                    </p>
-                    @if (kasaLoginMsg()) { <p class="msg" [class.ok]="!kasaLoginErr()" [class.err]="kasaLoginErr()">{{ kasaLoginMsg() }}</p> }
-                  }
-                  @if (d.driverType === 'tuya') {
-                    <div class="edit-row" style="margin-top:0.4rem">
-                      <input type="text" [(ngModel)]="editTuyaDeviceId" placeholder="Device ID (leave blank to keep existing)" autocomplete="off" />
-                      <input type="text" [(ngModel)]="editTuyaKey"      placeholder="Local Key (leave blank to keep existing)" autocomplete="off" />
-                    </div>
-                    <div class="edit-row" style="margin-top:0.4rem">
-                      <select [(ngModel)]="editTuyaVersion">
-                        <option value="3.1">Protocol 3.1</option>
-                        <option value="3.3">Protocol 3.3</option>
-                        <option value="3.4">Protocol 3.4</option>
-                        <option value="3.5">Protocol 3.5</option>
-                      </select>
-                      <span></span>
-                    </div>
-                    <p style="font-size:0.75rem;color:var(--text-muted);margin:0.2rem 0 0">Leave Device ID and Local Key blank to keep existing values.</p>
-                  }
-                  <div style="display:flex;gap:0.5rem;margin-top:0.4rem">
-                    <button class="btn-sm btn-primary" (click)="saveDevice(d.id, d.driverType)">Save</button>
-                    <button class="btn-sm btn-ghost" (click)="cancelDeviceEdit()">Cancel</button>
-                    @if (deviceMsg()) { <span class="msg" [class.ok]="!deviceErr()" [class.err]="deviceErr()">{{ deviceMsg() }}</span> }
                   </div>
-                </div>
-              } @else {
-                <div class="row-label">
-                  <span class="row-name">{{ d.alias }}</span>
-                  <span class="row-meta row-sub">
-                    {{ d.ip }}
-                    @if (d.hasEmeter) { · ⚡ }
-                    @if (!d.online && d.isProtected) { <span class="offline"> · Offline</span> }
+                } @else {
+                  <div class="row-label">
+                    <span class="row-name">{{ d.alias }}</span>
+                    <span class="row-meta row-sub">
+                      {{ d.ip }}
+                      @if (d.hasEmeter) { · ⚡ }
+                      @if (!d.online && d.isProtected) { <span class="offline"> · Offline</span> }
+                    </span>
+                  </div>
+                  <span class="driver-badge" [class]="'driver-badge ' + d.driverType">
+                    {{ driverLabel(d.driverType) }}
                   </span>
-                </div>
-                <span class="driver-badge" [class]="'driver-badge ' + d.driverType">
-                  {{ driverLabel(d.driverType) }}
-                </span>
-                @if (!d.isProtected) {
-                  <button class="btn-sm btn-ghost device-switch" [class.on]="d.state && d.online"
-                          [disabled]="!d.online || switchingId() === d.id" (click)="switchDevice(d)"
-                          [attr.aria-label]="(d.state ? 'Turn off ' : 'Turn on ') + d.alias">
-                    {{ !d.online ? 'Offline' : d.state ? 'On' : 'Off' }}
-                  </button>
-                }
-                @if (isAdmin()) {
-                  <button class="btn-sm btn-ghost" (click)="startDeviceEdit(d)">Edit</button>
-                  <button class="btn-sm btn-danger" (click)="deleteDevice(d.id, d.alias)">✕</button>
-                }
-              }
-            </div>
-          }
-          }
-
-          @if (devices().length > 0 && filteredDevices().length === 0) {
-            <p style="color:var(--text-muted);font-size:0.85rem;padding:0.5rem 0">No devices match.</p>
-          }
-
-          @if (devices().length === 0) {
-            <p style="color:var(--text-muted);font-size:0.85rem;padding:0.5rem 0">No devices registered. Use Discover to find devices on your network.</p>
-          }
-
-          @if (isAdmin()) {
-            <!-- Manual add with Probe -->
-            <div class="add-form" style="margin-top:0.75rem">
-              <input type="text" [(ngModel)]="newDeviceAlias" placeholder="Alias (e.g. Porch Light)" />
-              <input type="text" [(ngModel)]="newDeviceIp"    placeholder="IP address (e.g. 192.168.1.50)"
-                     (keydown.enter)="probeIp()" />
-              <button class="btn-sm btn-ghost" (click)="probeIp()" [disabled]="!newDeviceIp.trim() || probing()">
-                {{ probing() ? '…' : 'Probe' }}
-              </button>
-              <button class="btn-sm btn-primary" (click)="addManual()" [disabled]="!newDeviceAlias.trim() || !newDeviceIp.trim()">Add</button>
-            </div>
-            @if (probeMsg()) {
-              <p class="msg" [class.ok]="!probeErr()" [class.err]="probeErr()">{{ probeMsg() }}</p>
-            }
-
-            <!-- Discover buttons -->
-            <div style="display:flex;gap:0.5rem;margin-top:0.5rem;flex-wrap:wrap">
-              <button class="btn-sm btn-ghost" [disabled]="discovering()" (click)="discover()">
-                {{ discovering() ? 'Scanning…' : '+ Discover on network' }}
-              </button>
-            </div>
-            @if (discoverMsg()) { <p class="msg" [class.ok]="!discoverErr()" [class.err]="discoverErr()">{{ discoverMsg() }}</p> }
-            @for (m of unreachedMeross(); track m.uuid) {
-              <p class="msg err">
-                {{ m.name }} ({{ m.type }}) is on your Meross account, but HomeHub couldn't reach it.
-                @if (!m.online) { Meross says it's offline. }
-                <button type="button" class="link-btn" (click)="otherNetworks()?.open()">Is it on another Wi-Fi network?</button>
-              </p>
-            }
-            <div style="margin-top:0.5rem"><app-other-networks /></div>
-
-            <!-- Registered devices that now answer at a different address -->
-            @if (movedDevices().length > 0) {
-              <div class="discover-list">
-                @for (d of movedDevices(); track d.ip) {
-                  <div class="discover-row">
-                    <span class="discover-alias">{{ d.moved?.alias }} moved from {{ d.moved?.previousIp }} to {{ d.ip }}</span>
-                    <button class="btn-sm btn-primary" (click)="applyMove(d)">Update address</button>
-                  </div>
+                  @if (!d.isProtected) {
+                    <button class="btn-sm btn-ghost device-switch" [class.on]="d.state && d.online"
+                            [disabled]="!d.online || switchingId() === d.id" (click)="switchDevice(d)"
+                            [attr.aria-label]="(d.state ? 'Turn off ' : 'Turn on ') + d.alias">
+                      {{ !d.online ? 'Offline' : d.state ? 'On' : 'Off' }}
+                    </button>
+                  }
+                  @if (isAdmin()) {
+                    <button class="btn-sm btn-ghost" (click)="startDeviceEdit(d)">Edit</button>
+                    <button class="btn-sm btn-danger" (click)="deleteDevice(d.id, d.alias)">✕</button>
+                  }
                 }
               </div>
             }
+            }
 
-            <!-- Discovery results -->
-            @if (discoveredDevices().length > 0) {
-              <div class="discover-list">
-                @for (d of discoveredDevices(); track d.ip) {
-                  <div class="discover-row">
-                    <input type="checkbox" [checked]="isSelected(d.ip)" (change)="toggleSelect(d.ip)"
-                           [disabled]="(d.driverType === 'meross' && d.needsLogin) || (d.driverType === 'tuya' && (!d.pendingKey?.trim() || (!d.driverConfig?.['deviceId'] && !d.pendingDeviceId?.trim())))" />
-                    <div class="discover-alias">
-                      <input type="text" [(ngModel)]="d.pendingAlias" placeholder="Alias" />
+            @if (devices().length > 0 && filteredDevices().length === 0) {
+              <p style="color:var(--text-muted);font-size:0.85rem;padding:0.5rem 0">No devices match.</p>
+            }
+
+            @if (devices().length === 0) {
+              <p style="color:var(--text-muted);font-size:0.85rem;padding:0.5rem 0">No devices registered. Use Discover to find devices on your network.</p>
+            }
+
+            @if (isAdmin()) {
+              <!-- Manual add with Probe -->
+              <div class="add-form" style="margin-top:0.75rem">
+                <input type="text" [(ngModel)]="newDeviceAlias" placeholder="Alias (e.g. Porch Light)" />
+                <input type="text" [(ngModel)]="newDeviceIp"    placeholder="IP address (e.g. 192.168.1.50)"
+                       (keydown.enter)="probeIp()" />
+                <button class="btn-sm btn-ghost" (click)="probeIp()" [disabled]="!newDeviceIp.trim() || probing()">
+                  {{ probing() ? '…' : 'Probe' }}
+                </button>
+                <button class="btn-sm btn-primary" (click)="addManual()" [disabled]="!newDeviceAlias.trim() || !newDeviceIp.trim()">Add</button>
+              </div>
+              @if (probeMsg()) {
+                <p class="msg" [class.ok]="!probeErr()" [class.err]="probeErr()">{{ probeMsg() }}</p>
+              }
+
+              <!-- Discover buttons -->
+              <div style="display:flex;gap:0.5rem;margin-top:0.5rem;flex-wrap:wrap">
+                <button class="btn-sm btn-ghost" [disabled]="discovering()" (click)="discover()">
+                  {{ discovering() ? 'Scanning…' : '+ Discover on network' }}
+                </button>
+              </div>
+              @if (discoverMsg()) { <p class="msg" [class.ok]="!discoverErr()" [class.err]="discoverErr()">{{ discoverMsg() }}</p> }
+              @for (m of unreachedMeross(); track m.uuid) {
+                <p class="msg err">
+                  {{ m.name }} ({{ m.type }}) is on your Meross account, but HomeHub couldn't reach it.
+                  @if (!m.online) { Meross says it's offline. }
+                  <button type="button" class="link-btn" (click)="otherNetworks()?.open()">Is it on another Wi-Fi network?</button>
+                </p>
+              }
+              <div style="margin-top:0.5rem"><app-other-networks /></div>
+
+              <!-- Registered devices that now answer at a different address -->
+              @if (movedDevices().length > 0) {
+                <div class="discover-list">
+                  @for (d of movedDevices(); track d.ip) {
+                    <div class="discover-row">
+                      <span class="discover-alias">{{ d.moved?.alias }} moved from {{ d.moved?.previousIp }} to {{ d.ip }}</span>
+                      <button class="btn-sm btn-primary" (click)="applyMove(d)">Update address</button>
                     </div>
-                    <span class="discover-ip">{{ d.ip }}</span>
-                    @if (d.model && d.model !== d.ip) { <span class="discover-model">{{ d.model }}</span> }
-                    <span class="driver-badge" [class]="'driver-badge ' + d.driverType">{{ driverLabel(d.driverType) }}</span>
-                    @if (d.needsLogin && d.driverType === 'meross') {
-                      <span class="discover-key-label">Sign in under Integrations → Meross, then Discover again</span>
-                    } @else if (d.needsLogin) {
-                      <div class="discover-key">
-                        <span class="discover-key-label">{{ d.driverType === 'kasa' ? 'TP-Link email' : 'Username' }}</span>
-                        <input type="text" [(ngModel)]="d.pendingUser" autocomplete="off" />
+                  }
+                </div>
+              }
+
+              <!-- Discovery results -->
+              @if (discoveredDevices().length > 0) {
+                <div class="discover-list">
+                  @for (d of discoveredDevices(); track d.ip) {
+                    <div class="discover-row">
+                      <input type="checkbox" [checked]="isSelected(d.ip)" (change)="toggleSelect(d.ip)"
+                             [disabled]="(d.driverType === 'meross' && d.needsLogin) || (d.driverType === 'tuya' && (!d.pendingKey?.trim() || (!d.driverConfig?.['deviceId'] && !d.pendingDeviceId?.trim())))" />
+                      <div class="discover-alias">
+                        <input type="text" [(ngModel)]="d.pendingAlias" placeholder="Alias" />
                       </div>
-                      <div class="discover-key">
-                        <span class="discover-key-label">Password</span>
-                        <input type="password" [(ngModel)]="d.pendingPass" autocomplete="new-password" />
-                      </div>
-                      @if (d.driverType === 'kasa') {
-                        <button class="btn-sm btn-primary" (click)="saveDiscoveredKasaLogin(d)"
-                                [disabled]="!d.pendingUser?.trim() || !d.pendingPass || kasaLoginSaving()">
-                          {{ kasaLoginSaving() ? 'Checking…' : 'Save login' }}
-                        </button>
-                      }
-                    }
-                    @if (d.driverType === 'tuya') {
-                      @if (tuyaCloudDevices.length > 0) {
-                        <div class="discover-key" style="min-width:180px">
-                          <span class="discover-key-label">Match to cloud device</span>
-                          <select (change)="applyCloudDevice(d, $event)">
-                            <option value="">— select —</option>
-                            @for (c of tuyaCloudDevices; track c.deviceId) {
-                              <option [value]="c.deviceId">{{ c.name || c.deviceId }}</option>
-                            }
-                          </select>
+                      <span class="discover-ip">{{ d.ip }}</span>
+                      @if (d.model && d.model !== d.ip) { <span class="discover-model">{{ d.model }}</span> }
+                      <span class="driver-badge" [class]="'driver-badge ' + d.driverType">{{ driverLabel(d.driverType) }}</span>
+                      @if (d.needsLogin && d.driverType === 'meross') {
+                        <span class="discover-key-label">Sign in under Integrations → Meross, then Discover again</span>
+                      } @else if (d.needsLogin) {
+                        <div class="discover-key">
+                          <span class="discover-key-label">{{ d.driverType === 'kasa' ? 'TP-Link email' : 'Username' }}</span>
+                          <input type="text" [(ngModel)]="d.pendingUser" autocomplete="off" />
                         </div>
-                      } @else {
-                        @if (!d.driverConfig?.['deviceId']) {
+                        <div class="discover-key">
+                          <span class="discover-key-label">Password</span>
+                          <input type="password" [(ngModel)]="d.pendingPass" autocomplete="new-password" />
+                        </div>
+                        @if (d.driverType === 'kasa') {
+                          <button class="btn-sm btn-primary" (click)="saveDiscoveredKasaLogin(d)"
+                                  [disabled]="!d.pendingUser?.trim() || !d.pendingPass || kasaLoginSaving()">
+                            {{ kasaLoginSaving() ? 'Checking…' : 'Save login' }}
+                          </button>
+                        }
+                      }
+                      @if (d.driverType === 'tuya') {
+                        @if (tuyaCloudDevices.length > 0) {
+                          <div class="discover-key" style="min-width:180px">
+                            <span class="discover-key-label">Match to cloud device</span>
+                            <select (change)="applyCloudDevice(d, $event)">
+                              <option value="">— select —</option>
+                              @for (c of tuyaCloudDevices; track c.deviceId) {
+                                <option [value]="c.deviceId">{{ c.name || c.deviceId }}</option>
+                              }
+                            </select>
+                          </div>
+                        } @else {
+                          @if (!d.driverConfig?.['deviceId']) {
+                            <div class="discover-key">
+                              <span class="discover-key-label">Device ID (required)</span>
+                              <input type="text" [(ngModel)]="d.pendingDeviceId" placeholder="e.g. bf1234abcd5678ef"
+                                     (ngModelChange)="onTuyaKeyChange(d)" />
+                            </div>
+                          }
                           <div class="discover-key">
-                            <span class="discover-key-label">Device ID (required)</span>
-                            <input type="text" [(ngModel)]="d.pendingDeviceId" placeholder="e.g. bf1234abcd5678ef"
+                            <span class="discover-key-label">Local Key (required)</span>
+                            <input type="text" [(ngModel)]="d.pendingKey" placeholder="e.g. a1b2c3d4e5f6g7h8"
                                    (ngModelChange)="onTuyaKeyChange(d)" />
                           </div>
                         }
-                        <div class="discover-key">
-                          <span class="discover-key-label">Local Key (required)</span>
-                          <input type="text" [(ngModel)]="d.pendingKey" placeholder="e.g. a1b2c3d4e5f6g7h8"
-                                 (ngModelChange)="onTuyaKeyChange(d)" />
-                        </div>
                       }
-                    }
-                  </div>
-                }
-              </div>
-              @if (hasTuyaDevices()) {
-                <p class="key-warning">
-                  ⚠ Tuya devices require a <strong>Device ID</strong> and <strong>Local Key</strong>.
-                  @if (tuyaCloudReady()) {
-                    <button class="btn-sm btn-ghost" style="margin-left:0.5rem" [disabled]="tuyaSyncing()" (click)="syncTuyaCloud()">
-                      {{ tuyaSyncing() ? 'Syncing…' : '⟳ Auto-fill from Tuya Cloud' }}
-                    </button>
-                    @if (tuyaSyncMsg()) { <span [class]="tuyaSyncErr() ? 'msg err' : 'msg ok'" style="margin-left:0.4rem">{{ tuyaSyncMsg() }}</span> }
-                  } @else {
-                    Enter them below, or configure Tuya Cloud credentials in the <strong>Integrations</strong> section to auto-fill.
+                    </div>
                   }
-                </p>
+                </div>
+                @if (hasTuyaDevices()) {
+                  <p class="key-warning">
+                    ⚠ Tuya devices require a <strong>Device ID</strong> and <strong>Local Key</strong>.
+                    @if (tuyaCloudReady()) {
+                      <button class="btn-sm btn-ghost" style="margin-left:0.5rem" [disabled]="tuyaSyncing()" (click)="syncTuyaCloud()">
+                        {{ tuyaSyncing() ? 'Syncing…' : '⟳ Auto-fill from Tuya Cloud' }}
+                      </button>
+                      @if (tuyaSyncMsg()) { <span [class]="tuyaSyncErr() ? 'msg err' : 'msg ok'" style="margin-left:0.4rem">{{ tuyaSyncMsg() }}</span> }
+                    } @else {
+                      Enter them below, or configure Tuya Cloud credentials in the <strong>Integrations</strong> section to auto-fill.
+                    }
+                  </p>
+                }
+                <div class="discover-footer">
+                  <span style="font-size:0.8rem;color:var(--text-muted)">{{ selectedCount() }} of {{ discoveredDevices().length }} selected</span>
+                  <button class="btn-sm btn-primary" [disabled]="selectedCount() === 0 || registering()" (click)="registerSelected()">
+                    {{ registering() ? 'Registering…' : 'Register Selected' }}
+                  </button>
+                </div>
               }
-              <div class="discover-footer">
-                <span style="font-size:0.8rem;color:var(--text-muted)">{{ selectedCount() }} of {{ discoveredDevices().length }} selected</span>
-                <button class="btn-sm btn-primary" [disabled]="selectedCount() === 0 || registering()" (click)="registerSelected()">
-                  {{ registering() ? 'Registering…' : 'Register Selected' }}
-                </button>
-              </div>
             }
-          }
-        </div>
+          </div>
+        }
       </div>
 
       <!-- ── Integrations (admin only) ────────────────────────── -->
       @if (isAdmin()) {
         <div class="section">
-          <div class="section-title">Integrations</div>
-          <div class="card">
-            <div class="pref-row" style="cursor:pointer" (click)="tuyaCloudExpanded.set(!tuyaCloudExpanded())">
-              <div class="pref-label">
-                Tuya Cloud
-                <div class="pref-sub">Connect to iot.tuya.com to auto-fill Device IDs and Local Keys during discovery</div>
+          <button type="button" class="section-title section-toggle" (click)="toggleSection('integrations')" [attr.aria-expanded]="isSectionOpen('integrations')">
+            <span class="chev">{{ isSectionOpen('integrations') ? '▾' : '▸' }}</span> Integrations
+          </button>
+          @if (isSectionOpen('integrations')) {
+            <div class="card">
+              <div class="pref-row" style="cursor:pointer" (click)="tuyaCloudExpanded.set(!tuyaCloudExpanded())">
+                <div class="pref-label">
+                  Tuya Cloud
+                  <div class="pref-sub">Connect to iot.tuya.com to auto-fill Device IDs and Local Keys during discovery</div>
+                </div>
+                @if (tuyaCloudReady()) { <span class="tuya-synced">● Connected</span> }
+                <span style="color:var(--text-muted);font-size:0.85rem">{{ tuyaCloudExpanded() ? '▲' : '▼' }}</span>
               </div>
-              @if (tuyaCloudReady()) { <span class="tuya-synced">● Connected</span> }
-              <span style="color:var(--text-muted);font-size:0.85rem">{{ tuyaCloudExpanded() ? '▲' : '▼' }}</span>
-            </div>
-            @if (tuyaCloudExpanded()) {
-              <div class="tuya-cloud-form">
-                <input type="text"     [(ngModel)]="tuyaAccessId"     placeholder="Access ID (Client ID)" autocomplete="off" />
-                <div class="pass-wrap">
-                  <input [type]="showTuyaSecret ? 'text' : 'password'" [(ngModel)]="tuyaAccessSecret"
-                         placeholder="Access Secret" autocomplete="new-password" />
-                  <button type="button" class="pass-eye" (click)="showTuyaSecret = !showTuyaSecret">
-                    @if (showTuyaSecret) {
-                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
-                        <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
-                        <line x1="1" y1="1" x2="23" y2="23"/>
-                      </svg>
-                    } @else {
-                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-                        <circle cx="12" cy="12" r="3"/>
-                      </svg>
+              @if (tuyaCloudExpanded()) {
+                <div class="tuya-cloud-form">
+                  <input type="text"     [(ngModel)]="tuyaAccessId"     placeholder="Access ID (Client ID)" autocomplete="off" />
+                  <div class="pass-wrap">
+                    <input [type]="showTuyaSecret ? 'text' : 'password'" [(ngModel)]="tuyaAccessSecret"
+                           placeholder="Access Secret" autocomplete="new-password" />
+                    <button type="button" class="pass-eye" (click)="showTuyaSecret = !showTuyaSecret">
+                      @if (showTuyaSecret) {
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                          <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
+                          <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
+                          <line x1="1" y1="1" x2="23" y2="23"/>
+                        </svg>
+                      } @else {
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                          <circle cx="12" cy="12" r="3"/>
+                        </svg>
+                      }
+                    </button>
+                  </div>
+                  <select [(ngModel)]="tuyaRegion">
+                    <option value="us">Americas (openapi.tuyaus.com)</option>
+                    <option value="eu">Europe (openapi.tuyaeu.com)</option>
+                    <option value="cn">China (openapi.tuyacn.com)</option>
+                    <option value="in">India (openapi.tuyain.com)</option>
+                  </select>
+                  <div style="display:flex;align-items:center;gap:0.5rem">
+                    <button class="btn-sm btn-primary" (click)="saveTuyaCredentials()"
+                            [disabled]="!tuyaAccessId.trim() || !tuyaAccessSecret.trim()">Save</button>
+                    @if (tuyaCredsMsg()) {
+                      <span class="msg" [class.ok]="!tuyaCredsErr()" [class.err]="tuyaCredsErr()">{{ tuyaCredsMsg() }}</span>
                     }
-                  </button>
+                  </div>
                 </div>
-                <select [(ngModel)]="tuyaRegion">
-                  <option value="us">Americas (openapi.tuyaus.com)</option>
-                  <option value="eu">Europe (openapi.tuyaeu.com)</option>
-                  <option value="cn">China (openapi.tuyacn.com)</option>
-                  <option value="in">India (openapi.tuyain.com)</option>
-                </select>
-                <div style="display:flex;align-items:center;gap:0.5rem">
-                  <button class="btn-sm btn-primary" (click)="saveTuyaCredentials()"
-                          [disabled]="!tuyaAccessId.trim() || !tuyaAccessSecret.trim()">Save</button>
-                  @if (tuyaCredsMsg()) {
-                    <span class="msg" [class.ok]="!tuyaCredsErr()" [class.err]="tuyaCredsErr()">{{ tuyaCredsMsg() }}</span>
-                  }
-                </div>
-              </div>
-            }
-          </div>
-
-          <!-- ── Meross ────────────────────────────────────────────── -->
-          <div class="card">
-            <app-meross-login (signedInChange)="onMerossSignIn($event)" />
-          </div>
-
-          <!-- ── Email (BYOK SMTP) ────────────────────────────────── -->
-          <div class="card">
-            <div class="pref-row" style="cursor:pointer" (click)="emailExpanded.set(!emailExpanded())">
-              <div class="pref-label">
-                Email alerts (SMTP)
-                <div class="pref-sub">Resend, Gmail App Password, AWS SES — any SMTP server. Used for L2+ alerts.</div>
-              </div>
-              @if (emailReady()) { <span class="tuya-synced">● Configured</span> }
-              <span style="color:var(--text-muted);font-size:0.85rem">{{ emailExpanded() ? '▲' : '▼' }}</span>
+              }
             </div>
-            @if (emailExpanded()) {
-              <div class="tuya-cloud-form">
-                <input type="text" [(ngModel)]="smtpHost" placeholder="Host (e.g. smtp.resend.com)" autocomplete="off" />
-                <div style="display:flex;gap:0.5rem">
-                  <input type="number" [(ngModel)]="smtpPort" placeholder="Port" style="width:6rem" />
-                  <label style="display:flex;align-items:center;gap:0.4rem;font-size:0.85rem;color:var(--text-muted)">
-                    <input type="checkbox" [(ngModel)]="smtpSecure" /> TLS (port 465)
-                  </label>
-                </div>
-                <input type="text" [(ngModel)]="smtpUser" placeholder="Username" autocomplete="off" />
-                <div class="pass-wrap">
-                  <input [type]="showSmtpPass ? 'text' : 'password'" [(ngModel)]="smtpPass"
-                         [placeholder]="hasSmtpPass() ? 'Password (leave blank to keep current)' : 'Password / API key'"
-                         autocomplete="new-password" />
-                  <button type="button" class="pass-eye" (click)="showSmtpPass = !showSmtpPass">
-                    @if (showSmtpPass) {
-                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
-                        <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
-                        <line x1="1" y1="1" x2="23" y2="23"/>
-                      </svg>
-                    } @else {
-                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-                        <circle cx="12" cy="12" r="3"/>
-                      </svg>
-                    }
-                  </button>
-                </div>
-                <input type="text" [(ngModel)]="smtpFrom" placeholder='From — "AuraFlow" <alerts@example.com>' autocomplete="off" />
-                <input type="text" [(ngModel)]="emailRecipients" placeholder="Recipients (comma-separated)" autocomplete="off" />
-                <div style="display:flex;align-items:center;gap:0.5rem">
-                  <button class="btn-sm btn-primary" (click)="saveSmtp()"
-                          [disabled]="!smtpHost.trim() || !emailRecipients.trim()">Save</button>
-                  @if (emailMsg()) {
-                    <span class="msg" [class.ok]="!emailErr()" [class.err]="emailErr()">{{ emailMsg() }}</span>
-                  }
-                </div>
-              </div>
-            }
-          </div>
 
-          <!-- ── SMS (BYOK Twilio) ────────────────────────────────── -->
-          <div class="card">
-            <div class="pref-row" style="cursor:pointer" (click)="smsExpanded.set(!smsExpanded())">
-              <div class="pref-label">
-                SMS alerts (Twilio)
-                <div class="pref-sub">Used for L3 critical alerts. Sender must be a Twilio-verified number in E.164.</div>
-              </div>
-              @if (smsReady()) { <span class="tuya-synced">● Configured</span> }
-              <span style="color:var(--text-muted);font-size:0.85rem">{{ smsExpanded() ? '▲' : '▼' }}</span>
+            <!-- ── Meross ────────────────────────────────────────────── -->
+            <div class="card">
+              <app-meross-login [openRequest]="merossOpenRequest()" (signedInChange)="onMerossSignIn($event)" />
             </div>
-            @if (smsExpanded()) {
-              <div class="tuya-cloud-form">
-                <input type="text" [(ngModel)]="twilioAccountSid" placeholder="Account SID (starts with AC)" autocomplete="off" />
-                <div class="pass-wrap">
-                  <input [type]="showTwilioToken ? 'text' : 'password'" [(ngModel)]="twilioAuthToken"
-                         [placeholder]="hasTwilioToken() ? 'Auth Token (leave blank to keep current)' : 'Auth Token'"
-                         autocomplete="new-password" />
-                  <button type="button" class="pass-eye" (click)="showTwilioToken = !showTwilioToken">
-                    @if (showTwilioToken) {
-                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
-                        <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
-                        <line x1="1" y1="1" x2="23" y2="23"/>
-                      </svg>
-                    } @else {
-                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-                        <circle cx="12" cy="12" r="3"/>
-                      </svg>
-                    }
-                  </button>
+
+            <!-- ── Email (BYOK SMTP) ────────────────────────────────── -->
+            <div class="card">
+              <div class="pref-row" style="cursor:pointer" (click)="emailExpanded.set(!emailExpanded())">
+                <div class="pref-label">
+                  Email alerts (SMTP)
+                  <div class="pref-sub">Resend, Gmail App Password, AWS SES — any SMTP server. Used for L2+ alerts.</div>
                 </div>
-                <input type="text" [(ngModel)]="twilioFrom" placeholder="From number (e.g. +15555551234)" autocomplete="off" />
-                <input type="text" [(ngModel)]="smsRecipients" placeholder="Recipient numbers (E.164, comma-separated)" autocomplete="off" />
-                <div style="display:flex;align-items:center;gap:0.5rem">
-                  <button class="btn-sm btn-primary" (click)="saveTwilio()"
-                          [disabled]="!twilioAccountSid.trim() || !twilioFrom.trim() || !smsRecipients.trim()">Save</button>
-                  @if (smsMsg()) {
-                    <span class="msg" [class.ok]="!smsErr()" [class.err]="smsErr()">{{ smsMsg() }}</span>
-                  }
-                </div>
+                @if (emailReady()) { <span class="tuya-synced">● Configured</span> }
+                <span style="color:var(--text-muted);font-size:0.85rem">{{ emailExpanded() ? '▲' : '▼' }}</span>
               </div>
-            }
-          </div>
+              @if (emailExpanded()) {
+                <div class="tuya-cloud-form">
+                  <input type="text" [(ngModel)]="smtpHost" placeholder="Host (e.g. smtp.resend.com)" autocomplete="off" />
+                  <div style="display:flex;gap:0.5rem">
+                    <input type="number" [(ngModel)]="smtpPort" placeholder="Port" style="width:6rem" />
+                    <label style="display:flex;align-items:center;gap:0.4rem;font-size:0.85rem;color:var(--text-muted)">
+                      <input type="checkbox" [(ngModel)]="smtpSecure" /> TLS (port 465)
+                    </label>
+                  </div>
+                  <input type="text" [(ngModel)]="smtpUser" placeholder="Username" autocomplete="off" />
+                  <div class="pass-wrap">
+                    <input [type]="showSmtpPass ? 'text' : 'password'" [(ngModel)]="smtpPass"
+                           [placeholder]="hasSmtpPass() ? 'Password (leave blank to keep current)' : 'Password / API key'"
+                           autocomplete="new-password" />
+                    <button type="button" class="pass-eye" (click)="showSmtpPass = !showSmtpPass">
+                      @if (showSmtpPass) {
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                          <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
+                          <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
+                          <line x1="1" y1="1" x2="23" y2="23"/>
+                        </svg>
+                      } @else {
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                          <circle cx="12" cy="12" r="3"/>
+                        </svg>
+                      }
+                    </button>
+                  </div>
+                  <input type="text" [(ngModel)]="smtpFrom" placeholder='From — "AuraFlow" <alerts@example.com>' autocomplete="off" />
+                  <input type="text" [(ngModel)]="emailRecipients" placeholder="Recipients (comma-separated)" autocomplete="off" />
+                  <div style="display:flex;align-items:center;gap:0.5rem">
+                    <button class="btn-sm btn-primary" (click)="saveSmtp()"
+                            [disabled]="!smtpHost.trim() || !emailRecipients.trim()">Save</button>
+                    @if (emailMsg()) {
+                      <span class="msg" [class.ok]="!emailErr()" [class.err]="emailErr()">{{ emailMsg() }}</span>
+                    }
+                  </div>
+                </div>
+              }
+            </div>
+
+            <!-- ── SMS (BYOK Twilio) ────────────────────────────────── -->
+            <div class="card">
+              <div class="pref-row" style="cursor:pointer" (click)="smsExpanded.set(!smsExpanded())">
+                <div class="pref-label">
+                  SMS alerts (Twilio)
+                  <div class="pref-sub">Used for L3 critical alerts. Sender must be a Twilio-verified number in E.164.</div>
+                </div>
+                @if (smsReady()) { <span class="tuya-synced">● Configured</span> }
+                <span style="color:var(--text-muted);font-size:0.85rem">{{ smsExpanded() ? '▲' : '▼' }}</span>
+              </div>
+              @if (smsExpanded()) {
+                <div class="tuya-cloud-form">
+                  <input type="text" [(ngModel)]="twilioAccountSid" placeholder="Account SID (starts with AC)" autocomplete="off" />
+                  <div class="pass-wrap">
+                    <input [type]="showTwilioToken ? 'text' : 'password'" [(ngModel)]="twilioAuthToken"
+                           [placeholder]="hasTwilioToken() ? 'Auth Token (leave blank to keep current)' : 'Auth Token'"
+                           autocomplete="new-password" />
+                    <button type="button" class="pass-eye" (click)="showTwilioToken = !showTwilioToken">
+                      @if (showTwilioToken) {
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                          <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
+                          <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
+                          <line x1="1" y1="1" x2="23" y2="23"/>
+                        </svg>
+                      } @else {
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                          <circle cx="12" cy="12" r="3"/>
+                        </svg>
+                      }
+                    </button>
+                  </div>
+                  <input type="text" [(ngModel)]="twilioFrom" placeholder="From number (e.g. +15555551234)" autocomplete="off" />
+                  <input type="text" [(ngModel)]="smsRecipients" placeholder="Recipient numbers (E.164, comma-separated)" autocomplete="off" />
+                  <div style="display:flex;align-items:center;gap:0.5rem">
+                    <button class="btn-sm btn-primary" (click)="saveTwilio()"
+                            [disabled]="!twilioAccountSid.trim() || !twilioFrom.trim() || !smsRecipients.trim()">Save</button>
+                    @if (smsMsg()) {
+                      <span class="msg" [class.ok]="!smsErr()" [class.err]="smsErr()">{{ smsMsg() }}</span>
+                    }
+                  </div>
+                </div>
+              }
+            </div>
+          }
         </div>
       }
 
       <!-- ── Users (admin only) ────────────────────────────────── -->
       @if (isAdmin()) {
         <div class="section">
-          <div class="section-title">Users</div>
-          <div class="card">
-            @for (u of users(); track u.id) {
-              <div class="row-item">
-                @if (editingUserId() === u.id) {
-                  <div style="flex:1;width:100%">
-                    <div class="edit-row single">
-                      <input type="password" [(ngModel)]="editPassword" placeholder="New password" autocomplete="new-password" />
+          <button type="button" class="section-title section-toggle" (click)="toggleSection('users')" [attr.aria-expanded]="isSectionOpen('users')">
+            <span class="chev">{{ isSectionOpen('users') ? '▾' : '▸' }}</span> Users
+          </button>
+          @if (isSectionOpen('users')) {
+            <div class="card">
+              @for (u of users(); track u.id) {
+                <div class="row-item">
+                  @if (editingUserId() === u.id) {
+                    <div style="flex:1;width:100%">
+                      <div class="edit-row single">
+                        <input type="password" [(ngModel)]="editPassword" placeholder="New password" autocomplete="new-password" />
+                      </div>
+                      <div style="display:flex;gap:0.5rem;margin-top:0.4rem">
+                        <button class="btn-sm btn-primary" (click)="savePassword(u.id)">Save</button>
+                        <button class="btn-sm btn-ghost" (click)="cancelUserEdit()">Cancel</button>
+                        @if (userMsg()) { <span class="msg" [class.ok]="!userErr()" [class.err]="userErr()">{{ userMsg() }}</span> }
+                      </div>
                     </div>
-                    <div style="display:flex;gap:0.5rem;margin-top:0.4rem">
-                      <button class="btn-sm btn-primary" (click)="savePassword(u.id)">Save</button>
-                      <button class="btn-sm btn-ghost" (click)="cancelUserEdit()">Cancel</button>
-                      @if (userMsg()) { <span class="msg" [class.ok]="!userErr()" [class.err]="userErr()">{{ userMsg() }}</span> }
-                    </div>
-                  </div>
-                } @else {
-                  <span class="row-label">{{ u.name }}</span>
-                  <span class="role-badge" [class.admin]="u.role === 'admin'">{{ u.role }}</span>
-                  <button class="btn-sm btn-ghost" (click)="startUserEdit(u.id)">Change password</button>
-                  @if (u.name !== currentUser()) {
-                    <button class="btn-sm btn-danger" (click)="deleteUser(u.id, u.name)">✕</button>
+                  } @else {
+                    <span class="row-label">{{ u.name }}</span>
+                    <span class="role-badge" [class.admin]="u.role === 'admin'">{{ u.role }}</span>
+                    <button class="btn-sm btn-ghost" (click)="startUserEdit(u.id)">Change password</button>
+                    @if (u.name !== currentUser()) {
+                      <button class="btn-sm btn-danger" (click)="deleteUser(u.id, u.name)">✕</button>
+                    }
                   }
-                }
-              </div>
-            }
+                </div>
+              }
 
-            <div class="add-form" style="margin-top:0.75rem">
-              <input type="text"     [(ngModel)]="newUsername" placeholder="Username" autocomplete="off" />
-              <input type="password" [(ngModel)]="newPassword" placeholder="Password" autocomplete="new-password" />
-              <button class="btn-sm btn-primary" style="grid-column:span 2" (click)="addUser()" [disabled]="!newUsername.trim() || !newPassword.trim()">Add user</button>
+              <div class="add-form" style="margin-top:0.75rem">
+                <input type="text"     [(ngModel)]="newUsername" placeholder="Username" autocomplete="off" />
+                <input type="password" [(ngModel)]="newPassword" placeholder="Password" autocomplete="new-password" />
+                <button class="btn-sm btn-primary" style="grid-column:span 2" (click)="addUser()" [disabled]="!newUsername.trim() || !newPassword.trim()">Add user</button>
+              </div>
+              @if (addUserMsg()) { <p class="msg" [class.ok]="!addUserErr()" [class.err]="addUserErr()">{{ addUserMsg() }}</p> }
             </div>
-            @if (addUserMsg()) { <p class="msg" [class.ok]="!addUserErr()" [class.err]="addUserErr()">{{ addUserMsg() }}</p> }
-          </div>
+          }
         </div>
       }
 
       <!-- ── Notifications ─────────────────────────────────────── -->
       @if (pushSupported) {
         <div class="section">
-          <div class="section-title">Notifications</div>
-          <div class="card">
-            <div class="pref-row">
-              <div class="pref-label">
-                Push notifications
-                <div class="pref-sub">Get notified when a device goes offline</div>
+          <button type="button" class="section-title section-toggle" (click)="toggleSection('notifications')" [attr.aria-expanded]="isSectionOpen('notifications')">
+            <span class="chev">{{ isSectionOpen('notifications') ? '▾' : '▸' }}</span> Notifications
+          </button>
+          @if (isSectionOpen('notifications')) {
+            <div class="card">
+              <div class="pref-row">
+                <div class="pref-label">
+                  Push notifications
+                  <div class="pref-sub">Get notified when a device goes offline</div>
+                </div>
+                <button class="btn-sm" [class.btn-primary]="!pushEnabled()" [class.btn-ghost]="pushEnabled()" (click)="togglePush()">
+                  {{ pushEnabled() ? 'Disable' : 'Enable' }}
+                </button>
               </div>
-              <button class="btn-sm" [class.btn-primary]="!pushEnabled()" [class.btn-ghost]="pushEnabled()" (click)="togglePush()">
-                {{ pushEnabled() ? 'Disable' : 'Enable' }}
-              </button>
+              @if (pushMsg()) { <p class="msg" [class.ok]="!pushErr()" [class.err]="pushErr()">{{ pushMsg() }}</p> }
             </div>
-            @if (pushMsg()) { <p class="msg" [class.ok]="!pushErr()" [class.err]="pushErr()">{{ pushMsg() }}</p> }
-          </div>
+          }
         </div>
       }
 
       <!-- ── Preferences ───────────────────────────────────────── -->
       <div class="section">
-        <div class="section-title">Chat commands</div>
-        <div class="card">
-          @if (chatStats(); as stats) {
-            <p style="margin:0">
-              <strong>{{ stats.rules }}</strong> of {{ stats.total }} answered instantly by rules ·
-              <strong>{{ stats.model }}</strong> sent to the AI model
-            </p>
-            @if (stats.recentModel.length) {
-              <p style="font-size:0.75rem;color:var(--text-muted);margin:0.75rem 0 0.25rem">Latest messages sent to the AI model:</p>
-              @for (item of stats.recentModel.slice(0, 10); track $index) {
-                <div style="font-size:0.85rem;padding:0.15rem 0;overflow-wrap:anywhere">{{ item.text }}</div>
+        <button type="button" class="section-title section-toggle" (click)="toggleSection('chat-commands')" [attr.aria-expanded]="isSectionOpen('chat-commands')">
+          <span class="chev">{{ isSectionOpen('chat-commands') ? '▾' : '▸' }}</span> Chat commands
+        </button>
+        @if (isSectionOpen('chat-commands')) {
+          <div class="card">
+            @if (chatStats(); as stats) {
+              <p style="margin:0">
+                <strong>{{ stats.rules }}</strong> of {{ stats.total }} answered instantly by rules ·
+                <strong>{{ stats.model }}</strong> sent to the AI model
+              </p>
+              @if (stats.recentModel.length) {
+                <p style="font-size:0.75rem;color:var(--text-muted);margin:0.75rem 0 0.25rem">Latest messages sent to the AI model:</p>
+                @for (item of stats.recentModel.slice(0, 10); track $index) {
+                  <div style="font-size:0.85rem;padding:0.15rem 0;overflow-wrap:anywhere">{{ item.text }}</div>
+                }
               }
+            } @else {
+              <p style="margin:0;color:var(--text-muted)">No stats available.</p>
             }
-          } @else {
-            <p style="margin:0;color:var(--text-muted)">No stats available.</p>
-          }
-        </div>
+          </div>
+        }
       </div>
 
       @if (chatStats()?.voice; as voice) {
         @if (voice.total > 0) {
           <div class="section">
-            <div class="section-title">Voice commands</div>
-            <div class="card">
-              <p style="margin:0">
-                <strong>{{ voice.understood }}</strong> of {{ voice.total }} understood ·
-                <strong>{{ voice.missed }}</strong> missed
-              </p>
-              @if (voice.recentMissed.length) {
-                <p style="font-size:0.75rem;color:var(--text-muted);margin:0.75rem 0 0.25rem">Latest misses, as speech recognition heard them:</p>
-                @for (item of voice.recentMissed.slice(0, 10); track $index) {
-                  <div style="font-size:0.85rem;padding:0.15rem 0;overflow-wrap:anywhere">{{ item.text }}</div>
+            <button type="button" class="section-title section-toggle" (click)="toggleSection('voice-commands')" [attr.aria-expanded]="isSectionOpen('voice-commands')">
+              <span class="chev">{{ isSectionOpen('voice-commands') ? '▾' : '▸' }}</span> Voice commands
+            </button>
+            @if (isSectionOpen('voice-commands')) {
+              <div class="card">
+                <p style="margin:0">
+                  <strong>{{ voice.understood }}</strong> of {{ voice.total }} understood ·
+                  <strong>{{ voice.missed }}</strong> missed
+                </p>
+                @if (voice.recentMissed.length) {
+                  <p style="font-size:0.75rem;color:var(--text-muted);margin:0.75rem 0 0.25rem">Latest misses, as speech recognition heard them:</p>
+                  @for (item of voice.recentMissed.slice(0, 10); track $index) {
+                    <div style="font-size:0.85rem;padding:0.15rem 0;overflow-wrap:anywhere">{{ item.text }}</div>
+                  }
                 }
-              }
-            </div>
+              </div>
+            }
           </div>
         }
       }
@@ -724,39 +764,47 @@ const DRIVER_LABEL: Record<string, string> = {
       <!-- ── Backups (admin only) ──────────────────────────────── -->
       @if (isAdmin()) {
         <div class="section">
-          <div class="section-title">Backups</div>
-          <div class="card">
-            <app-backups (restored)="reloadAfterRestore()" />
-          </div>
+          <button type="button" class="section-title section-toggle" (click)="toggleSection('backups')" [attr.aria-expanded]="isSectionOpen('backups')">
+            <span class="chev">{{ isSectionOpen('backups') ? '▾' : '▸' }}</span> Backups
+          </button>
+          @if (isSectionOpen('backups')) {
+            <div class="card">
+              <app-backups (restored)="reloadAfterRestore()" />
+            </div>
+          }
         </div>
       }
 
       <div class="section">
-        <div class="section-title">Preferences</div>
-        <div class="card">
-          <div class="pref-row">
-            <div class="pref-label">
-              Energy rate
-              <div class="pref-sub">Used for monthly cost estimates on the Energy page</div>
+        <button type="button" class="section-title section-toggle" (click)="toggleSection('preferences')" [attr.aria-expanded]="isSectionOpen('preferences')">
+          <span class="chev">{{ isSectionOpen('preferences') ? '▾' : '▸' }}</span> Preferences
+        </button>
+        @if (isSectionOpen('preferences')) {
+          <div class="card">
+            <div class="pref-row">
+              <div class="pref-label">
+                Energy rate
+                <div class="pref-sub">Used for monthly cost estimates on the Energy page</div>
+              </div>
+              <input
+                class="pref-input"
+                type="number"
+                step="0.01"
+                min="0"
+                [(ngModel)]="kwhRateDraft"
+                (change)="saveKwhRate()"
+                placeholder="0.15" />
+              <span style="font-size:0.85rem;color:var(--text-muted)">$/kWh</span>
             </div>
-            <input
-              class="pref-input"
-              type="number"
-              step="0.01"
-              min="0"
-              [(ngModel)]="kwhRateDraft"
-              (change)="saveKwhRate()"
-              placeholder="0.15" />
-            <span style="font-size:0.85rem;color:var(--text-muted)">$/kWh</span>
-          </div>
 
-          <div class="pref-row">
-            <div class="pref-label">
-              Location
-              <div class="pref-sub">Latitude / Longitude — used for solar scheduling. Edit <code>LATITUDE</code> and <code>LONGITUDE</code> in <code>.env</code> to update.</div>
+            <div class="pref-row">
+              <div class="pref-label">
+                Location
+                <div class="pref-sub">Latitude / Longitude — used for solar scheduling. Edit <code>LATITUDE</code> and <code>LONGITUDE</code> in <code>.env</code> to update.</div>
+              </div>
             </div>
           </div>
-        </div>
+        }
       </div>
 
     </div>
@@ -769,6 +817,53 @@ export class SettingsComponent implements OnInit, OnDestroy {
   readonly devices = this._devices.asReadonly();
   readonly users   = this._users.asReadonly();
   readonly isAdmin = computed(() => this.auth.user()?.role === 'admin');
+
+  // ── Collapsible sections ───────────────────────────────────
+  // Devices starts open and the rest closed; choices are remembered on this browser.
+  private static readonly SECTIONS_KEY = 'homehub.settings.sections';
+  private readonly openSections = signal<Record<string, boolean>>(SettingsComponent.loadSections());
+
+  private static loadSections(): Record<string, boolean> {
+    try {
+      return JSON.parse(localStorage.getItem(SettingsComponent.SECTIONS_KEY) ?? '{}') ?? {};
+    } catch {
+      return {};
+    }
+  }
+
+  // Room groups in Devices: closed until opened, except Unassigned, which lists devices still to set up.
+  // Always open while searching or filtering. Choices are remembered on this browser.
+  private static readonly GROUPS_KEY = 'homehub.settings.rooms';
+  private readonly groupState = signal<Record<string, boolean>>(SettingsComponent.loadGroupState());
+
+  private static loadGroupState(): Record<string, boolean> {
+    try {
+      const state = JSON.parse(localStorage.getItem(SettingsComponent.GROUPS_KEY) ?? '{}');
+      return state && typeof state === 'object' && !Array.isArray(state) ? state : {};
+    } catch {
+      return {};
+    }
+  }
+
+  isGroupOpen(name: string): boolean {
+    if (this.deviceSearch().trim() || this.deviceFilter() !== 'all') return true;
+    return this.groupState()[name] ?? name === 'Unassigned';
+  }
+
+  toggleGroup(name: string): void {
+    if (this.deviceSearch().trim() || this.deviceFilter() !== 'all') return;   // results always show
+    this.groupState.update((state) => ({ ...state, [name]: !this.isGroupOpen(name) }));
+    try { localStorage.setItem(SettingsComponent.GROUPS_KEY, JSON.stringify(this.groupState())); } catch { /* private window */ }
+  }
+
+  isSectionOpen(key: string): boolean {
+    return this.openSections()[key] ?? key === 'devices';
+  }
+
+  toggleSection(key: string, open = !this.isSectionOpen(key)): void {
+    this.openSections.update((s) => ({ ...s, [key]: open }));
+    try { localStorage.setItem(SettingsComponent.SECTIONS_KEY, JSON.stringify(this.openSections())); } catch { /* private window */ }
+  }
   readonly currentUser = computed(() => this.auth.user()?.name ?? '');
 
   chatStats = signal<ChatStats | null>(null);
@@ -1080,7 +1175,7 @@ export class SettingsComponent implements OnInit, OnDestroy {
     // Pre-fill credentials if already stored
     const auth = (d.driverConfig as any)?.auth;
     this.editAuthUser = auth?.user ?? '';
-    this.editAuthPass = auth?.pass ?? '';
+    this.editAuthPass = '';   // never sent to the browser; blank keeps the saved one
     this.showAuthPass = false;
     this.editKasaUser = this.kasaUsername;
     this.editKasaPass = '';
@@ -1089,6 +1184,10 @@ export class SettingsComponent implements OnInit, OnDestroy {
     this.editTuyaKey      = '';
     this.editTuyaVersion  = (d.driverConfig as any)?.version ?? '3.3';
     this.deviceMsg.set('');
+  }
+
+  hasSavedPassword(d: Device): boolean {
+    return d.savedSecrets?.includes('auth.pass') ?? false;
   }
 
   cancelDeviceEdit(): void {
@@ -1154,10 +1253,17 @@ export class SettingsComponent implements OnInit, OnDestroy {
     // For Shelly/Tuya, merge auth into driverConfig
     if (driverType === 'shelly' || driverType === 'tuya') {
       const baseConfig = { ...(device?.driverConfig ?? {}) } as Record<string, unknown>;
-      if (this.editAuthUser.trim() && this.editAuthPass.trim()) {
-        baseConfig['auth'] = { user: this.editAuthUser.trim(), pass: this.editAuthPass.trim() };
-      } else {
+      // HomeHub keeps the saved password when none is sent. Clearing the username removes the login.
+      const user = this.editAuthUser.trim();
+      const pass = this.editAuthPass.trim();
+      if (!user) {
         delete baseConfig['auth'];
+      } else if (pass || (device && this.hasSavedPassword(device))) {
+        baseConfig['auth'] = pass ? { user, pass } : { user };
+      } else {
+        this.deviceMsg.set('Enter the password too');
+        this.deviceErr.set(true);
+        return;
       }
       // Blank deviceId/key preserve existing — clearing them bricks LAN control.
       if (driverType === 'tuya') {
@@ -1190,7 +1296,7 @@ export class SettingsComponent implements OnInit, OnDestroy {
 
   // ── Probe ──────────────────────────────────────────────────
 
-  private readonly merossLogin = viewChild(MerossLoginComponent);
+  readonly merossOpenRequest = signal(0);
   readonly otherNetworks = viewChild(OtherNetworksComponent);
   readonly unreachedMeross = signal<MerossAccountDevice[]>([]);
 
@@ -1218,7 +1324,8 @@ export class SettingsComponent implements OnInit, OnDestroy {
         if (result.needsLogin && result.driverType === 'meross') {
           this.probeMsg.set('Found a Meross device. Sign in to Meross under Integrations, then select Probe again.');
           this.probeErr.set(true);
-          this.merossLogin()?.open();
+          this.toggleSection('integrations', true);
+          this.merossOpenRequest.update((n) => n + 1);
           return;
         }
         this.probeMsg.set(`Detected: ${result.model ?? result.driverType} (${this.driverLabel(result.driverType)})`);

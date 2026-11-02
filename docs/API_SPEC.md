@@ -59,6 +59,10 @@ Clears refresh token cookie.
 
 ## Devices
 
+Any signed-in user can list devices, switch them, and set or cancel timers. Adding, editing, deleting, probing and discovering devices is `admin` only.
+
+Passwords and keys in `driverConfig`, such as a Shelly's `auth.pass` or a Tuya `key`, are never returned. `savedSecrets` lists which are saved, for example `["auth.pass"]`. A `PATCH` whose `driverConfig` leaves a saved secret out, or blank, keeps it. Removing the object that holds it, such as `auth`, removes it.
+
 ### `GET /api/devices`
 Returns all configured devices with current state.
 
