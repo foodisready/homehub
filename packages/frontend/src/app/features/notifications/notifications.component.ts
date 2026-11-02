@@ -62,7 +62,6 @@ import { NotificationHistoryService, type DispatchRow, type HistoryQuery } from 
     <div class="page">
       <div class="topbar">
         <div style="display:flex;align-items:center;gap:1rem">
-          <a class="back-link" routerLink="/dashboard">← Dashboard</a>
           <h1>Notifications</h1>
         </div>
         <button class="btn" (click)="refresh()">Refresh</button>

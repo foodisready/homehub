@@ -64,7 +64,6 @@ import { MotionRulesComponent } from './motion-rules.component';
     <div class="page">
       <div class="topbar">
         <div style="display:flex;align-items:center;gap:1rem">
-          <a class="back-link" routerLink="/dashboard">← Dashboard</a>
           <h1>Sensors</h1>
         </div>
         <button class="btn primary" (click)="createOpen.set(!createOpen())">

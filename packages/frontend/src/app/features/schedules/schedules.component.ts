@@ -1,7 +1,6 @@
 import { Component, OnInit, signal, computed } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
-import { RouterLink } from '@angular/router';
 import { AuthService } from '../../core/auth/auth.service';
 import { Device } from '../../shared/models/device.model';
 import { SOLAR_EVENTS, describeTiming, timingOrder } from './schedule-text';
@@ -42,13 +41,12 @@ const CRON_PRESETS = [
   { label: 'Every day at 6 AM',      value: '0 6 * * *' },
   { label: 'Every day at 9 PM',      value: '0 21 * * *' },
   { label: 'Every weekday at 8 AM',  value: '0 8 * * 1-5' },
-  { label: 'Custom…',                value: '' },
-];
+  { label: 'Custom…',                value: '' }];
 
 @Component({
   selector: 'app-schedules',
   standalone: true,
-  imports: [FormsModule, RouterLink],
+  imports: [FormsModule],
   styles: [`
     .topbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.75rem; margin-bottom: 1.5rem; }
     .topbar h1 { font-size: 1.4rem; font-weight: 700; }
@@ -235,7 +233,6 @@ const CRON_PRESETS = [
 
       <div class="topbar">
         <div style="display:flex; align-items:center; gap:1rem">
-          <a class="back-link" routerLink="/dashboard">← Dashboard</a>
           <h1>Schedules</h1>
         </div>
         @if (auth.user()?.role === 'admin') {

@@ -1,5 +1,4 @@
 import { Component, OnInit, signal, inject, computed } from '@angular/core';
-import { RouterLink } from '@angular/router';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { FirmwareService } from '../../core/services/firmware.service';
@@ -15,7 +14,7 @@ import type { FirmwareRelease } from '../../shared/models/sensor.model';
 @Component({
   selector: 'app-firmware',
   standalone: true,
-  imports: [RouterLink, DatePipe, DecimalPipe, FormsModule],
+  imports: [DatePipe, DecimalPipe, FormsModule],
   styles: [`
     .topbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.5rem; }
     .topbar h1 { font-size: 1.4rem; font-weight: 700; }
@@ -56,7 +55,6 @@ import type { FirmwareRelease } from '../../shared/models/sensor.model';
     <div class="page">
       <div class="topbar">
         <div style="display:flex;align-items:center;gap:1rem">
-          <a class="back-link" routerLink="/dashboard">← Dashboard</a>
           <h1>Firmware library</h1>
         </div>
         <span></span>

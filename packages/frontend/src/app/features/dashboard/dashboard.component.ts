@@ -1,13 +1,12 @@
 import { Component, OnInit, OnDestroy, signal, computed } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Router, RouterLink } from '@angular/router';
+import { Router } from '@angular/router';
 import { DecimalPipe } from '@angular/common';
 import { AuthService } from '../../core/auth/auth.service';
 import { SocketService, DeviceStateEvent, DeviceOnlineEvent, DeviceOverrideEvent } from '../../core/socket/socket.service';
 import { DeviceRowComponent, OverrideRequest } from './device-row/device-row.component';
 import { DeviceFilterComponent, matchesDevice, type DeviceFilter } from '../../shared/device-filter/device-filter.component';
 import { SystemStatusComponent } from './system-status.component';
-import { PhoneQrComponent } from './phone-qr.component';
 import { Device } from '../../shared/models/device.model';
 
 const COLLAPSED_KEY = 'homehub.dashboard.collapsed';
@@ -34,7 +33,7 @@ function loadCollapsed(): Set<string> {
 @Component({
   selector: 'app-dashboard',
   standalone: true,
-  imports: [DeviceRowComponent, DeviceFilterComponent, SystemStatusComponent, PhoneQrComponent, DecimalPipe, RouterLink],
+  imports: [DeviceRowComponent, DeviceFilterComponent, SystemStatusComponent, DecimalPipe],
   styles: [`
     .topbar {
       display: flex;
@@ -45,16 +44,8 @@ function loadCollapsed(): Set<string> {
       margin-bottom: 1.5rem;
     }
     .topbar h1 { font-size: 1.4rem; font-weight: 700; }
+    @media (min-width: 900px) { .topbar { display: none; } }
     .topbar-right { display: flex; align-items: center; flex-wrap: wrap; gap: 0.6rem 1rem; }
-    .user-info { font-size: 0.85rem; color: var(--text-muted); }
-    .btn-logout {
-      background: transparent;
-      border: 1px solid var(--border);
-      color: var(--text-muted);
-      padding: 0.35rem 0.85rem;
-      font-size: 0.8rem;
-    }
-    .btn-logout:hover { background: var(--surface); color: var(--text); }
 
     app-device-filter { margin-bottom: 1rem; }
     .total { color: var(--text-muted); font-size: 0.8rem; margin-bottom: 0.75rem; }
@@ -99,29 +90,10 @@ function loadCollapsed(): Set<string> {
   template: `
     <div class="page">
 
-      <!-- Top bar -->
+      <!-- On wider screens the app's top bar shows the name instead -->
       <div class="topbar">
         <h1>HomeHub</h1>
-        <div class="topbar-right">
-          <a routerLink="/schedules" style="font-size:0.85rem; color:var(--text-muted)">Schedules</a>
-          <a routerLink="/scenes" style="font-size:0.85rem; color:var(--text-muted)">Scenes</a>
-          <a routerLink="/sensors" style="font-size:0.85rem; color:var(--text-muted)">Sensors</a>
-          <a routerLink="/firmware" style="font-size:0.85rem; color:var(--text-muted)">Firmware</a>
-          <a routerLink="/notifications" style="font-size:0.85rem; color:var(--text-muted)">Alerts</a>
-          <a routerLink="/energy" style="font-size:0.85rem; color:var(--text-muted)">Energy</a>
-          <a routerLink="/chat" style="font-size:0.85rem; color:var(--text-muted)">Chat</a>
-          <a routerLink="/settings" style="font-size:0.85rem; color:var(--text-muted)">Settings</a>
-          @if (auth.user(); as u) {
-            <span class="user-info">{{ u.name }}</span>
-          }
-          <button class="btn-logout" (click)="showQr.set(true)">QR code</button>
-          <button class="btn-logout" (click)="logout()">Sign out</button>
-        </div>
       </div>
-
-      @if (showQr()) {
-        <app-phone-qr (closed)="showQr.set(false)" />
-      }
 
       <!-- HomeHub self-update card (shows when an upstream release is available) -->
       <app-system-status />
@@ -174,7 +146,6 @@ function loadCollapsed(): Set<string> {
   `,
 })
 export class DashboardComponent implements OnInit, OnDestroy {
-  readonly showQr = signal(false);
 
   private readonly _devices  = signal<Device[]>([]);
   private readonly _busyIds  = signal<Set<number>>(new Set());
@@ -347,9 +318,4 @@ export class DashboardComponent implements OnInit, OnDestroy {
     });
   }
 
-  logout(): void {
-    this.auth.logout();
-    this.socket.disconnect();
-    this.router.navigate(['/login']);
-  }
 }

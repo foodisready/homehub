@@ -1,6 +1,5 @@
 import { Component, signal, computed, ViewChild, ElementRef, AfterViewChecked, NgZone } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { RouterLink } from '@angular/router';
 import { AuthService } from '../../core/auth/auth.service';
 
 interface ActionTaken {
@@ -30,7 +29,7 @@ const TOOL_LABELS: Record<string, string> = {
 @Component({
   selector: 'app-chat',
   standalone: true,
-  imports: [FormsModule, RouterLink],
+  imports: [FormsModule],
   // HttpClient not needed — uses native fetch() for SSE streaming
   styles: [`
     .topbar {
@@ -177,7 +176,6 @@ const TOOL_LABELS: Record<string, string> = {
 
       <div class="topbar">
         <div style="display:flex; align-items:center; gap:1rem">
-          <a class="back-link" routerLink="/dashboard">← Dashboard</a>
           <h1>Chat</h1>
         </div>
       </div>
@@ -274,8 +272,7 @@ export class ChatComponent implements AfterViewChecked {
     'Turn off all devices',
     'When is sunset today?',
     'Show me all schedules',
-    'Turn on the living room lamp',
-  ];
+    'Turn on the living room lamp'];
 
   constructor(readonly auth: AuthService, private zone: NgZone) {}
 

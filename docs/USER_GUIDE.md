@@ -90,6 +90,9 @@ Garage doors are always protected. The dashboard shows **Open** or **Closed** an
 
 ## Control your devices
 
+On a phone, the tabs at the bottom take you to Home, Scenes, Chat and Schedules. **More** has everything else, plus **Sign out**. On a computer, the same pages are along the top, and your name at the top right has **Sign out**.
+
+
 - **Dashboard:** tap a device's switch. Tap its name or timer icon for timers and details.
 - **Settings → Devices:** tap **On** or **Off** to test a light.
 - **Chat:** type a command, such as "turn on the porch light".
@@ -178,7 +181,7 @@ Settings sections fold away. Select a section's name to open or close it. Device
 
 To reach HomeHub away from home, set up [Remote Access](./REMOTE_ACCESS.md). Don't forward ports on your router.
 
-The **QR code** button on the dashboard gives you a quick way to open HomeHub on your phone.
+**QR code** gives you a quick way to open HomeHub on your phone. On a computer, it's at the top right. On a phone, it's under **More**.
 
 ## Voice control
 

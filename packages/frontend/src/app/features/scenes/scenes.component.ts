@@ -1,7 +1,6 @@
 import { Component, OnInit, signal, computed } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
-import { RouterLink } from '@angular/router';
 import { AuthService } from '../../core/auth/auth.service';
 import { Device } from '../../shared/models/device.model';
 
@@ -13,7 +12,7 @@ const SCENE_ICONS = ['💡','🌙','🌅','🎬','🏠','🎉','😴','🔒','�
 @Component({
   selector: 'app-scenes',
   standalone: true,
-  imports: [FormsModule, RouterLink],
+  imports: [FormsModule],
   styles: [`
     .topbar { display:flex; align-items:center; justify-content:space-between; margin-bottom:1.5rem; }
     .topbar h1 { font-size:1.4rem; font-weight:700; }
@@ -81,7 +80,6 @@ const SCENE_ICONS = ['💡','🌙','🌅','🎬','🏠','🎉','😴','🔒','�
     <div class="page">
       <div class="topbar">
         <div style="display:flex;align-items:center;gap:1rem">
-          <a class="back-link" routerLink="/dashboard">← Dashboard</a>
           <h1>Scenes</h1>
         </div>
         @if (auth.user()?.role === 'admin') {

@@ -380,7 +380,7 @@ The dev server doesn't recognize the address. Follow [Allow the address on the d
 
 ### Open HomeHub on another phone
 
-Set `HOMEHUB_REMOTE_URL` in `.env` to your HTTPS address and restart the backend. Then select **QR code** on the dashboard and scan it with the phone's camera. The phone still needs Tailscale installed and connected.
+Set `HOMEHUB_REMOTE_URL` in `.env` to your HTTPS address and restart the backend. Then select **QR code**, at the top right on a computer, and scan it with the phone's camera. The phone still needs Tailscale installed and connected.
 
 ### Login fails or you keep being logged out
 

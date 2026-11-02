@@ -1,7 +1,6 @@
 import { Component, OnInit, signal, computed, OnDestroy, viewChild } from '@angular/core';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
-import { RouterLink } from '@angular/router';
 import { AuthService } from '../../core/auth/auth.service';
 import { SystemService } from '../../core/services/system.service';
 import { SocketService } from '../../core/socket/socket.service';
@@ -60,7 +59,7 @@ const DRIVER_LABEL: Record<string, string> = {
 @Component({
   selector: 'app-settings',
   standalone: true,
-  imports: [FormsModule, RouterLink, DeviceFilterComponent, BackupsComponent, MerossLoginComponent, OtherNetworksComponent],
+  imports: [FormsModule, DeviceFilterComponent, BackupsComponent, MerossLoginComponent, OtherNetworksComponent],
   styles: [`
     .topbar { display:flex; align-items:center; justify-content:space-between; margin-bottom:1.5rem; }
     .topbar h1 { font-size:1.4rem; font-weight:700; }
@@ -220,7 +219,6 @@ const DRIVER_LABEL: Record<string, string> = {
 
       <div class="topbar">
         <div style="display:flex;align-items:center;gap:1rem">
-          <a class="back-link" routerLink="/dashboard">← Dashboard</a>
           <h1>Settings</h1>
         </div>
       </div>
@@ -914,8 +912,7 @@ export class SettingsComponent implements OnInit, OnDestroy {
     if (!this.devices().some((d) => d.room)) return [{ name: '', devices: list }];
     return [
       { name: 'Unassigned', devices: list.filter((d) => !d.room) },
-      ...rooms.map((room) => ({ name: room, devices: list.filter((d) => d.room === room) })),
-    ].filter((g) => g.devices.length > 0);
+      ...rooms.map((room) => ({ name: room, devices: list.filter((d) => d.room === room) }))].filter((g) => g.devices.length > 0);
   });
   readonly roomNames = computed(() =>
     [...new Set(this.devices().flatMap((d) => d.room ?? []))].sort((a, b) => a.localeCompare(b)));
@@ -1417,8 +1414,7 @@ export class SettingsComponent implements OnInit, OnDestroy {
         this._discoveredDevices.set(newDevices);
         this.discoverMsg.set([
           moved.length ? `${moved.length} device(s) changed address.` : '',
-          newDevices.length ? `Found ${newDevices.length} new device(s). Review and register below.` : '',
-        ].join(' ').trim());
+          newDevices.length ? `Found ${newDevices.length} new device(s). Review and register below.` : ''].join(' ').trim());
         this.discoverErr.set(false);
       },
       error: () => { this.discovering.set(false); this.discoverMsg.set('Discovery failed.'); this.discoverErr.set(true); },

@@ -1,6 +1,5 @@
 import { Component, OnInit, signal, computed } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { RouterLink } from '@angular/router';
 import { DecimalPipe } from '@angular/common';
 import { Device } from '../../shared/models/device.model';
 
@@ -110,7 +109,7 @@ function xLabels(readings: EnergyReading[], range: Range): { label: string; x: n
 @Component({
   selector: 'app-energy',
   standalone: true,
-  imports: [RouterLink, DecimalPipe],
+  imports: [DecimalPipe],
   styles: [`
     .topbar {
       display: flex;
@@ -195,7 +194,6 @@ function xLabels(readings: EnergyReading[], range: Range): { label: string; x: n
 
       <div class="topbar">
         <div style="display:flex; align-items:center; gap:1rem">
-          <a class="back-link" routerLink="/dashboard">← Dashboard</a>
           <h1>Energy</h1>
         </div>
       </div>
@@ -298,8 +296,7 @@ export class EnergyComponent implements OnInit {
   readonly ranges: { value: Range; label: string }[] = [
     { value: '24h', label: '24 h' },
     { value: '7d',  label: '7 d'  },
-    { value: '30d', label: '30 d' },
-  ];
+    { value: '30d', label: '30 d' }];
 
   private readonly _loading       = signal(true);
   private readonly _selectedRange = signal<Range>('24h');
