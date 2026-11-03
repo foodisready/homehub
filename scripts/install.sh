@@ -44,7 +44,22 @@ $DOCKER compose version >/dev/null 2>&1 || fail "Docker Compose is missing. Inst
 # ── HomeHub ────────────────────────────────────────────────────
 mkdir -p "$DIR"
 cd "$DIR"
-if [ -f docker-compose.yml ]; then say "Updating HomeHub in $DIR"; else say "Installing HomeHub in $DIR"; fi
+# The release the backend reports, such as v0.1.3. Releases before v0.1.4 always said 1.0.0.
+running_version() {
+  v=$(curl -fs -m 3 http://localhost:3000/health 2>/dev/null | sed -n 's/.*"version":"\([^"]*\)".*/\1/p') || true
+  [ "$v" = "1.0.0" ] && v=""
+  echo "$v"
+}
+
+if [ -f docker-compose.yml ]; then
+  FRESH=""
+  OLD_VERSION=$(running_version)
+  say "Updating HomeHub${OLD_VERSION:+ $OLD_VERSION} in $DIR"
+else
+  FRESH=1
+  OLD_VERSION=""
+  say "Installing HomeHub in $DIR"
+fi
 curl -fsSL "$RAW/docker-compose.yml" -o docker-compose.yml.new
 mv docker-compose.yml.new docker-compose.yml
 
@@ -55,7 +70,7 @@ if [ "${MEM_KB:-0}" -lt 6000000 ] && ! grep -qs '^OLLAMA_MODEL=.' .env; then
   printf '\n# Set by the installer: this computer has under 6 GB of memory.\nOLLAMA_MODEL=llama3.2:1b\n' >> .env
 fi
 
-say "Downloading HomeHub. The first time, this can take 10 minutes or more."
+if [ -n "$FRESH" ]; then say "Downloading HomeHub. This can take 10 minutes or more."; else say "Downloading what's new"; fi
 $DOCKER compose -f docker-compose.yml pull
 $DOCKER compose -f docker-compose.yml up -d --remove-orphans
 
@@ -71,15 +86,26 @@ done
 
 IP=$(hostname -I 2>/dev/null | awk '{ print $1 }') || true
 [ -n "$IP" ] || IP=$(ip route get 1.1.1.1 2>/dev/null | awk '{ for (i = 1; i < NF; i++) if ($i == "src") print $(i + 1) }') || true
-say "HomeHub is running."
+NEW_VERSION=$(running_version)
+if [ -n "$FRESH" ] || [ -z "$NEW_VERSION" ]; then
+  say "HomeHub${NEW_VERSION:+ $NEW_VERSION} is running."
+elif [ -n "$OLD_VERSION" ] && [ "$OLD_VERSION" != "$NEW_VERSION" ]; then
+  say "HomeHub updated from $OLD_VERSION to $NEW_VERSION, and is running."
+elif [ -n "$OLD_VERSION" ]; then
+  say "HomeHub $NEW_VERSION is running. It was already up to date."
+else
+  say "HomeHub updated to $NEW_VERSION, and is running."
+fi
 echo "Open it on a phone or computer on the same network:"
 echo
 echo "    http://homehub.local:4200"
 [ -n "$IP" ] && echo "    http://$IP:4200   (if homehub.local doesn't open)"
 echo
-echo "The first time, HomeHub asks you to create your account. Do that straight away."
-echo "The AI model for Chat keeps downloading in the background for a few more minutes."
-echo
+if [ -n "$FRESH" ]; then
+  echo "HomeHub asks you to create your account. Do that straight away."
+  echo "The AI model for Chat keeps downloading in the background for a few more minutes."
+  echo
+fi
 echo "To update HomeHub later, run this installer again."
 case "$DOCKER" in
   sudo*) echo "To use docker commands without sudo, log out and back in." ;;
