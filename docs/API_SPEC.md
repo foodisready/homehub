@@ -544,6 +544,8 @@ JSON backups of settings tables (users, devices, sensors, scenes, scene_actions,
 |---|---|---|
 | `GET` | `/api/backups` | Lists backups, newest first: `{ name, createdAt, note, size, counts }` |
 | `POST` | `/api/backups` | Creates one. Body: `{ note? }`. Returns `201` with the entry. |
+| `POST` | `/api/backups/upload` | Adds a backup file from another HomeHub. Body: `{ content }`. It's checked with a test restore, and refused if it has `"<hidden>"` values. Returns `201` with the entry, named `uploaded-*.json`. Restoring is a separate call. |
+| `GET` | `/api/backups/:name/download` | The whole file as an attachment, passwords and keys included |
 | `GET` | `/api/backups/:name` | `{ name, content }`, where secrets in `content` are `"<hidden>"` |
 | `PUT` | `/api/backups/:name` | Saves edited text. Body: `{ content }`. `"<hidden>"` values are filled back in from the saved file by row id. The edit is test-restored and rolled back first; a failure returns `400` with the reason. |
 | `POST` | `/api/backups/:name/restore` | Saves the current state as `before-restore-*.json`, then replaces each table present in the file. Returns `{ counts, removed, safetyBackup }`. |

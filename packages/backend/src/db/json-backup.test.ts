@@ -179,6 +179,41 @@ describe('JSON backups', () => {
     assert.throws(() => jb.deleteBackup('../../x.json'), /Invalid backup name/);
   });
 
+  it('downloads the whole file, passwords included, and moves it to another HomeHub', () => {
+    const { name } = jb.createBackup('from the Mac');
+    const file = jb.readFull(name);
+    assert.ok(file.includes('shelly-pass'));
+
+    // The other HomeHub: empty, with only its own admin.
+    fs.rmSync(BACKUP_DIR, { recursive: true, force: true });
+    db().pragma('foreign_keys = OFF');
+    for (const t of ['energy_readings', 'schedules', 'settings', 'devices', 'users']) db().prepare(`DELETE FROM ${t}`).run();
+    db().pragma('foreign_keys = ON');
+    db().prepare("INSERT INTO users (id, name, password_hash, role) VALUES (1, 'admin', 'pi-hash', 'admin')").run();
+
+    const uploaded = jb.importBackup(file);
+    assert.match(uploaded.name, /^uploaded-\d{4}-\d{2}-\d{2}-\d{6}\.json$/);
+    assert.equal(uploaded.note, 'from the Mac');
+    assert.deepEqual(aliases(), [], 'uploading changes nothing until restored');
+
+    jb.restoreBackup(uploaded.name);
+    assert.deepEqual(aliases(), ['Kitchen lights', 'Porch']);
+    const cfg = JSON.parse((db().prepare('SELECT driver_config c FROM devices WHERE id = 1').get() as { c: string }).c);
+    assert.equal(cfg.auth.pass, 'shelly-pass');
+    assert.equal((db().prepare('SELECT password_hash p FROM users').get() as { p: string }).p, 'bcrypt-hash');
+  });
+
+  it('refuses an upload with hidden values or that would not restore', () => {
+    const { name } = jb.createBackup();
+    assert.throws(() => jb.importBackup(jb.readMasked(name)), /<hidden> in place of passwords/);
+    assert.throws(() => jb.importBackup('{"format":"other"}'), /Not a HomeHub backup/);
+
+    const data = JSON.parse(jb.readFull(name));
+    data.tables.devices = data.tables.devices.filter((d: { id: number }) => d.id !== 1);
+    assert.throws(() => jb.importBackup(JSON.stringify(data)), /refers to devices 1/);
+    assert.equal(jb.listBackups().length, 1, 'nothing saved');
+  });
+
   it('deletes a backup', () => {
     const { name } = jb.createBackup();
     jb.deleteBackup(name);

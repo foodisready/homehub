@@ -234,6 +234,16 @@ Open **Settings → Backups** and select **Back up now**, with an optional note 
 
 A restore also removes energy history for devices that aren't in the backup.
 
+### Moving to another HomeHub
+
+To move your setup, for example from a computer to a Raspberry Pi:
+
+1. On the old HomeHub, select **Back up now**, then **Download** on that backup.
+2. On the new HomeHub, select **Upload a backup** and choose the file. HomeHub checks it and adds it to the list without changing anything.
+3. Select **Restore** on it.
+
+The new HomeHub then has the old one's users and passwords, so sign in with your old password. A downloaded file includes passwords and device logins, so keep it private and delete it once you've moved. Motion sensors still report to the old HomeHub's address until you reconnect them on the **Sensors** page.
+
 HomeHub also makes a full copy of its database once a day and keeps the last 7. Those include history, and you restore them from the command line.
 
 ## Household members

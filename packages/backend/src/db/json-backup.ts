@@ -162,6 +162,37 @@ export function readMasked(name: string): string {
   return JSON.stringify(mask(readBackup(name)), null, 2);
 }
 
+/**
+ * The saved file exactly as it is, passwords and keys included, for moving to
+ * another HomeHub. Admin only, like every backup route.
+ */
+export function readFull(name: string): string {
+  const file = filePath(name);
+  if (!fs.existsSync(file)) throw new BackupError('Backup not found', 404);
+  return fs.readFileSync(file, 'utf8');
+}
+
+/**
+ * Save a backup file brought from another HomeHub (or this one) into the
+ * backups folder, after checking it would restore cleanly. Nothing changes
+ * until it is restored.
+ */
+export function importBackup(text: string): BackupEntry {
+  const data = parseBackup(text);
+  if (JSON.stringify(data).includes(JSON.stringify(HIDDEN))) {
+    throw new BackupError(
+      `This file has ${HIDDEN} in place of passwords and keys, so it can't be restored. ` +
+      'Use Download on the other HomeHub, not text copied from View / Edit.',
+    );
+  }
+  applyBackup(data, { dryRun: true });
+  fs.mkdirSync(backupDir(), { recursive: true });
+  let name = `uploaded-${stamp()}.json`;
+  for (let i = 2; fs.existsSync(path.join(backupDir(), name)); i++) name = `uploaded-${stamp()}-${i}.json`;
+  writeFileAtomic(path.join(backupDir(), name), data);
+  return entryFor(name);
+}
+
 export function deleteBackup(name: string): void {
   const file = filePath(name);
   if (!fs.existsSync(file)) throw new BackupError('Backup not found', 404);

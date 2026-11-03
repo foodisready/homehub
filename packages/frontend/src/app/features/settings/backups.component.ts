@@ -74,11 +74,17 @@ const COUNT_LABELS: [string, string, string][] = [
       in HomeHub's <code>data/backups</code> folder. Energy history isn't included.
       Passwords and keys show as <code>&lt;hidden&gt;</code>, and stay as they are when you save an edit.
     </p>
+    <p class="intro">
+      To move to another HomeHub, such as a Raspberry Pi, use <b>Download</b> here, then <b>Upload a backup</b>
+      on the other one and press Restore. A downloaded file includes passwords and device logins, so keep it private.
+    </p>
 
     <div class="create">
       <input type="text" [(ngModel)]="note" placeholder="Note (optional), e.g. before moving to the Pi"
              maxlength="200" (keydown.enter)="create()" />
       <button class="btn-sm btn-primary" (click)="create()" [disabled]="busy()">Back up now</button>
+      <button class="btn-sm btn-ghost" (click)="fileInput.click()" [disabled]="busy()">Upload a backup</button>
+      <input #fileInput type="file" accept=".json,application/json" hidden (change)="upload(fileInput)" />
     </div>
     @if (message()) { <p class="msg" [class.ok]="!isError()" [class.err]="isError()">{{ message() }}</p> }
 
@@ -95,6 +101,7 @@ const COUNT_LABELS: [string, string, string][] = [
               <button class="btn-sm btn-ghost" (click)="toggleEditor(b.name)">
                 {{ editing() === b.name ? 'Close' : 'View / Edit' }}
               </button>
+              <button class="btn-sm btn-ghost" (click)="download(b.name)" [disabled]="busy()">Download</button>
               <button class="btn-sm btn-ghost" (click)="ask(b.name, 'restore')" [disabled]="busy()">Restore</button>
               <button class="btn-sm btn-ghost" (click)="ask(b.name, 'delete')" [disabled]="busy()" aria-label="Delete backup">✕</button>
             </div>
@@ -192,6 +199,41 @@ export class BackupsComponent implements OnInit {
       },
       error: (err) => { this.busy.set(false); this.show(this.errorText(err), true); },
     });
+  }
+
+  /** Saves the whole file, passwords included, to this computer. */
+  download(name: string): void {
+    this.http.get(`/api/backups/${encodeURIComponent(name)}/download`, { responseType: 'blob' }).subscribe({
+      next: (blob) => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = name;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      },
+      error: (err) => this.show(this.errorText(err), true),
+    });
+  }
+
+  /** Adds a file from another HomeHub to the list. Restoring it is a separate step. */
+  upload(input: HTMLInputElement): void {
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file) return;
+    if (file.size > 4 * 1024 * 1024) { this.show('That file is too big to be a HomeHub backup', true); return; }
+    this.busy.set(true);
+    file.text().then((content) => {
+      this.http.post<BackupEntry>('/api/backups/upload', { content }).subscribe({
+        next: (entry) => {
+          this.busy.set(false);
+          this.show(`Uploaded ${file.name}. It's in the list as ${entry.name}. Press Restore on it to use it.`);
+          this.load();
+          this.confirming.set({ name: entry.name, action: 'restore' });
+        },
+        error: (err) => { this.busy.set(false); this.show(this.errorText(err), true); },
+      });
+    }, () => { this.busy.set(false); this.show('Could not read that file', true); });
   }
 
   ask(name: string, action: 'restore' | 'delete'): void {
