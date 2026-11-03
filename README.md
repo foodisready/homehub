@@ -31,8 +31,11 @@ Then open `http://homehub.local:4200` and create your account.
 
 HomeHub is free, and always will be. If it's useful to you, you can support its development with a donation.
 
+**[Donate to HomeHub](https://buy.stripe.com/aFabIUfbD70fgk7fmY2B200)** (any amount from $2, paid securely through Stripe)
+
 - Donations are voluntary, final, and not tax-deductible. They don't buy a product, service or features. Everyone gets the same HomeHub.
 - They pay for development time and the smart devices HomeHub is tested with.
+- Donations are received by Super Future Funk LLC, which is the name on your card statement.
 - If you were charged by mistake, charged twice, or charged the wrong amount, [open an issue](https://github.com/foodisready/homehub/issues) within 30 days and we'll refund it.
 
 ## Contact
