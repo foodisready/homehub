@@ -151,7 +151,8 @@ services:
 
   # ── Local LLM (Ollama) ─────────────────────────────────────────
   ollama:
-    image: ollama/ollama:latest
+    # Pinned, like every image here, so updates only arrive when this file changes.
+    image: ollama/ollama:0.35.1
     ports:
       - "11434:11434"
     volumes:
@@ -184,7 +185,8 @@ services:
   # The 1-year `--interval` is the closest Watchtower offers to "no
   # periodic polling" — nothing fires unless the HTTP API is poked.
   watchtower:
-    image: containrrr/watchtower:latest
+    # 1.7.1 is Watchtower's last release.
+    image: containrrr/watchtower:1.7.1
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
@@ -241,7 +243,7 @@ services:
 
   # ── Tailscale sidecar (remote access) ─────────────────────────
   tailscale:
-    image: tailscale/tailscale:latest
+    image: tailscale/tailscale:v1.102.5
     hostname: homehub
     environment:
       - TS_AUTHKEY=${TS_AUTHKEY:-}
