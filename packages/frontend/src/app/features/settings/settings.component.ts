@@ -78,6 +78,10 @@ const DRIVER_LABEL: Record<string, string> = {
     }
     .section-toggle:hover { color:var(--text); }
     .section-toggle .chev { width:0.8rem; font-size:0.8rem; }
+    .support { display:flex; align-items:center; gap:0.75rem 1rem; flex-wrap:wrap; margin-top:1.25rem; }
+    .support-text { flex:1; min-width:14rem; }
+    .support-links { display:flex; gap:0.5rem; flex-wrap:wrap; }
+    .support-links a { text-decoration:none; display:inline-flex; align-items:center; }
     .section-title {
       font-size:0.7rem;
       font-weight:700;
@@ -829,13 +833,6 @@ const DRIVER_LABEL: Record<string, string> = {
 
             <div class="pref-row">
               <div class="pref-label">
-                Location
-                <div class="pref-sub">Latitude / Longitude — used for solar scheduling. Edit <code>LATITUDE</code> and <code>LONGITUDE</code> in <code>.env</code> to update.</div>
-              </div>
-            </div>
-
-            <div class="pref-row">
-              <div class="pref-label">
                 Version
                 <div class="pref-sub">
                   {{ appVersion() === 'dev' ? 'Development build, running outside Docker' : 'Installed release' }}
@@ -845,6 +842,17 @@ const DRIVER_LABEL: Record<string, string> = {
             </div>
           </div>
         }
+      </div>
+
+      <div class="card support">
+        <div class="support-text">
+          <strong>Support HomeHub</strong>
+          <div class="pref-sub">HomeHub is free and open source. If it's useful to you, a donation helps keep it going.</div>
+        </div>
+        <div class="support-links">
+          <a class="btn-sm btn-primary" href="https://buy.stripe.com/aFabIUfbD70fgk7fmY2B200" target="_blank" rel="noopener">Donate</a>
+          <a class="btn-sm btn-ghost" href="https://github.com/foodisready/homehub" target="_blank" rel="noopener">Source code</a>
+        </div>
       </div>
 
     </div>
