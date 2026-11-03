@@ -186,6 +186,14 @@ To switch several devices together, give them the same nickname. If two plugs bo
 
 "Light" and "lamp" count as the same word if a name wouldn't otherwise match. If a name could mean more than one device, HomeHub asks which one you mean.
 
+"**Room** lights" or "**room** lamps", such as "turn on Brenden's lights", switches the lights in that room. A room also answers to its name without "room", so "Brenden's" means "Brenden's room". Protected devices, and ones named as something else, such as a fan or TV, are left out. A nickname that matches the words wins.
+
+### Teach HomeHub what you meant
+
+When Chat or voice doesn't understand a command, it's listed under **Settings → Teach HomeHub** (administrators only). Select **Teach**, check the words, then choose the devices or the scene you meant and select **Save**. HomeHub saves the words as a nickname for those devices, or as another name for the scene, so the same command works next time, in Chat and by voice. Select **Ignore** for anything that isn't a command, such as a question.
+
+HomeHub refuses words it would still read some other way, for example another device's name or a room's name, and says why.
+
 ## Schedules
 
 Open **Schedules** to add a time for a device. Each device has its own collapsible group, and a schedule can run:

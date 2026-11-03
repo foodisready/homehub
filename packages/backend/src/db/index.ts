@@ -125,6 +125,10 @@ function migrate(db: Database.Database): void {
   try { db.exec('ALTER TABLE devices ADD COLUMN override_until TEXT'); } catch {}
   try { db.exec('ALTER TABLE devices ADD COLUMN timer_off_at TEXT'); } catch {}
   try { db.exec('ALTER TABLE devices ADD COLUMN nicknames TEXT'); } catch {}
+  try { db.exec('ALTER TABLE scenes ADD COLUMN nicknames TEXT'); } catch {}
+  // Set when someone teaches HomeHub what a missed command meant, or dismisses it.
+  try { db.exec('ALTER TABLE chat_commands ADD COLUMN resolved INTEGER NOT NULL DEFAULT 0'); } catch {}
+  try { db.exec('ALTER TABLE voice_commands ADD COLUMN resolved INTEGER NOT NULL DEFAULT 0'); } catch {}
   try { db.exec('ALTER TABLE devices ADD COLUMN room TEXT'); } catch {}
   try { db.exec('ALTER TABLE devices ADD COLUMN is_protected INTEGER NOT NULL DEFAULT 0'); } catch {}
   try { db.exec('ALTER TABLE devices ADD COLUMN turned_on_at TEXT'); } catch {}

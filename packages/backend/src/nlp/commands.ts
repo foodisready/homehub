@@ -39,7 +39,7 @@ export function parseDuration(text: string): number | null {
   return (toNumber(amount) + half) * minutesPerUnit + (extraMinutes ? toNumber(extraMinutes) : 0);
 }
 
-function cleanUp(text: string): string {
+export function cleanUp(text: string): string {
   return text
     .toLowerCase()
     .trim()

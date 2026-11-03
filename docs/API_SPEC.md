@@ -192,6 +192,17 @@ Shows how many of the last 1,000 Chat messages the rules answered, and the lates
 
 ---
 
+### `GET /api/nlp/misses` — `admin` only
+Commands neither the rules nor anyone has dealt with yet, newest first, one per wording: voice commands that weren't understood, and Chat messages the rules passed to the model. Each has `source` (`voice` or `chat`), `id`, `text`, `createdAt`, the suggested `phrase` to teach and its `kind` (`device` or `scene`).
+
+### `POST /api/nlp/teach` — `admin` only
+Body: `{ source, id, phrase, deviceIds }` or `{ source, id, phrase, sceneId }`. Saves `phrase` as a nickname on each device, or as another name for the scene, then checks HomeHub now reads it that way. If it wouldn't, for example because the phrase is another device's or a room's name, nothing is saved and the response is `400` with the reason. On success the miss, and any with the same wording, leave the list. Returns `{ phrase, devices }` or `{ phrase, scene }`.
+
+### `POST /api/nlp/misses/dismiss` — `admin` only
+Body: `{ source, id }`. Leaves that miss, and any with the same wording, out of the list. **Response 204**
+
+---
+
 ### `GET /api/devices/:id/energy`
 Live energy metrics. Only available on HS110, KP115 models. Returns `null` values for non-energy models.
 

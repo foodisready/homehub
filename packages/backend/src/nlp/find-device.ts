@@ -11,7 +11,8 @@ export type DeviceMatch =
   | { device: NamedDevice }
   | { error: string; candidates?: string[] };
 
-const normalize = (name: string) =>
+/** A name as HomeHub compares it: lower case, no possessive 's, no leading my or the. */
+export const normalize = (name: string) =>
   name.toLowerCase().replace(/['’]s\b/g, '').replace(/[_-]+/g, ' ').trim().replace(/^(my|the)\s+/, '');
 
 const singular = (name: string) => name.split(/\s+/).map((word) => word.replace(/s$/, '')).join(' ');
@@ -48,17 +49,29 @@ export interface NamedScene {
 // Speech recognition may hear "Goodnight" as "good night".
 const sceneKey = (name: string) => normalize(name).replace(/[^a-z0-9]/g, '');
 
+const parseNames = (value: unknown): string[] => {
+  try {
+    const list = JSON.parse(String(value ?? '[]'));
+    return Array.isArray(list) ? list.map(String) : [];
+  } catch {
+    return [];
+  }
+};
+
+/** Scene names and the extra names taught for them. */
 export function listSceneNames(): string[] {
-  const scenes = getDb().prepare('SELECT name FROM scenes').all() as { name: string }[];
-  return scenes.map((scene) => scene.name);
+  const scenes = getDb().prepare('SELECT name, nicknames FROM scenes').all() as { name: string; nicknames: string | null }[];
+  return scenes.flatMap((scene) => [scene.name, ...parseNames(scene.nicknames)]);
 }
 
-/** Finds a scene by its whole name. A scene can switch many devices, so nothing partial counts. */
+/** Finds a scene by its whole name or a taught name. A scene can switch many devices, so nothing partial counts. */
 export function findScene(name: string): NamedScene | null {
   const wanted = sceneKey(name);
   if (!wanted) return null;
-  const scenes = getDb().prepare('SELECT id, name FROM scenes').all() as NamedScene[];
-  return scenes.find((scene) => sceneKey(scene.name) === wanted) ?? null;
+  const scenes = getDb().prepare('SELECT id, name, nicknames FROM scenes').all() as (NamedScene & { nicknames: string | null })[];
+  const found = scenes.find((scene) => sceneKey(scene.name) === wanted)
+    ?? scenes.find((scene) => parseNames(scene.nicknames).some((n) => sceneKey(n) === wanted));
+  return found ? { id: found.id, name: found.name } : null;
 }
 
 /**

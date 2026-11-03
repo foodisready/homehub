@@ -13,6 +13,7 @@ import { OtherNetworksComponent } from './other-networks.component';
 import { HomeSettingsComponent } from './home-settings.component';
 import { AiConnectionComponent } from './ai-connection.component';
 import { CamerasToggleComponent } from './cameras-toggle.component';
+import { TeachCommandsComponent } from './teach-commands.component';
 import { AutomationsService } from '../../core/services/automations.service';
 
 interface ChatStats {
@@ -65,7 +66,7 @@ const DRIVER_LABEL: Record<string, string> = {
 @Component({
   selector: 'app-settings',
   standalone: true,
-  imports: [FormsModule, DeviceFilterComponent, BackupsComponent, MerossLoginComponent, OtherNetworksComponent, HomeSettingsComponent, AiConnectionComponent, CamerasToggleComponent],
+  imports: [FormsModule, DeviceFilterComponent, BackupsComponent, MerossLoginComponent, OtherNetworksComponent, HomeSettingsComponent, AiConnectionComponent, CamerasToggleComponent, TeachCommandsComponent],
   styles: [`
     .topbar { display:flex; align-items:center; justify-content:space-between; margin-bottom:1.5rem; }
     .topbar h1 { font-size:1.4rem; font-weight:700; }
@@ -748,6 +749,18 @@ const DRIVER_LABEL: Record<string, string> = {
       }
 
       <!-- ── Preferences ───────────────────────────────────────── -->
+      <!-- ── Teach HomeHub (admin only) ───────────────────────── -->
+      @if (isAdmin()) {
+        <div class="section">
+          <button type="button" class="section-title section-toggle" (click)="toggleSection('teach')" [attr.aria-expanded]="isSectionOpen('teach')">
+            <span class="chev">{{ isSectionOpen('teach') ? '▾' : '▸' }}</span> Teach HomeHub
+          </button>
+          @if (isSectionOpen('teach')) {
+            <div class="card"><app-teach-commands /></div>
+          }
+        </div>
+      }
+
       <div class="section">
         <button type="button" class="section-title section-toggle" (click)="toggleSection('chat-commands')" [attr.aria-expanded]="isSectionOpen('chat-commands')">
           <span class="chev">{{ isSectionOpen('chat-commands') ? '▾' : '▸' }}</span> Chat commands
