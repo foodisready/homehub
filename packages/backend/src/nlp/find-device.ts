@@ -1,4 +1,5 @@
 import { getDb } from '../db';
+import { isProtectedDevice, type PowerDevice } from '../devices/power';
 
 export interface NamedDevice {
   id:    number;
@@ -77,7 +78,35 @@ export function findDeviceGroup(name: string): NamedDevice[] {
 
   const group = devices.filter((d) =>
     namesOf(d).slice(1).some((nickname) => singular(normalize(nickname)) === singular(wanted)));
-  return group.length > 1 ? group : [];
+  if (group.length > 1) return group;
+
+  return roomLights(wanted, name, devices);
+}
+
+/** A room's name, and the name without "room": "Brenden's room" is also "Brenden's". */
+const roomKeys = (room: string) => {
+  const key = normalize(room);
+  return [key, key.replace(/\s+room$/, '')].filter(Boolean);
+};
+
+/** Names that say a device isn't a light, so "<room> lights" leaves it alone. */
+const NOT_A_LIGHT = /\b(?:fans?|heaters?|tvs?|television|valves?|doors?|garage|pumps?|cameras?|cams?|speakers?|chargers?|ac|air|humidifiers?|dehumidifiers?|purifiers?|kettles?|coffee|printers?|routers?|plugs?)\b/i;
+
+/**
+ * "Brenden's lights", "kitchen lamps": the lights in a room, meaning every
+ * device there that isn't protected and isn't named as something else, such
+ * as a fan. Speech recognition often hears "light" for "lights", so the
+ * singular counts too, unless the name already fits one device ("my office
+ * light").
+ */
+function roomLights(wanted: string, spoken: string, devices: NamedDevice[]): NamedDevice[] {
+  const match = wanted.match(/^(.+?)\s+(?:lights?|lamps?)$/);
+  if (!match) return [];
+  const place = match[1];
+  const inRoom = devices.filter((d) => typeof d.room === 'string' && roomKeys(d.room).includes(place));
+  if (!inRoom.length) return [];
+  if ('device' in findDeviceByName(spoken)) return [];
+  return inRoom.filter((d) => !NOT_A_LIGHT.test(d.alias) && !isProtectedDevice(d as unknown as PowerDevice));
 }
 
 /**

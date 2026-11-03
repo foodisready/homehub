@@ -227,6 +227,51 @@ describe('chat commands', () => {
       });
     });
 
+    describe("a room's lights", () => {
+      beforeEach(() => {
+        db.prepare("UPDATE devices SET room = 'Brenden''s room' WHERE alias IN ('My office lamp', 'Media long lamp', 'Main Valve')").run();
+      });
+      after(() => { db.prepare('UPDATE devices SET room = NULL').run(); });
+      const switched = () => calls.map((c) => `${c.ip}=${c.state}`).sort();
+
+      for (const text of ["turn on brenden's lights", "turn on Brenden's light", "turn on brenden's room lamps", 'turn on the brenden room lights']) {
+        it(`switches the lamps in the room for "${text}"`, async () => {
+          const result = await commands.runPowerCommand(text);
+          assert.deepEqual(switched(), ['10.0.0.1=true', '10.0.0.3=true'], 'the valve, not a light, stays out');
+          assert.match(result!.response, /^Turned on /);
+        });
+      }
+
+      it('lets a name that fits one device win', async () => {
+        db.prepare("UPDATE devices SET room = 'Office' WHERE alias IN ('My office lamp', 'Media long lamp')").run();
+        await commands.runPowerCommand('turn off my office light');
+        assert.deepEqual(switched(), ['10.0.0.1=false'], 'My office lamp only, not every lamp in the Office');
+      });
+
+      it('includes lights not named lamp or light, but not fans or protected devices', async () => {
+        db.prepare("UPDATE devices SET room = 'Brenden''s room', alias = 'Ceiling' WHERE alias = 'Long Lamp'").run();
+        db.prepare("UPDATE devices SET room = 'Brenden''s room', alias = 'Brenden fan' WHERE alias = 'Kitchen lights'").run();
+        try {
+          await commands.runPowerCommand("turn on brenden's lights");
+          assert.deepEqual(switched(), ['10.0.0.1=true', '10.0.0.2=true', '10.0.0.3=true']);
+        } finally {
+          db.prepare("UPDATE devices SET alias = 'Long Lamp', room = NULL WHERE alias = 'Ceiling'").run();
+          db.prepare("UPDATE devices SET alias = 'Kitchen lights', room = NULL WHERE alias = 'Brenden fan'").run();
+        }
+      });
+
+      it('finds nothing when the room has only protected devices', async () => {
+        db.prepare("UPDATE devices SET room = 'Garage' WHERE alias = 'Main Valve'").run();
+        assert.equal(await commands.runPowerCommand('turn on the garage lights'), null);
+        assert.deepEqual(calls, []);
+      });
+
+      it("doesn't take a room for a name without lights or lamps", async () => {
+        assert.equal(await commands.runPowerCommand("turn on brenden's"), null);
+        assert.deepEqual(calls, []);
+      });
+    });
+
     describe('devices sharing a nickname', () => {
       const setNicknames = (alias: string, nicknames: string[]) =>
         db.prepare('UPDATE devices SET nicknames = ? WHERE alias = ?').run(JSON.stringify(nicknames), alias);
