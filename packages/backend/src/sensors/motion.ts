@@ -6,6 +6,7 @@ import { getCachedState } from '../kasa/device.cache';
 import { logger } from '../logger';
 import { withActivity } from '../activity/activity';
 import { emitMotion } from '../socket';
+import { automationsPaused } from '../automation/pause';
 
 const SWEEP_INTERVAL_MS = 15_000;
 // A lost "clear" event must not keep a room occupied forever.
@@ -73,6 +74,7 @@ export async function handleMotion(token: string, occupied: boolean, now = new D
     FROM motion_rules r JOIN devices d ON d.id = r.device_id WHERE r.token = ?
   `).get(token) as RuleWithDevice;
   if (!rule.turn_on_with_motion || isProtectedDevice(rule)) return true;
+  if (automationsPaused()) return true;
 
   // Someone chose to hold this light in its current state.
   if (rule.timer_off_at || toMs(rule.override_until) > now.getTime()) return true;
@@ -128,7 +130,7 @@ function shouldTurnOff(rule: RuleWithDevice, now: number): boolean {
 let sweeping = false;
 
 export async function sweepMotionRules(now = Date.now()): Promise<void> {
-  if (sweeping) return;
+  if (sweeping || automationsPaused()) return;
   sweeping = true;
   try {
     const rules = getDb().prepare(`

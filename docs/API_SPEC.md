@@ -589,6 +589,13 @@ Names must match `^[A-Za-z0-9][A-Za-z0-9._-]*\.json$`. A restore removes history
 
 ---
 
+## Pausing automations
+
+| Method | Path | Who | Notes |
+|---|---|---|---|
+| `GET` | `/api/system/automations` | any | `{ paused }` |
+| `PUT` | `/api/system/automations` | admin | Body: `{ paused }`. While paused, this HomeHub runs no schedules (`/internal/devices/:id/execute` answers `{ skipped: true, paused: true }`), motion rules, timers, camera motion snapshots or automatic water shutoff. Resuming drops timers that ran out while paused, without switching anything. The setting is left out of backups, and a restore keeps this HomeHub's value. |
+
 ## WebSocket Events (Socket.io)
 
 Connect to `ws://<pi-ip>:3000` with a valid JWT:

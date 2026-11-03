@@ -13,6 +13,7 @@
 
 import { getDb } from '../db';
 import { logger } from '../logger';
+import { automationsPaused } from '../automation/pause';
 
 export type ShutoffStatus = 'not_fired' | 'fired' | 'verified' | 'failed';
 
@@ -74,6 +75,12 @@ export async function maybeFireShutoff(
   const deviceId = cfg.shutoffDeviceId;
   if (typeof deviceId !== 'number' || deviceId <= 0) {
     logger.info({ eventId, sensorRowId: sensor.id }, 'Shutoff skipped — no shutoffDeviceId configured');
+    return;
+  }
+
+  // Paused: leave it unfired, so the next reading after resuming can still fire it.
+  if (automationsPaused()) {
+    logger.warn({ eventId, sensorRowId: sensor.id }, 'Shutoff skipped — automations paused on this HomeHub');
     return;
   }
 

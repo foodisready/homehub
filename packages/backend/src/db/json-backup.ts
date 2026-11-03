@@ -85,7 +85,8 @@ export function snapshot(note?: string): BackupFile {
   const db = getDb();
   const tables: BackupFile['tables'] = {};
   for (const t of BACKUP_TABLES) {
-    const rows = db.prepare(`SELECT * FROM ${t} ORDER BY ${pkOf(t)}`).all() as Row[];
+    let rows = db.prepare(`SELECT * FROM ${t} ORDER BY ${pkOf(t)}`).all() as Row[];
+    if (t === 'settings') rows = rows.filter((r) => !THIS_HOMEHUB_ONLY.includes(r.key as string));
     for (const row of rows) {
       for (const col of JSON_COLUMNS[t] ?? []) {
         if (typeof row[col] === 'string') {
@@ -308,6 +309,9 @@ export interface RestoreResult {
 /** Tables whose rows belong to one account: they follow that account in or stay out. */
 const PER_USER_TABLES = new Set<string>(['push_subscriptions', 'notification_preferences']);
 
+/** Settings that describe this HomeHub, not the home: never backed up, and a restore leaves them as they are. */
+const THIS_HOMEHUB_ONLY = ['automations_paused'];
+
 /** Settings this HomeHub keeps when it already has them: the backup fills them in only if unset. */
 const LOCAL_SETTINGS = [['home_latitude', 'home_longitude'], ['home_timezone']];
 
@@ -398,7 +402,7 @@ export function applyBackup(data: BackupFile, opts: { dryRun?: boolean } = {}): 
         if (t === 'settings') {
           const isSetHere = (k: string) =>
             !!(db.prepare("SELECT 1 FROM settings WHERE key = ? AND value <> ''").get(k));
-          const keep = LOCAL_SETTINGS.filter((group) => isSetHere(group[0])).flat();
+          const keep = [...LOCAL_SETTINGS.filter((group) => isSetHere(group[0])).flat(), ...THIS_HOMEHUB_ONLY];
           db.prepare(`DELETE FROM settings WHERE key NOT IN (${keep.map(() => '?').join(', ') || "''"})`).run(...keep);
           let n = 0;
           rows.forEach((row, i) => {

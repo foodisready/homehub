@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { requireAdmin } from '../middleware/auth';
 import { logger } from '../logger';
+import { automationsPaused, setAutomationsPaused } from '../automation/pause';
 
 /**
  * HomeHub-self update routes — see auraflow/docs/ota-strategy.md
@@ -79,6 +80,22 @@ systemRouter.get('/version', async (_req: Request, res: Response) => {
     updateAvailable,
     updaterAvailable: WATCHTOWER_HTTP_TOKEN.length > 0,
   });
+});
+
+/* GET /api/system/automations — { paused }, for the banner every page shows while paused.
+ * PUT (admin) { paused } pauses or resumes schedules, motion rules, timers,
+ * camera motion snapshots and automatic water shutoff on this HomeHub. */
+systemRouter.get('/automations', (_req: Request, res: Response) => {
+  res.json({ paused: automationsPaused() });
+});
+
+systemRouter.put('/automations', requireAdmin, (req: Request, res: Response) => {
+  const { paused } = (req.body ?? {}) as { paused?: unknown };
+  if (typeof paused !== 'boolean') {
+    return res.status(400).json({ error: 'paused must be true or false', code: 'VALIDATION_ERROR' });
+  }
+  setAutomationsPaused(paused);
+  res.json({ paused: automationsPaused() });
 });
 
 /* GET /api/system/remote-url

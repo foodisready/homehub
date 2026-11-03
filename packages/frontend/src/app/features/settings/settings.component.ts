@@ -13,6 +13,7 @@ import { OtherNetworksComponent } from './other-networks.component';
 import { HomeSettingsComponent } from './home-settings.component';
 import { AiConnectionComponent } from './ai-connection.component';
 import { CamerasToggleComponent } from './cameras-toggle.component';
+import { AutomationsService } from '../../core/services/automations.service';
 
 interface ChatStats {
   total: number;
@@ -831,6 +832,22 @@ const DRIVER_LABEL: Record<string, string> = {
               <span style="font-size:0.85rem;color:var(--text-muted)">$/kWh</span>
             </div>
 
+            @if (isAdmin()) {
+              <div class="pref-row">
+                <div class="pref-label">
+                  Pause automations
+                  <div class="pref-sub">
+                    For a second HomeHub, such as a development copy, that uses the same devices as your main one.
+                    While paused, this HomeHub runs no schedules, motion rules, timers, camera snapshots or automatic water shutoff.
+                    You can still switch devices by hand.
+                  </div>
+                </div>
+                <input type="checkbox" [checked]="automations.paused()" (change)="setPaused($any($event.target))"
+                       aria-label="Pause automations on this HomeHub" style="width:1.1rem;height:1.1rem;flex-shrink:0" />
+              </div>
+              @if (pauseMsg()) { <p class="msg err" style="margin:0 0 0.5rem">{{ pauseMsg() }}</p> }
+            }
+
             <div class="pref-row">
               <div class="pref-label">
                 Version
@@ -865,6 +882,18 @@ export class SettingsComponent implements OnInit, OnDestroy {
   readonly devices = this._devices.asReadonly();
   readonly users   = this._users.asReadonly();
   readonly isAdmin = computed(() => this.auth.user()?.role === 'admin');
+  readonly automations = inject(AutomationsService);
+  readonly pauseMsg = signal('');
+
+  setPaused(box: HTMLInputElement): void {
+    this.pauseMsg.set('');
+    this.automations.setPaused(box.checked).subscribe({
+      error: (err: HttpErrorResponse) => {
+        box.checked = !box.checked;
+        this.pauseMsg.set(err.error?.error ?? 'Could not save. Try again.');
+      },
+    });
+  }
 
   // ── Collapsible sections ───────────────────────────────────
   // Devices starts open and the rest closed; choices are remembered on this browser.

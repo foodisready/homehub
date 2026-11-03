@@ -258,6 +258,16 @@ Keep signing in with the account you made on the new HomeHub. Other people's acc
 
 HomeHub also makes a full copy of its database once a day and keeps the last 7. Those include history, and you restore them from the command line.
 
+## Pause automations
+
+If you run a second HomeHub against the same devices, for example a development copy on your computer, pause automations on it so the two don't undo each other. Open **Settings → Preferences** and select **Pause automations** (administrators only).
+
+While paused, that HomeHub runs no schedules, motion rules, "Turn off after" timers, camera motion snapshots or automatic water shutoff. You can still switch devices by hand, use Chat and run scenes. A banner on every page says it's paused, with a **Resume** button. Timers that ran out while paused end without switching anything.
+
+Don't pause your main HomeHub for long: automatic water shutoff is off while paused. The setting isn't included in backups, so restoring a backup never pauses or resumes a HomeHub.
+
+Motion sensors report to one HomeHub only, the one they were last connected to on the **Sensors** page. Connect them to your main HomeHub.
+
 ## Home location and time zone
 
 Open **Settings → Home** to choose your time zone and enter your home's latitude and longitude. HomeHub opens it for you after you create your account.

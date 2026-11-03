@@ -4,6 +4,7 @@ import { getAllCachedStates, noteState } from '../kasa/device.cache';
 import { emitDeviceOverride, emitDeviceState } from '../socket';
 import { logger } from '../logger';
 import { withActivity } from '../activity/activity';
+import { automationsPaused } from '../automation/pause';
 
 export interface PowerDevice {
   id:            number;
@@ -165,6 +166,7 @@ export async function sweepPowerTimers(): Promise<void> {
     ).all() as { id: number }[];
     for (const { id } of lapsed) clearOverride(id);
 
+    if (automationsPaused()) return;
     const due = db.prepare("SELECT * FROM devices WHERE timer_off_at <= datetime('now')")
       .all() as (PowerDevice & { timer_off_at: string })[];
     await Promise.all(due.map(expireTimer));

@@ -16,6 +16,7 @@ import { recordVoiceCommand } from '../nlp/command-log';
 import { listDeviceNames, listSceneNames } from '../nlp/find-device';
 import { withActivity } from '../activity/activity';
 import { issueTokens, serviceUser } from '../auth/auth.service';
+import { automationsPaused } from '../automation/pause';
 
 export const internalRouter = Router();
 
@@ -81,6 +82,11 @@ internalRouter.post('/devices/:id/execute', async (req: Request, res: Response) 
   const { state, label } = req.body as { state: boolean; label?: unknown };
   if (typeof state !== 'boolean') {
     return res.status(400).json({ error: '`state` must be a boolean', code: 'VALIDATION_ERROR' });
+  }
+
+  if (automationsPaused()) {
+    logger.info({ deviceId: device.id, alias: device.alias }, 'Scheduled action skipped — automations paused');
+    return res.json({ alias: device.alias, state, skipped: true, paused: true });
   }
 
   // Skip if there is an active manual override for this device

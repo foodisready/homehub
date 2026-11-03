@@ -3,6 +3,7 @@ import { logger } from '../logger';
 import { sendPushToAll } from '../push/push.service';
 import * as bridge from './bridge';
 import { capture, getSettings, pruneSnapshots } from './snapshots';
+import { automationsPaused } from '../automation/pause';
 
 /**
  * Watches the bridge for motion. The bridge learns about motion from the Wyze
@@ -91,7 +92,7 @@ export function startCameraWatch(): void {
       busy = true;
       try {
         // Turned off in Settings: nothing to watch, but keep checking in case it's turned back on.
-        if (getSettings().enabled) await checkMotion(); else delay = IDLE_POLL_MS;
+        if (getSettings().enabled && !automationsPaused()) await checkMotion(); else delay = IDLE_POLL_MS;
       } catch {
         delay = IDLE_POLL_MS;   // bridge down or signed out; check back later, quietly
       } finally {
