@@ -1,6 +1,6 @@
 # Install HomeHub
 
-This guide takes you from a new Raspberry Pi to a running HomeHub. It should take about an hour, and most of that is waiting for downloads and builds.
+This guide takes you from a new Raspberry Pi to a running HomeHub. It takes about 20 minutes, and most of that is waiting for downloads.
 
 HomeHub is free. There's no HomeHub account, and it runs entirely on your own hardware.
 
@@ -15,62 +15,54 @@ A 32-bit operating system won't work. To check yours, run `uname -m`. It should 
 
 Docker Desktop on a Mac or Windows PC isn't recommended, because HomeHub's device discovery relies on Linux host networking.
 
-## Step 1: Install Docker
+## Step 1: Install HomeHub
 
-Connect to your Pi, then install Docker and allow your user to run it:
+Connect to your Pi, then run:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/foodisready/homehub/main/scripts/install.sh | sh
+```
+
+The installer:
+
+- installs Docker, if it isn't already installed,
+- puts HomeHub's settings in a `homehub` folder in your home folder,
+- downloads HomeHub and starts it,
+- chooses the smaller AI model on a Pi with 4 GB of memory,
+- shows the address to open when HomeHub is ready.
+
+It may ask for your Pi's password, to install Docker. The first time, it takes 10 minutes or more, mostly for downloads. You don't need a Docker account or a settings file: HomeHub makes its own secrets the first time it starts, and you set everything else in the browser.
+
+To see what the installer does before you run it, open [scripts/install.sh](../scripts/install.sh).
+
+### Or install by hand
+
+If you'd rather run each step yourself, install Docker and allow your user to run it:
 
 ```bash
 curl -fsSL https://get.docker.com | sudo sh
 sudo usermod -aG docker "$USER"
-sudo systemctl enable docker
 ```
 
-Log out and back in, then check that it works:
-
-```bash
-docker run --rm hello-world
-docker compose version
-```
-
-Other install options are in [Docker's documentation](https://docs.docker.com/engine/install/).
-
-## Step 2: Download HomeHub
-
-HomeHub's ready-made images are on Docker Hub, so you only need the file that tells Docker how to run them:
+Log out and back in, then download HomeHub's compose file and start it:
 
 ```bash
 mkdir homehub && cd homehub
-curl -fsSLO https://raw.githubusercontent.com/playground/homehub/main/docker-compose.yml
-```
-
-You don't need a settings file. HomeHub makes its own secrets the first time it starts, and you set everything else in the browser.
-
-## Step 3: Start HomeHub
-
-```bash
+curl -fsSLO https://raw.githubusercontent.com/foodisready/homehub/main/docker-compose.yml
 docker compose -f docker-compose.yml pull
 docker compose -f docker-compose.yml up -d
 ```
 
-Use these exact commands, with `-f docker-compose.yml`.
+Use these exact commands, with `-f docker-compose.yml`. HomeHub is ready when `docker compose -f docker-compose.yml ps` shows `backend` and `frontend` as running.
 
-The first start can take a while, because it downloads HomeHub and an AI model of about 2 GB. To check on it:
+## Step 2: Create your account
 
-```bash
-docker compose -f docker-compose.yml ps
-```
-
-HomeHub is ready when `backend` and `frontend` both show as running.
-
-## Step 4: Create your account
-
-1. Find your Pi's address with `hostname -I`.
-2. On a phone or computer on the same network, open `http://<your-pi-address>:4200`.
-3. HomeHub asks you to create the admin account. Choose a username and a password of at least 8 characters.
+1. On a phone or computer on the same network, open **http://homehub.local:4200**. If that doesn't open, use the address the installer showed, such as `http://192.168.1.50:4200`. To find it again, run `hostname -I` on the Pi.
+2. HomeHub asks you to create the admin account. Choose a username and a password of at least 8 characters.
 
 Do this straight away: until an account exists, anyone on your network who opens HomeHub can create it.
 
-## Step 5: Set your home's location
+## Step 3: Set your home's location
 
 After you create the account, HomeHub opens **Settings → Home**. Choose your time zone and enter your home's latitude and longitude. To find them, right-click your home in Google Maps and select the numbers at the top. Sunrise and sunset schedules use the location, and clock-time schedules use the time zone.
 
@@ -81,20 +73,44 @@ Next, follow the [User Guide](./USER_GUIDE.md) to add your devices.
 A few things are set in a `.env` file next to `docker-compose.yml`, such as Wyze cameras or a smaller AI model. To make one:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/playground/homehub/main/.env.example -o .env
+curl -fsSL https://raw.githubusercontent.com/foodisready/homehub/main/.env.example -o .env
 nano .env
 ```
 
-Every setting is optional, and the file explains each one. Press `Ctrl+O`, `Enter`, then `Ctrl+X` to save, then run the start command again.
+Every setting is optional, and the file explains each one. Press `Ctrl+O`, `Enter`, then `Ctrl+X` to save. Then run `docker compose -f docker-compose.yml up -d` in the `homehub` folder.
 
 - **Wyze cameras:** set `COMPOSE_PROFILES=cameras`. Then sign in to Wyze in HomeHub under **Cameras**, as the [User Guide](./USER_GUIDE.md#cameras) explains.
-- **A Pi with 4 GB of memory:** set `OLLAMA_MODEL=llama3.2:1b`.
+- **A different AI model:** set `OLLAMA_MODEL`. The installer already sets `llama3.2:1b` on a Pi with 4 GB of memory.
+- **Another name than homehub.local,** for example with two HomeHubs on one network: set `HOMEHUB_LOCAL_NAME=cabin` for `http://cabin.local:4200`, or `off`.
 
 Keep `.env` private if you put passwords or secrets in it.
 
-## Step 6: Reserve your Pi's address
+## Step 4: Reserve your Pi's address
 
 In your router's settings, reserve the Pi's current IP address. This keeps the address from changing, which would break your bookmarks and any motion sensors reporting to it.
+
+## Step 5 (optional): Use HomeHub away from home
+
+[Tailscale](https://tailscale.com) gives your phone a private connection to HomeHub from anywhere, without opening your router to the internet. It's free for home use.
+
+1. [Create a Tailscale account](https://login.tailscale.com/start), and install the Tailscale app on your phone.
+2. On the Pi, install Tailscale and sign in. The second command shows a link: open it on your phone or computer and sign in with the same account.
+
+   ```bash
+   curl -fsSL https://tailscale.com/install.sh | sh
+   sudo tailscale up --hostname=homehub
+   ```
+
+3. Give HomeHub a secure web address:
+
+   ```bash
+   sudo tailscale serve --bg 4200
+   ```
+
+   The first time, it may show a link to turn on HTTPS for your account. Open it and approve. If the command stops, run it again.
+4. In the [Tailscale admin console](https://login.tailscale.com/admin/machines), open the Pi's **⋯** menu and choose **Disable key expiry**, so the Pi stays signed in.
+
+With Tailscale on, your phone opens HomeHub at `https://homehub.<your-tailnet>.ts.net`. `tailscale serve status` shows the exact address. To let other people in your home use it, invite them to your tailnet; each person also needs their own HomeHub account. See [Remote Access](./REMOTE_ACCESS.md) for other options.
 
 ## After a restart or power cut
 
@@ -115,17 +131,15 @@ Run these from the `homehub` folder.
 
 ## Update HomeHub
 
-Back up first, then run this from the `homehub` folder:
+Back up first, then run the installer again:
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/playground/homehub/main/docker-compose.yml
-docker compose -f docker-compose.yml pull
-docker compose -f docker-compose.yml up -d
+curl -fsSL https://raw.githubusercontent.com/foodisready/homehub/main/scripts/install.sh | sh
 ```
 
-Docker downloads only the images that changed, and restarts only those services. Your data stays in Docker's `homehub_homehub-data` volume.
+It downloads only the images that changed and restarts only those services. Your data stays in Docker's `homehub_homehub-data` volume, and your `.env` file stays as it is.
 
-If you installed with `git clone`, run `git pull` instead of the `curl` line. To build HomeHub from source, for example to try your own changes, run `docker compose -f docker-compose.yml up -d --build` from the cloned folder. It takes 30–60 minutes on a Raspberry Pi 4.
+If you installed with `git clone`, run `git pull` instead, then `docker compose -f docker-compose.yml pull` and `docker compose -f docker-compose.yml up -d`. To build HomeHub from source, for example to try your own changes, run `docker compose -f docker-compose.yml up -d --build` from the cloned folder. It takes 30–60 minutes on a Raspberry Pi 4.
 
 ### Publishing images
 
@@ -160,6 +174,7 @@ HomeHub uses these ports, so make sure nothing else on the computer does:
 |---|---|
 | 4200 | The HomeHub website |
 | 3000 | Backend, and motion sensor reports |
+| 5353 (UDP) | The homehub.local name, shared with the Pi's own `.local` name |
 | 3001 | AI assistant connection (MCP) |
 | 3002 | Scheduler |
 | 8080 | Self-update helper |
@@ -174,7 +189,9 @@ Don't forward these ports through your router. For access away from home, use [R
 
 **`Cannot start — required environment variables are missing`:** HomeHub couldn't save its secrets in its data volume. Check the backend logs, and that the disk isn't full.
 
-**`permission denied` when running Docker:** log out and back in after Step 1.
+**`permission denied` when running Docker:** log out and back in after installing, so your user can run Docker without `sudo`.
+
+**homehub.local doesn't open:** some phones, especially Android ones, and some networks don't support `.local` names. Use the Pi's IP address instead, and bookmark it.
 
 **The website doesn't load:** run the status command. If `backend` isn't running, check its logs. It waits for the AI model service, so give it a few more minutes on the first start.
 

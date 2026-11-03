@@ -18,31 +18,18 @@ To install HomeHub at home, follow [INSTALL.md](./INSTALL.md) instead. This page
 
 ## Quick Start (Raspberry Pi)
 
-1. **Clone the repo**
+1. **Install**
    ```bash
-   git clone <repo-url> homehub
-   cd homehub
+   curl -fsSL https://raw.githubusercontent.com/foodisready/homehub/main/scripts/install.sh | sh
    ```
+   This installs Docker if needed, puts `docker-compose.yml` in `~/homehub`, pulls the published images and starts them. Running it again updates HomeHub. The [install guide](./INSTALL.md) has the same steps done by hand.
 
-2. **Settings (optional)**
-   No `.env` is needed. On first start the backend generates its secrets in the data volume (`/data/secrets`), the first browser visit creates the admin account, and the location and time zone are set in **Settings → Home**. To change a default, such as `COMPOSE_PROFILES` or `TS_AUTHKEY`, copy `.env.example` to `.env`; values set there win over generated ones.
+2. **Open HomeHub**
+   On the home network, open `http://homehub.local:4200` (or `http://<pi-ip>:4200`) and create the admin account. Then set the location and time zone in **Settings → Home**.
 
-3. **Download and start all services**
-   ```bash
-   docker compose -f docker-compose.yml pull
-   docker compose -f docker-compose.yml up -d
-   ```
-   To build from source instead, use `up -d --build`.
-   Name the file explicitly: a plain `docker compose up` also applies `docker-compose.override.yml`, which runs the development builds.
+No `.env` is needed. On first start the backend generates its secrets in the data volume (`/data/secrets`). To change a default, such as `COMPOSE_PROFILES` or `TS_AUTHKEY`, copy `.env.example` to `~/homehub/.env`; values set there win over generated ones.
 
-   First startup will take several minutes — Ollama needs to pull the LLM model.
-
-   Then open `http://<host>:4200` and create the admin account.
-
-4. **Open the dashboard**
-
-   From your home network: `http://<pi-ip>:4200`
-   Log in with `admin` and the password you set in `.env`.
+To run from a clone instead, use `docker compose -f docker-compose.yml up -d --build`. Name the file explicitly: a plain `docker compose up` also applies `docker-compose.override.yml`, which runs the development builds.
 
 ---
 
