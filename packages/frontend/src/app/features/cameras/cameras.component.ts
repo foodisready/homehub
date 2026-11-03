@@ -31,6 +31,11 @@ const PAGE = 48;
     h2 { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); margin: 1.75rem 0 0.75rem; }
     .card { padding: 1rem; }
     .muted { color: var(--text-muted); font-size: 0.85rem; line-height: 1.5; }
+    .cmd {
+      margin:0.6rem 0; padding:0.6rem 0.75rem; overflow-x:auto; white-space:pre;
+      font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:0.8rem;
+      background:var(--bg); border:1px solid var(--border); border-radius:var(--radius);
+    }
     .msg { font-size: 0.82rem; margin-top: 0.5rem; }
     .msg.err { color: var(--red); }
     .msg.ok { color: var(--green); }
@@ -104,10 +109,12 @@ const PAGE = 48;
               @case ('not-configured') {
                 <strong>Camera bridge isn't set up</strong>
                 <p class="muted" style="margin-top:0.4rem">
-                  HomeHub talks to Wyze cameras through the camera bridge. In HomeHub's <code>.env</code>, set
-                  <code>COMPOSE_PROFILES=cameras</code> and <code>WYZE_BRIDGE_API_KEY</code> to a random value, then restart HomeHub.
-                  The User Guide's Cameras section has the steps.
+                  HomeHub talks to Wyze cameras through the camera bridge, which is off until you turn it on.
+                  On the computer running HomeHub, run these in the <code>homehub</code> folder:
                 </p>
+                <pre class="cmd">echo COMPOSE_PROFILES=cameras &gt;&gt; .env
+docker compose -f docker-compose.yml up -d</pre>
+                <p class="muted">Then come back here to sign in to Wyze. The User Guide's Cameras section has more detail.</p>
               }
               @case ('unreachable') {
                 <strong>HomeHub can't reach the camera bridge</strong>
@@ -115,7 +122,7 @@ const PAGE = 48;
               }
               @case ('unauthorized') {
                 <strong>The camera bridge rejected HomeHub's key</strong>
-                <p class="muted" style="margin-top:0.4rem"><code>WYZE_BRIDGE_API_KEY</code> must match in HomeHub and the bridge. Restart both after changing it.</p>
+                <p class="muted" style="margin-top:0.4rem">HomeHub and the bridge normally share a key HomeHub makes itself. If you set <code>WYZE_BRIDGE_API_KEY</code> in <code>.env</code>, remove it or make sure both use the same value, then run <code>docker compose -f docker-compose.yml up -d</code>.</p>
               }
               @case ('signed-out') {
                 <strong>Sign in to Wyze</strong>
