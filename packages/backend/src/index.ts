@@ -38,6 +38,7 @@ import { notificationSettingsRouter } from './routes/notification-settings';
 import { notificationHistoryRouter } from './routes/notification-history';
 import { systemRouter } from './routes/system';
 import { backupsRouter } from './routes/backups';
+import { startLocalName } from './discovery/local-name';
 import { camerasRouter } from './routes/cameras';
 import { startCameraWatch } from './cameras/watch';
 import { activityMiddleware, startActivityPruning } from './activity/activity';
@@ -132,6 +133,7 @@ httpServer.listen(PORT, async () => {
   startMotionRules();        // turn lights off when a room has been empty long enough
   startCameraWatch();        // save snapshots when Wyze cameras see motion
   startActivityPruning();    // delete activity older than the keep setting
+  startLocalName();          // answer for homehub.local on the home network
 
   // Daily DB backup: run once at startup, then every 24 hours
   runBackup();

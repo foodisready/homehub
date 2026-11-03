@@ -69,6 +69,9 @@ services:
       - WATCHTOWER_HTTP_API_TOKEN=${WATCHTOWER_HTTP_API_TOKEN:-}
       # Tells the backend whether the camera bridge is part of this install.
       - COMPOSE_PROFILES=${COMPOSE_PROFILES:-}
+      # The name HomeHub answers to on the home network: http://homehub.local:4200.
+      # Set HOMEHUB_LOCAL_NAME in .env to change it, or to `off`.
+      - HOMEHUB_LOCAL_NAME=${HOMEHUB_LOCAL_NAME:-homehub}
     labels:
       # Tell Watchtower this container is eligible for auto-recreation
       # when /api/system/update fires. Mirrors the WATCHTOWER_LABEL_ENABLE
