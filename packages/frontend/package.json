@@ -7,7 +7,7 @@
     "build": "ng build --configuration production",
     "test": "ng test"
   },
-  "license": "SEE LICENSE IN LICENSE.md",
+  "license": "AGPL-3.0-only",
   "dependencies": {
     "@angular/animations": "^21.0.0",
     "@angular/common": "^21.0.0",

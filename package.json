@@ -10,7 +10,7 @@
     "clean": "pnpm -r exec rm -rf dist node_modules"
   },
   "keywords": ["smart-home", "kasa", "mcp", "homehub"],
-  "license": "SEE LICENSE IN LICENSE.md",
+  "license": "AGPL-3.0-only",
   "engines": {
     "node": ">=24.0.0",
     "pnpm": ">=9.0.0"

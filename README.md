@@ -27,8 +27,11 @@ HomeHub is a free smart home hub that runs on your own hardware, such as a Raspb
 
 ## License
 
-HomeHub is licensed under the [Functional Source License, Version 1.1, ALv2 Future License](LICENSE.md) (FSL-1.1-ALv2).
+Copyright © 2026 foodisready.
 
-- You may use, copy and change HomeHub for any purpose except a competing use: offering it, or something substantially similar, to others as a commercial product or service.
-- Running it in your own home or business, learning from it, and changing it for yourself are all allowed.
-- Each version becomes available under the Apache License 2.0 two years after it's released.
+HomeHub is free software, licensed under the [GNU Affero General Public License, version 3](LICENSE) (AGPL-3.0-only).
+
+- You can use HomeHub for any purpose, including at home or in a business, and change it however you like.
+- If you share a changed version, or let other people use a changed version over a network, you must make your source code available to them under the same licence.
+
+If HomeHub is useful to you, please consider a donation to support its development.

@@ -9,7 +9,7 @@
     "dev": "tsx watch src/index.ts",
     "test": "node --test dist/**/*.test.js"
   },
-  "license": "SEE LICENSE IN LICENSE.md",
+  "license": "AGPL-3.0-only",
   "type": "commonjs",
   "dependencies": {
     "better-sqlite3": "^12.11.1",
