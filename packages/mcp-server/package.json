@@ -11,7 +11,7 @@
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": ["mcp", "homehub"],
-  "license": "ISC",
+  "license": "SEE LICENSE IN LICENSE.md",
   "type": "commonjs",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.25.2",

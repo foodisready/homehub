@@ -10,7 +10,7 @@
     "clean": "pnpm -r exec rm -rf dist node_modules"
   },
   "keywords": ["smart-home", "kasa", "mcp", "homehub"],
-  "license": "ISC",
+  "license": "SEE LICENSE IN LICENSE.md",
   "engines": {
     "node": ">=24.0.0",
     "pnpm": ">=9.0.0"

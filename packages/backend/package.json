@@ -11,7 +11,7 @@
     "reset-password": "tsx scripts/reset-password.ts",
     "db:status": "node -e \"const DB=require('better-sqlite3');const db=new DB('./data/db.sqlite');const now=new Date();console.log('\\n=== Devices ===');db.prepare('SELECT alias,turned_on_at,override_until FROM devices ORDER BY alias').all().forEach(r=>{const onAt=r.turned_on_at?new Date(r.turned_on_at.replace(' ','T')+'Z'):null;const elapsed=onAt?((now-onAt)/60000).toFixed(1)+' min':'-';console.log(r.alias.padEnd(22),'on_since:',elapsed.padEnd(12),'override_until:',r.override_until??'-')});console.log('\\n=== Schedules ===');db.prepare(\\\"SELECT label,trigger_type,cron_expression,duration_minutes,enabled FROM schedules ORDER BY label\\\").all().forEach(r=>console.log(r.label.padEnd(22),r.trigger_type.padEnd(10),r.cron_expression??(''+r.duration_minutes+'min'),'enabled:',r.enabled===1?'yes':'no'));db.close();\""
   },
-  "license": "ISC",
+  "license": "SEE LICENSE IN LICENSE.md",
   "type": "commonjs",
   "dependencies": {
     "@types/nodemailer": "^8.0.0",

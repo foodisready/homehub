@@ -27,4 +27,8 @@ HomeHub is a free smart home hub that runs on your own hardware, such as a Raspb
 
 ## License
 
-ISC
+HomeHub is licensed under the [Functional Source License, Version 1.1, ALv2 Future License](LICENSE.md) (FSL-1.1-ALv2).
+
+- You may use, copy and change HomeHub for any purpose except a competing use: offering it, or something substantially similar, to others as a commercial product or service.
+- Running it in your own home or business, learning from it, and changing it for yourself are all allowed.
+- Each version becomes available under the Apache License 2.0 two years after it's released.
