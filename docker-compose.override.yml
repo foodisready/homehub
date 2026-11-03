@@ -6,12 +6,15 @@ name: homehub
 services:
 
   frontend:
+    # Local dev builds get their own name, so they never replace published images.
+    image: homehub-frontend-dev
     build:
       target: production   # stays as nginx placeholder until Phase 4
     ports:
       - "4200:80"
 
   backend:
+    image: homehub-backend-dev
     build:
       target: dev
     volumes:
@@ -22,6 +25,7 @@ services:
     # network_mode: host is inherited from docker-compose.yml
 
   mcp-server:
+    image: homehub-mcp-server-dev
     build:
       target: dev
     volumes:
@@ -30,6 +34,7 @@ services:
       - NODE_ENV=development
 
   scheduler:
+    image: homehub-scheduler-dev
     build:
       target: dev
     volumes:

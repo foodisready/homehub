@@ -36,10 +36,12 @@ To install HomeHub at home, follow [INSTALL.md](./INSTALL.md) instead. This page
    - `TIMEZONE` / `TZ` — your time zone, for example `America/New_York` (fixed-time schedules run in UTC without `TZ`)
    - `TS_AUTHKEY` — your Tailscale auth key (or leave blank if using Headscale)
 
-3. **Build and start all services**
+3. **Download and start all services**
    ```bash
-   docker compose -f docker-compose.yml up -d --build
+   docker compose -f docker-compose.yml pull
+   docker compose -f docker-compose.yml up -d
    ```
+   To build from source instead, use `up -d --build`.
    Name the file explicitly: a plain `docker compose up` also applies `docker-compose.override.yml`, which runs the development builds.
 
    First startup will take several minutes — Ollama needs to pull the LLM model.

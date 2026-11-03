@@ -1,9 +1,14 @@
 name: homehub
 
+# HomeHub's own images are published to Docker Hub for 64-bit ARM (Raspberry Pi).
+# `docker compose -f docker-compose.yml pull` downloads them; `up -d --build`
+# builds them from this source instead. scripts/release-images.sh publishes.
+
 services:
 
   # ── Angular frontend served by Nginx ──────────────────────────
   frontend:
+    image: ${HOMEHUB_IMAGE_PREFIX:-superfuturefunk}/homehub-frontend:${HOMEHUB_TAG:-latest}
     build:
       context: ./packages/frontend
       dockerfile: Dockerfile
@@ -35,6 +40,7 @@ services:
   # other services on localhost through their published ports, and they
   # reach it on host.docker.internal.
   backend:
+    image: ${HOMEHUB_IMAGE_PREFIX:-superfuturefunk}/homehub-backend:${HOMEHUB_TAG:-latest}
     build:
       context: ./packages/backend
       dockerfile: Dockerfile
@@ -81,6 +87,7 @@ services:
 
   # ── MCP server (AI agent bridge) ──────────────────────────────
   mcp-server:
+    image: ${HOMEHUB_IMAGE_PREFIX:-superfuturefunk}/homehub-mcp-server:${HOMEHUB_TAG:-latest}
     build:
       context: ./packages/mcp-server
       dockerfile: Dockerfile
@@ -110,6 +117,7 @@ services:
 
   # ── Automation scheduler (cron + solar) ───────────────────────
   scheduler:
+    image: ${HOMEHUB_IMAGE_PREFIX:-superfuturefunk}/homehub-scheduler:${HOMEHUB_TAG:-latest}
     build:
       context: ./packages/scheduler
       dockerfile: Dockerfile

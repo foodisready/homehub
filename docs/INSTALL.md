@@ -36,7 +36,7 @@ Other install options are in [Docker's documentation](https://docs.docker.com/en
 
 ## Step 2: Download HomeHub
 
-HomeHub doesn't publish ready-made Docker images yet. You download the source code, and Docker builds the images on your Pi in Step 4.
+HomeHub's ready-made images are on Docker Hub. You still download the source code, because it holds the settings template and the file that tells Docker how to run everything.
 
 ```bash
 sudo apt-get install -y git
@@ -78,12 +78,13 @@ Keep `.env` private, because it holds your passwords and secrets.
 ## Step 4: Start HomeHub
 
 ```bash
-docker compose -f docker-compose.yml up -d --build
+docker compose -f docker-compose.yml pull
+docker compose -f docker-compose.yml up -d
 ```
 
-Use this exact command. A plain `docker compose up` runs the development version instead.
+Use these exact commands. A plain `docker compose up` runs the development version instead.
 
-The first start can take a long time, because it builds HomeHub and downloads an AI model. To check on it:
+The first start can take a while, because it downloads HomeHub and an AI model of about 2 GB. To check on it:
 
 ```bash
 docker compose -f docker-compose.yml ps
@@ -130,8 +131,21 @@ Back up first, then run:
 
 ```bash
 git pull
-docker compose -f docker-compose.yml up -d --build
+docker compose -f docker-compose.yml pull
+docker compose -f docker-compose.yml up -d
 ```
+
+To build HomeHub on the Pi from source instead, for example to try your own changes, run `docker compose -f docker-compose.yml up -d --build`. It takes 30–60 minutes on a Raspberry Pi 4.
+
+### Publishing images
+
+HomeHub's maintainer publishes new images from a computer with Docker signed in to Docker Hub:
+
+```bash
+scripts/release-images.sh
+```
+
+It builds the four HomeHub images for 64-bit ARM from committed code and pushes them tagged `latest` and with the commit. To publish under another Docker Hub account, set `HOMEHUB_IMAGE_PREFIX` to that account's name, both when publishing and in the Pi's `.env`.
 
 ## Back up your data
 
