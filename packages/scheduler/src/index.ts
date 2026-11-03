@@ -6,6 +6,7 @@ import Database from 'better-sqlite3';
 import cron from 'node-cron';
 import pino from 'pino';
 import { SchedulerService } from './scheduler.service';
+import { readSecret } from './secrets';
 
 const logger = pino(
   process.env.NODE_ENV === 'production'
@@ -15,7 +16,7 @@ const logger = pino(
 
 const DB_PATH      = process.env.DB_PATH      || path.resolve(process.cwd(), '../backend/data/db.sqlite');
 const PORT         = process.env.SCHEDULER_PORT || 3002;
-const INTERNAL_KEY = process.env.INTERNAL_API_KEY || '';
+const INTERNAL_KEY = readSecret('INTERNAL_API_KEY');
 
 // Open DB in read-write (scheduler may read; backend does all writes)
 const db        = new Database(DB_PATH);
@@ -33,7 +34,7 @@ app.get('/health', (_req, res) => {
 
 // Called by backend after any schedule change
 app.post('/reload', (req, res) => {
-  if (req.headers['x-internal-key'] !== INTERNAL_KEY) {
+  if (!INTERNAL_KEY || req.headers['x-internal-key'] !== INTERNAL_KEY) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
   scheduler.load();

@@ -36,6 +36,22 @@ export class AuthService {
     );
   }
 
+  /** True until HomeHub has its first admin account. */
+  setupNeeded(): Observable<boolean> {
+    return this.http.get<{ needed: boolean }>(`${API}/auth/setup`).pipe(map((r) => r.needed));
+  }
+
+  /** Create the first admin account, then sign in as it. */
+  setup(username: string, password: string): Observable<AuthUser> {
+    return this.http.post<LoginResponse>(`${API}/auth/setup`, { username, password }).pipe(
+      tap((res) => {
+        this._token.set(res.accessToken);
+        this._user.set(res.user);
+      }),
+      map((res) => res.user),
+    );
+  }
+
   logout(): void {
     this.http.post(`${API}/auth/logout`, {}).subscribe();
     this._token.set(null);

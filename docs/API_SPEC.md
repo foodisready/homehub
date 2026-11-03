@@ -57,6 +57,35 @@ Clears refresh token cookie.
 
 ---
 
+### `GET /api/auth/setup`
+Public. Whether HomeHub still needs its first admin account.
+
+**Response 200**
+```json
+{ "needed": true }
+```
+
+---
+
+### `POST /api/auth/setup`
+Public, and works only while there are no users. Creates the first admin and signs them in, like `/login`.
+
+**Body**
+```json
+{ "username": "admin", "password": "at-least-8-characters" }
+```
+
+**Response 201** — same as `/login`. **400** for a missing username or a password under 8 characters. **409** `ALREADY_SET_UP` once any user exists.
+
+With `ADMIN_PASSWORD` set in the environment, the backend creates that admin on first start instead, so setup is never needed.
+
+---
+
+### `POST /internal/service-token`
+Requires `X-Internal-Key`. Returns `{ accessToken }` for the first admin account; the MCP server signs in with it. **503** `NOT_SET_UP` before any admin exists.
+
+---
+
 ## Devices
 
 Any signed-in user can list devices, switch them, and set or cancel timers. Adding, editing, deleting, probing and discovering devices is `admin` only.
@@ -440,34 +469,39 @@ Cannot delete your own account.
 
 ---
 
-## Settings — `admin` only
+## Home settings
 
-### `GET /api/settings`
+The home's location and time zone. Saved in the `settings` table (`home_latitude`, `home_longitude`, `home_timezone`); until then, `LATITUDE`, `LONGITUDE` and `TIMEZONE` or `TZ` from the environment apply. `.env.example`'s San Francisco location and a `TZ` of `UTC` count as unset.
+
+### `GET /api/home-settings`
+Any signed-in user.
+
 **Response 200**
 ```json
 {
-  "latitude": 37.7749,
-  "longitude": -122.4194,
-  "timezone": "America/Los_Angeles",
-  "ollamaModel": "llama3.2:3b",
-  "energyRatePerKwh": 0.15,
-  "pollingIntervalSeconds": 30
+  "latitude": 40.7128,
+  "longitude": -74.006,
+  "timezone": "America/New_York",
+  "located": true,
+  "source": { "location": "settings", "timezone": "settings" },
+  "today": { "sunrise": "2026-11-02T11:28:00.000Z", "sunset": "2026-11-02T21:53:00.000Z" }
 }
 ```
+`latitude` and `longitude` are `null`, and `today` is `null`, until a location is known. `source` is `settings`, `env`, or `none` / `default`.
 
 ---
 
-### `PATCH /api/settings`
-**Body** (all fields optional)
+### `PUT /api/home-settings` — `admin` only
+**Body** (each part optional; latitude and longitude go together)
 ```json
-{
-  "latitude": 37.7749,
-  "longitude": -122.4194,
-  "timezone": "America/Los_Angeles",
-  "energyRatePerKwh": 0.18
-}
+{ "latitude": 40.7128, "longitude": -74.006, "timezone": "America/New_York" }
 ```
-**Response 200** — updated settings object
+**Response 200** — the settings, as for `GET`. **400** for a latitude outside -90 to 90, a longitude outside -180 to 180, or an unknown IANA time zone. The backend switches its own time zone straight away and tells the scheduler to reload.
+
+---
+
+### `GET /api/home-settings/mcp` — `admin` only
+**Response 200** — `{ "secret": "<MCP_SECRET>", "port": 3001 }`, for connecting an AI app.
 
 ---
 

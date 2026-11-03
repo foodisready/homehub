@@ -2,9 +2,11 @@
  * backend.service.ts
  *
  * HTTP client for calling the HomeHub backend REST API.
- * Authenticates with admin credentials on first use and re-authenticates
- * automatically on 401 (token expiry).
+ * Signs in with HomeHub's internal key (no admin password needed) and
+ * re-authenticates automatically on 401 (token expiry).
  */
+
+import { readSecret } from './secrets';
 
 let token: string | null = null;
 
@@ -13,13 +15,9 @@ function baseUrl(): string {
 }
 
 async function login(): Promise<void> {
-  const res = await fetch(`${baseUrl()}/api/auth/login`, {
+  const res = await fetch(`${baseUrl()}/internal/service-token`, {
     method:  'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify({
-      username: process.env.ADMIN_USER     ?? 'admin',
-      password: process.env.ADMIN_PASSWORD ?? '',
-    }),
+    headers: { 'Content-Type': 'application/json', 'X-Internal-Key': readSecret('INTERNAL_API_KEY') },
   });
 
   if (!res.ok) {

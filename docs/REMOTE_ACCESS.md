@@ -221,7 +221,7 @@ For easy access, they can add it to their phone home screen:
 ## Security Notes
 
 - JWT auth is always enforced — Tailscale provides encrypted transport, but HomeHub requires login regardless. This is defense in depth.
-- `MCP_SECRET` should be a strong random value (`openssl rand -base64 32`). Anyone with the MCP secret can control all plugs.
+- HomeHub generates a strong `MCP_SECRET` unless you set one in `.env`. Anyone with the MCP secret can control all plugs.
 - The Tailscale sidecar uses Docker `cap_add: NET_ADMIN, SYS_MODULE` — required for WireGuard tunnel creation.
 - Never expose port 3000 (backend) or 3002 (scheduler) to the tailnet directly — all external access should go through Nginx on port 4200.
 - Periodically rotate `TS_AUTHKEY` and `JWT_SECRET` for production deployments.

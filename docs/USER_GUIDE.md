@@ -96,7 +96,7 @@ HomeHub can show Wyze cameras live, pause them while you're home, and save a sna
 ### Turn on the camera bridge
 
 1. Create an API key at the [Wyze developer console](https://developer-api-console.wyze.com/), signed in with your Wyze account. Keep the key and its ID handy.
-2. In HomeHub's `.env`, set `COMPOSE_PROFILES=cameras` and `WYZE_BRIDGE_API_KEY` to a random value. Create one with `openssl rand -hex 24`.
+2. In HomeHub's `.env`, set `COMPOSE_PROFILES=cameras`. If you don't have a `.env` yet, the [install guide](./INSTALL.md#optional-settings-file) shows how to make one. HomeHub and the bridge share a key that HomeHub generates.
 3. Restart HomeHub: `docker compose -f docker-compose.yml up -d`.
 4. Open **Cameras** (under **More** on a phone), and sign in with your Wyze email, password, API key ID and API key. HomeHub passes these to the bridge and doesn't keep them.
 5. Select **Add** next to each camera, or **Add all**. Then give each one a room in **Settings → Devices**.
@@ -246,6 +246,21 @@ The new HomeHub then has the old one's users and passwords, so sign in with your
 
 HomeHub also makes a full copy of its database once a day and keeps the last 7. Those include history, and you restore them from the command line.
 
+## Home location and time zone
+
+Open **Settings → Home** to choose your time zone and enter your home's latitude and longitude. HomeHub opens it for you after you create your account.
+
+- **Time zone:** clock-time schedules, timers and every time HomeHub shows use it. **Use** sets it to the time zone of the phone or computer you're using.
+- **Location:** sunrise and sunset schedules use it. In Google Maps, right-click your home and select the numbers at the top, then paste both into the first box. On an `https` address, such as through Tailscale, **Use this device's location** fills them in.
+
+After you save, the page shows today's sunrise and sunset, so you can check they look right. Schedules change straight away, without a restart.
+
+## AI assistant
+
+An AI app such as Claude Desktop can see and switch your devices through HomeHub's MCP server. In **Settings → Integrations → AI assistant (MCP)**, select **Show secret** and give the app the address and secret shown. See [Connecting an AI assistant](./mcp-connection.md) for the app's settings.
+
+Anyone with the secret can control every device, so share it only with apps you trust.
+
 ## Household members
 
 Open **Settings → Users** to add people. Everyone can switch devices and set timers. Only administrators can add, edit or remove devices, or change settings.
@@ -274,10 +289,10 @@ Voice control is experimental and isn't included in the install. The test setup 
 
 **A motion rule says it's waiting for the first report:** select **Connect sensor** and wait for "Sensor connected", then wave at it. It ignores new motion for a short time after each report.
 
-**The Cameras page says the bridge isn't set up or can't be reached:** check `COMPOSE_PROFILES=cameras` and `WYZE_BRIDGE_API_KEY` in `.env`, then restart HomeHub. The bridge can take a minute to start.
+**The Cameras page says the bridge isn't set up or can't be reached:** check `COMPOSE_PROFILES=cameras` in `.env`, then restart HomeHub. The bridge can take a minute to start.
 
 **A camera shows no picture:** it may be paused, offline or still connecting. Wyze cameras connect to the bridge a little while after it starts.
 
-**A schedule runs at the wrong time:** check that `TZ` in `.env` matches your time zone. Sun schedules also need the right `LATITUDE` and `LONGITUDE`. Restart HomeHub after changing them.
+**A schedule runs at the wrong time:** check the time zone in **Settings → Home**. Sunrise and sunset schedules also need your home's location there. **Settings → Home** shows today's sunrise and sunset, so you can check them.
 
 **Chat doesn't understand a command:** use a device's full name, or add a nickname. Commands that need the AI model can be slow on a Pi.

@@ -36,53 +36,23 @@ Other install options are in [Docker's documentation](https://docs.docker.com/en
 
 ## Step 2: Download HomeHub
 
-HomeHub's ready-made images are on Docker Hub. You still download the source code, because it holds the settings template and the file that tells Docker how to run everything.
+HomeHub's ready-made images are on Docker Hub, so you only need the file that tells Docker how to run them:
 
 ```bash
-sudo apt-get install -y git
-git clone https://github.com/playground/homehub.git
-cd homehub
+mkdir homehub && cd homehub
+curl -fsSLO https://raw.githubusercontent.com/playground/homehub/main/docker-compose.yml
 ```
 
-## Step 3: Add your settings
+You don't need a settings file. HomeHub makes its own secrets the first time it starts, and you set everything else in the browser.
 
-Copy the settings template:
-
-```bash
-cp .env.example .env
-```
-
-Run this command five times, and save each result for the first five settings below:
-
-```bash
-openssl rand -hex 32
-```
-
-Open the file with `nano .env` and change these settings:
-
-| Setting | What to enter |
-|---|---|
-| `JWT_SECRET` | The first generated value |
-| `JWT_REFRESH_SECRET` | The second generated value |
-| `INTERNAL_API_KEY` | The third generated value |
-| `MCP_SECRET` | The fourth generated value |
-| `WATCHTOWER_HTTP_API_TOKEN` | The fifth generated value. HomeHub won't start without it. |
-| `ADMIN_PASSWORD` | The password you'll use to sign in |
-| `LATITUDE`, `LONGITUDE` | Your home's location, used for sunrise and sunset schedules |
-| `TIMEZONE`, `TZ` | Your time zone, such as `America/New_York` |
-
-Put quotes around a password that contains `#` or spaces. Press `Ctrl+O`, `Enter`, then `Ctrl+X` to save and exit.
-
-Keep `.env` private, because it holds your passwords and secrets.
-
-## Step 4: Start HomeHub
+## Step 3: Start HomeHub
 
 ```bash
 docker compose -f docker-compose.yml pull
 docker compose -f docker-compose.yml up -d
 ```
 
-Use these exact commands. A plain `docker compose up` runs the development version instead.
+Use these exact commands, with `-f docker-compose.yml`.
 
 The first start can take a while, because it downloads HomeHub and an AI model of about 2 GB. To check on it:
 
@@ -92,17 +62,35 @@ docker compose -f docker-compose.yml ps
 
 HomeHub is ready when `backend` and `frontend` both show as running.
 
-### Optional: Wyze cameras
-
-To use Wyze cameras, set `COMPOSE_PROFILES=cameras` and `WYZE_BRIDGE_API_KEY` in `.env` before starting, as the [User Guide](./USER_GUIDE.md#cameras) explains. To add them later, set those and run the start command again.
-
-## Step 5: Sign in
+## Step 4: Create your account
 
 1. Find your Pi's address with `hostname -I`.
 2. On a phone or computer on the same network, open `http://<your-pi-address>:4200`.
-3. Sign in with the username `admin` and your `ADMIN_PASSWORD`.
+3. HomeHub asks you to create the admin account. Choose a username and a password of at least 8 characters.
+
+Do this straight away: until an account exists, anyone on your network who opens HomeHub can create it.
+
+## Step 5: Set your home's location
+
+After you create the account, HomeHub opens **Settings → Home**. Choose your time zone and enter your home's latitude and longitude. To find them, right-click your home in Google Maps and select the numbers at the top. Sunrise and sunset schedules use the location, and clock-time schedules use the time zone.
 
 Next, follow the [User Guide](./USER_GUIDE.md) to add your devices.
+
+### Optional: settings file
+
+A few things are set in a `.env` file next to `docker-compose.yml`, such as Wyze cameras or a smaller AI model. To make one:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/playground/homehub/main/.env.example -o .env
+nano .env
+```
+
+Every setting is optional, and the file explains each one. Press `Ctrl+O`, `Enter`, then `Ctrl+X` to save, then run the start command again.
+
+- **Wyze cameras:** set `COMPOSE_PROFILES=cameras`. Then sign in to Wyze in HomeHub under **Cameras**, as the [User Guide](./USER_GUIDE.md#cameras) explains.
+- **A Pi with 4 GB of memory:** set `OLLAMA_MODEL=llama3.2:1b`.
+
+Keep `.env` private if you put passwords or secrets in it.
 
 ## Step 6: Reserve your Pi's address
 
@@ -127,15 +115,17 @@ Run these from the `homehub` folder.
 
 ## Update HomeHub
 
-Back up first, then run:
+Back up first, then run this from the `homehub` folder:
 
 ```bash
-git pull
+curl -fsSLO https://raw.githubusercontent.com/playground/homehub/main/docker-compose.yml
 docker compose -f docker-compose.yml pull
 docker compose -f docker-compose.yml up -d
 ```
 
-To build HomeHub on the Pi from source instead, for example to try your own changes, run `docker compose -f docker-compose.yml up -d --build`. It takes 30–60 minutes on a Raspberry Pi 4.
+Docker downloads only the images that changed, and restarts only those services. Your data stays in Docker's `homehub_homehub-data` volume.
+
+If you installed with `git clone`, run `git pull` instead of the `curl` line. To build HomeHub from source, for example to try your own changes, run `docker compose -f docker-compose.yml up -d --build` from the cloned folder. It takes 30–60 minutes on a Raspberry Pi 4.
 
 ### Publishing images
 
@@ -180,9 +170,9 @@ Don't forward these ports through your router. For access away from home, use [R
 
 ## Problems during install
 
-**`WATCHTOWER_HTTP_API_TOKEN must be set in .env`:** add a value for it in `.env`, as in Step 3.
+**HomeHub asks you to sign in, but you never made an account:** someone else on your network created it first. On a new install, start again with `docker compose -f docker-compose.yml down -v`, then the start command. `-v` deletes all of HomeHub's data, so don't use it once you've set HomeHub up.
 
-**`Cannot start — required environment variables are missing`:** check the backend logs. A setting from Step 3 is missing or still has its placeholder value.
+**`Cannot start — required environment variables are missing`:** HomeHub couldn't save its secrets in its data volume. Check the backend logs, and that the disk isn't full.
 
 **`permission denied` when running Docker:** log out and back in after Step 1.
 

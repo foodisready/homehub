@@ -4,6 +4,9 @@ import {
   issueTokens,
   verifyRefreshToken,
   findUserById,
+  needsSetup,
+  createFirstAdmin,
+  SetupError,
 } from '../auth/auth.service';
 import { startLoginAttempt } from '../auth/login-limiter';
 import { logger } from '../logger';
@@ -54,6 +57,31 @@ authRouter.post('/login', async (req: Request, res: Response) => {
     accessToken,
     user: { id: user.id, name: user.name, role: user.role },
   });
+});
+
+// GET /api/auth/setup — whether HomeHub still needs its first admin account
+authRouter.get('/setup', (_req: Request, res: Response) => {
+  res.json({ needed: needsSetup() });
+});
+
+// POST /api/auth/setup — create the first admin, then sign them in. Works only while there are no users.
+authRouter.post('/setup', async (req: Request, res: Response) => {
+  const { username, password } = req.body as { username?: unknown; password?: unknown };
+  if (typeof username !== 'string' || typeof password !== 'string') {
+    return res.status(400).json({ error: 'username and password are required', code: 'VALIDATION_ERROR' });
+  }
+  try {
+    const user = await createFirstAdmin(username, password);
+    const { accessToken, refreshToken } = issueTokens(user);
+    res.cookie(REFRESH_COOKIE, refreshToken, COOKIE_OPTS);
+    logger.info({ userId: user.id, name: user.name, address: req.socket.remoteAddress }, 'First admin created');
+    res.status(201).json({ accessToken, user: { id: user.id, name: user.name, role: user.role } });
+  } catch (err) {
+    if (err instanceof SetupError) {
+      return res.status(err.status).json({ error: err.message, code: err.status === 409 ? 'ALREADY_SET_UP' : 'VALIDATION_ERROR' });
+    }
+    throw err;
+  }
 });
 
 // POST /api/auth/refresh

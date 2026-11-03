@@ -3,6 +3,12 @@ import path from 'path';
 // Repo root .env is two levels up from packages/backend/
 dotenv.config({ path: path.resolve(process.cwd(), '../../.env') });
 
+// Secrets not set in .env come from files HomeHub makes in its data volume.
+// Before any other import: auth reads the JWT secrets when it loads.
+import { loadSecrets } from './secrets';
+const { created: createdSecrets } = loadSecrets();
+if (createdSecrets.length) console.info(`[homehub] Generated ${createdSecrets.join(', ')} in the data volume`);
+
 import { validateEnv } from './env';
 validateEnv();   // crash early with a clear message if config is incomplete
 
@@ -44,6 +50,8 @@ import { startPolling } from './kasa/device.cache';
 import { startPowerTimers } from './devices/power';
 import { startMotionRules } from './sensors/motion';
 import { seedAdminIfEmpty } from './auth/auth.service';
+import { applyHomeTimezone } from './home/home-settings';
+import { homeSettingsRouter } from './routes/home-settings';
 import { initSocket } from './socket';
 
 const app = express();
@@ -103,6 +111,7 @@ app.use('/api/system',                 systemRouter);
 app.use('/api/backups',                requireAdmin, backupsRouter);
 app.use('/api/cameras',                camerasRouter);
 app.use('/api/activity',               activityRouter);
+app.use('/api/home-settings',          homeSettingsRouter);
 
 // ── Global error handler ───────────────────────────────────────
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
@@ -116,7 +125,8 @@ const PORT = process.env.PORT || 3000;
 httpServer.listen(PORT, async () => {
   logger.info({ port: PORT }, 'HomeHub backend started');
   getDb();                   // init DB + run migrations
-  await seedAdminIfEmpty();  // create default admin if DB is empty
+  applyHomeTimezone();       // the time zone chosen in Settings, if any
+  await seedAdminIfEmpty();  // admin from ADMIN_PASSWORD, or wait for setup in the browser
   startPolling();            // begin device state polling
   startPowerTimers();        // turn devices off when their timers end
   startMotionRules();        // turn lights off when a room has been empty long enough

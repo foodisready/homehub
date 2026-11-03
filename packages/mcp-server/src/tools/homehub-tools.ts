@@ -212,12 +212,15 @@ export function registerHomeHubTools(server: McpServer): void {
     },
     async ({ date }) => {
       try {
-        const lat = parseFloat(process.env.LATITUDE  ?? '37.7749');
-        const lon = parseFloat(process.env.LONGITUDE ?? '-122.4194');
+        // The home's location and time zone, as set in HomeHub's Settings → Home.
+        const home = await apiRequest<{ latitude: number | null; longitude: number | null; timezone: string }>('GET', '/api/home-settings');
+        if (home.latitude === null || home.longitude === null) {
+          return ok('The home location is not set yet. An admin can set it in HomeHub under Settings → Home.');
+        }
         const d   = date ? new Date(date) : new Date();
-        const t   = SunCalc.getTimes(d, lat, lon);
+        const t   = SunCalc.getTimes(d, home.latitude, home.longitude);
 
-        const fmt = (dt: Date) => dt.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', timeZone: process.env.TIMEZONE ?? 'America/Los_Angeles' });
+        const fmt = (dt: Date) => dt.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', timeZone: home.timezone });
 
         const lines = [
           `Solar times for ${d.toDateString()}:`,

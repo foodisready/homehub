@@ -24,7 +24,7 @@ Add the following to your `claude_desktop_config.json`
 ```
 
 Replace `<RASPBERRY_PI_IP>` with your Pi's LAN IP (e.g. `192.168.1.100`)
-and `<YOUR_MCP_SECRET>` with the value of `MCP_SECRET` from your `.env` file.
+and `<YOUR_MCP_SECRET>` with the secret shown in HomeHub under **Settings → Integrations → AI assistant (MCP)** (select **Show secret**). HomeHub generates it on first start; setting `MCP_SECRET` in `.env` replaces it.
 
 ---
 
@@ -65,8 +65,7 @@ Once Tailscale is running (Phase 9), replace the IP with your Pi's Tailscale add
 
 ## Security notes
 
-- `MCP_SECRET` is required in production. If unset, auth is disabled (dev only).
-- The MCP server calls the backend using admin credentials (`ADMIN_USER` / `ADMIN_PASSWORD`).
-  Keep these credentials in your `.env` file and never commit it.
+- The MCP secret is always set in production: HomeHub generates one in its data volume if `.env` has none. Outside Docker with no secret anywhere, auth is off (dev only).
+- The MCP server signs in to the backend with HomeHub's internal key, as the first admin account. Its changes show in Activity as the AI assistant's. It needs no admin password.
 - In the Docker deployment the MCP server is only reachable from inside the home network
   (or over Tailscale) — it is not exposed to the public internet.

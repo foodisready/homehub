@@ -15,6 +15,7 @@ import { runPowerCommand } from '../nlp/commands';
 import { recordVoiceCommand } from '../nlp/command-log';
 import { listDeviceNames, listSceneNames } from '../nlp/find-device';
 import { withActivity } from '../activity/activity';
+import { issueTokens, serviceUser } from '../auth/auth.service';
 
 export const internalRouter = Router();
 
@@ -29,6 +30,18 @@ function stripIpv6Mapped(ip?: string): string | null {
   const m = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(ip);
   return m ? m[1] : ip;
 }
+
+// POST /internal/service-token
+// The MCP server's sign-in: it holds the internal key rather than an admin password.
+// It acts as the first admin; Activity still shows its changes as the AI assistant's.
+internalRouter.post('/service-token', (_req: Request, res: Response) => {
+  const user = serviceUser();
+  if (!user) {
+    res.status(503).json({ error: 'HomeHub has no admin account yet. Create one in the browser first.', code: 'NOT_SET_UP' });
+    return;
+  }
+  res.json({ accessToken: issueTokens(user).accessToken });
+});
 
 // GET /internal/voice/device-names
 // Lets the voice bridge tell speech recognition which names to expect.

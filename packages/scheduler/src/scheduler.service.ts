@@ -2,6 +2,11 @@ import cron from 'node-cron';
 import Database from 'better-sqlite3';
 import pino from 'pino';
 import { getSolarEventTime, type SolarEvent } from './solar';
+import { readSecret } from './secrets';
+
+function isTimezone(tz: string): boolean {
+  try { new Intl.DateTimeFormat('en-US', { timeZone: tz }); return true; } catch { return false; }
+}
 
 const logger = pino(
   process.env.NODE_ENV === 'production'
@@ -27,26 +32,54 @@ export class SchedulerService {
   private solarTimers   = new Map<number, NodeJS.Timeout>();
   private autoOffTimers = new Map<number, NodeJS.Timeout>();
 
-  private readonly lat: number;
-  private readonly lon: number;
+  private lat = 37.7749;
+  private lon = -122.4194;
   private readonly backendUrl: string;
   private readonly internalKey: string;
   private db: Database.Database;
 
   constructor(db: Database.Database) {
     this.db          = db;
-    this.lat         = parseFloat(process.env.LATITUDE  || '37.7749');
-    this.lon         = parseFloat(process.env.LONGITUDE || '-122.4194');
     this.backendUrl  = process.env.BACKEND_URL   || 'http://backend:3000';
-    this.internalKey = process.env.INTERNAL_API_KEY || '';
+    this.internalKey = readSecret('INTERNAL_API_KEY');
+    // Remember .env's TZ, so it stays the fallback after this process changes TZ.
+    this.envTz       = process.env.TZ ?? '';
+  }
+
+  private readonly envTz: string;
+
+  /**
+   * Location and time zone from Settings → Home (the settings table), else
+   * .env. Read on every load, so a change in Settings applies on the next
+   * reload, which the backend triggers when they're saved.
+   */
+  applyHomeSettings(): void {
+    let rows: { key: string; value: string }[] = [];
+    try {
+      rows = this.db.prepare("SELECT key, value FROM settings WHERE key IN ('home_latitude', 'home_longitude', 'home_timezone')")
+        .all() as { key: string; value: string }[];
+    } catch (err) {
+      logger.warn({ err }, 'Could not read home settings; using .env');
+    }
+    const saved = new Map(rows.map((r) => [r.key, r.value]));
+    const num = (v: string | undefined) => (v === undefined || v.trim() === '' ? NaN : Number(v));
+
+    let lat = num(saved.get('home_latitude')), lon = num(saved.get('home_longitude'));
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) { lat = num(process.env.LATITUDE); lon = num(process.env.LONGITUDE); }
+    if (Number.isFinite(lat) && Number.isFinite(lon)) { this.lat = lat; this.lon = lon; }
+
+    const tz = saved.get('home_timezone') || process.env.TIMEZONE || this.envTz;
+    if (tz && isTimezone(tz)) process.env.TZ = tz;   // Node applies a TZ change straight away
+
     if (this.lat === 37.7749 && this.lon === -122.4194) {
-      logger.warn('LATITUDE and LONGITUDE are the San Francisco example values, so solar schedules will run at the wrong time');
+      logger.warn('No home location set (Settings → Home), so solar schedules use San Francisco times');
     }
   }
 
   /** Load all enabled schedules from DB and register their jobs. */
   load(): void {
     this.clearAll();
+    this.applyHomeSettings();
 
     const rows = this.db.prepare(
       "SELECT * FROM schedules WHERE enabled = 1"

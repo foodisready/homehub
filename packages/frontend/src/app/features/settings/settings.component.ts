@@ -1,4 +1,5 @@
-import { Component, OnInit, signal, computed, OnDestroy, viewChild } from '@angular/core';
+import { Component, OnInit, signal, computed, OnDestroy, viewChild, inject } from '@angular/core';
+import { ActivatedRoute } from '@angular/router';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
 import { AuthService } from '../../core/auth/auth.service';
@@ -9,6 +10,8 @@ import { Device } from '../../shared/models/device.model';
 import { BackupsComponent } from './backups.component';
 import { MerossLoginComponent } from './meross-login.component';
 import { OtherNetworksComponent } from './other-networks.component';
+import { HomeSettingsComponent } from './home-settings.component';
+import { AiConnectionComponent } from './ai-connection.component';
 
 interface ChatStats {
   total: number;
@@ -60,7 +63,7 @@ const DRIVER_LABEL: Record<string, string> = {
 @Component({
   selector: 'app-settings',
   standalone: true,
-  imports: [FormsModule, DeviceFilterComponent, BackupsComponent, MerossLoginComponent, OtherNetworksComponent],
+  imports: [FormsModule, DeviceFilterComponent, BackupsComponent, MerossLoginComponent, OtherNetworksComponent, HomeSettingsComponent, AiConnectionComponent],
   styles: [`
     .topbar { display:flex; align-items:center; justify-content:space-between; margin-bottom:1.5rem; }
     .topbar h1 { font-size:1.4rem; font-weight:700; }
@@ -488,6 +491,20 @@ const DRIVER_LABEL: Record<string, string> = {
         }
       </div>
 
+      <!-- ── Home location and time zone (admin only) ─────────── -->
+      @if (isAdmin()) {
+        <div class="section">
+          <button type="button" class="section-title section-toggle" (click)="toggleSection('home')" [attr.aria-expanded]="isSectionOpen('home')">
+            <span class="chev">{{ isSectionOpen('home') ? '▾' : '▸' }}</span> Home
+          </button>
+          @if (isSectionOpen('home')) {
+            <div class="card">
+              <app-home-settings [welcome]="welcome()" />
+            </div>
+          }
+        </div>
+      }
+
       <!-- ── Integrations (admin only) ────────────────────────── -->
       @if (isAdmin()) {
         <div class="section">
@@ -641,6 +658,16 @@ const DRIVER_LABEL: Record<string, string> = {
                     }
                   </div>
                 </div>
+              }
+              <div class="pref-row" style="cursor:pointer" (click)="aiExpanded.set(!aiExpanded())">
+                <div class="pref-label">
+                  AI assistant (MCP)
+                  <div class="pref-sub">Connect an AI app such as Claude Desktop</div>
+                </div>
+                <span class="chev">{{ aiExpanded() ? '▾' : '▸' }}</span>
+              </div>
+              @if (aiExpanded()) {
+                <app-ai-connection />
               }
             </div>
           }
@@ -867,6 +894,11 @@ export class SettingsComponent implements OnInit, OnDestroy {
     try { localStorage.setItem(SettingsComponent.GROUPS_KEY, JSON.stringify(this.groupState())); } catch { /* private window */ }
   }
 
+  /** Arrived from creating the first admin account (/settings?welcome=1). */
+  readonly welcome = signal(false);
+  readonly aiExpanded = signal(false);
+  private readonly route = inject(ActivatedRoute);
+
   isSectionOpen(key: string): boolean {
     return this.openSections()[key] ?? key === 'devices';
   }
@@ -1040,6 +1072,10 @@ export class SettingsComponent implements OnInit, OnDestroy {
   }
 
   ngOnInit(): void {
+    if (this.route.snapshot.queryParamMap.get('welcome')) {
+      this.welcome.set(true);
+      this.toggleSection('home', true);
+    }
     this.stopWatchingDevices = this.socket.onDeviceState((event) => {
       this._devices.update((list) => list.map((d) => d.id === event.id ? { ...d, state: event.state } : d));
     });

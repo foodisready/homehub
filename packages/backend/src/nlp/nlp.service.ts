@@ -1,4 +1,5 @@
 import SunCalc from 'suncalc';
+import { solarLocation } from '../home/home-settings';
 import { getDb } from '../db';
 import { getCachedState } from '../kasa/device.cache';
 import { getDriver } from '../drivers/registry';
@@ -253,8 +254,7 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
     }
 
     case 'get_sunrise_sunset': {
-      const lat = parseFloat(process.env.LATITUDE  ?? '37.7749');
-      const lon = parseFloat(process.env.LONGITUDE ?? '-122.4194');
+      const { lat, lon } = solarLocation();
       const d   = args.date ? new Date(String(args.date)) : new Date();
       const t   = SunCalc.getTimes(d, lat, lon);
       return {

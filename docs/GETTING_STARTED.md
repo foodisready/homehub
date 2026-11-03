@@ -24,17 +24,8 @@ To install HomeHub at home, follow [INSTALL.md](./INSTALL.md) instead. This page
    cd homehub
    ```
 
-2. **Configure environment**
-   ```bash
-   cp .env.example .env
-   ```
-   Edit `.env` — at minimum set:
-   - `JWT_SECRET`, `JWT_REFRESH_SECRET` and `INTERNAL_API_KEY` — generate each with `openssl rand -base64 32`
-   - `WATCHTOWER_HTTP_API_TOKEN` — generate with `openssl rand -hex 32`
-   - `ADMIN_PASSWORD` — your initial admin password
-   - `LATITUDE` / `LONGITUDE` — your home coordinates (for solar scheduling)
-   - `TIMEZONE` / `TZ` — your time zone, for example `America/New_York` (fixed-time schedules run in UTC without `TZ`)
-   - `TS_AUTHKEY` — your Tailscale auth key (or leave blank if using Headscale)
+2. **Settings (optional)**
+   No `.env` is needed. On first start the backend generates its secrets in the data volume (`/data/secrets`), the first browser visit creates the admin account, and the location and time zone are set in **Settings → Home**. To change a default, such as `COMPOSE_PROFILES` or `TS_AUTHKEY`, copy `.env.example` to `.env`; values set there win over generated ones.
 
 3. **Download and start all services**
    ```bash
@@ -45,6 +36,8 @@ To install HomeHub at home, follow [INSTALL.md](./INSTALL.md) instead. This page
    Name the file explicitly: a plain `docker compose up` also applies `docker-compose.override.yml`, which runs the development builds.
 
    First startup will take several minutes — Ollama needs to pull the LLM model.
+
+   Then open `http://<host>:4200` and create the admin account.
 
 4. **Open the dashboard**
 

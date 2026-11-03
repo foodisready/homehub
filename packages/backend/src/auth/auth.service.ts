@@ -88,15 +88,53 @@ export function verifyRefreshToken(token: string): TokenPayload {
   return jwt.verify(token, JWT_REFRESH_SECRET) as unknown as TokenPayload;
 }
 
-// ── Admin seed ─────────────────────────────────────────────────
+// ── Admin seed and first-run setup ─────────────────────────────
 
+/**
+ * With ADMIN_PASSWORD set (and not the .env.example placeholder), create that
+ * admin on first start, as before. Without it, HomeHub waits for someone to
+ * create the admin account in the browser (createFirstAdmin).
+ */
 export async function seedAdminIfEmpty(): Promise<void> {
   if (userCount() > 0) return;
 
-  const name     = process.env.ADMIN_USER     || 'admin';
-  const password = process.env.ADMIN_PASSWORD || 'changeme';
+  const password = process.env.ADMIN_PASSWORD;
+  if (!password || password.startsWith('change-me')) {
+    console.warn('[homehub] No users yet. Open HomeHub in a browser to create the admin account.');
+    return;
+  }
+  const name = process.env.ADMIN_USER || 'admin';
   await createUser(name, password, 'admin');
+  // Only log the name — never the password
+  console.warn(`[homehub] Created admin user "${name}" from ADMIN_PASSWORD.`);
+}
 
-  // Only log a warning — never log the actual password
-  console.warn(`[homehub] Created default admin user "${name}". Change the password immediately.`);
+export const needsSetup = (): boolean => userCount() === 0;
+
+export class SetupError extends Error {
+  constructor(message: string, readonly status: number) { super(message); }
+}
+
+let settingUp = false;
+
+/** Create the first admin. Refused once any user exists, so it works exactly once. */
+export async function createFirstAdmin(name: string, password: string): Promise<UserRow> {
+  const trimmed = name.trim();
+  if (!trimmed || trimmed.length > 32) throw new SetupError('Enter a username of up to 32 characters', 400);
+  if (password.length < 8) throw new SetupError('Use a password of at least 8 characters', 400);
+  // bcrypt is async, so guard against two first visitors racing past the check.
+  if (settingUp || !needsSetup()) throw new SetupError('HomeHub is already set up. Sign in instead.', 409);
+  settingUp = true;
+  try {
+    const user = await createUser(trimmed, password, 'admin');
+    console.warn(`[homehub] Created admin user "${trimmed}" in the browser.`);
+    return user;
+  } finally {
+    settingUp = false;
+  }
+}
+
+/** The account the MCP server acts as: the first admin. */
+export function serviceUser(): UserRow | undefined {
+  return getDb().prepare("SELECT * FROM users WHERE role = 'admin' ORDER BY id LIMIT 1").get() as UserRow | undefined;
 }
