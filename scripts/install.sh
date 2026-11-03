@@ -20,7 +20,7 @@ fail() { printf '\n\033[31m%s\033[0m\n' "$*" >&2; exit 1; }
 [ "$(uname -s)" = Linux ] || fail "HomeHub installs on Linux, such as Raspberry Pi OS. See docs/INSTALL.md."
 case "$(uname -m)" in
   aarch64|arm64) ;;
-  x86_64|amd64) echo "Note: HomeHub's ready-made images are built for Raspberry Pi (64-bit ARM). On this PC, build them instead: see docs/INSTALL.md." ;;
+  x86_64|amd64) ;;
   *) fail "HomeHub needs a 64-bit operating system. This one is $(uname -m). On a Raspberry Pi, install Raspberry Pi OS (64-bit)." ;;
 esac
 command -v curl >/dev/null || fail "curl is missing. Install it with: sudo apt install curl"

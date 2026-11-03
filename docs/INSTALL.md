@@ -143,13 +143,17 @@ If you installed with `git clone`, run `git pull` instead, then `docker compose 
 
 ### Publishing images
 
-HomeHub's maintainer publishes new images from a computer with Docker signed in to Docker Hub:
+HomeHub's images are on GitHub's registry, `ghcr.io/foodisready/homehub-*`, for Raspberry Pi and for PCs. Anyone can download them without an account.
+
+To publish a release, push a version tag:
 
 ```bash
-scripts/release-images.sh
+git tag v1.2.0 && git push origin v1.2.0
 ```
 
-It builds the four HomeHub images for 64-bit ARM from committed code and pushes them tagged `latest` and with the commit. To publish under another Docker Hub account, set `HOMEHUB_IMAGE_PREFIX` to that account's name, both when publishing and in the Pi's `.env`.
+GitHub Actions builds the four images, publishes them tagged with the version, the commit and `latest`, then creates the GitHub Release. HomeHub's **Update** card offers a new version once its Release exists, so the images are always ready first. To try a build on a Pi without releasing it, run **Release images** by hand in the repo's **Actions** tab, then set `HOMEHUB_TAG` to the commit, such as `1d04500`, in the Pi's `.env`.
+
+`scripts/release-images.sh` builds and pushes from your own computer instead, after `docker login ghcr.io`. To publish under another account, set `HOMEHUB_IMAGE_PREFIX`, such as `ghcr.io/yourname`, both when publishing and in the Pi's `.env`.
 
 ## Back up your data
 

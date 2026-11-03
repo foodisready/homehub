@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
-# Build HomeHub's four images and push them to Docker Hub.
+# Build HomeHub's four images on this computer and push them to ghcr.io.
+# Releases normally come from GitHub Actions (.github/workflows/release-images.yml)
+# when a version tag is pushed; this script is the fallback.
 #
 #   scripts/release-images.sh            # 64-bit ARM (Raspberry Pi), tagged latest + commit
 #   PLATFORMS=linux/arm64,linux/amd64 scripts/release-images.sh   # also Intel/AMD PCs
 #
-# Sign in first with `docker login`. Images are built from committed code
+# Sign in first with `docker login ghcr.io` (a GitHub token with
+# write:packages as the password). Images are built from committed code
 # only: the script refuses to run with uncommitted changes, so a published
 # image always matches a commit on GitHub. Secrets never enter an image:
 # each package's .dockerignore excludes .env* and data/.
@@ -12,7 +15,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-PREFIX="${HOMEHUB_IMAGE_PREFIX:-superfuturefunk}"
+PREFIX="${HOMEHUB_IMAGE_PREFIX:-ghcr.io/foodisready}"
 PLATFORMS="${PLATFORMS:-linux/arm64}"
 SERVICES=(backend frontend scheduler mcp-server)
 
@@ -47,4 +50,4 @@ done
 
 echo
 echo "Published $COMMIT. On the Pi, from the homehub folder:"
-echo "  git pull && docker compose -f docker-compose.yml pull && docker compose -f docker-compose.yml up -d"
+echo "  docker compose -f docker-compose.yml pull && docker compose -f docker-compose.yml up -d"
