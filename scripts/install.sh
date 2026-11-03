@@ -71,7 +71,14 @@ if [ "${MEM_KB:-0}" -lt 6000000 ] && ! grep -qs '^OLLAMA_MODEL=.' .env; then
 fi
 
 if [ -n "$FRESH" ]; then say "Downloading HomeHub. This can take 10 minutes or more."; else say "Downloading what's new"; fi
-$DOCKER compose -f docker-compose.yml pull
+# A slow or dropped connection shouldn't end the install, so try a few times.
+n=1
+until $DOCKER compose -f docker-compose.yml pull; do
+  [ $n -ge 3 ] && fail "Couldn't download HomeHub. Check the internet connection, then run the installer again."
+  n=$((n + 1))
+  echo "Download interrupted. Trying again ($n of 3)…"
+  sleep 10
+done
 $DOCKER compose -f docker-compose.yml up -d --remove-orphans
 
 say "Waiting for HomeHub to start"
