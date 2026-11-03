@@ -35,7 +35,7 @@ HomeHub is free, and always will be. If it's useful to you, you can support its 
 
 - Donations are voluntary, final, and not tax-deductible. They don't buy a product, service or features. Everyone gets the same HomeHub.
 - They pay for development time and the smart devices HomeHub is tested with.
-- Donations are received by Super Future Funk LLC, which is the name on your card statement.
+- Your card statement shows **HOMEHUB DONATION**. Donations are received by Super Future Funk LLC.
 - If you were charged by mistake, charged twice, or charged the wrong amount, [open an issue](https://github.com/foodisready/homehub/issues) within 30 days and we'll refund it.
 
 ## Contact
