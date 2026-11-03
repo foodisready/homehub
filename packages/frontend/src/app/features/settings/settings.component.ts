@@ -832,7 +832,8 @@ const DRIVER_LABEL: Record<string, string> = {
               <span style="font-size:0.85rem;color:var(--text-muted)">$/kWh</span>
             </div>
 
-            @if (isAdmin()) {
+            <!-- For developers: shown on a development copy, or to resume one that's paused. -->
+            @if (isAdmin() && (appVersion() === 'dev' || automations.paused())) {
               <div class="pref-row">
                 <div class="pref-label">
                   Pause automations

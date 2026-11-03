@@ -260,7 +260,7 @@ HomeHub also makes a full copy of its database once a day and keeps the last 7. 
 
 ## Pause automations
 
-If you run a second HomeHub against the same devices, for example a development copy on your computer, pause automations on it so the two don't undo each other. Open **Settings → Preferences** and select **Pause automations** (administrators only).
+This is for developers. If you run a development copy of HomeHub against the same devices as your main one, pause automations on it so the two don't undo each other. On the development copy, open **Settings → Preferences** and select **Pause automations** (administrators only). The option doesn't appear on HomeHubs installed from a release, unless one is already paused.
 
 While paused, that HomeHub runs no schedules, motion rules, "Turn off after" timers, camera motion snapshots or automatic water shutoff. You can still switch devices by hand, use Chat and run scenes. A banner on every page says it's paused, with a **Resume** button. Timers that ran out while paused end without switching anything.
 
