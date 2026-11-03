@@ -28,7 +28,9 @@ const WATCHTOWER_HTTP_TOKEN = process.env.WATCHTOWER_HTTP_API_TOKEN ?? '';
 const RELEASES_URL = process.env.HOMEHUB_RELEASES_URL
   ?? 'https://api.github.com/repos/foodisready/homehub/releases/latest';
 
-const CACHE_TTL_MS = 60 * 60 * 1000;   // 1 hour — see `latest` cache below
+// 10 minutes: a new release shows soon after it's published, and 6 checks an hour
+// stay well inside GitHub's 60 an hour for unauthenticated requests.
+const CACHE_TTL_MS = 10 * 60 * 1000;
 
 /* Cache the GitHub Releases lookup so the UI's per-minute poll doesn't
  * burn through the 60/hour unauthenticated rate limit. We hold the
