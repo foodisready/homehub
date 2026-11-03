@@ -42,7 +42,8 @@ export interface BridgeCamera {
 }
 
 export type BridgeState =
-  | { state: 'not-configured' }          // no API key in .env
+  | { state: 'not-configured' }          // the bridge is left out (HOMEHUB_CAMERA_BRIDGE=0)
+  | { state: 'off' }                      // cameras turned off in Settings
   | { state: 'unreachable'; detail: string }
   | { state: 'signed-out' }               // bridge is up but has no Wyze login
   | { state: 'unauthorized' }             // API key doesn't match WB_API

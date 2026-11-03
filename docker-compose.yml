@@ -63,12 +63,12 @@ services:
       # networking so it reaches Watchtower via the localhost-bound
       # port mapping (8080) rather than service-name DNS.
       - WATCHTOWER_URL=http://localhost:8080
-      # Wyze camera bridge, on its localhost-bound ports (profile: cameras)
+      # Wyze camera bridge, on its localhost-bound ports
       - WYZE_BRIDGE_URL=http://localhost:5050
       - WYZE_BRIDGE_HLS_URL=http://localhost:8888
       - WATCHTOWER_HTTP_API_TOKEN=${WATCHTOWER_HTTP_API_TOKEN:-}
       # Tells the backend whether the camera bridge is part of this install.
-      - COMPOSE_PROFILES=${COMPOSE_PROFILES:-}
+      - HOMEHUB_CAMERA_BRIDGE=${HOMEHUB_CAMERA_BRIDGE:-1}
       # The name HomeHub answers to on the home network: http://homehub.local:4200.
       # Set HOMEHUB_LOCAL_NAME in .env to change it, or to `off`.
       - HOMEHUB_LOCAL_NAME=${HOMEHUB_LOCAL_NAME:-homehub}
@@ -223,7 +223,7 @@ services:
     networks:
       - homehub-net
 
-  # ── Wyze camera bridge (optional: COMPOSE_PROFILES=cameras) ──
+  # ── Wyze camera bridge ─────────────────────────────────────────
   # Connects to Wyze cameras with your Wyze account and serves their
   # video locally. HomeHub signs it in, relays live video, pauses
   # cameras and saves motion snapshots through it.
@@ -233,8 +233,11 @@ services:
   # exposed to the network. Port 5050 avoids macOS's AirPlay on 5000.
   wyze-bridge:
     image: mrlt8/wyze-bridge:2.10.3
-    profiles:
-      - cameras
+    # Runs with HomeHub, idle until someone signs in to Wyze on the Cameras
+    # page (about 90 MB of memory). HOMEHUB_CAMERA_BRIDGE=0 in .env leaves it
+    # out; Settings can also turn cameras off without removing it.
+    deploy:
+      replicas: ${HOMEHUB_CAMERA_BRIDGE:-1}
     ports:
       - "127.0.0.1:5050:5000"   # API and sign-in
       - "127.0.0.1:8888:8888"   # HLS live video

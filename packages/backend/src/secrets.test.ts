@@ -10,7 +10,7 @@ import fs from 'node:fs';
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'homehub-secrets-test-'));
 const DIR = path.join(TMP, 'secrets');
-const KEYS = ['JWT_SECRET', 'JWT_REFRESH_SECRET', 'INTERNAL_API_KEY', 'MCP_SECRET', 'WATCHTOWER_HTTP_API_TOKEN', 'WYZE_BRIDGE_API_KEY', 'COMPOSE_PROFILES'];
+const KEYS = ['JWT_SECRET', 'JWT_REFRESH_SECRET', 'INTERNAL_API_KEY', 'MCP_SECRET', 'WATCHTOWER_HTTP_API_TOKEN', 'WYZE_BRIDGE_API_KEY', 'HOMEHUB_CAMERA_BRIDGE'];
 
 let secrets: typeof import('./secrets');
 const saved: Record<string, string | undefined> = {};
@@ -55,13 +55,20 @@ describe('generated secrets', () => {
     assert.match(process.env.INTERNAL_API_KEY ?? '', /^[0-9a-f]{64}$/);
   });
 
-  it('makes the camera key but uses it only with the cameras profile', () => {
+  it('uses the camera key unless .env leaves the bridge out', () => {
     secrets.loadSecrets();
-    assert.equal(process.env.WYZE_BRIDGE_API_KEY, undefined);
     const key = fs.readFileSync(path.join(DIR, 'WYZE_BRIDGE_API_KEY'), 'utf8').trim();
     assert.match(key, /^[0-9a-f]{64}$/);
+    assert.equal(process.env.WYZE_BRIDGE_API_KEY, key, 'on by default');
 
-    process.env.COMPOSE_PROFILES = 'remote-access, cameras';
+    for (const off of ['0', 'off', 'false']) {
+      process.env.HOMEHUB_CAMERA_BRIDGE = off;
+      delete process.env.WYZE_BRIDGE_API_KEY;
+      secrets.loadSecrets();
+      assert.equal(process.env.WYZE_BRIDGE_API_KEY, undefined, off);
+      assert.ok(fs.existsSync(path.join(DIR, 'WYZE_BRIDGE_API_KEY')), 'the key stays, for adding the bridge back');
+    }
+    process.env.HOMEHUB_CAMERA_BRIDGE = '1';
     secrets.loadSecrets();
     assert.equal(process.env.WYZE_BRIDGE_API_KEY, key);
   });

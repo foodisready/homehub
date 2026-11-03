@@ -3,11 +3,12 @@ import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
 import { AuthService } from '../../core/auth/auth.service';
 import { SocketService } from '../../core/socket/socket.service';
+import { CamerasStateService } from '../../core/services/cameras-state.service';
 import { AuthImgComponent } from './auth-img.component';
 import { LiveViewComponent } from './live-view.component';
 
 type BridgeState =
-  | { state: 'not-configured' } | { state: 'unreachable'; detail: string } | { state: 'signed-out' }
+  | { state: 'not-configured' } | { state: 'off' } | { state: 'unreachable'; detail: string } | { state: 'signed-out' }
   | { state: 'unauthorized' } | { state: 'ready'; cameras: number };
 
 interface Snapshot { id: number; deviceId: number | null; camera: string; cameraName: string; trigger: 'motion' | 'manual'; sizeBytes: number; takenAt: string }
@@ -17,7 +18,7 @@ interface Camera {
   lastMotionAt: string | null; latestSnapshot: Snapshot | null;
 }
 interface AccountCamera { cam: string; name: string; model: string | null; ip: string | null; mac: string | null; streaming: boolean; added: boolean }
-interface Settings { motionSnapshots: boolean; notify: boolean; keepDays: number; cooldownSeconds: number }
+interface Settings { enabled: boolean; motionSnapshots: boolean; notify: boolean; keepDays: number; cooldownSeconds: number }
 
 const PAGE = 48;
 
@@ -31,6 +32,7 @@ const PAGE = 48;
     h2 { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); margin: 1.75rem 0 0.75rem; }
     .card { padding: 1rem; }
     .muted { color: var(--text-muted); font-size: 0.85rem; line-height: 1.5; }
+    .link { background:none; border:none; padding:0; color:var(--accent, #60a5fa); font:inherit; cursor:pointer; text-decoration:underline; }
     .cmd {
       margin:0.6rem 0; padding:0.6rem 0.75rem; overflow-x:auto; white-space:pre;
       font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:0.8rem;
@@ -106,15 +108,22 @@ const PAGE = 48;
         @if (b.state !== 'ready') {
           <div class="card">
             @switch (b.state) {
+              @case ('off') {
+                <strong>Cameras are off</strong>
+                <p class="muted" style="margin-top:0.4rem">They're hidden from the menu, and HomeHub isn't watching for motion.</p>
+                @if (isAdmin()) {
+                  <button class="btn-sm btn-primary" type="button" style="margin-top:0.6rem" (click)="turnOn()" [disabled]="busy()">Turn on cameras</button>
+                } @else {
+                  <p class="muted">An administrator can turn them on in Settings → Integrations.</p>
+                }
+              }
               @case ('not-configured') {
-                <strong>Camera bridge isn't set up</strong>
+                <strong>The camera bridge is left out of this HomeHub</strong>
                 <p class="muted" style="margin-top:0.4rem">
-                  HomeHub talks to Wyze cameras through the camera bridge, which is off until you turn it on.
-                  On the computer running HomeHub, run these in the <code>homehub</code> folder:
+                  HomeHub talks to Wyze cameras through the camera bridge. To add it, remove
+                  <code>HOMEHUB_CAMERA_BRIDGE=0</code> from HomeHub's <code>.env</code>, then run this in the <code>homehub</code> folder:
                 </p>
-                <pre class="cmd">echo COMPOSE_PROFILES=cameras &gt;&gt; .env
-docker compose -f docker-compose.yml up -d</pre>
-                <p class="muted">Then come back here to sign in to Wyze. The User Guide's Cameras section has more detail.</p>
+                <pre class="cmd">docker compose -f docker-compose.yml up -d</pre>
               }
               @case ('unreachable') {
                 <strong>HomeHub can't reach the camera bridge</strong>
@@ -144,6 +153,10 @@ docker compose -f docker-compose.yml up -d</pre>
                       </button>
                     </div>
                   </div>
+                  <p class="muted" style="margin-top:0.75rem">
+                    No Wyze cameras? <button class="link" type="button" (click)="turnOff()" [disabled]="busy()">Turn cameras off</button>
+                    to hide this page from the menu. You can turn them back on in Settings → Integrations.
+                  </p>
                 } @else {
                   <p class="muted" style="margin-top:0.4rem">Ask an administrator to sign in to Wyze.</p>
                 }
@@ -267,6 +280,10 @@ docker compose -f docker-compose.yml up -d</pre>
             <span class="label">Wait between snapshots<small>From the same camera, so one visit doesn't fill the folder</small></span>
             <input type="number" min="5" max="3600" [value]="st.cooldownSeconds" (change)="saveSettings({ cooldownSeconds: +$any($event.target).value })" aria-label="Seconds between snapshots" /> sec
           </div>
+          <div class="settings-row">
+            <span class="label">Cameras in HomeHub<small>Turn off to hide Cameras from the menu and stop watching for motion</small></span>
+            <button class="btn-sm ghost" type="button" (click)="turnOff()" [disabled]="busy()">Turn off</button>
+          </div>
           @if (settingsMsg()) { <p class="msg" [class.err]="settingsErr()" [class.ok]="!settingsErr()">{{ settingsMsg() }}</p> }
         </div>
       }
@@ -298,6 +315,7 @@ export class CamerasComponent implements OnInit, OnDestroy {
   private readonly http = inject(HttpClient);
   private readonly auth = inject(AuthService);
   private readonly socket = inject(SocketService);
+  private readonly cams = inject(CamerasStateService);
 
   readonly isAdmin = computed(() => this.auth.user()?.role === 'admin');
   readonly bridge = signal<BridgeState | null>(null);
@@ -416,6 +434,24 @@ export class CamerasComponent implements OnInit, OnDestroy {
         this.refresh();
       },
       error: (err: HttpErrorResponse) => { this.busy.set(false); this.show(err.error?.error ?? 'Wyze sign-in failed.', true); },
+    });
+  }
+
+  turnOff(): void {
+    this.busy.set(true);
+    this.show('');
+    this.cams.setEnabled(false).subscribe({
+      next: () => { this.busy.set(false); this.refresh(); },
+      error: (err: HttpErrorResponse) => { this.busy.set(false); this.show(err.error?.error ?? 'Could not turn cameras off.', true); },
+    });
+  }
+
+  turnOn(): void {
+    this.busy.set(true);
+    this.show('');
+    this.cams.setEnabled(true).subscribe({
+      next: () => { this.busy.set(false); this.refresh(); },
+      error: (err: HttpErrorResponse) => { this.busy.set(false); this.show(err.error?.error ?? 'Could not turn cameras on.', true); },
     });
   }
 

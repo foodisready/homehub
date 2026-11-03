@@ -91,17 +91,21 @@ Garage doors are always protected. The dashboard shows **Open** or **Closed** an
 
 ## Cameras
 
-HomeHub can show Wyze cameras live, pause them while you're home, and save a snapshot when one sees motion. It works through the camera bridge, an optional extra service, and needs a free Wyze developer API key.
+HomeHub can show Wyze cameras live, pause them while you're home, and save a snapshot when one sees motion. It works through the camera bridge, a service that comes with HomeHub, and needs a free Wyze developer API key.
 
-### Turn on the camera bridge
+### Add your cameras
 
 1. Create an API key at the [Wyze developer console](https://developer-api-console.wyze.com/), signed in with your Wyze account. Keep the key and its ID handy.
-2. In HomeHub's `.env`, set `COMPOSE_PROFILES=cameras`. If you don't have a `.env` yet, the [install guide](./INSTALL.md#optional-settings-file) shows how to make one. HomeHub and the bridge share a key that HomeHub generates.
-3. Restart HomeHub: `docker compose -f docker-compose.yml up -d`.
-4. Open **Cameras** (under **More** on a phone), and sign in with your Wyze email, password, API key ID and API key. HomeHub passes these to the bridge and doesn't keep them.
-5. Select **Add** next to each camera, or **Add all**. Then give each one a room in **Settings → Devices**.
+2. Open **Cameras** (under **More** on a phone), and sign in with your Wyze email, password, API key ID and API key. HomeHub passes these to the bridge and doesn't keep them.
+3. Select **Add** next to each camera, or **Add all**. Then give each one a room in **Settings → Devices**.
 
 Cameras on another Wi-Fi network work too, because the bridge finds them through your Wyze account.
+
+### Turn cameras off
+
+No Wyze cameras? Select **Turn cameras off** on the Cameras page, or clear **Wyze cameras** under **Settings → Integrations**. Cameras disappears from the menu and HomeHub stops watching for motion. Turn it back on in the same place.
+
+The bridge itself keeps running, idle, using about 90 MB of memory. To leave it out of HomeHub entirely, set `HOMEHUB_CAMERA_BRIDGE=0` in `.env` and run `docker compose -f docker-compose.yml up -d`. Remove the line and run the command again to bring it back.
 
 ### Watch, pause and resume
 
@@ -297,7 +301,7 @@ Voice control is experimental and isn't included in the install. The test setup 
 
 **A motion rule says it's waiting for the first report:** select **Connect sensor** and wait for "Sensor connected", then wave at it. It ignores new motion for a short time after each report.
 
-**The Cameras page says the bridge isn't set up or can't be reached:** check `COMPOSE_PROFILES=cameras` in `.env`, then restart HomeHub. The bridge can take a minute to start.
+**The Cameras page says it can't reach the bridge:** the bridge can take a minute to start. Check it's running with `docker compose -f docker-compose.yml ps wyze-bridge`, and that `.env` doesn't set `HOMEHUB_CAMERA_BRIDGE=0`.
 
 **A camera shows no picture:** it may be paused, offline or still connecting. Wyze cameras connect to the bridge a little while after it starts.
 

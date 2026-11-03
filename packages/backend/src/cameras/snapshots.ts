@@ -19,6 +19,8 @@ export function snapshotDir(): string {
 // ── Settings ──────────────────────────────────────────────────────
 
 export interface CameraSettings {
+  /** Cameras on in HomeHub: shown in the menu and watched for motion. */
+  enabled: boolean;
   /** Save a snapshot when a camera reports motion. */
   motionSnapshots: boolean;
   /** Send a phone notification with each motion snapshot. */
@@ -29,8 +31,9 @@ export interface CameraSettings {
   cooldownSeconds: number;
 }
 
-const DEFAULTS: CameraSettings = { motionSnapshots: true, notify: false, keepDays: 30, cooldownSeconds: 30 };
+const DEFAULTS: CameraSettings = { enabled: true, motionSnapshots: true, notify: false, keepDays: 30, cooldownSeconds: 30 };
 const KEYS: Record<keyof CameraSettings, string> = {
+  enabled: 'cameras_enabled',
   motionSnapshots: 'camera_motion_snapshots',
   notify: 'camera_motion_notify',
   keepDays: 'camera_snapshot_keep_days',
@@ -47,15 +50,15 @@ export function getSettings(): CameraSettings {
     const [min, max] = LIMITS[k];
     return Number.isInteger(n) && n >= min && n <= max ? n : DEFAULTS[k];
   };
-  const bool = (k: 'motionSnapshots' | 'notify') => (get(k) === undefined ? DEFAULTS[k] : get(k) === '1');
-  return { motionSnapshots: bool('motionSnapshots'), notify: bool('notify'), keepDays: num('keepDays'), cooldownSeconds: num('cooldownSeconds') };
+  const bool = (k: 'enabled' | 'motionSnapshots' | 'notify') => (get(k) === undefined ? DEFAULTS[k] : get(k) === '1');
+  return { enabled: bool('enabled'), motionSnapshots: bool('motionSnapshots'), notify: bool('notify'), keepDays: num('keepDays'), cooldownSeconds: num('cooldownSeconds') };
 }
 
 export function saveSettings(patch: Partial<CameraSettings>): CameraSettings {
   const upsert = getDb().prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
   for (const [k, v] of Object.entries(patch) as [keyof CameraSettings, unknown][]) {
     if (!(k in KEYS)) continue;
-    if (k === 'motionSnapshots' || k === 'notify') {
+    if (k === 'enabled' || k === 'motionSnapshots' || k === 'notify') {
       if (typeof v !== 'boolean') throw new Error(`${k} must be true or false`);
       upsert.run(KEYS[k], v ? '1' : '0');
     } else {

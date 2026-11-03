@@ -79,7 +79,7 @@ nano .env
 
 Every setting is optional, and the file explains each one. Press `Ctrl+O`, `Enter`, then `Ctrl+X` to save. Then run `docker compose -f docker-compose.yml up -d` in the `homehub` folder.
 
-- **Wyze cameras:** set `COMPOSE_PROFILES=cameras`. Then sign in to Wyze in HomeHub under **Cameras**, as the [User Guide](./USER_GUIDE.md#cameras) explains.
+- **No Wyze cameras:** set `HOMEHUB_CAMERA_BRIDGE=0` to leave the camera bridge out and save about 90 MB of memory. You can also just turn cameras off in **Settings → Integrations**.
 - **A different AI model:** set `OLLAMA_MODEL`. The installer already sets `llama3.2:1b` on a Pi with 4 GB of memory.
 - **Another name than homehub.local,** for example with two HomeHubs on one network: set `HOMEHUB_LOCAL_NAME=cabin` for `http://cabin.local:4200`, or `off`.
 
@@ -183,7 +183,7 @@ HomeHub uses these ports, so make sure nothing else on the computer does:
 | 3002 | Scheduler |
 | 8080 | Self-update helper |
 | 11434 | Local AI model |
-| 5050, 8888 | Wyze camera bridge, if turned on. Only HomeHub itself can reach these. |
+| 5050, 8888 | Wyze camera bridge. Only HomeHub itself can reach these. |
 
 Don't forward these ports through your router. For access away from home, use [Remote Access](./REMOTE_ACCESS.md).
 

@@ -32,9 +32,13 @@ export function secretsDir(): string {
   return path.join(path.dirname(dbPath), 'secrets');
 }
 
-/** Cameras are an optional compose profile; without it there's no bridge to talk to. */
-export const camerasEnabled = (): boolean =>
-  (process.env.COMPOSE_PROFILES ?? '').split(',').map((p) => p.trim()).includes('cameras');
+/**
+ * The Wyze camera bridge runs with HomeHub unless HOMEHUB_CAMERA_BRIDGE=0 in
+ * .env leaves it out. (Settings can also turn cameras off in HomeHub; the
+ * bridge then stays running but idle.)
+ */
+export const cameraBridgeInstalled = (): boolean =>
+  !/^(0|off|false|no)$/i.test((process.env.HOMEHUB_CAMERA_BRIDGE ?? '').trim());
 
 /** The file's value, making it first if needed. Two processes starting at once both end up with the same value. */
 function readOrCreate(dir: string, key: ManagedSecret): string {
@@ -75,9 +79,9 @@ export function loadSecrets(): { created: ManagedSecret[] } {
     const existed = fs.existsSync(path.join(dir, key));
     const value = readOrCreate(dir, key);
     if (!existed) created.push(key);
-    // The bridge's key is made either way, so turning cameras on later just works,
-    // but HomeHub only uses it when the cameras profile is on.
-    if (key === 'WYZE_BRIDGE_API_KEY' && !camerasEnabled()) {
+    // The bridge's key is made either way, so adding the bridge back later just works,
+    // but HomeHub only uses it while the bridge is part of the install.
+    if (key === 'WYZE_BRIDGE_API_KEY' && !cameraBridgeInstalled()) {
       delete process.env[key];
       continue;
     }

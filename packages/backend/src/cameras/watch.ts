@@ -82,7 +82,7 @@ export function resetMotionState(): void {
 
 export function startCameraWatch(): void {
   if (!process.env.WYZE_BRIDGE_API_KEY) {
-    logger.info('Wyze bridge not configured (WYZE_BRIDGE_API_KEY unset); camera watch off');
+    logger.info('Camera bridge not part of this install; camera watch off');
     return;
   }
   const loop = async () => {
@@ -90,7 +90,8 @@ export function startCameraWatch(): void {
     if (!busy) {
       busy = true;
       try {
-        await checkMotion();
+        // Turned off in Settings: nothing to watch, but keep checking in case it's turned back on.
+        if (getSettings().enabled) await checkMotion(); else delay = IDLE_POLL_MS;
       } catch {
         delay = IDLE_POLL_MS;   // bridge down or signed out; check back later, quietly
       } finally {

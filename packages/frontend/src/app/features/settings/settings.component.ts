@@ -12,6 +12,7 @@ import { MerossLoginComponent } from './meross-login.component';
 import { OtherNetworksComponent } from './other-networks.component';
 import { HomeSettingsComponent } from './home-settings.component';
 import { AiConnectionComponent } from './ai-connection.component';
+import { CamerasToggleComponent } from './cameras-toggle.component';
 
 interface ChatStats {
   total: number;
@@ -63,7 +64,7 @@ const DRIVER_LABEL: Record<string, string> = {
 @Component({
   selector: 'app-settings',
   standalone: true,
-  imports: [FormsModule, DeviceFilterComponent, BackupsComponent, MerossLoginComponent, OtherNetworksComponent, HomeSettingsComponent, AiConnectionComponent],
+  imports: [FormsModule, DeviceFilterComponent, BackupsComponent, MerossLoginComponent, OtherNetworksComponent, HomeSettingsComponent, AiConnectionComponent, CamerasToggleComponent],
   styles: [`
     .topbar { display:flex; align-items:center; justify-content:space-between; margin-bottom:1.5rem; }
     .topbar h1 { font-size:1.4rem; font-weight:700; }
@@ -659,6 +660,7 @@ const DRIVER_LABEL: Record<string, string> = {
                   </div>
                 </div>
               }
+              <app-cameras-toggle />
               <div class="pref-row" style="cursor:pointer" (click)="aiExpanded.set(!aiExpanded())">
                 <div class="pref-label">
                   AI assistant (MCP)

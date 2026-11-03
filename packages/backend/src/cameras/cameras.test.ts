@@ -126,7 +126,7 @@ describe('Wyze cameras', () => {
     db.pragma('foreign_keys = OFF');
     db.prepare('DELETE FROM camera_snapshots').run();
     db.prepare('DELETE FROM devices').run();
-    db.prepare("DELETE FROM settings WHERE key LIKE 'camera_%'").run();
+    db.prepare("DELETE FROM settings WHERE key LIKE 'camera%'").run();
     db.pragma('foreign_keys = ON');
     fs.rmSync(snaps.snapshotDir(), { recursive: true, force: true });
     Object.assign(fake, { signedIn: true, power: { front: 'on', pan: 'on' }, motionTs: { front: 1000, pan: 0 }, calls: [], login: null });
@@ -257,9 +257,22 @@ describe('Wyze cameras', () => {
     });
 
     it('validates settings', () => {
-      assert.deepEqual(snaps.saveSettings({ keepDays: 7, notify: true }), { motionSnapshots: true, notify: true, keepDays: 7, cooldownSeconds: 30 });
+      assert.deepEqual(snaps.saveSettings({ keepDays: 7, notify: true }), { enabled: true, motionSnapshots: true, notify: true, keepDays: 7, cooldownSeconds: 30 });
+      assert.throws(() => snaps.saveSettings({ enabled: 1 as never }), /enabled/);
       assert.throws(() => snaps.saveSettings({ keepDays: 0 }), /keepDays/);
       assert.throws(() => snaps.saveSettings({ notify: 'yes' as never }), /notify/);
+    });
+  });
+
+  describe('turning cameras off in Settings', () => {
+    it('reports the bridge as off until turned back on', async () => {
+      assert.equal((await (await api('PUT', '/settings', { enabled: false })).json() as any).enabled, false);
+      assert.deepEqual(await (await api('GET', '/bridge')).json(), { state: 'off' });
+      const settings = await (await api('GET', '/settings', undefined, 'member')).json() as any;
+      assert.deepEqual([settings.enabled, settings.bridgeInstalled], [false, true], 'members see it too, for the menu');
+
+      await api('PUT', '/settings', { enabled: true });
+      assert.equal(((await (await api('GET', '/bridge')).json()) as any).state, 'ready');
     });
   });
 

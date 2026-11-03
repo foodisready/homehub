@@ -528,7 +528,7 @@ Cameras are devices with `driverType: "wyze"` and `driverConfig: { cam: "<bridge
 
 | Method | Path | Who | Does |
 |---|---|---|---|
-| `GET` | `/api/cameras/bridge` | any | `{ state }`: `not-configured`, `unreachable`, `signed-out`, `unauthorized` or `ready` (with `cameras`) |
+| `GET` | `/api/cameras/bridge` | any | `{ state }`: `off` (turned off in Settings), `not-configured` (`HOMEHUB_CAMERA_BRIDGE=0`), `unreachable`, `signed-out`, `unauthorized` or `ready` (with `cameras`) |
 | `POST` | `/api/cameras/bridge/login` | admin | Body: `{ email, password, keyId, apiKey }`. Passed to the bridge's `/login`, not stored. Returns the new state. |
 | `GET` | `/api/cameras/bridge/cameras` | admin | Cameras on the Wyze account: `[{ cam, name, model, ip, mac, streaming, added }]` |
 | `GET` | `/api/cameras` | any | Added cameras: `{ bridgeError, cameras: [{ deviceId, name, room, cam, model, watching, online, streaming, lastMotionAt, latestSnapshot }] }` |
@@ -538,7 +538,7 @@ Cameras are devices with `driverType: "wyze"` and `driverConfig: { cam: "<bridge
 | `GET` | `/api/cameras/snapshots` | any | Newest first. Query: `deviceId`, `before` (an id, for paging), `limit` (max 200) |
 | `GET` | `/api/cameras/snapshots/:id/image` | any | The JPEG |
 | `DELETE` | `/api/cameras/snapshots/:id` | admin | Deletes it. Returns `204`. |
-| `GET` / `PUT` | `/api/cameras/settings` | any / admin | `{ motionSnapshots, notify, keepDays (1–365), cooldownSeconds (5–3600) }` |
+| `GET` / `PUT` | `/api/cameras/settings` | any / admin | `{ enabled, motionSnapshots, notify, keepDays (1–365), cooldownSeconds (5–3600) }`. `enabled: false` hides Cameras from the menu and stops the motion watch. Responses add `bridgeInstalled` (false with `HOMEHUB_CAMERA_BRIDGE=0`). |
 
 A `camera:snapshot` socket event announces each new snapshot. The backend reaches the bridge at `WYZE_BRIDGE_URL` and `WYZE_BRIDGE_HLS_URL`, sending `WYZE_BRIDGE_API_KEY` in the `api` header.
 

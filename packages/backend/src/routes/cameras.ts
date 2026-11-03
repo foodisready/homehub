@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import { cameraBridgeInstalled } from '../secrets';
 import { Readable } from 'stream';
 import { getDb } from '../db';
 import { logger } from '../logger';
@@ -35,6 +36,7 @@ const deviceParam = (req: Request) => {
 
 // GET /api/cameras/bridge — is the bridge set up and signed in?
 camerasRouter.get('/bridge', async (_req: Request, res: Response) => {
+  if (!snaps.getSettings().enabled) return res.json({ state: 'off' });
   res.json(await bridge.getState());
 });
 
@@ -64,14 +66,15 @@ camerasRouter.get('/bridge/cameras', requireAdmin, async (_req: Request, res: Re
 });
 
 // GET /api/cameras/settings
+// bridgeInstalled: false when .env leaves the bridge out, so the menu can hide Cameras.
 camerasRouter.get('/settings', (_req: Request, res: Response) => {
-  res.json({ ...snaps.getSettings(), limits: snaps.LIMITS });
+  res.json({ ...snaps.getSettings(), bridgeInstalled: cameraBridgeInstalled(), limits: snaps.LIMITS });
 });
 
 // PUT /api/cameras/settings
 camerasRouter.put('/settings', requireAdmin, (req: Request, res: Response) => {
   try {
-    res.json({ ...snaps.saveSettings(req.body ?? {}), limits: snaps.LIMITS });
+    res.json({ ...snaps.saveSettings(req.body ?? {}), bridgeInstalled: cameraBridgeInstalled(), limits: snaps.LIMITS });
   } catch (err) {
     res.status(400).json({ error: (err as Error).message, code: 'VALIDATION_ERROR' });
   }

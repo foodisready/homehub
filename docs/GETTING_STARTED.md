@@ -27,7 +27,7 @@ To install HomeHub at home, follow [INSTALL.md](./INSTALL.md) instead. This page
 2. **Open HomeHub**
    On the home network, open `http://homehub.local:4200` (or `http://<pi-ip>:4200`) and create the admin account. Then set the location and time zone in **Settings → Home**.
 
-No `.env` is needed. On first start the backend generates its secrets in the data volume (`/data/secrets`). To change a default, such as `COMPOSE_PROFILES` or `TS_AUTHKEY`, copy `.env.example` to `~/homehub/.env`; values set there win over generated ones.
+No `.env` is needed. On first start the backend generates its secrets in the data volume (`/data/secrets`). To change a default, such as `HOMEHUB_CAMERA_BRIDGE` or `TS_AUTHKEY`, copy `.env.example` to `~/homehub/.env`; values set there win over generated ones.
 
 To run from a clone instead, use `docker compose -f docker-compose.yml up -d --build`. Name the file explicitly: a plain `docker compose up` also applies `docker-compose.override.yml`, which runs the development builds.
 

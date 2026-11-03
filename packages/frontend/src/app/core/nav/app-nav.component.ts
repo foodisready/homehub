@@ -2,6 +2,7 @@ import { Component, HostListener, computed, inject, signal } from '@angular/core
 import { Router, RouterLink, RouterLinkActive, NavigationEnd } from '@angular/router';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { filter, map } from 'rxjs';
+import { CamerasStateService } from '../services/cameras-state.service';
 import { AuthService } from '../auth/auth.service';
 import { SocketService } from '../socket/socket.service';
 import { PhoneQrComponent } from '../../features/dashboard/phone-qr.component';
@@ -227,6 +228,7 @@ const MORE: NavItem[] = [
 })
 export class AppNavComponent {
   readonly auth = inject(AuthService);
+  private readonly cams = inject(CamerasStateService);
   private readonly router = inject(Router);
   private readonly socket = inject(SocketService);
 
@@ -249,7 +251,8 @@ export class AppNavComponent {
   readonly visible = computed(() => this.auth.isLoggedIn() && !this.url().startsWith('/login'));
 
   private readonly isAdmin = computed(() => this.auth.user()?.role === 'admin');
-  readonly moreItems = computed(() => MORE.filter((i) => !i.adminOnly || this.isAdmin()));
+  readonly moreItems = computed(() =>
+    MORE.filter((i) => (!i.adminOnly || this.isAdmin()) && (i.path !== '/cameras' || this.cams.visible())));
   readonly allItems = computed(() => [...MAIN, ...this.moreItems()]);
   readonly roleLabel = computed(() => (this.isAdmin() ? ' · administrator' : ''));
 
