@@ -26,7 +26,9 @@ process.env.WATCHTOWER_URL            = 'http://watchtower.test';
 
 /* Mock state — toggled per test. */
 let releasesTagToReturn:    string | null = 'v1.1.0';
-let watchtowerBehavior:     'ok' | 'reject' | 'offline' = 'ok';
+let watchtowerBehavior:     'ok' | 'reject' | 'offline' | 'busy' = 'ok';
+/** Ends a 'busy' update, as the backend being replaced would. */
+let endBusyUpdate: (() => void) | null = null;
 let watchtowerLastAuth:     string | null = null;
 
 const originalFetch = globalThis.fetch;
@@ -46,6 +48,10 @@ globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: Parameters
       : null;
     if (watchtowerBehavior === 'offline') throw new Error('ECONNREFUSED');
     if (watchtowerBehavior === 'reject') return new Response('boom', { status: 500 });
+    if (watchtowerBehavior === 'busy') {
+      // Watchtower answers only after replacing the containers.
+      return new Promise<Response>((_resolve, reject) => { endBusyUpdate = () => reject(new Error('socket hang up')); });
+    }
     return new Response('ok', { status: 200 });
   }
 
@@ -55,7 +61,7 @@ globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: Parameters
 import { getDb } from '../db';
 import { authenticate } from '../middleware/auth';
 import { issueTokens, type UserRow } from '../auth/auth.service';
-import { systemRouter } from './system';
+import { systemRouter, setUpdateAcceptWait } from './system';
 
 let server: http.Server;
 let baseUrl: string;
@@ -187,6 +193,21 @@ describe('POST /api/system/update', () => {
     assert.equal(r.status, 503);
     const body = await r.json() as Record<string, unknown>;
     assert.equal(body.code, 'UPDATER_OFFLINE');
+  });
+
+  it("says the update started while watchtower is still replacing containers", async () => {
+    watchtowerBehavior = 'busy';
+    setUpdateAcceptWait(100);
+    const t = Date.now();
+    const r = await fetch(`${baseUrl}/api/system/update`, {
+      method:  'POST',
+      headers: { Authorization: `Bearer ${adminToken}` },
+    });
+    assert.equal(r.status, 202);
+    assert.equal((await r.json() as Record<string, unknown>).started, true);
+    assert.ok(Date.now() - t < 2000, "didn't wait for watchtower to finish");
+    endBusyUpdate?.();   // the request dying later is fine
+    setUpdateAcceptWait(3000);
   });
 
   it('rejects non-admin users with 403', async () => {

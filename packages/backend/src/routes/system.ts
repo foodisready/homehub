@@ -112,6 +112,14 @@ systemRouter.get('/remote-url', (_req: Request, res: Response) => {
  * Forwards the request to Watchtower. The container-recreate happens
  * after this response is on the wire — the client's TCP connection
  * will drop mid-poll and reconnect to the new instance. */
+/* Watchtower answers only once it has pulled the new images and replaced the
+ * containers, this backend included, so waiting for its answer would never
+ * finish: the request dies with the old container. Wait briefly for a quick
+ * refusal (wrong token, updater down), then say the update has started. */
+let acceptWaitMs = 3_000;
+/** For tests. */
+export function setUpdateAcceptWait(ms: number): void { acceptWaitMs = ms; }
+
 systemRouter.post('/update', requireAdmin, async (_req: Request, res: Response) => {
   if (!WATCHTOWER_HTTP_TOKEN) {
     return res.status(503).json({
@@ -120,28 +128,34 @@ systemRouter.post('/update', requireAdmin, async (_req: Request, res: Response) 
     });
   }
 
-  try {
-    const r = await fetch(`${WATCHTOWER_URL}/v1/update`, {
-      method:  'POST',
-      headers: { Authorization: `Bearer ${WATCHTOWER_HTTP_TOKEN}` },
-    });
-    if (!r.ok) {
-      const text = await r.text().catch(() => '');
-      logger.error({ status: r.status, text }, 'watchtower update endpoint rejected request');
-      return res.status(502).json({
-        error: 'updater rejected request',
-        code:  'UPDATER_FAILED',
-      });
-    }
-    return res.json({
-      started: true,
-      message: 'Update started — backend will restart shortly.',
-    });
-  } catch (err) {
-    logger.error({ err }, 'watchtower unreachable');
-    return res.status(503).json({
-      error: 'updater unreachable',
-      code:  'UPDATER_OFFLINE',
-    });
+  const request = fetch(`${WATCHTOWER_URL}/v1/update`, {
+    method:  'POST',
+    headers: { Authorization: `Bearer ${WATCHTOWER_HTTP_TOKEN}` },
+  });
+  const STILL_RUNNING = Symbol('still running');
+  const first = await Promise.race([
+    request.then((r) => ({ r }), (err: unknown) => ({ err })),
+    new Promise<typeof STILL_RUNNING>((resolve) => setTimeout(() => resolve(STILL_RUNNING), acceptWaitMs)),
+  ]);
+
+  if (first === STILL_RUNNING) {
+    // Updating. The answer, if it ever comes, only matters for the log.
+    request.then(
+      (r) => { if (!r.ok) logger.error({ status: r.status }, 'watchtower update finished with an error'); },
+      () => undefined,   // expected: this container is replaced mid-request
+    );
+    logger.info('Update started');
+    return res.status(202).json({ started: true, message: 'Update started — HomeHub will restart shortly.' });
   }
+  if ('err' in first) {
+    logger.error({ err: first.err }, 'watchtower unreachable');
+    return res.status(503).json({ error: 'updater unreachable', code: 'UPDATER_OFFLINE' });
+  }
+  if (!first.r.ok) {
+    const text = await first.r.text().catch(() => '');
+    logger.error({ status: first.r.status, text }, 'watchtower update endpoint rejected request');
+    return res.status(502).json({ error: 'updater rejected request', code: 'UPDATER_FAILED' });
+  }
+  // Finished already: nothing was out of date, or this container wasn't replaced.
+  return res.json({ started: true, message: 'Update finished.' });
 });
