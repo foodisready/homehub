@@ -10,8 +10,9 @@ import { logger } from '../logger';
  *
  * Only the backend runs on the host's network, so it does this. It answers
  * A (IPv4) questions for its own name, with the address on the network the
- * question came from. It shares port 5353 with any other mDNS service on the
- * computer, such as Avahi.
+ * question came from, and tells AAAA (IPv6) askers there's no IPv6 address.
+ * It shares port 5353 with any other mDNS service on the computer, such as
+ * Avahi.
  *
  * The name comes from HOMEHUB_LOCAL_NAME, which docker-compose.yml sets to
  * `homehub`. Unset (as in development) or `off`, nothing answers, so a
@@ -21,6 +22,8 @@ import { logger } from '../logger';
 const MDNS_ADDR = '224.0.0.251';
 const MDNS_PORT = 5353;
 const TYPE_A = 1;
+const TYPE_AAAA = 28;
+const TYPE_NSEC = 47;
 const TYPE_ANY = 255;
 const TTL = 120;
 
@@ -104,22 +107,42 @@ function encodeName(name: string): Buffer {
   return Buffer.concat([...parts, Buffer.from([0])]);
 }
 
-/** An answer with one A record. `legacy` replies echo the id and question, as plain DNS does. */
-export function buildAnswer(name: string, address: string, opts: { id?: number; legacy?: boolean } = {}): Buffer {
+function record(name: Buffer, type: number, cls: number, rdata: Buffer): Buffer {
+  const head = Buffer.alloc(10);
+  head.writeUInt16BE(type, 0);
+  head.writeUInt16BE(cls, 2);
+  head.writeUInt32BE(TTL, 4);
+  head.writeUInt16BE(rdata.length, 8);
+  return Buffer.concat([name, head, rdata]);
+}
+
+/**
+ * A reply about `name`. For an A question (the default), the answer is the
+ * address. For any other question, such as AAAA (IPv6), the answer is an
+ * NSEC record saying the name has only an IPv4 address, so the asker doesn't
+ * wait seconds for an IPv6 reply that never comes (RFC 6762 §6.1). Either
+ * way the other record goes along as additional information.
+ * `legacy` replies echo the id and question, as plain DNS does.
+ */
+export function buildAnswer(
+  name: string, address: string, opts: { id?: number; legacy?: boolean; type?: number } = {},
+): Buffer {
+  const type = opts.type ?? TYPE_A;
+  const encoded = encodeName(name);
+  const cls = opts.legacy ? 0x0001 : 0x8001;   // IN, with cache-flush for mDNS
+  const a = record(encoded, TYPE_A, cls, Buffer.from(address.split('.').map(Number)));
+  // NSEC: next name is this name; bitmap window 0 lists only type A (bit 1).
+  const nsec = record(encoded, TYPE_NSEC, cls, Buffer.concat([encoded, Buffer.from([0, 1, 0x40])]));
+  const positive = type === TYPE_A || type === TYPE_ANY;
+
   const header = Buffer.alloc(12);
   header.writeUInt16BE(opts.legacy ? opts.id ?? 0 : 0, 0);
   header.writeUInt16BE(0x8400, 2);            // response, authoritative
   header.writeUInt16BE(opts.legacy ? 1 : 0, 4);
-  header.writeUInt16BE(1, 6);
-  const encoded = encodeName(name);
-  const question = opts.legacy ? Buffer.concat([encoded, Buffer.from([0, TYPE_A, 0, 1])]) : Buffer.alloc(0);
-  const rr = Buffer.alloc(10);
-  rr.writeUInt16BE(TYPE_A, 0);
-  rr.writeUInt16BE(opts.legacy ? 0x0001 : 0x8001, 2);   // IN, with cache-flush for mDNS
-  rr.writeUInt32BE(TTL, 4);
-  rr.writeUInt16BE(4, 8);
-  const ip = Buffer.from(address.split('.').map(Number));
-  return Buffer.concat([header, question, encoded, rr, ip]);
+  header.writeUInt16BE(1, 6);                 // one answer
+  header.writeUInt16BE(1, 10);                // one additional record
+  const question = opts.legacy ? Buffer.concat([encoded, Buffer.from([type >> 8, type & 0xff, 0, 1])]) : Buffer.alloc(0);
+  return Buffer.concat([header, question, positive ? a : nsec, positive ? nsec : a]);
 }
 
 /** What to send back for one incoming packet, if anything. */
@@ -128,13 +151,15 @@ export function respond(
 ): { message: Buffer; to: { address: string; port: number }; via: string } | null {
   const q = parseQuery(buf);
   if (!q) return null;
-  const asked = q.questions.find((x) => x.name.toLowerCase() === hostname && (x.type === TYPE_A || x.type === TYPE_ANY));
+  const ours = q.questions.filter((x) => x.name.toLowerCase() === hostname);
+  // Answer the address question first; AAAA (and others) get "IPv4 only".
+  const asked = ours.find((x) => x.type === TYPE_A || x.type === TYPE_ANY) ?? ours.find((x) => x.type === TYPE_AAAA);
   if (!asked) return null;
   const address = addressFor(from.address, addrs);
   if (!address) return null;
   // A query from a port other than 5353 is a plain DNS lookup and wants a direct reply.
   const legacy = from.port !== MDNS_PORT;
-  const message = buildAnswer(hostname, address, { id: q.id, legacy });
+  const message = buildAnswer(hostname, address, { id: q.id, legacy, type: asked.type });
   const to = legacy || asked.unicast ? from : { address: MDNS_ADDR, port: MDNS_PORT };
   return { message, to, via: address };
 }

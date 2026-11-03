@@ -18,6 +18,25 @@ function query(name: string, type = 1, opts: { unicast?: boolean; id?: number } 
   return Buffer.concat([header, ...labels, Buffer.from([0]), tail]);
 }
 
+/** The records in a reply (names written out in full, as HomeHub writes them). */
+function records(msg: Buffer): { name: string; type: number; cls: number; rdata: Buffer }[] {
+  let pos = 12;
+  const skipName = () => { while (msg[pos] !== 0) pos += msg[pos] + 1; pos++; };
+  for (let i = 0; i < msg.readUInt16BE(4); i++) { skipName(); pos += 4; }
+  const out = [];
+  const total = msg.readUInt16BE(6) + msg.readUInt16BE(8) + msg.readUInt16BE(10);
+  for (let i = 0; i < total; i++) {
+    const start = pos;
+    skipName();
+    const name = parseQuery(Buffer.concat([Buffer.alloc(4), Buffer.from([0, 1, 0, 0, 0, 0, 0, 0]), msg.subarray(start, pos), Buffer.alloc(4)]))!.questions[0].name;
+    const type = msg.readUInt16BE(pos), cls = msg.readUInt16BE(pos + 2), len = msg.readUInt16BE(pos + 8);
+    out.push({ name, type, cls, rdata: msg.subarray(pos + 10, pos + 10 + len) });
+    pos += 10 + len;
+  }
+  assert.equal(pos, msg.length, 'nothing left over');
+  return out;
+}
+
 const HOME = [{ address: '10.1.2.88', netmask: '255.255.255.0' }, { address: '192.168.50.5', netmask: '255.255.255.0' }];
 const MDNS = { address: '10.1.2.40', port: 5353 };
 
@@ -32,20 +51,31 @@ describe('homehub.local', () => {
     assert.ok(r);
     assert.deepEqual(r.to, { address: '224.0.0.251', port: 5353 });
     assert.equal(r.via, '10.1.2.88');
-    // Header: response + authoritative, one answer; then the record ending in the address.
+    // Response + authoritative: the address, then "no other address types" (NSEC).
     assert.equal(r.message.readUInt16BE(2), 0x8400);
-    assert.equal(r.message.readUInt16BE(6), 1);
-    assert.deepEqual([...r.message.subarray(-4)], [10, 1, 2, 88]);
-    assert.equal(r.message.readUInt16BE(r.message.length - 14), 1, 'type A');
-    assert.equal(r.message.readUInt16BE(r.message.length - 12), 0x8001, 'cache-flush, IN');
+    assert.deepEqual([r.message.readUInt16BE(6), r.message.readUInt16BE(10)], [1, 1]);
+    const [a, nsec] = records(r.message);
+    assert.deepEqual([a.name, a.type, a.cls, [...a.rdata]], ['homehub.local', 1, 0x8001, [10, 1, 2, 88]]);
+    assert.deepEqual([nsec.name, nsec.type], ['homehub.local', 47]);
 
     const other = respond(query('homehub.local'), { address: '192.168.50.9', port: 5353 }, 'homehub.local', HOME);
     assert.equal(other?.via, '192.168.50.5');
   });
 
+  it('tells IPv6 (AAAA) askers there is only an IPv4 address, so they don\'t wait', () => {
+    const r = respond(query('homehub.local', 28), MDNS, 'homehub.local', HOME);
+    assert.ok(r);
+    const [nsec, a] = records(r.message);
+    assert.equal(nsec.type, 47, 'answer: NSEC');
+    // Next name is homehub.local itself, then window 0, one byte, bit for type A only.
+    assert.deepEqual([...nsec.rdata.subarray(-3)], [0, 1, 0x40]);
+    assert.equal(nsec.rdata.length, 'homehub.local'.length + 2 + 3);
+    assert.deepEqual([a.type, [...a.rdata]], [1, [10, 1, 2, 88]], 'address as additional');
+  });
+
   it('ignores other names, other record types and answers', () => {
     assert.equal(respond(query('printer.local'), MDNS, 'homehub.local', HOME), null);
-    assert.equal(respond(query('homehub.local', 28), MDNS, 'homehub.local', HOME), null, 'AAAA');
+    assert.equal(respond(query('homehub.local', 16), MDNS, 'homehub.local', HOME), null, 'TXT');
     assert.equal(respond(buildAnswer('homehub.local', '10.1.2.88'), MDNS, 'homehub.local', HOME), null);
     assert.equal(respond(Buffer.from([1, 2, 3]), MDNS, 'homehub.local', HOME), null);
     assert.equal(respond(query('homehub.local'), MDNS, 'homehub.local', []), null, 'no home network');
@@ -59,6 +89,7 @@ describe('homehub.local', () => {
     assert.deepEqual(legacy?.to, { address: '10.1.2.40', port: 50000 });
     assert.equal(legacy?.message.readUInt16BE(0), 0x1234, 'echoes the id');
     assert.equal(legacy?.message.readUInt16BE(4), 1, 'echoes the question');
+    assert.deepEqual(records(legacy!.message).map((x) => x.cls), [1, 1], 'plain DNS: no cache-flush bit');
     assert.deepEqual(parseQuery(Buffer.concat([query('x.local')]))?.questions[0].name, 'x.local');
   });
 
