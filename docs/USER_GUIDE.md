@@ -230,7 +230,15 @@ Garage doors, devices with "valve" in their name, and devices used for automatic
 Open **Settings → Backups** and select **Back up now**, with an optional note such as "before moving to the Pi". HomeHub saves your devices, rooms, schedules, scenes, motion rules, users and logins as a JSON file in its `data/backups` folder. Energy history isn't included.
 
 - **View / Edit** opens the file. Passwords and keys show as `<hidden>`, and HomeHub keeps the real values when you save. Saving checks your changes against the current database first, so a mistake, such as two devices with the same name, is caught before you restore.
-- **Restore** replaces your current settings with the backup. HomeHub saves your current settings as a `before-restore` backup first, so you can undo it. To leave something alone, remove its whole table from the file before restoring. For example, delete `"users"` to keep your current users and passwords.
+- **Restore** replaces your devices, rooms, schedules, scenes, motion rules and logins with the backup's. HomeHub saves your current settings as a `before-restore` backup first, so you can undo it. To leave something alone, remove its whole table from the file before restoring.
+
+A restore never changes the accounts already on this HomeHub, so you can still sign in afterwards:
+
+- Accounts here keep their passwords, even if the backup has an account with the same name.
+- Accounts that are only in the backup are added, with their passwords and notification choices from the backup.
+- Your home's location and time zone stay as they are. If they aren't set here yet, they come from the backup.
+
+Undoing a restore doesn't remove accounts it added. Remove those under **Settings → Users**.
 
 A restore also removes energy history for devices that aren't in the backup.
 
@@ -242,7 +250,7 @@ To move your setup, for example from a computer to a Raspberry Pi:
 2. On the new HomeHub, select **Upload a backup** and choose the file. HomeHub checks it and adds it to the list without changing anything.
 3. Select **Restore** on it.
 
-The new HomeHub then has the old one's users and passwords, so sign in with your old password. A downloaded file includes passwords and device logins, so keep it private and delete it once you've moved. Motion sensors still report to the old HomeHub's address until you reconnect them on the **Sensors** page.
+Keep signing in with the account you made on the new HomeHub. Other people's accounts come across with their old passwords. A downloaded file includes passwords and device logins, so keep it private and delete it once you've moved. Motion sensors still report to the old HomeHub's address until you reconnect them on the **Sensors** page.
 
 HomeHub also makes a full copy of its database once a day and keeps the last 7. Those include history, and you restore them from the command line.
 

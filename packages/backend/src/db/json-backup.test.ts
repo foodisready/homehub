@@ -20,6 +20,7 @@ let jb: typeof import('./json-backup');
 
 const db = () => getDb();
 const aliases = () => (db().prepare('SELECT alias FROM devices ORDER BY id').all() as { alias: string }[]).map((r) => r.alias);
+const TABLES = ['energy_readings', 'schedules', 'settings', 'devices', 'notification_preferences', 'push_subscriptions', 'users'];
 const count = (sql: string) => (db().prepare(sql).get() as { n: number }).n;
 
 function seed(): void {
@@ -50,7 +51,7 @@ describe('JSON backups', () => {
   beforeEach(() => {
     fs.rmSync(BACKUP_DIR, { recursive: true, force: true });
     db().pragma('foreign_keys = OFF');
-    for (const t of ['energy_readings', 'schedules', 'settings', 'devices', 'users']) db().prepare(`DELETE FROM ${t}`).run();
+    for (const t of TABLES) db().prepare(`DELETE FROM ${t}`).run();
     db().pragma('foreign_keys = ON');
     seed();
   });
@@ -187,7 +188,7 @@ describe('JSON backups', () => {
     // The other HomeHub: empty, with only its own admin.
     fs.rmSync(BACKUP_DIR, { recursive: true, force: true });
     db().pragma('foreign_keys = OFF');
-    for (const t of ['energy_readings', 'schedules', 'settings', 'devices', 'users']) db().prepare(`DELETE FROM ${t}`).run();
+    for (const t of TABLES) db().prepare(`DELETE FROM ${t}`).run();
     db().pragma('foreign_keys = ON');
     db().prepare("INSERT INTO users (id, name, password_hash, role) VALUES (1, 'admin', 'pi-hash', 'admin')").run();
 
@@ -196,11 +197,54 @@ describe('JSON backups', () => {
     assert.equal(uploaded.note, 'from the Mac');
     assert.deepEqual(aliases(), [], 'uploading changes nothing until restored');
 
-    jb.restoreBackup(uploaded.name);
+    const result = jb.restoreBackup(uploaded.name);
     assert.deepEqual(aliases(), ['Kitchen lights', 'Porch']);
     const cfg = JSON.parse((db().prepare('SELECT driver_config c FROM devices WHERE id = 1').get() as { c: string }).c);
     assert.equal(cfg.auth.pass, 'shelly-pass');
-    assert.equal((db().prepare('SELECT password_hash p FROM users').get() as { p: string }).p, 'bcrypt-hash');
+    assert.equal((db().prepare('SELECT password_hash p FROM users').get() as { p: string }).p, 'pi-hash', "the Pi's admin keeps its password");
+    assert.deepEqual(result.accounts, { added: [], kept: ['admin'] });
+  });
+
+  it('adds accounts from the backup, with their passwords and notification choices, and keeps the ones here', () => {
+    db().prepare("INSERT INTO users (id, name, password_hash, role) VALUES (2, 'sam', 'sam-hash', 'member')").run();
+    db().prepare("INSERT INTO notification_preferences (user_id, channel, min_level) VALUES (1, 'push', 2), (2, 'push', 3)").run();
+    const { name } = jb.createBackup();
+
+    // This HomeHub: a different admin password and an account of its own on id 2.
+    db().prepare('DELETE FROM notification_preferences').run();
+    db().prepare('DELETE FROM users WHERE id = 2').run();
+    db().prepare("UPDATE users SET password_hash = 'here-hash' WHERE id = 1").run();
+    db().prepare("INSERT INTO users (id, name, password_hash, role) VALUES (2, 'alex', 'alex-hash', 'admin')").run();
+    db().prepare("INSERT INTO notification_preferences (user_id, channel, min_level) VALUES (1, 'push', 1)").run();
+
+    const result = jb.restoreBackup(name);
+
+    assert.deepEqual(result.accounts, { added: ['sam'], kept: ['admin'] });
+    const users = db().prepare('SELECT id, name, password_hash p, role FROM users ORDER BY id').all();
+    assert.deepEqual(users, [
+      { id: 1, name: 'admin', p: 'here-hash', role: 'admin' },
+      { id: 2, name: 'alex', p: 'alex-hash', role: 'admin' },
+      { id: 3, name: 'sam', p: 'sam-hash', role: 'member' },
+    ]);
+    const prefs = db().prepare('SELECT user_id u, min_level l FROM notification_preferences ORDER BY user_id').all();
+    assert.deepEqual(prefs, [{ u: 1, l: 1 }, { u: 3, l: 3 }], "sam's choice moves to sam's new id; admin's here stays");
+  });
+
+  it("keeps this HomeHub's home location and time zone, and fills them in when unset", () => {
+    db().prepare("INSERT INTO settings (key, value) VALUES ('home_latitude', '40.71'), ('home_longitude', '-74.01'), ('home_timezone', 'America/New_York')").run();
+    const { name } = jb.createBackup();
+    db().prepare("UPDATE settings SET value = '51.5' WHERE key = 'home_latitude'").run();
+    db().prepare("UPDATE settings SET value = '-0.13' WHERE key = 'home_longitude'").run();
+    db().prepare("DELETE FROM settings WHERE key = 'home_timezone'").run();
+    db().prepare("UPDATE settings SET value = 'someone-else' WHERE key = 'kasa_username'").run();
+
+    jb.restoreBackup(name);
+
+    const get = (k: string) => (db().prepare('SELECT value FROM settings WHERE key = ?').get(k) as { value: string } | undefined)?.value;
+    assert.equal(get('home_latitude'), '51.5');
+    assert.equal(get('home_longitude'), '-0.13');
+    assert.equal(get('home_timezone'), 'America/New_York', 'unset here, so taken from the backup');
+    assert.equal(get('kasa_username'), 'me', 'other settings come from the backup');
   });
 
   it('refuses an upload with hidden values or that would not restore', () => {

@@ -13,6 +13,7 @@ interface BackupEntry {
 interface RestoreResult {
   counts: Record<string, number>;
   removed: number;
+  accounts?: { added: string[]; kept: string[] };
   safetyBackup: string;
 }
 
@@ -111,8 +112,9 @@ const COUNT_LABELS: [string, string, string][] = [
             @if (confirming()?.action === 'restore') {
               <div class="confirm danger">
                 <span>
-                  Replace your current settings with this backup? HomeHub saves your current settings
-                  as a new backup first, so you can undo this.
+                  Replace your devices, rooms, schedules and settings with this backup? Accounts here keep
+                  their passwords, and accounts only in the backup are added. HomeHub saves your current
+                  settings as a new backup first, so you can undo this.
                 </span>
                 <button class="btn-sm btn-red" (click)="restore(b.name)" [disabled]="busy()">Restore</button>
                 <button class="btn-sm btn-ghost" (click)="confirming.set(null)">Cancel</button>
@@ -248,7 +250,8 @@ export class BackupsComponent implements OnInit {
         this.busy.set(false);
         this.confirming.set(null);
         const removed = r.removed ? ` Removed ${r.removed} history entries for devices that aren't in it.` : '';
-        this.show(`Restored ${name}. Your previous settings are saved as ${r.safetyBackup}.${removed}`);
+        const added = r.accounts?.added.length ? ` Added ${r.accounts.added.length === 1 ? 'account' : 'accounts'} ${r.accounts.added.join(', ')}.` : '';
+        this.show(`Restored ${name}. Your previous settings are saved as ${r.safetyBackup}.${added}${removed}`);
         this.load();
         this.restored.emit();
       },

@@ -582,7 +582,7 @@ JSON backups of settings tables (users, devices, sensors, scenes, scene_actions,
 | `GET` | `/api/backups/:name/download` | The whole file as an attachment, passwords and keys included |
 | `GET` | `/api/backups/:name` | `{ name, content }`, where secrets in `content` are `"<hidden>"` |
 | `PUT` | `/api/backups/:name` | Saves edited text. Body: `{ content }`. `"<hidden>"` values are filled back in from the saved file by row id. The edit is test-restored and rolled back first; a failure returns `400` with the reason. |
-| `POST` | `/api/backups/:name/restore` | Saves the current state as `before-restore-*.json`, then replaces each table present in the file. Returns `{ counts, removed, safetyBackup }`. |
+| `POST` | `/api/backups/:name/restore` | Saves the current state as `before-restore-*.json`, then replaces each table present in the file, except that `users` are merged: accounts already here are kept as they are, and backup accounts with a new name are added (with their `push_subscriptions` and `notification_preferences`). `home_latitude`, `home_longitude` and `home_timezone` stay if set here. Returns `{ counts, removed, accounts: { added, kept }, safetyBackup }`. |
 | `DELETE` | `/api/backups/:name` | Deletes it. Returns `204`. |
 
 Names must match `^[A-Za-z0-9][A-Za-z0-9._-]*\.json$`. A restore removes history rows whose device, sensor or user isn't in the backup.

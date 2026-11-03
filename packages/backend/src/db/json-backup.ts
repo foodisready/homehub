@@ -301,11 +301,56 @@ export interface RestoreResult {
   counts: Record<string, number>;
   /** History rows removed because their device, sensor or user is gone. */
   removed: number;
+  /** Accounts the backup brought in, and backup accounts already here (kept as they are). */
+  accounts: { added: string[]; kept: string[] };
+}
+
+/** Tables whose rows belong to one account: they follow that account in or stay out. */
+const PER_USER_TABLES = new Set<string>(['push_subscriptions', 'notification_preferences']);
+
+/** Settings this HomeHub keeps when it already has them: the backup fills them in only if unset. */
+const LOCAL_SETTINGS = [['home_latitude', 'home_longitude'], ['home_timezone']];
+
+function insertRow(
+  db: Database.Database, t: TableName, row: Row, i: number,
+  opts: { omit?: string[]; set?: Row; orIgnore?: boolean } = {},
+): Database.RunResult {
+  const cols = columns(db, t);
+  const jsonCols = new Set(JSON_COLUMNS[t] ?? []);
+  const merged: Row = { ...row, ...opts.set };
+  const keys = Object.keys(merged).filter((k) => cols.has(k) && !opts.omit?.includes(k));
+  if (keys.length === 0) throw new BackupError(`${t} row ${i + 1} has no known fields`);
+  const values = keys.map((k) => {
+    const v = merged[k];
+    if (v === HIDDEN) throw new BackupError(`${t} row ${i + 1}: ${k} is still ${HIDDEN}`);
+    if (jsonCols.has(k) && v !== null && typeof v === 'object') return JSON.stringify(v);
+    if (typeof v === 'boolean') return v ? 1 : 0;
+    if (v !== null && typeof v === 'object') {
+      throw new BackupError(`${t} row ${i + 1}: ${k} must be text, a number or null`);
+    }
+    return v;
+  });
+  try {
+    return db.prepare(
+      `INSERT ${opts.orIgnore ? 'OR IGNORE ' : ''}INTO ${t} (${keys.map((k) => `"${k}"`).join(', ')}) VALUES (${keys.map(() => '?').join(', ')})`,
+    ).run(...values);
+  } catch (err) {
+    throw new BackupError(`${t} row ${i + 1}: ${(err as Error).message}`);
+  }
 }
 
 /**
- * Replace each table in the backup with the backup's rows. Tables left out of
- * the file are untouched. Runs in one transaction.
+ * Restore the backup's devices, rooms, schedules and settings, keeping this
+ * HomeHub's accounts. Runs in one transaction; tables left out of the file
+ * are untouched.
+ *
+ * - Most tables are replaced with the backup's rows.
+ * - Accounts are merged: every account here stays as it is, password
+ *   included, so whoever restores can still sign in. A backup account whose
+ *   name isn't here is added with its password; one whose name is here is
+ *   skipped. Push subscriptions and notification choices come along only for
+ *   added accounts.
+ * - The home's location and time zone stay if this HomeHub has them set.
  *
  * Foreign keys are off during the swap so deleting devices doesn't cascade
  * into the history tables. Afterwards, settings rows that point at something
@@ -314,37 +359,59 @@ export interface RestoreResult {
 export function applyBackup(data: BackupFile, opts: { dryRun?: boolean } = {}): RestoreResult {
   const db = getDb();
   const tables = BACKUP_TABLES.filter((t) => data.tables[t]);
-  const result: RestoreResult = { counts: {}, removed: 0 };
+  const result: RestoreResult = { counts: {}, removed: 0, accounts: { added: [], kept: [] } };
   const ROLLBACK = Symbol('rollback');
+  /** Backup user id → id of an account added from the backup. */
+  const addedIds = new Map<unknown, number>();
 
   db.pragma('foreign_keys = OFF');
   try {
     db.transaction(() => {
       for (const t of tables) {
-        const cols = columns(db, t);
-        const jsonCols = new Set(JSON_COLUMNS[t] ?? []);
-        db.prepare(`DELETE FROM ${t}`).run();
         const rows = data.tables[t]!;
-        rows.forEach((row, i) => {
-          const keys = Object.keys(row).filter((k) => cols.has(k));
-          if (keys.length === 0) throw new BackupError(`${t} row ${i + 1} has no known fields`);
-          const values = keys.map((k) => {
-            const v = row[k];
-            if (v === HIDDEN) throw new BackupError(`${t} row ${i + 1}: ${k} is still ${HIDDEN}`);
-            if (jsonCols.has(k) && v !== null && typeof v === 'object') return JSON.stringify(v);
-            if (typeof v === 'boolean') return v ? 1 : 0;
-            if (v !== null && typeof v === 'object') {
-              throw new BackupError(`${t} row ${i + 1}: ${k} must be text, a number or null`);
-            }
-            return v;
+
+        if (t === 'users') {
+          const here = new Set((db.prepare('SELECT name FROM users').all() as { name: string }[]).map((u) => u.name));
+          rows.forEach((row, i) => {
+            if (typeof row.name !== 'string' || !row.name.trim()) throw new BackupError(`users row ${i + 1} has no name`);
+            if (here.has(row.name)) { result.accounts.kept.push(row.name); return; }
+            const { lastInsertRowid } = insertRow(db, t, row, i, { omit: ['id'] });
+            addedIds.set(row.id, Number(lastInsertRowid));
+            here.add(row.name);
+            result.accounts.added.push(row.name);
           });
-          try {
-            db.prepare(`INSERT INTO ${t} (${keys.map((k) => `"${k}"`).join(', ')}) VALUES (${keys.map(() => '?').join(', ')})`)
-              .run(...values);
-          } catch (err) {
-            throw new BackupError(`${t} row ${i + 1}: ${(err as Error).message}`);
-          }
-        });
+          result.counts[t] = result.accounts.added.length;
+          continue;
+        }
+
+        if (PER_USER_TABLES.has(t)) {
+          let n = 0;
+          rows.forEach((row, i) => {
+            const userId = addedIds.get(row.user_id);
+            if (userId === undefined) return;
+            n += insertRow(db, t, row, i, { omit: ['id'], set: { user_id: userId }, orIgnore: true }).changes;
+          });
+          result.counts[t] = n;
+          continue;
+        }
+
+        if (t === 'settings') {
+          const isSetHere = (k: string) =>
+            !!(db.prepare("SELECT 1 FROM settings WHERE key = ? AND value <> ''").get(k));
+          const keep = LOCAL_SETTINGS.filter((group) => isSetHere(group[0])).flat();
+          db.prepare(`DELETE FROM settings WHERE key NOT IN (${keep.map(() => '?').join(', ') || "''"})`).run(...keep);
+          let n = 0;
+          rows.forEach((row, i) => {
+            if (keep.includes(row.key as string)) return;
+            insertRow(db, t, row, i);
+            n++;
+          });
+          result.counts[t] = n;
+          continue;
+        }
+
+        db.prepare(`DELETE FROM ${t}`).run();
+        rows.forEach((row, i) => insertRow(db, t, row, i));
         result.counts[t] = rows.length;
       }
 
