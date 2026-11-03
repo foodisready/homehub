@@ -31,9 +31,9 @@ Then open `http://homehub.local:4200` and create your account.
 
 HomeHub is free, and always will be. If it's useful to you, you can support its development with a donation.
 
-- Donations are voluntary and don't buy a product, service or features. Everyone gets the same HomeHub.
+- Donations are voluntary, final, and not tax-deductible. They don't buy a product, service or features. Everyone gets the same HomeHub.
 - They pay for development time and the smart devices HomeHub is tested with.
-- If you were charged by mistake, or charged the wrong amount, [open an issue](https://github.com/foodisready/homehub/issues) within 30 days and we'll refund it.
+- If you were charged by mistake, charged twice, or charged the wrong amount, [open an issue](https://github.com/foodisready/homehub/issues) within 30 days and we'll refund it.
 
 ## Contact
 
