@@ -3,6 +3,7 @@ import { RouterOutlet } from '@angular/router';
 import { AppNavComponent } from './core/nav/app-nav.component';
 import { AuthService } from './core/auth/auth.service';
 import { AutomationsService } from './core/services/automations.service';
+import { AppUpdateService } from './core/services/app-update.service';
 
 @Component({
   selector: 'app-root',
@@ -44,6 +45,10 @@ export class AppComponent {
   readonly automations = inject(AutomationsService);
   readonly isAdmin = computed(() => this.auth.user()?.role === 'admin');
   readonly resuming = signal(false);
+
+  constructor() {
+    inject(AppUpdateService).start();
+  }
 
   resume(): void {
     this.resuming.set(true);

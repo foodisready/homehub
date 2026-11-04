@@ -136,7 +136,7 @@ export class HomeSettingsComponent implements OnInit {
       || this.longitude.trim() !== (s.longitude === null ? '' : String(s.longitude));
   }
 
-  /** "33.95, -84.55" pasted from Google Maps fills both boxes. */
+  /** "39.80, -89.64" pasted from Google Maps fills both boxes. */
   splitPasted(value: string): void {
     const m = /^\s*(-?\d+(?:\.\d+)?)\s*[, ]\s*(-?\d+(?:\.\d+)?)\s*$/.exec(value);
     if (m) { this.latitude = m[1]; this.longitude = m[2]; }

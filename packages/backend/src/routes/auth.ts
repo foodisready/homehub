@@ -9,6 +9,7 @@ import {
   SetupError,
 } from '../auth/auth.service';
 import { startLoginAttempt } from '../auth/login-limiter';
+import { checkInvite, redeemInvite, InviteError } from '../auth/invites';
 import { logger } from '../logger';
 
 export const authRouter = Router();
@@ -79,6 +80,56 @@ authRouter.post('/setup', async (req: Request, res: Response) => {
   } catch (err) {
     if (err instanceof SetupError) {
       return res.status(err.status).json({ error: err.message, code: err.status === 409 ? 'ALREADY_SET_UP' : 'VALIDATION_ERROR' });
+    }
+    throw err;
+  }
+});
+
+// ── Family invites ───────────────────────────────────────────────
+// The code travels in the body, not the URL, so it doesn't land in logs.
+
+/** Guesses count against the login limit, like wrong passwords. */
+function inviteAttempt(req: Request, res: Response) {
+  const attempt = startLoginAttempt(req.socket.remoteAddress ?? 'unknown', '(invite)');
+  if (!attempt.allowed) {
+    res.set('Retry-After', String(attempt.retryAfterSeconds));
+    res.status(429).json({ error: 'Too many tries. Wait a few minutes, then try again.', code: 'RATE_LIMITED' });
+    return null;
+  }
+  return attempt;
+}
+
+// POST /api/auth/invite { code } — whether an invite still works
+authRouter.post('/invite', (req: Request, res: Response) => {
+  const attempt = inviteAttempt(req, res);
+  if (!attempt) return;
+  try {
+    const result = checkInvite(req.body?.code);
+    attempt.succeeded();
+    res.json(result);
+  } catch (err) {
+    if (err instanceof InviteError) return res.status(err.status).json({ error: err.message, code: 'INVALID_INVITE' });
+    throw err;
+  }
+});
+
+// POST /api/auth/join { code, username, password } — make a family login from an invite, then sign in
+authRouter.post('/join', async (req: Request, res: Response) => {
+  const attempt = inviteAttempt(req, res);
+  if (!attempt) return;
+  const { code, username, password } = (req.body ?? {}) as Record<string, unknown>;
+  try {
+    const user = await redeemInvite(code, username, password);
+    attempt.succeeded();
+    const { accessToken, refreshToken } = issueTokens(user);
+    res.cookie(REFRESH_COOKIE, refreshToken, COOKIE_OPTS);
+    logger.info({ userId: user.id, name: user.name }, 'Family member joined with an invite');
+    res.status(201).json({ accessToken, user: { id: user.id, name: user.name, role: user.role } });
+  } catch (err) {
+    if (err instanceof InviteError) {
+      // A name already taken or a short password is the person's typo, not a guess.
+      if (err.status === 400 || err.status === 409) attempt.succeeded();
+      return res.status(err.status).json({ error: err.message, code: err.status === 409 ? 'CONFLICT' : err.status === 400 ? 'VALIDATION_ERROR' : 'INVALID_INVITE' });
     }
     throw err;
   }

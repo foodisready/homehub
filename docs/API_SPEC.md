@@ -81,6 +81,24 @@ With `ADMIN_PASSWORD` set in the environment, the backend creates that admin on 
 
 ---
 
+### `POST /api/auth/invite`
+Public. Whether a family invite code still works. The code is sent in the body, never the URL, so it stays out of logs.
+
+**Body** `{ "code": "…" }`
+
+**Response 200** `{ "expiresAt": "2026-11-05T14:57:00.000Z" }`. **404** `INVALID_INVITE` for an unknown code; **410** once it's cancelled, expired or used up. Failed checks count against the login rate limit (**429**).
+
+---
+
+### `POST /api/auth/join`
+Public. Creates a family (member) login from an invite and signs it in, like `/login`.
+
+**Body** `{ "code": "…", "username": "Mom", "password": "at-least-8-characters" }`
+
+**Response 201** — same as `/login`. **400** for a missing name or a short password, **409** `CONFLICT` when the name is taken (ignoring case), **404**/**410** as above.
+
+---
+
 ### `POST /internal/service-token`
 Requires `X-Internal-Key`. Returns `{ accessToken }` for the first admin account; the MCP server signs in with it. **503** `NOT_SET_UP` before any admin exists.
 
@@ -529,6 +547,52 @@ Any signed-in user.
 
 ### `GET /api/home-settings/mcp` — `admin` only
 **Response 200** — `{ "secret": "<MCP_SECRET>", "port": 3001 }`, for connecting an AI app.
+
+---
+
+## First-run setup — `admin` only
+
+The guided setup after the first admin account is made. Mounted at `/api/setup`.
+
+### `GET /api/setup`
+```json
+{ "finished": false, "step": "devices", "starters": [{ "id": "evening", "title": "Evening lights", "description": "…" }] }
+```
+`step` is one of `home`, `devices`, `rooms`, `starters`, `family`, `done`. A home with devices but no saved progress (set up before the wizard existed) reports `finished: true`.
+
+### `PUT /api/setup`
+Body `{ "step"?: "rooms", "finished"?: true }`. **400** for an unknown step.
+
+### `GET /api/setup/places?q=springfield, il&tz=America/Chicago`
+Up to 8 towns, best first: whole-name matches, then towns in `tz`, then bigger towns. Text after a comma narrows by region or country; US state abbreviations work. The town list ships with HomeHub (GeoNames, CC BY 4.0), so nothing leaves the house.
+```json
+[{ "name": "Springfield", "region": "Illinois", "country": "United States", "latitude": 39.8, "longitude": -89.64, "timezone": "America/Chicago", "label": "Springfield, Illinois, United States" }]
+```
+
+### `GET /api/setup/places/guess?tz=America/New_York`
+The biggest town in that time zone, or `null`.
+
+### `POST /api/setup/starters`
+Creates starter automations, all or none.
+```json
+{ "starters": [
+  { "id": "evening", "deviceIds": [3, 4], "offTime": "22:30" },
+  { "id": "outdoor", "deviceIds": [5] },
+  { "id": "goodnight", "deviceIds": [3, 4, 5] }
+] }
+```
+`evening`: on at sunset, off at `offTime` (24-hour, default `23:00`). `outdoor`: on at sunset, off at sunrise. `goodnight`: a scene named Goodnight (or Goodnight 2, …) that turns the devices off.
+
+**Response 201** `{ "schedules": 6, "scenes": ["Goodnight"] }`. **400** for an unknown starter, no devices, a bad time, or a protected device.
+
+### `GET /api/setup/invites`
+Invites that still work: `[{ "id": 1, "expiresAt": "…", "uses": 2, "maxUses": 10 }]`.
+
+### `POST /api/setup/invites`
+A new invite for up to 10 people, valid 24 hours. **201** with the same fields plus `code`, returned only this once; only its hash is stored. The join link is `<HomeHub address>/join#<code>`.
+
+### `DELETE /api/setup/invites/:id`
+Cancels an invite. **204**, or **404**.
 
 ---
 

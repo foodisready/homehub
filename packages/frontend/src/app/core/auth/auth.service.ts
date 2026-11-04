@@ -52,6 +52,17 @@ export class AuthService {
     );
   }
 
+  /** Make a family login from an invite code, then sign in as it. */
+  join(code: string, username: string, password: string): Observable<AuthUser> {
+    return this.http.post<LoginResponse>(`${API}/auth/join`, { code, username, password }).pipe(
+      tap((res) => {
+        this._token.set(res.accessToken);
+        this._user.set(res.user);
+      }),
+      map((res) => res.user),
+    );
+  }
+
   logout(): void {
     this.http.post(`${API}/auth/logout`, {}).subscribe();
     this._token.set(null);

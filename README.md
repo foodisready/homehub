@@ -49,6 +49,10 @@ For questions, bug reports and donation problems, [open an issue on GitHub](http
 - [API reference](docs/API_SPEC.md) lists the REST API
 - [Voice control plan](docs/VOICE_CONTROL.md) covers the voice work in progress
 
+## Credits
+
+Town names and locations for setup come from [GeoNames](https://www.geonames.org), licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+
 ## License
 
 Copyright © 2026 foodisready.

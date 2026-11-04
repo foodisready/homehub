@@ -53,6 +53,7 @@ import { startMotionRules } from './sensors/motion';
 import { seedAdminIfEmpty } from './auth/auth.service';
 import { applyHomeTimezone } from './home/home-settings';
 import { homeSettingsRouter } from './routes/home-settings';
+import { setupRouter } from './routes/setup';
 import { initSocket } from './socket';
 
 const app = express();
@@ -113,6 +114,7 @@ app.use('/api/backups',                requireAdmin, backupsRouter);
 app.use('/api/cameras',                camerasRouter);
 app.use('/api/activity',               activityRouter);
 app.use('/api/home-settings',          homeSettingsRouter);
+app.use('/api/setup',                  setupRouter);
 
 // ── Global error handler ───────────────────────────────────────
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {

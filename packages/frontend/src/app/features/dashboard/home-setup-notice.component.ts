@@ -24,13 +24,19 @@ interface HomeSettings {
       display: flex; align-items: center; justify-content: space-between; gap: 0.6rem 1rem; flex-wrap: wrap;
     }
     .notice strong { color: var(--text); }
+    .notice.setup { border-color: var(--accent); background: rgba(59,130,246,0.12); }
     .notice a {
       font-size: 0.85rem; padding: 0.4rem 0.85rem; border-radius: 6px; text-decoration: none;
       background: var(--accent); color: #fff; white-space: nowrap;
     }
   `],
   template: `
-    @if (message(); as text) {
+    @if (setupStep(); as step) {
+      <div class="notice setup" role="status">
+        <span><strong>Let's finish setting up HomeHub.</strong> {{ step }}</span>
+        <a routerLink="/welcome">Continue setup</a>
+      </div>
+    } @else if (message(); as text) {
       <div class="notice" role="status">
         <span><strong>Schedules may run at the wrong time.</strong> {{ text }}</span>
         <a routerLink="/settings" [queryParams]="{ section: 'home' }">Set it in Settings</a>
@@ -42,6 +48,22 @@ export class HomeSetupNoticeComponent implements OnInit {
   private readonly http = inject(HttpClient);
   private readonly auth = inject(AuthService);
   private readonly home = signal<HomeSettings | null>(null);
+  private readonly setup = signal<{ finished: boolean; step: string } | null>(null);
+
+  /** Setup was started but not finished: say what's next. */
+  readonly setupStep = computed(() => {
+    const s = this.setup();
+    if (!s || s.finished) return '';
+    const next: Record<string, string> = {
+      home: 'Next: tell it where your home is.',
+      devices: 'Next: find your devices.',
+      rooms: 'Next: name your devices and pick rooms.',
+      starters: 'Next: a few starter automations.',
+      family: 'Next: invite your family.',
+      done: 'Almost done.',
+    };
+    return next[s.step] ?? 'A few steps left.';
+  });
 
   readonly message = computed(() => {
     const h = this.home();
@@ -54,6 +76,9 @@ export class HomeSetupNoticeComponent implements OnInit {
   });
 
   ngOnInit(): void {
+    if (this.auth.user()?.role === 'admin') {
+      this.http.get<{ finished: boolean; step: string }>('/api/setup').subscribe({ next: (s) => this.setup.set(s), error: () => undefined });
+    }
     this.http.get<HomeSettings>('/api/home-settings').subscribe({ next: (h) => this.home.set(h), error: () => undefined });
   }
 }

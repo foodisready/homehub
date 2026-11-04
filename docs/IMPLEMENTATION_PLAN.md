@@ -277,6 +277,55 @@ Production-grade deployment. `docker compose up -d` on a fresh Pi → everything
 
 ---
 
+## Phase 11 — Setup Without a Technical Helper
+
+**Goal:** someone who has never used a terminal can set up HomeHub, add their devices and get their family on it, without help.
+
+**Already in place:** the one-line installer, account creation in the browser, generated secrets, device discovery, nightly backups with download, upload and restore in Settings, and one-tap updates from the dashboard.
+
+Work in this order:
+
+### 11a — First-run wizard ✅
+
+Replaces landing on an empty dashboard with a setup notice.
+
+- [x] **Your home:** take the time zone from the browser, and find the location from a town or postcode. Nobody types coordinates.
+- [x] **Find devices:** scan automatically and list what was found by brand. "Add all" adds them in one tap; each can still be skipped.
+- [x] **Name and group:** suggest a name and room for each device. The admin accepts or edits them.
+- [x] **Starter automations:** offer optional examples, such as "lights on at sunset, off at 11 PM" and "porch light off in the morning". Each is one tap.
+- [x] **Invite family:** show a QR code that creates a family login on their phone, with "Add to Home Screen" steps.
+- [x] It can be skipped or resumed, and opened again later from Settings.
+
+### 11b — Guided cloud brands
+
+- [ ] A card for each brand (Wyze, Meross, Tuya) that says what it needs, where to find it, and has a **Test** button that answers in plain words.
+- [ ] Tuya local keys: fetch them automatically if possible, otherwise give step-by-step help. Recommend local-control brands when buying.
+
+### 11c — Looks after itself
+
+- [ ] A plain-language health page, for example "Living room lamp hasn't answered since 3 PM. Is it plugged in?". No logs.
+- [ ] If an update doesn't start, go back to the previous version automatically.
+- [ ] Moving to new hardware: restore a backup during first-run setup.
+
+### 11d — Ready-to-flash image
+
+- [ ] A Raspberry Pi Imager image: choose HomeHub, enter Wi-Fi in Imager, plug in, then open `homehub.local` on a phone.
+- [ ] A build pipeline for the image in GitHub Actions, with checksums for each release.
+
+### 11e — Away from home
+
+- [ ] A guided remote-access flow: install Tailscale on the phone, sign in, then scan a code. HomeHub handles its own side.
+
+### 11f — Test with someone who isn't the developer
+
+- [ ] Give a fresh Pi to a non-technical person and watch the setup without helping. Every point where they hesitate becomes a task here. Repeat after each of 11a–11d.
+
+### Deliverable
+
+A non-technical household goes from unboxing to family members controlling lights on their phones in under 30 minutes, with no terminal and no outside help.
+
+---
+
 ## Dependency Graph
 
 ```

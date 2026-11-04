@@ -326,4 +326,19 @@ function migrate(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_firmware_target_uploaded
       ON firmware_releases(target, uploaded_at DESC);
   `);
+
+  // ── Family invites: a QR code that lets someone make their own login ──
+  // Only a hash of the code is kept, so a copy of the DB can't be used to join.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS invites (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      code_hash   TEXT    NOT NULL UNIQUE,
+      created_by  INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      expires_at  TEXT    NOT NULL,
+      max_uses    INTEGER NOT NULL,
+      uses        INTEGER NOT NULL DEFAULT 0,
+      cancelled   INTEGER NOT NULL DEFAULT 0,
+      created_at  TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    );
+  `);
 }

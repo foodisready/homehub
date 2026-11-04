@@ -62,11 +62,17 @@ Use these exact commands, with `-f docker-compose.yml`. HomeHub is ready when `d
 
 Do this straight away: until an account exists, anyone on your network who opens HomeHub can create it.
 
-## Step 3: Set your home's location
+## Step 3: Follow the guided setup
 
-After you create the account, HomeHub opens **Settings → Home**. Choose your time zone and enter your home's latitude and longitude. To find them, right-click your home in Google Maps and select the numbers at the top. Sunrise and sunset schedules use the location, and clock-time schedules use the time zone.
+After you create the account, HomeHub walks you through five short steps. Each one can be skipped, and **Finish later** takes you to the dashboard, which shows a **Continue setup** button until you're done.
 
-Next, follow the [User Guide](./USER_GUIDE.md) to add your devices.
+1. **Home:** type your town, and HomeHub fills in its location and time zone. Sunrise and sunset schedules use the location; clock times use the time zone. Towns are looked up on HomeHub itself, so nothing is sent anywhere.
+2. **Devices:** HomeHub searches your network and lists what it found. Untick anything you don't want, fix any names, and add them in one go. Devices that need a sign-in or key, such as Tuya plugs, can be connected later in **Settings → Devices**.
+3. **Rooms:** HomeHub suggests a room from each name, such as *Kitchen* for "Kitchen lights". Change anything that's wrong.
+4. **Automations:** optional starters: evening lights (on at sunset, off at a time you choose), outdoor lights from sunset to sunrise, and a **Goodnight** scene.
+5. **Family:** show a QR code. Each person scans it with their phone, chooses a name and password, and is in.
+
+You can run the setup again any time from **Settings → Home**. The [User Guide](./USER_GUIDE.md) covers everything else.
 
 ### Optional: settings file
 

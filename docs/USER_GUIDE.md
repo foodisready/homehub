@@ -284,7 +284,7 @@ Motion sensors report to one HomeHub only, the one they were last connected to o
 
 ## Home location and time zone
 
-Open **Settings → Home** to choose your time zone and enter your home's latitude and longitude. HomeHub opens it for you after you create your account.
+The guided setup asks for your town and sets both for you. To change them later, open **Settings → Home**, or select **Run the guided setup again** there.
 
 - **Time zone:** clock-time schedules, timers and every time HomeHub shows use it. **Use** sets it to the time zone of the phone or computer you're using.
 - **Location:** sunrise and sunset schedules use it. In Google Maps, right-click your home and select the numbers at the top, then paste both into the first box. On an `https` address, such as through Tailscale, **Use this device's location** fills them in.
@@ -299,7 +299,15 @@ Anyone with the secret can control every device, so share it only with apps you 
 
 ## Household members
 
-Open **Settings → Users** to add people. Everyone can switch devices and set timers. Only administrators can add, edit or remove devices, or change settings.
+The easiest way to add people is an invite. In **Settings → Users**, select **Show an invite code**. Each person scans the QR code with their phone's camera, chooses their own name and password, and is signed in. HomeHub then shows them how to add it to their home screen.
+
+- An invite works for up to 10 people for 24 hours. **Cancel this invite** stops it straight away.
+- Invited people get family logins, never administrator ones.
+- Open HomeHub at its network address, such as `http://homehub.local:4200`, before showing the code. A code made on `localhost` points phones at an address they can't reach, and HomeHub warns you.
+
+You can also add someone by typing a name and password under **Settings → Users**.
+
+Everyone can switch devices and set timers. Only administrators can add, edit or remove devices, or change settings.
 
 Settings sections fold away. Select a section's name to open or close it. Devices starts open, and HomeHub remembers your choice on each browser.
 

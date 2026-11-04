@@ -1,5 +1,5 @@
 import { Component, OnInit, signal, computed, OnDestroy, viewChild, inject } from '@angular/core';
-import { ActivatedRoute } from '@angular/router';
+import { ActivatedRoute, RouterLink } from '@angular/router';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
 import { AuthService } from '../../core/auth/auth.service';
@@ -8,6 +8,7 @@ import { SocketService } from '../../core/socket/socket.service';
 import { DeviceFilterComponent, matchesDevice, type DeviceFilter } from '../../shared/device-filter/device-filter.component';
 import { Device } from '../../shared/models/device.model';
 import { BackupsComponent } from './backups.component';
+import { InviteQrComponent } from '../welcome/invite-qr.component';
 import { MerossLoginComponent } from './meross-login.component';
 import { OtherNetworksComponent } from './other-networks.component';
 import { HomeSettingsComponent } from './home-settings.component';
@@ -67,7 +68,7 @@ const DRIVER_LABEL: Record<string, string> = {
 @Component({
   selector: 'app-settings',
   standalone: true,
-  imports: [FormsModule, DeviceFilterComponent, BackupsComponent, MerossLoginComponent, OtherNetworksComponent, HomeSettingsComponent, AiConnectionComponent, CamerasToggleComponent, TeachCommandsComponent, VoiceRepliesComponent],
+  imports: [FormsModule, RouterLink, InviteQrComponent, DeviceFilterComponent, BackupsComponent, MerossLoginComponent, OtherNetworksComponent, HomeSettingsComponent, AiConnectionComponent, CamerasToggleComponent, TeachCommandsComponent, VoiceRepliesComponent],
   styles: [`
     .topbar { display:flex; align-items:center; justify-content:space-between; margin-bottom:1.5rem; }
     .topbar h1 { font-size:1.4rem; font-weight:700; }
@@ -508,6 +509,9 @@ const DRIVER_LABEL: Record<string, string> = {
           @if (isSectionOpen('home')) {
             <div class="card">
               <app-home-settings [welcome]="welcome()" />
+              <p style="margin-top:1rem;font-size:0.82rem;color:var(--text-muted)">
+                New to HomeHub, or moved house? <a routerLink="/welcome">Run the guided setup again</a>.
+              </p>
             </div>
           }
         </div>
@@ -690,6 +694,11 @@ const DRIVER_LABEL: Record<string, string> = {
             <span class="chev">{{ isSectionOpen('users') ? '▾' : '▸' }}</span> Users
           </button>
           @if (isSectionOpen('users')) {
+            <div class="card" style="margin-bottom:0.75rem">
+              <p style="font-weight:600;margin-bottom:0.25rem">Invite family</p>
+              <p style="font-size:0.82rem;color:var(--text-muted);margin-bottom:0.75rem">They scan a code and choose their own name and password.</p>
+              <app-invite-qr />
+            </div>
             <div class="card">
               @for (u of users(); track u.id) {
                 <div class="row-item">

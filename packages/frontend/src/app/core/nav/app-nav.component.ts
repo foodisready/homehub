@@ -248,7 +248,8 @@ export class AppNavComponent {
   );
 
   /** Signed in and not on the sign-in page. */
-  readonly visible = computed(() => this.auth.isLoggedIn() && !this.url().startsWith('/login'));
+  // Setup and joining are full-page flows of their own.
+  readonly visible = computed(() => this.auth.isLoggedIn() && !/^\/(login|welcome|join)/.test(this.url()));
 
   private readonly isAdmin = computed(() => this.auth.user()?.role === 'admin');
   readonly moreItems = computed(() =>

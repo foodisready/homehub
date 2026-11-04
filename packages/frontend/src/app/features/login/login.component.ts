@@ -176,8 +176,8 @@ export class LoginComponent implements OnInit {
     this.auth.setup(this.username.trim(), this.password).subscribe({
       next: () => {
         this.socket.connect();
-        // Next stop: where the home is, for sunrise and sunset schedules.
-        this.router.navigate(['/settings'], { queryParams: { welcome: 1 } });
+        // Next stop: the guided setup.
+        this.router.navigate(['/welcome']);
       },
       error: (err: HttpErrorResponse) => {
         this.loading.set(false);
