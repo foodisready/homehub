@@ -115,7 +115,10 @@ async function updates(probe: Probe): Promise<HealthItem> {
   ]);
   if (updater) return { ...base, level: 'ok', detail: 'Running. HomeHub can update, and go back a version if an update misbehaves.' };
   if (watchtower) {
-    return { ...base, level: 'info', detail: 'Updates work. To be able to go back a version, run the installer on the HomeHub computer once more.' };
+    return {
+      ...base, level: 'info',
+      detail: 'Updates work, but this HomeHub can\'t go back a version yet. Once, on the HomeHub computer, run: curl -fsSL https://raw.githubusercontent.com/foodisready/homehub/main/scripts/install.sh | sh',
+    };
   }
   return { ...base, level: 'warn', detail: "The update service isn't answering, so the Update button won't work. Run the installer on the HomeHub computer to update." };
 }

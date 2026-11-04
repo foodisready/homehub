@@ -95,7 +95,7 @@ describe('checkHealth', () => {
     assert.equal(item(r, 'updater')?.level, 'ok');
     const old = await checkHealth({ probe: async (url) => !url.includes(':8081'), now: NOW, dataDir: TMP });
     assert.equal(item(old, 'updater')?.level, 'info', 'Watchtower only: works, but suggests the installer');
-    assert.match(item(old, 'updater')!.detail, /run the installer/);
+    assert.match(item(old, 'updater')!.detail, /install\.sh/);
     assert.equal(item(r, 'cameras'), undefined, 'camera bridge not installed');
   });
 

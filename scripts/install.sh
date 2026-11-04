@@ -63,6 +63,13 @@ fi
 curl -fsSL "$RAW/docker-compose.yml" -o docker-compose.yml.new
 mv docker-compose.yml.new docker-compose.yml
 
+# HomeHub's Update and Go back record the version they chose in .env. Running
+# the installer means the newest release, so drop that (a HOMEHUB_TAG set by
+# hand stays).
+if grep -qs '^# Chosen in HomeHub' .env; then
+  sed -i '/^# Chosen in HomeHub/{N;/\nHOMEHUB_TAG=/d;}' .env
+fi
+
 # A 4 GB Pi runs short of memory with the default AI model, so pick the small one.
 MEM_KB=$(awk '/^MemTotal:/ { print $2 }' /proc/meminfo)
 if [ "${MEM_KB:-0}" -lt 6000000 ] && ! grep -qs '^OLLAMA_MODEL=.' .env; then
