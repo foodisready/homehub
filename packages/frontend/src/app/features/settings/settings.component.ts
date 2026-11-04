@@ -1129,6 +1129,9 @@ export class SettingsComponent implements OnInit, OnDestroy {
       this.welcome.set(true);
       this.toggleSection('home', true);
     }
+    // The dashboard's "time zone not set" notice links to /settings?section=home.
+    const section = this.route.snapshot.queryParamMap.get('section');
+    if (section) this.toggleSection(section, true);
     this.stopWatchingDevices = this.socket.onDeviceState((event) => {
       this._devices.update((list) => list.map((d) => d.id === event.id ? { ...d, state: event.state } : d));
     });

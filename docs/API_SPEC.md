@@ -335,10 +335,13 @@ Called by the sensor. The token is the auth, so these need no login. Returns `20
     "cronExpression": "0 0 * * *",
     "state": false,
     "enabled": true,
-    "nextRun": "2026-03-13T00:00:00Z"
+    "nextRun": "2026-03-13T00:00:00Z",
+    "problem": null
   }
 ]
 ```
+
+`problem` is set, in words, on a cron schedule the scheduler can't read, such as `0 30 * * *` (hour 30). Such a schedule never runs.
 
 ---
 
@@ -353,6 +356,8 @@ Called by the sensor. The token is the auth, so these need no login. Returns `20
   "state": false
 }
 ```
+
+The minute comes first. An expression the scheduler can't run is refused with `400` and code `INVALID_CRON`, with the reason in `error`. `PUT /api/schedules/:id` checks the same way.
 
 **Body (solar type)**
 ```json

@@ -221,7 +221,8 @@ export class DeviceRowComponent implements OnDestroy {
     }
   }
 
-  time = clock;
+  /** "6:35 PM" today, "Yesterday 12:30 AM", or "Nov 1, 6:12 PM": a time alone can't say which night. */
+  time = (iso: string) => { const t = when(iso); return t.charAt(0).toUpperCase() + t.slice(1); };
 
   recentText(e: ActivityEvent): string {
     return `${actionWord(e.driverType, e.state)} ${causeText(e)}`;

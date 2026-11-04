@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { requireAdmin } from '../middleware/auth';
 import { getDb } from '../db';
 import { logger } from '../logger';
+import { cronProblem } from './cron-check';
 
 export const schedulesRouter = Router();
 
@@ -36,6 +37,8 @@ function toPublic(row: ScheduleRow & { device_alias?: string }) {
     state:              row.state === 1,
     enabled:            row.enabled === 1,
     createdAt:          row.created_at,
+    /** Why the scheduler can't run it, so it never fires; null when fine. */
+    problem:            row.trigger_type === 'cron' ? cronProblem(row.cron_expression ?? '') : null,
   };
 }
 
@@ -78,6 +81,8 @@ schedulesRouter.post('/', requireAdmin, (req: Request, res: Response) => {
   if (triggerType === 'cron' && !cronExpression) {
     return res.status(400).json({ error: 'cronExpression required for cron trigger', code: 'VALIDATION_ERROR' });
   }
+  const badCron = triggerType === 'cron' ? cronProblem(cronExpression!) : null;
+  if (badCron) return res.status(400).json({ error: badCron, code: 'INVALID_CRON' });
   if (triggerType === 'solar' && (!solarEvent || !SOLAR_EVENTS.includes(solarEvent))) {
     return res.status(400).json({ error: `solarEvent must be one of: ${SOLAR_EVENTS.join(', ')}`, code: 'VALIDATION_ERROR' });
   }
@@ -124,6 +129,8 @@ schedulesRouter.put('/:id', requireAdmin, (req: Request, res: Response) => {
   if (triggerType === 'cron' && !cronExpression) {
     return res.status(400).json({ error: 'cronExpression required for cron trigger', code: 'VALIDATION_ERROR' });
   }
+  const badCron = triggerType === 'cron' ? cronProblem(cronExpression!) : null;
+  if (badCron) return res.status(400).json({ error: badCron, code: 'INVALID_CRON' });
   if (triggerType === 'solar' && (!solarEvent || !SOLAR_EVENTS.includes(solarEvent))) {
     return res.status(400).json({ error: `solarEvent must be one of: ${SOLAR_EVENTS.join(', ')}`, code: 'VALIDATION_ERROR' });
   }

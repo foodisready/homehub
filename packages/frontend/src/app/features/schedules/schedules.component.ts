@@ -3,7 +3,7 @@ import { HttpClient } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
 import { AuthService } from '../../core/auth/auth.service';
 import { Device } from '../../shared/models/device.model';
-import { SOLAR_EVENTS, describeTiming, timingOrder } from './schedule-text';
+import { SOLAR_EVENTS, cronProblem, describeCron, describeTiming, timingOrder } from './schedule-text';
 
 interface Schedule {
   id: number;
@@ -17,6 +17,8 @@ interface Schedule {
   durationMinutes: number | null;
   state: boolean;
   enabled: boolean;
+  /** Set when the scheduler can't read it, so it never runs. */
+  problem?: string | null;
 }
 
 interface ScheduleGroup {
@@ -116,6 +118,10 @@ const CRON_PRESETS = [
     .schedule-info { flex: 1 1 14rem; min-width: 0; }
     .schedule-actions { display: flex; align-items: center; gap: 0.5rem; margin-left: auto; }
     .schedule-label { font-weight: 600; overflow-wrap: anywhere; }
+    .cron-check { font-size: 0.8rem; margin: 0.35rem 0 0; overflow-wrap: anywhere; }
+    .cron-check.bad { color: var(--red); }
+    .cron-check.ok { color: var(--text-muted); }
+    .schedule-problem { font-size: 0.8rem; color: var(--red); margin-top: 0.2rem; overflow-wrap: anywhere; }
     .schedule-meta { font-size: 0.8rem; color: var(--text-muted); margin-top: 0.2rem; overflow-wrap: anywhere; }
     .badge {
       display: inline-block;
@@ -275,6 +281,9 @@ const CRON_PRESETS = [
                     @if (s.label !== timing(s)) {
                       <div class="schedule-meta">{{ s.label }}</div>
                     }
+                    @if (s.problem) {
+                      <div class="schedule-problem">Never runs: {{ s.problem }} Edit it to fix the time.</div>
+                    }
                   </div>
 
                   @if (auth.user()?.role === 'admin') {
@@ -384,11 +393,17 @@ const CRON_PRESETS = [
                   <div style="margin-top:0.3rem">
                     <code>0 21 * * *</code> — every day at 9 PM<br>
                     <code>0 8 * * 1-5</code> — weekdays at 8 AM<br>
-                    <code>0 8,20 * * *</code> — 8 AM and 8 PM daily
+                    <code>0 8,20 * * *</code> — 8 AM and 8 PM daily<br>
+                    <code>30 0 * * *</code> — 12:30 AM daily (minute first)
                   </div>
                 </div>
               }
-              <input type="text" [(ngModel)]="form.cronExpression" placeholder="0 21 * * *" style="margin-top:0.3rem" />
+              <input type="text" [(ngModel)]="form.cronExpression" placeholder="0 21 * * *" style="margin-top:0.3rem"
+                     [attr.aria-invalid]="!!cronCheck().problem" aria-describedby="cron-check" />
+              @if (cronCheck(); as c) {
+                @if (c.problem) { <p id="cron-check" class="cron-check bad">{{ c.problem }}</p> }
+                @else if (c.words) { <p id="cron-check" class="cron-check ok">Runs: {{ c.words }}</p> }
+              }
             </div>
           }
 
@@ -409,7 +424,7 @@ const CRON_PRESETS = [
 
           <div class="form-actions">
             <button class="btn-cancel" (click)="closeForm()">Cancel</button>
-            <button class="btn-primary btn-save" [disabled]="saving()" (click)="save()">
+            <button class="btn-primary btn-save" [disabled]="saving() || (form.triggerType === 'cron' && !!cronCheck().problem)" (click)="save()">
               {{ saving() ? 'Saving…' : (editingId() ? 'Update Schedule' : 'Save Schedule') }}
             </button>
           </div>
@@ -537,6 +552,16 @@ export class SchedulesComponent implements OnInit {
     const val = (event.target as HTMLSelectElement).value;
     this.form.selectedPreset = val;
     if (val !== '') this.form.cronExpression = val;
+  }
+
+  /** What the typed cron expression means, or what's wrong with it, while typing. */
+  cronCheck(): { problem: string | null; words: string | null } {
+    const expr = (this.form.cronExpression ?? '').trim();
+    if (!expr) return { problem: null, words: null };
+    const problem = cronProblem(expr);
+    if (problem) return { problem, words: null };
+    const words = describeCron(expr);
+    return { problem: null, words: words === expr ? null : words };
   }
 
   timing(s: Schedule): string {
