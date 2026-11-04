@@ -327,6 +327,19 @@ function migrate(db: Database.Database): void {
       ON firmware_releases(target, uploaded_at DESC);
   `);
 
+  // ── Matter: HomeHub's own Matter identity and its paired devices ──
+  // Kept here rather than in files, so backups and restores carry it: losing
+  // it means pairing every Matter device again. It holds private keys.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS matter_storage (
+      namespace TEXT NOT NULL,
+      context   TEXT NOT NULL,
+      key       TEXT NOT NULL,
+      value     TEXT NOT NULL,
+      PRIMARY KEY (namespace, context, key)
+    );
+  `);
+
   // ── Family invites: a QR code that lets someone make their own login ──
   // Only a hash of the code is kept, so a copy of the DB can't be used to join.
   db.exec(`

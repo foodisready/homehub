@@ -9,6 +9,7 @@ import { DeviceFilterComponent, matchesDevice, type DeviceFilter } from '../../s
 import { Device } from '../../shared/models/device.model';
 import { BackupsComponent } from './backups.component';
 import { InviteQrComponent } from '../welcome/invite-qr.component';
+import { MatterPairComponent } from './matter-pair.component';
 import { MerossLoginComponent } from './meross-login.component';
 import { OtherNetworksComponent } from './other-networks.component';
 import { HomeSettingsComponent } from './home-settings.component';
@@ -63,12 +64,13 @@ const DRIVER_LABEL: Record<string, string> = {
   tuya:   'Tuya',
   meross: 'Meross',
   wyze:   'Wyze',
+  matter: 'Matter',
 };
 
 @Component({
   selector: 'app-settings',
   standalone: true,
-  imports: [FormsModule, RouterLink, InviteQrComponent, DeviceFilterComponent, BackupsComponent, MerossLoginComponent, OtherNetworksComponent, HomeSettingsComponent, AiConnectionComponent, CamerasToggleComponent, TeachCommandsComponent, VoiceRepliesComponent],
+  imports: [FormsModule, RouterLink, InviteQrComponent, MatterPairComponent, DeviceFilterComponent, BackupsComponent, MerossLoginComponent, OtherNetworksComponent, HomeSettingsComponent, AiConnectionComponent, CamerasToggleComponent, TeachCommandsComponent, VoiceRepliesComponent],
   styles: [`
     .topbar { display:flex; align-items:center; justify-content:space-between; margin-bottom:1.5rem; }
     .topbar h1 { font-size:1.4rem; font-weight:700; }
@@ -140,6 +142,8 @@ const DRIVER_LABEL: Record<string, string> = {
     .driver-badge.tuya   { border-color:#15803d; color:#4ade80; }
     .driver-badge.meross { border-color:#7c3aed; color:#c4b5fd; }
     .driver-badge.wyze   { border-color:#0e7490; color:#67e8f9; }
+    .driver-badge.matter { border-color:#be185d; color:#f9a8d4; }
+    .matter-panel { margin-top:0.75rem; padding:0.9rem; border:1px solid var(--border); border-radius:var(--radius); }
 
     .btn-sm {
       padding:0.3rem 0.75rem;
@@ -262,7 +266,9 @@ const DRIVER_LABEL: Record<string, string> = {
                   <div style="flex:1; width:100%">
                     <div class="edit-row">
                       <input type="text" [(ngModel)]="editAlias" placeholder="Alias" />
-                      <input type="text" [(ngModel)]="editIp"    placeholder="IP address" />
+                      @if (d.driverType !== 'matter') {
+                        <input type="text" [(ngModel)]="editIp"    placeholder="IP address" />
+                      }
                     </div>
                     <div class="edit-row" style="margin-top:0.4rem">
                       <input type="text" [(ngModel)]="editRoom" placeholder="Room" list="device-rooms" autocomplete="off" aria-label="Room" />
@@ -340,7 +346,7 @@ const DRIVER_LABEL: Record<string, string> = {
                   <div class="row-label">
                     <span class="row-name">{{ d.alias }}</span>
                     <span class="row-meta row-sub">
-                      {{ d.ip }}
+                      {{ d.driverType === 'matter' ? matterModel(d) : d.ip }}
                       @if (d.hasEmeter) { · ⚡ }
                       @if (!d.online && d.isProtected) { <span class="offline"> · Offline</span> }
                     </span>
@@ -392,7 +398,13 @@ const DRIVER_LABEL: Record<string, string> = {
                 <button class="btn-sm btn-ghost" [disabled]="discovering()" (click)="discover()">
                   {{ discovering() ? 'Scanning…' : '+ Discover on network' }}
                 </button>
+                <button class="btn-sm btn-ghost" type="button" (click)="showMatter.set(!showMatter())" [attr.aria-expanded]="showMatter()">
+                  + Add a Matter device
+                </button>
               </div>
+              @if (showMatter()) {
+                <div class="matter-panel"><app-matter-pair (added)="reloadDevices()" /></div>
+              }
               @if (discoverMsg()) { <p class="msg" [class.ok]="!discoverErr()" [class.err]="discoverErr()">{{ discoverMsg() }}</p> }
               @for (m of unreachedMeross(); track m.uuid) {
                 <p class="msg err">
@@ -1289,6 +1301,17 @@ export class SettingsComponent implements OnInit, OnDestroy {
   }
 
   // ── Device methods ──────────────────────────────────────────
+
+  readonly showMatter = signal(false);
+
+  reloadDevices(): void {
+    this.http.get<Device[]>('/api/devices').subscribe((d) => this._devices.set(d));
+  }
+
+  /** "Eve Energy" for a Matter device, which has no address worth showing. */
+  matterModel(d: Device): string {
+    return d.model && d.model !== 'Matter device' ? `Matter · ${d.model}` : 'Matter';
+  }
 
   startDeviceEdit(d: Device): void {
     this.editingDeviceId.set(d.id);

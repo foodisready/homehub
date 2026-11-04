@@ -326,6 +326,24 @@ A non-technical household goes from unboxing to family members controlling light
 
 ---
 
+## Phase 12 — Matter
+
+**Goal:** most new smart plugs, lights and switches work with HomeHub, whatever the brand.
+
+- [x] matter.js 0.18 as a controller inside the backend, loaded only when a home has Matter devices
+- [x] Pairing by code, shared from Google Home, Apple Home, Alexa or SmartThings (multi-admin)
+- [x] Each on/off endpoint becomes a HomeHub device, including power-strip outlets and bridged devices
+- [x] Live state from subscriptions, so outside changes appear immediately and are recorded as such
+- [x] Pairing data in SQLite (`matter_storage`), so backups and restores carry it; backup before a matter.js version change
+- [x] Unpair on delete; HomeHub shown as "HomeHub" in other apps
+- [ ] Dimming and colour (LevelControl, ColorControl)
+- [ ] Energy readings from plugs that report them (ElectricalPowerMeasurement)
+- [ ] Sensors: contact, motion, leak, temperature
+- [ ] Commissioning brand-new devices over Bluetooth, where the host has a usable adapter
+- [ ] Try with real devices from several brands
+
+---
+
 ## Dependency Graph
 
 ```

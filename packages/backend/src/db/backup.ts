@@ -36,6 +36,27 @@ export function runBackup(): void {
   }
 }
 
+/**
+ * A one-off copy before a change that's hard to undo, such as matter.js
+ * upgrading its stored data. Named for the change, and never pruned.
+ */
+export function backupBefore(label: string): string | null {
+  const dest = path.join(BACKUP_DIR, `before-${label.replace(/[^\w.-]+/g, '_')}.sqlite`);
+  const tmp = `${dest}.tmp`;
+  try {
+    fs.mkdirSync(BACKUP_DIR, { recursive: true });
+    fs.rmSync(tmp, { force: true });
+    getDb().prepare('VACUUM INTO ?').run(tmp);
+    fs.renameSync(tmp, dest);
+    logger.info({ dest }, 'Backup written before an upgrade');
+    return dest;
+  } catch (err) {
+    fs.rmSync(tmp, { force: true });
+    logger.error({ err, dest }, 'Backup before an upgrade failed');
+    return null;
+  }
+}
+
 /** Keep only the most recent KEEP_DAYS backup files. */
 function pruneBackups(): void {
   const files = fs.readdirSync(BACKUP_DIR)

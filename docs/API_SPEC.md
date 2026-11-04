@@ -305,6 +305,17 @@ Triggers subnet broadcast discovery. Returns found devices (not yet saved). Kasa
 
 A device HomeHub found but can't log in to includes `needsLogin: true`. Newer Kasa plugs need the TP-Link account they were set up with, saved with `PUT /api/kasa/login`. Their results include `driverConfig: { "protocol": "klap" }`, which must be sent when registering them. Until the login works they're listed as `Kasa plug` plus the last four MAC characters. A Shelly login is stored per device in `driverConfig.auth`.
 
+### `POST /api/matter/pair` — `admin` only
+Pairs a Matter device that another Matter app has just shared, and adds each part that switches on and off as a device with `driverType: "matter"`.
+
+**Body** `{ "code": "3497-011-2332" }`: the 11-digit manual code (spaces and dashes allowed), or QR code text starting `MT:`.
+
+**Response 201** `{ "devices": [{ "id": 12, "alias": "Eve Energy" }] }`. Errors use code `MATTER_PAIRING_FAILED`: **400** for a malformed code or one the device refused, **404** when no device is waiting with that code, **409** while another pairing is running, **422** when the device has nothing HomeHub can switch (it's unpaired again), **502** for other failures. Pairing can take up to a minute.
+
+Matter devices store `ip` as `matter:<node>:<endpoint>`, and `driverConfig` as `{ nodeId, endpoint, vendor, product }`. Deleting the last device of a node unpairs the node.
+
+---
+
 ### `GET /api/kasa/login` — `admin` only
 Returns `{ "username": string | null }`. The password is never returned.
 

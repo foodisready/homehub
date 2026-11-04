@@ -13,7 +13,19 @@
     "moduleResolution": "node",
     "declaration": true,
     "sourceMap": true,
-    "types": ["node"]
+    "types": ["node"],
+    // matter.js publishes these through package "exports", which "node"
+    // resolution can't read. Types only: Node resolves them at runtime.
+    "paths": {
+      "@matter/main/*": ["./node_modules/@matter/main/dist/esm/*"],
+      "@matter/types/*": ["./node_modules/@matter/types/dist/esm/*/index", "./node_modules/@matter/types/dist/esm/*"],
+      "@matter/general/*": ["./node_modules/@matter/general/dist/esm/*/index", "./node_modules/@matter/general/dist/esm/*"],
+      "@matter/protocol/*": ["./node_modules/@matter/protocol/dist/esm/*/index", "./node_modules/@matter/protocol/dist/esm/*"],
+      "@matter/node/*": ["./node_modules/@matter/node/dist/esm/*/index", "./node_modules/@matter/node/dist/esm/*"],
+      "@matter/model/*": ["./node_modules/@matter/model/dist/esm/*/index", "./node_modules/@matter/model/dist/esm/*"],
+      "@matter/nodejs/*": ["./node_modules/@matter/nodejs/dist/esm/*/index", "./node_modules/@matter/nodejs/dist/esm/*"],
+      "@project-chip/matter.js/*": ["./node_modules/@project-chip/matter.js/dist/esm/*/export"]
+    }
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]

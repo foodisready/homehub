@@ -14,8 +14,9 @@ HomeHub controls devices directly over your home network. All of them are switch
 | **Tuya** | Wi-Fi smart plugs | Needs a Device ID and Local Key |
 | **Meross** | MSG100 and MSG200 garage door openers | Needs a one-time Meross sign-in |
 | **Wyze** | Cameras, such as Cam v2, v3 and Pan v3 | Needs the camera bridge and a Wyze API key. See [Cameras](#cameras) |
+| **Any Matter brand** | Plugs, lights, switches and power strips (on and off) | Shared from Google Home, Apple Home, Alexa or SmartThings. See [Matter devices](#matter-devices) |
 
-Zigbee and Philips Hue devices aren't supported. "Works with Google or Alexa" on a box doesn't mean it works with HomeHub, so check the brand first.
+Zigbee devices aren't supported. "Works with Google or Alexa" on a box doesn't mean it works with HomeHub, but the **Matter** logo does.
 
 ## Add a device
 
@@ -88,6 +89,22 @@ If Discover doesn't find it, HomeHub tells you which openers on your Meross acco
 HomeHub keeps only the key that Meross returns, not your password, plus a sign-in token it uses to read device names. The opener is then controlled over your home network, without the internet. The key works for every Meross device on that account.
 
 Garage doors are always protected. The dashboard shows **Open** or **Closed** and asks you to confirm, and Chat and voice can't switch them. While the door is closing, it still shows **Open** until it's all the way down, which takes about 25 seconds to update.
+
+### Matter devices
+
+Matter is the common standard behind the Matter logo on boxes. A Matter device can work with several apps at once, so you share it with HomeHub from the app it's already in, and it stays there too. HomeHub then controls it directly on your network, without the cloud, and sees changes straight away, even from a wall switch or another app.
+
+1. Add the device to Google Home, Apple Home, Alexa or SmartThings first, using the code on the device or its box. HomeHub can't do this step itself, because new devices join Wi-Fi over Bluetooth.
+2. In that app, share the device. For example, in Google Home open the device's settings, then **Linked Matter apps & services → Link apps & services**. The app shows a pairing code.
+3. In HomeHub, open **Settings → Devices → + Add a Matter device**, enter the code within a few minutes, and select **Add device**.
+
+Each part that switches on and off becomes its own device: a plug is one, and a power strip with four outlets is four. Rename them and pick rooms like any other device. Schedules, scenes, timers, Chat and voice all work with them. HomeHub switches Matter devices on and off; dimming and colour aren't supported yet.
+
+Deleting a Matter device from HomeHub also unpairs it from HomeHub. It stays in your other apps.
+
+Thread devices work too, as long as you have a Thread border router, such as a Google Nest Hub, an Apple TV or HomePod, or an Echo 4th generation.
+
+HomeHub keeps its Matter pairings in its database, so backups include them and a restore brings them back. Keep backups private: they hold HomeHub's Matter keys.
 
 ## Cameras
 

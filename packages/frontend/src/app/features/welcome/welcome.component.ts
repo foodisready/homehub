@@ -6,6 +6,7 @@ import { forkJoin, of, catchError, map } from 'rxjs';
 import { AuthService } from '../../core/auth/auth.service';
 import type { Device } from '../../shared/models/device.model';
 import { InviteQrComponent } from './invite-qr.component';
+import { MatterPairComponent } from '../settings/matter-pair.component';
 import { COMMON_ROOMS, guessRoom, looksLikeLight, looksOutdoor, needsBetterName } from './suggest';
 
 type Step = 'home' | 'devices' | 'rooms' | 'starters' | 'family' | 'done';
@@ -44,7 +45,7 @@ const BRAND: Record<string, string> = { kasa: 'TP-Link Kasa', shelly: 'Shelly', 
 @Component({
   selector: 'app-welcome',
   standalone: true,
-  imports: [FormsModule, InviteQrComponent],
+  imports: [FormsModule, InviteQrComponent, MatterPairComponent],
   styles: [`
     .wrap { max-width: 680px; margin: 0 auto; padding: 1.5rem 1rem 4rem; }
     .top { display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem; gap:1rem; }
@@ -221,6 +222,14 @@ const BRAND: Record<string, string> = { kasa: 'TP-Link Kasa', shelly: 'Shelly', 
               </p>
             }
             <p style="margin-top:1rem"><button class="btn-sm btn-ghost" type="button" (click)="scan()">Search again</button></p>
+          </div>
+        }
+        @if (!scanning()) {
+          <div class="card">
+            <button class="later" type="button" style="text-decoration:none;color:var(--text)" (click)="showMatter.set(!showMatter())" [attr.aria-expanded]="showMatter()">
+              {{ showMatter() ? '▾' : '▸' }} <b>Have Matter devices?</b> <span class="muted">Add them with a pairing code.</span>
+            </button>
+            @if (showMatter()) { <div style="margin-top:0.75rem"><app-matter-pair (added)="matterAdded($event)" /></div> }
           </div>
         }
         @if (message()) { <p class="muted ok">{{ message() }}</p> }
@@ -591,6 +600,13 @@ export class WelcomeComponent implements OnInit {
   }
 
   touch(): void { this.version.update((v) => v + 1); }
+
+  readonly showMatter = signal(false);
+
+  matterAdded(devices: { alias: string }[]): void {
+    this.loadDevices();
+    this.message.set(`Added ${devices.map((d) => d.alias).join(', ')}. You can name ${devices.length === 1 ? 'it' : 'them'} on the next step.`);
+  }
 
   brand(type: string): string { return BRAND[type] ?? type; }
 

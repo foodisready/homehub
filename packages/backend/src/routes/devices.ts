@@ -3,6 +3,7 @@ import { reconcileDiscovered } from '../drivers/reconcile';
 import type { DiscoveredDevice } from '../drivers/DeviceDriver';
 import { getDb } from '../db';
 import { getCachedState, getAllCachedStates, noteState, pollDeviceNow } from '../kasa/device.cache';
+import { forgetIfUnused } from '../matter/service';
 import { getDriver, getAllDrivers } from '../drivers/registry';
 import { emitDeviceState } from '../socket';
 import { logger } from '../logger';
@@ -399,8 +400,16 @@ devicesRouter.delete('/:id/override', (req: Request, res: Response) => {
 // DELETE /api/devices/:id
 devicesRouter.delete('/:id', requireAdmin, (req: Request, res: Response) => {
   const db = getDb();
-  const result = db.prepare('DELETE FROM devices WHERE id = ? OR alias = ?')
-    .run(req.params.id, req.params.id);
-  if (result.changes === 0) return res.status(404).json({ error: 'Device not found', code: 'DEVICE_NOT_FOUND' });
+  const device = db.prepare('SELECT * FROM devices WHERE id = ? OR alias = ?')
+    .get(req.params.id, req.params.id) as DeviceRow | undefined;
+  if (!device) return res.status(404).json({ error: 'Device not found', code: 'DEVICE_NOT_FOUND' });
+  db.prepare('DELETE FROM devices WHERE id = ?').run(device.id);
+  // A Matter device with no parts left in HomeHub is unpaired, so it stops expecting HomeHub.
+  if (device.driver_type === 'matter' && device.driver_config) {
+    try {
+      const nodeId = JSON.parse(device.driver_config).nodeId;
+      if (typeof nodeId === 'string') forgetIfUnused(nodeId);
+    } catch { /* not a valid config: nothing to unpair */ }
+  }
   res.status(204).send();
 });

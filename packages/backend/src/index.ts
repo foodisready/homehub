@@ -54,6 +54,8 @@ import { seedAdminIfEmpty } from './auth/auth.service';
 import { applyHomeTimezone } from './home/home-settings';
 import { homeSettingsRouter } from './routes/home-settings';
 import { setupRouter } from './routes/setup';
+import { matterRouter } from './routes/matter';
+import { startMatter, stopMatter } from './matter/service';
 import { initSocket } from './socket';
 
 const app = express();
@@ -115,6 +117,7 @@ app.use('/api/cameras',                camerasRouter);
 app.use('/api/activity',               activityRouter);
 app.use('/api/home-settings',          homeSettingsRouter);
 app.use('/api/setup',                  setupRouter);
+app.use('/api/matter',                 requireAdmin, matterRouter);
 
 // ── Global error handler ───────────────────────────────────────
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
@@ -136,6 +139,7 @@ httpServer.listen(PORT, async () => {
   startCameraWatch();        // save snapshots when Wyze cameras see motion
   startActivityPruning();    // delete activity older than the keep setting
   startLocalName();          // answer for homehub.local on the home network
+  startMatter().catch(() => undefined);   // connect to Matter devices, if there are any
 
   // Daily DB backup: run once at startup, then every 24 hours
   runBackup();
@@ -166,8 +170,10 @@ function pruneFlowReadings(): void {
   }
 }
 
-process.on('SIGTERM', () => {
+process.on('SIGTERM', async () => {
   logger.info('SIGTERM received, shutting down');
+  // Matter first, with a limit: a device that doesn't answer mustn't hold up the stop.
+  await Promise.race([stopMatter(), new Promise((r) => setTimeout(r, 3000))]);
   httpServer.close(() => {
     logger.info('HTTP server closed');
     process.exit(0);

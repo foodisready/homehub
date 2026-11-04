@@ -4,7 +4,7 @@ HomeHub is a free smart home hub that runs on your own hardware, such as a Raspb
 
 ## What it does
 
-- Controls TP-Link Kasa, Shelly, Tuya and Meross devices from one dashboard
+- Controls TP-Link Kasa, Shelly, Tuya, Meross and Matter devices from one dashboard
 - Shows Wyze cameras live and saves a snapshot when one sees motion
 - Runs schedules, including sunrise and sunset
 - Runs scenes that set several devices at once
