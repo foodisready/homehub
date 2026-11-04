@@ -1,6 +1,7 @@
 import { Component, OnInit, OnDestroy, signal, computed, inject } from '@angular/core';
+import { RouterLink } from '@angular/router';
 import { AuthService } from '../../core/auth/auth.service';
-import { SystemService, SystemVersion } from '../../core/services/system.service';
+import { HealthReport, SystemService, SystemVersion } from '../../core/services/system.service';
 
 const POLL_IDLE_MS    = 60_000;
 const POLL_UPDATE_MS  = 3_000;
@@ -18,7 +19,17 @@ type Phase = 'idle' | 'confirm' | 'updating' | 'done' | 'failed';
 @Component({
   selector: 'app-system-status',
   standalone: true,
+  imports: [RouterLink],
   styles: [`
+    .health {
+      display: flex; align-items: center; gap: 0.6rem; margin-bottom: 1.25rem;
+      padding: 0.7rem 1rem; border-radius: 8px; font-size: 0.88rem; color: var(--text);
+      background: rgba(245,158,11,0.08); border: 1px solid rgba(245,158,11,0.55);
+    }
+    .health.problem { background: rgba(248,113,113,0.08); border-color: rgba(248,113,113,0.6); }
+    .health .mark { font-weight: 800; color: #f59e0b; }
+    .health.problem .mark { color: var(--red); }
+    .health .go { margin-left: auto; white-space: nowrap; }
     .card {
       background: rgba(30,64,175,0.08);
       border: 1px solid #1e40af;
@@ -67,6 +78,14 @@ type Phase = 'idle' | 'confirm' | 'updating' | 'done' | 'failed';
     .panel .btn { margin-top: 1rem; }
   `],
   template: `
+    @if (healthNotice(); as h) {
+      <a class="health" [class.problem]="h.problem" routerLink="/health">
+        <span class="mark" aria-hidden="true">!</span>
+        <span>{{ h.text }}</span>
+        <span class="go">Health ›</span>
+      </a>
+    }
+
     @if (version(); as v) {
       @if (v.updateAvailable && isAdmin() && phase() !== 'done') {
         <div class="card">
@@ -123,6 +142,15 @@ export class SystemStatusComponent implements OnInit, OnDestroy {
   private auth = inject(AuthService);
 
   readonly version = signal<SystemVersion | null>(null);
+  readonly health  = signal<HealthReport | null>(null);
+  /** Admins see a one-line notice when Health finds something wrong. */
+  readonly healthNotice = computed(() => {
+    const h = this.health();
+    if (!h || h.status === 'ok' || !this.isAdmin()) return null;
+    const bad = h.items.filter((i) => i.level === 'error' || i.level === 'warn');
+    const text = bad.length === 1 ? `${bad[0].label}: needs a look` : `${bad.length} things need a look`;
+    return { text, problem: h.status === 'problem' };
+  });
   readonly phase   = signal<Phase>('idle');
   readonly target  = signal('');
   readonly error   = signal('');
@@ -160,6 +188,9 @@ export class SystemStatusComponent implements OnInit, OnDestroy {
       next:  (v) => this.version.set(v),
       error: () => { /* unreachable: leave the card as it was */ },
     });
+    if (this.isAdmin()) {
+      this.svc.health().subscribe({ next: (h) => this.health.set(h), error: () => undefined });
+    }
   }
 
   start(): void {

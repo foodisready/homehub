@@ -338,9 +338,19 @@ To reach HomeHub away from home, set up [Remote Access](./REMOTE_ACCESS.md). Don
 
 **QR code** gives you a quick way to open HomeHub on your phone. On a computer, it's at the top right. On a phone, it's under **More**.
 
+## Health
+
+**More → Health** shows whether HomeHub is working, in plain words: its services, devices that aren't responding, voice speakers, the nightly backup, disk space and the computer's temperature. Anything that needs a look comes first, with what to do about it. Admins also see a notice on the Home page when something does.
+
+### Go back a version
+
+If something stopped working after an update, open **Health**, and under **Version** select **Go back to** the version HomeHub ran before. HomeHub saves a copy of its database, switches back and restarts, which takes a minute or two. Your devices, schedules and settings stay. When a fixed version is out, the Update card on the Home page offers it as usual.
+
+If Health says to run the installer once more, your HomeHub was installed before going back was possible: run the installer again on the HomeHub computer, and the option appears.
+
 ## Voice control
 
-Voice control is experimental and isn't included in the install. The test setup works with the Ava app on an Android tablet, but its connection to HomeHub isn't packaged yet. See the [voice control plan](./VOICE_CONTROL.md).
+Say a command to a speaker or tablet, and HomeHub does it and answers, with no cloud. It needs the [voice bridge](../packages/voice-bridge/README.md) running on an always-on computer, such as the one HomeHub runs on, and a voice speaker such as the Ava app on an Android tablet. Its speakers appear under **Health**. See the [voice control plan](./VOICE_CONTROL.md) for what's still to come.
 
 ## Troubleshooting
 

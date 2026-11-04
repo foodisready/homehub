@@ -241,4 +241,13 @@ describe('/internal/voice', () => {
     const { names } = await res.json() as { names: string[] };
     for (const name of ['My office lamp', 'desk light', 'Main Valve']) assert.ok(names.includes(name));
   });
+  it('keeps the bridge\'s check-in for the Health page', async () => {
+    const post = (body: unknown, headers: Record<string, string> = key) =>
+      fetch(`${baseUrl}/internal/voice/status`, { method: 'POST', headers, body: JSON.stringify(body) });
+    assert.equal((await post({ speakers: [] }, { 'Content-Type': 'application/json' })).status, 401);
+    assert.equal((await post({ speakers: 'tablet' })).status, 400);
+    assert.equal((await post({ version: '0.1', speakers: [{ name: 'Tablet', address: '10.9.0.20', connected: true }] })).status, 200);
+    const { lastBridgeReport } = await import('../system/voice-bridge');
+    assert.deepEqual(lastBridgeReport()?.speakers, [{ name: 'Tablet', address: '10.9.0.20', connected: true }]);
+  });
 });

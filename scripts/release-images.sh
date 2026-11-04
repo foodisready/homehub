@@ -17,7 +17,7 @@ cd "$(dirname "$0")/.."
 
 PREFIX="${HOMEHUB_IMAGE_PREFIX:-ghcr.io/foodisready}"
 PLATFORMS="${PLATFORMS:-linux/arm64}"
-SERVICES=(backend frontend scheduler mcp-server)
+SERVICES=(backend frontend scheduler mcp-server updater)
 
 if [ -n "$(git status --porcelain)" ]; then
   echo "Uncommitted changes. Commit them first, so the images match a commit." >&2

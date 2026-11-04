@@ -303,9 +303,10 @@ Replaces landing on an empty dashboard with a setup notice.
 
 ### 11c — Looks after itself
 
-- [ ] A plain-language health page, for example "Living room lamp hasn't answered since 3 PM. Is it plugged in?". No logs.
+- [x] A plain-language **Health** page (More → Health): services, devices not responding, voice bridge and speakers, nightly backup, disk space, temperature, paused automations, missing home location. Each item says what to do. Admins see a notice on Home when something needs a look.
+- [x] Go back a version: the new `updater` service (the only one with the Docker socket, on 127.0.0.1) switches HomeHub to a release by setting `HOMEHUB_TAG`. Health offers the version that ran before this one, after a database copy. The Update button uses it too. Existing installs get it by running the installer once more.
 - [ ] If an update doesn't start, go back to the previous version automatically.
-- [ ] Moving to new hardware: restore a backup during first-run setup.
+- [ ] Moving to new hardware: restore a backup during first-run setup. The 2026-11-04 move from the Pi to a laptop was done by hand, by copying the data volume.
 
 ### 11d — Ready-to-flash image
 

@@ -223,6 +223,36 @@ services:
     networks:
       - homehub-net
 
+  # ── Updater (switch HomeHub to a version, newer or older) ──────
+  # The Update button and the Health page's "go back" use it. It's the only
+  # HomeHub service with the Docker socket; it answers on 127.0.0.1 only,
+  # with the token the backend makes, and only recreates HomeHub's own four
+  # services. It records the chosen version in .env as HOMEHUB_TAG.
+  updater:
+    image: ${HOMEHUB_IMAGE_PREFIX:-ghcr.io/foodisready}/homehub-updater:${HOMEHUB_UPDATER_TAG:-latest}
+    build:
+      context: ./packages/updater
+      target: production
+    network_mode: host
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - .:/project
+      - homehub-data:/homehub:ro
+    environment:
+      - PROJECT_DIR=/project
+      # Set in .env, or read from the file the backend makes.
+      - UPDATER_TOKEN=${WATCHTOWER_HTTP_API_TOKEN:-}
+    depends_on:
+      backend:
+        condition: service_healthy   # it makes the token file
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:8081/health',(r)=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+    logging: *default-logging
+
   # ── Wyze camera bridge ─────────────────────────────────────────
   # Connects to Wyze cameras with your Wyze account and serves their
   # video locally. HomeHub signs it in, relays live video, pauses

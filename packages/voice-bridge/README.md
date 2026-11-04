@@ -59,7 +59,7 @@ systemctl --user status homehub-voice
 journalctl --user -u homehub-voice -f
 ```
 
-Each command is logged with what was heard, HomeHub's reply and how long each step took.
+Each command is logged with what was heard, HomeHub's reply and how long each step took. The bridge also checks in with HomeHub every minute, so HomeHub's **Health** page shows whether it's running and which speakers are connected.
 
 ## Measured speed
 

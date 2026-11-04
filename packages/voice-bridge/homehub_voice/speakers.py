@@ -42,6 +42,7 @@ class SpeakerLink:
         answer: Callable[[bytes, bool], Answer],
         speak: Callable[[str, str], str],
         listed: bool,
+        on_change: Callable[[], None] = lambda: None,
     ) -> None:
         self.speaker = speaker
         self.answer = answer
@@ -51,6 +52,14 @@ class SpeakerLink:
         self.run: Run | None = None
         self.count = 0
         self.task: asyncio.Task | None = None
+        self.connected = False
+        self.usable = True  # False once it turns out not to be a speaker
+        self.on_change = on_change
+
+    def _set_connected(self, value: bool) -> None:
+        if value != self.connected:
+            self.connected = value
+            self.on_change()
 
     def start(self) -> None:
         self.task = asyncio.create_task(self._keep_connected(), name=f'speaker {self.name}')
@@ -66,6 +75,8 @@ class SpeakerLink:
                 log.info('%s disconnected; reconnecting', self.name)
             except StopTrying as e:
                 log.info('%s: %s', self.name, e)
+                self.usable = False
+                self.on_change()
                 return
             except asyncio.CancelledError:
                 raise
@@ -77,6 +88,8 @@ class SpeakerLink:
                     log.warning('%s', msg)
                     last_error = msg
                 if not self.listed:
+                    self.usable = False
+                    self.on_change()
                     return
                 delay = 300
             except Exception as e:  # noqa: BLE001 — a speaker that's off or asleep is normal
@@ -106,8 +119,10 @@ class SpeakerLink:
             except Exception:  # noqa: BLE001 — older firmware doesn't support it
                 pass
             log.info('%s connected (%s), listening', self.name, self.speaker.label)
+            self._set_connected(True)
             await gone.wait()
         finally:
+            self._set_connected(False)
             if self.run:
                 self.run.ended.set()
             await c.disconnect()
@@ -191,6 +206,14 @@ class Speakers:
         self.discover = discover
         self.links: dict[str, SpeakerLink] = {}
         self.listed = listed
+        self.changed = asyncio.Event()
+
+    def status(self) -> list[dict]:
+        """Speakers for HomeHub's Health page. Devices that turned out not to be speakers are left out."""
+        return [
+            {'name': l.name, 'address': l.speaker.label, 'connected': l.connected}
+            for l in self.links.values() if l.usable
+        ]
 
     def add(self, speaker: Speaker, listed: bool) -> None:
         key = f'{resolve(speaker.host)}:{speaker.port}'
@@ -199,6 +222,7 @@ class Speakers:
         link = self.make(speaker, listed)
         self.links[key] = link
         link.start()
+        self.changed.set()
 
     async def run(self) -> None:
         for s in self.listed:

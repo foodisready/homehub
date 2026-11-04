@@ -2,6 +2,9 @@ import { Router, Request, Response } from 'express';
 import { requireAdmin } from '../middleware/auth';
 import { logger } from '../logger';
 import { automationsPaused, setAutomationsPaused } from '../automation/pause';
+import { checkHealth } from '../system/health';
+import { UpdaterError, VERSION_RE, previousVersion, requestSwitch, switchStatus, updaterAvailable } from '../system/updater';
+import { backupBefore } from '../db/backup';
 
 /**
  * HomeHub-self update routes — see auraflow/docs/ota-strategy.md
@@ -70,18 +73,76 @@ export const systemRouter = Router();
  * update flag is only ever true for real Docker builds (HOMEHUB_VERSION
  * != "dev") so a dev workflow doesn't surface an Update button that
  * wouldn't actually do anything. */
+/* Whether the updater service answers, checked at most every 30 seconds:
+ * every open page asks for the version each minute. */
+let switcherCache = { up: false, at: 0 };
+async function canSwitch(): Promise<boolean> {
+  if (Date.now() - switcherCache.at > 30_000) switcherCache = { up: await updaterAvailable(), at: Date.now() };
+  return switcherCache.up;
+}
+
 systemRouter.get('/version', async (_req: Request, res: Response) => {
-  const latest = await getLatestVersion();
+  const [latest, switcher] = await Promise.all([getLatestVersion(), canSwitch()]);
   const updateAvailable =
     HOMEHUB_VERSION !== 'dev'
     && latest !== null
     && latest !== HOMEHUB_VERSION;
+  const previous = HOMEHUB_VERSION === 'dev' ? null : previousVersion();
   res.json({
     running: HOMEHUB_VERSION,
     latest,
     updateAvailable,
     updaterAvailable: WATCHTOWER_HTTP_TOKEN.length > 0,
+    // The updater service can switch to any release, so this HomeHub can go back.
+    canSwitch: switcher,
+    previous,
   });
+});
+
+/* Before changing version, a copy of the database, in case the other
+ * version can't use it. */
+function backupForSwitch(to: string): void {
+  backupBefore(`version-${HOMEHUB_VERSION}-to-${to}`);
+}
+
+/* POST /api/system/switch { version }
+ * Goes back to the version that ran before this one, or on to the latest
+ * release. Only those two: an arbitrary old version could be one whose
+ * database changes this one has already made. Needs the updater service. */
+systemRouter.post('/switch', requireAdmin, async (req: Request, res: Response) => {
+  const version = (req.body ?? {}).version;
+  if (typeof version !== 'string' || !VERSION_RE.test(version)) {
+    return res.status(400).json({ error: 'version must look like v1.2.3', code: 'VALIDATION_ERROR' });
+  }
+  if (version === HOMEHUB_VERSION) {
+    return res.status(400).json({ error: `HomeHub is already running ${version}.`, code: 'ALREADY_RUNNING' });
+  }
+  const allowed = [previousVersion(), await getLatestVersion()].filter((v): v is string => !!v);
+  if (!allowed.includes(version)) {
+    return res.status(400).json({ error: 'HomeHub can go back to the version before this one, or update to the latest.', code: 'VERSION_NOT_OFFERED' });
+  }
+  try {
+    backupForSwitch(version);
+    await requestSwitch(version);
+    logger.info({ from: HOMEHUB_VERSION, to: version, by: req.user?.name }, 'Version switch started');
+    res.status(202).json({ started: true, version, message: `Switching to ${version}. HomeHub will restart shortly.` });
+  } catch (err) {
+    if (err instanceof UpdaterError) return res.status(err.status).json({ error: err.message, code: err.code });
+    throw err;
+  }
+});
+
+/* GET /api/system/switch-status — the updater's last switch, so a failed
+ * download can be explained after HomeHub comes back. */
+systemRouter.get('/switch-status', requireAdmin, async (_req: Request, res: Response) => {
+  res.json(await switchStatus());
+});
+
+/* GET /api/system/health
+ * Whether HomeHub is working: services, devices, voice, backups, disk and
+ * settings, each with what to do about it. For the Health page. */
+systemRouter.get('/health', async (_req: Request, res: Response) => {
+  res.json(await checkHealth());
 });
 
 /* GET /api/system/automations — { paused }, for the banner every page shows while paused.
@@ -120,7 +181,21 @@ let acceptWaitMs = 3_000;
 /** For tests. */
 export function setUpdateAcceptWait(ms: number): void { acceptWaitMs = ms; }
 
-systemRouter.post('/update', requireAdmin, async (_req: Request, res: Response) => {
+systemRouter.post('/update', requireAdmin, async (req: Request, res: Response) => {
+  // With the updater service, an update is a switch to the latest release.
+  const latest = await getLatestVersion();
+  if (latest && VERSION_RE.test(latest) && latest !== HOMEHUB_VERSION && await canSwitch()) {
+    try {
+      backupForSwitch(latest);
+      await requestSwitch(latest);
+      logger.info({ from: HOMEHUB_VERSION, to: latest, by: req.user?.name }, 'Update started');
+      return res.status(202).json({ started: true, message: 'Update started — HomeHub will restart shortly.' });
+    } catch (err) {
+      if (!(err instanceof UpdaterError)) throw err;
+      logger.warn({ code: err.code }, 'Updater failed; trying Watchtower');
+    }
+  }
+
   if (!WATCHTOWER_HTTP_TOKEN) {
     return res.status(503).json({
       error: 'updater not configured (WATCHTOWER_HTTP_API_TOKEN unset)',

@@ -11,8 +11,8 @@ import os
 import signal
 import sys
 
-from . import config as cfg
-from .homehub import HomeHub
+from . import __version__, config as cfg
+from .homehub import HomeHub, HomeHubError
 from .pipeline import answer
 from .replies import ReplyServer
 from .speakers import SpeakerLink, Speakers
@@ -20,6 +20,8 @@ from .speakers import SpeakerLink, Speakers
 log = logging.getLogger('homehub-voice')
 
 NAMES_EVERY_S = 600
+# How often the bridge checks in with HomeHub's Health page, at most. Changes are reported straight away.
+REPORT_EVERY_S = 60
 
 
 async def main() -> int:
@@ -37,7 +39,7 @@ async def main() -> int:
 
     from .speech import Listener, Speaker as Voice
 
-    log.info('loading Whisper %s and the Piper voice', conf.whisper_model)
+    log.info('HomeHub voice bridge %s: loading Whisper %s and the Piper voice', __version__, conf.whisper_model)
     listener = Listener(conf.whisper_model, conf.language)
     voice = Voice(conf.piper_voice)
     replies = ReplyServer(conf.reply_port)
@@ -49,9 +51,13 @@ async def main() -> int:
         voice.say(text, path)
         return replies.url(name, host)
 
+    speakers: Speakers
     speakers = Speakers(
         conf.speakers,
-        lambda s, listed: SpeakerLink(s, lambda audio, spoke: answer(audio, spoke, listener, homehub), speak, listed),
+        lambda s, listed: SpeakerLink(
+            s, lambda audio, spoke: answer(audio, spoke, listener, homehub), speak, listed,
+            on_change=lambda: speakers.changed.set(),
+        ),
         conf.discover,
     )
     if not conf.speakers and not conf.discover:
@@ -63,11 +69,30 @@ async def main() -> int:
             await asyncio.sleep(NAMES_EVERY_S)
             await asyncio.get_running_loop().run_in_executor(None, homehub.refresh_names)
 
+    async def report() -> None:
+        failing = False
+        while True:
+            try:
+                await asyncio.wait_for(speakers.changed.wait(), REPORT_EVERY_S)
+                await asyncio.sleep(1)  # let a burst of changes settle
+            except TimeoutError:
+                pass
+            speakers.changed.clear()
+            try:
+                await asyncio.get_running_loop().run_in_executor(None, homehub.report, __version__, speakers.status())
+                if failing:
+                    log.info('checking in with HomeHub again')
+                failing = False
+            except HomeHubError as e:
+                if not failing:
+                    log.warning("can't check in with HomeHub: %s", e)
+                failing = True
+
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGTERM, signal.SIGINT):
         loop.add_signal_handler(sig, stop.set)
-    tasks = [asyncio.create_task(speakers.run()), asyncio.create_task(refresh_names())]
+    tasks = [asyncio.create_task(speakers.run()), asyncio.create_task(refresh_names()), asyncio.create_task(report())]
     await stop.wait()
     log.info('stopping')
     for t in tasks:

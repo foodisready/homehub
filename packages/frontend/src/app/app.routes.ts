@@ -76,5 +76,10 @@ export const routes: Routes = [
     loadComponent: () => import('./features/notifications/notifications.component').then((m) => m.NotificationsComponent),
     canActivate: [authGuard],
   },
+  {
+    path: 'health',
+    loadComponent: () => import('./features/health/health.component').then((m) => m.HealthComponent),
+    canActivate: [authGuard],
+  },
   { path: '**', redirectTo: 'dashboard' },
 ];

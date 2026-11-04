@@ -160,6 +160,8 @@ curl -fsSL https://raw.githubusercontent.com/foodisready/homehub/main/scripts/in
 
 It downloads only the images that changed and restarts only those services. Your data stays in Docker's `homehub_homehub-data` volume, and your `.env` file stays as it is.
 
+Usually you don't need the installer for this: the Home page offers each new version with an **Update** button. If an update misbehaves, **More → Health → Go back to** returns to the version before. The updater service behind both records the chosen version in `.env` as `HOMEHUB_TAG`. To follow the newest release again by hand, remove that line, then run the installer.
+
 If you installed with `git clone`, run `git pull` instead, then `docker compose -f docker-compose.yml pull` and `docker compose -f docker-compose.yml up -d`. To build HomeHub from source, for example to try your own changes, run `docker compose -f docker-compose.yml up -d --build` from the cloned folder. It takes 30–60 minutes on a Raspberry Pi 4.
 
 ### Publishing images
@@ -202,7 +204,8 @@ HomeHub uses these ports, so make sure nothing else on the computer does:
 | 5353 (UDP) | The homehub.local name, shared with the Pi's own `.local` name |
 | 3001 | AI assistant connection (MCP) |
 | 3002 | Scheduler |
-| 8080 | Self-update helper |
+| 8080 | Self-update helper (Watchtower) |
+| 8081 | Updater, which updates HomeHub and can go back a version. Only HomeHub itself can reach it. |
 | 11434 | Local AI model |
 | 5050, 8888 | Wyze camera bridge. Only HomeHub itself can reach these. |
 

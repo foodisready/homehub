@@ -176,6 +176,10 @@ class HomeHubClientTest(unittest.TestCase):
         self.assertEqual(h.command('turn on office lamp'), CommandResult(True, 'Done.'))
         self.assertEqual(StubHomeHub.seen[-1], ('/internal/voice/command', 'k', {'text': 'turn on office lamp'}))
 
+    def test_report(self):
+        HomeHub(self.url, 'k').report('0.1.0', [{'name': 'Tablet', 'address': '10.0.0.20', 'connected': True}])
+        self.assertEqual(StubHomeHub.seen[-1], ('/internal/voice/status', 'k', {'version': '0.1.0', 'speakers': [{'name': 'Tablet', 'address': '10.0.0.20', 'connected': True}]}))
+
     def test_wrong_key_keeps_old_names(self):
         h = HomeHub(self.url, 'wrong')
         h.names = ['Old']
@@ -241,6 +245,7 @@ class SpeakerLinkTest(unittest.IsolatedAsyncioTestCase):
 
         link, c = await self.connected_link(answer_fn)
         self.assertEqual(link.name, 'Test Speaker')
+        self.assertTrue(link.connected)
         port = await c.handlers['handle_start']('conv1', 0, None, 'okay nabu')
         self.assertEqual(port, 0)
         for ch in chunks(tone(0.5, False) + tone(1, True) + tone(2, False)):
@@ -286,6 +291,28 @@ class SpeakerLinkTest(unittest.IsolatedAsyncioTestCase):
             link.start()
             await asyncio.wait_for(link.task, 2)  # returns instead of reconnecting
         self.assertIsNone(FakeClient.instances[0].handlers)
+        self.assertFalse(link.usable)
+
+    async def test_status_lists_speakers_only(self):
+        from homehub_voice import speakers
+
+        made = []
+
+        def make(s, listed):
+            link = speakers.SpeakerLink(s, lambda a, sp: None, lambda t, h: '', listed)
+            link.start = lambda: None  # no connection in this test
+            made.append(link)
+            return link
+
+        group = speakers.Speakers([], make, discover=False)
+        group.add(cfg.Speaker('10.0.0.5'), True)
+        group.add(cfg.Speaker('10.0.0.6'), False)
+        group.add(cfg.Speaker('10.0.0.5'), False)  # the same one, found again
+        self.assertEqual(len(made), 2)
+        self.assertTrue(group.changed.is_set())
+        made[0].connected = True
+        made[1].usable = False
+        self.assertEqual(group.status(), [{'name': '10.0.0.5', 'address': '10.0.0.5', 'connected': True}])
 
 
 if __name__ == '__main__':

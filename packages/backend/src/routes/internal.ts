@@ -18,6 +18,7 @@ import { listDeviceNames, listSceneNames } from '../nlp/find-device';
 import { withActivity } from '../activity/activity';
 import { issueTokens, serviceUser } from '../auth/auth.service';
 import { automationsPaused } from '../automation/pause';
+import { recordBridgeReport } from '../system/voice-bridge';
 
 export const internalRouter = Router();
 
@@ -49,6 +50,15 @@ internalRouter.post('/service-token', (_req: Request, res: Response) => {
 // Lets the voice bridge tell speech recognition which names to expect.
 internalRouter.get('/voice/device-names', (_req: Request, res: Response) => {
   res.json({ names: [...listDeviceNames(), ...listSceneNames()] });
+});
+
+// POST /internal/voice/status  { version?, speakers: [{ name, address, connected }] }
+// The voice bridge checks in every minute, for the Health page.
+internalRouter.post('/voice/status', (req: Request, res: Response) => {
+  if (!recordBridgeReport(req.body)) {
+    return res.status(400).json({ error: '`speakers` must be a list', code: 'VALIDATION_ERROR' });
+  }
+  res.json({ ok: true });
 });
 
 // POST /internal/voice/command  { text: string }

@@ -7,6 +7,32 @@ export interface SystemVersion {
   latest:          string | null;
   updateAvailable: boolean;
   updaterAvailable: boolean;
+  /** The updater service can switch to any release, so going back is possible. */
+  canSwitch?: boolean;
+  /** The release that ran before this one. */
+  previous?: string | null;
+}
+
+export interface SwitchStatus {
+  busy: boolean;
+  current: string;
+  last: { version: string; from?: string; ok: boolean; step: string; finished?: string } | null;
+}
+
+export interface HealthItem {
+  id: string;
+  group: 'HomeHub' | 'Devices' | 'Voice' | 'Data' | 'Computer' | 'Settings';
+  label: string;
+  level: 'ok' | 'warn' | 'error' | 'info';
+  detail: string;
+  link?: string;
+}
+
+export interface HealthReport {
+  status: 'ok' | 'attention' | 'problem';
+  checkedAt: string;
+  version: string;
+  items: HealthItem[];
 }
 
 export interface SystemUpdateResult {
@@ -20,6 +46,18 @@ export class SystemService {
 
   version(): Observable<SystemVersion> {
     return this.http.get<SystemVersion>('/api/system/version');
+  }
+
+  health(): Observable<HealthReport> {
+    return this.http.get<HealthReport>('/api/system/health');
+  }
+
+  switchTo(version: string): Observable<SystemUpdateResult> {
+    return this.http.post<SystemUpdateResult>('/api/system/switch', { version });
+  }
+
+  switchStatus(): Observable<SwitchStatus | null> {
+    return this.http.get<SwitchStatus | null>('/api/system/switch-status');
   }
 
   update(): Observable<SystemUpdateResult> {

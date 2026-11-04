@@ -56,6 +56,7 @@ import { homeSettingsRouter } from './routes/home-settings';
 import { setupRouter } from './routes/setup';
 import { matterRouter } from './routes/matter';
 import { startMatter, stopMatter } from './matter/service';
+import { noteRunningVersion } from './system/updater';
 import { initSocket } from './socket';
 
 const app = express();
@@ -139,6 +140,7 @@ httpServer.listen(PORT, async () => {
   startCameraWatch();        // save snapshots when Wyze cameras see motion
   startActivityPruning();    // delete activity older than the keep setting
   startLocalName();          // answer for homehub.local on the home network
+  noteRunningVersion();   // remember the version before this one, to go back to
   startMatter().catch(() => undefined);   // connect to Matter devices, if there are any
 
   // Daily DB backup: run once at startup, then every 24 hours

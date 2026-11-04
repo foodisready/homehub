@@ -1,4 +1,4 @@
-# Build HomeHub's four images for Raspberry Pi (arm64) and PCs (amd64) and
+# Build HomeHub's five images for Raspberry Pi (arm64) and PCs (amd64) and
 # publish them to GitHub's registry, ghcr.io/<owner>/homehub-<service>.
 #
 # - Push a version tag, such as v1.2.0: publishes that version and `latest`,
@@ -33,7 +33,7 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        service: [backend, frontend, scheduler, mcp-server]
+        service: [backend, frontend, scheduler, mcp-server, updater]
         arch: [arm64, amd64]
         include:
           - arch: arm64
@@ -95,7 +95,7 @@ jobs:
     runs-on: ubuntu-24.04
     strategy:
       matrix:
-        service: [backend, frontend, scheduler, mcp-server]
+        service: [backend, frontend, scheduler, mcp-server, updater]
     steps:
       - uses: actions/download-artifact@v4
         with:

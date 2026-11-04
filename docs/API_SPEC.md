@@ -703,6 +703,18 @@ Names must match `^[A-Za-z0-9][A-Za-z0-9._-]*\.json$`. A restore removes history
 | `GET` | `/api/system/automations` | any | `{ paused }` |
 | `PUT` | `/api/system/automations` | admin | Body: `{ paused }`. While paused, this HomeHub runs no schedules (`/internal/devices/:id/execute` answers `{ skipped: true, paused: true }`), motion rules, timers, camera motion snapshots or automatic water shutoff. Resuming drops timers that ran out while paused, without switching anything. The setting is left out of backups, and a restore keeps this HomeHub's value. |
 
+## Health and versions
+
+| Method | Path | Who | Notes |
+|---|---|---|---|
+| `GET` | `/api/system/health` | any | `{ status: 'ok' \| 'attention' \| 'problem', checkedAt, version, items }`. Each item is `{ id, group, label, level: 'ok' \| 'warn' \| 'error' \| 'info', detail, link? }`, where `detail` says what to do in plain words. Services are probed at their health or root addresses only. |
+| `GET` | `/api/system/version` | any | Also returns `canSwitch` (the updater service answers) and `previous`, the older release that ran before this one, or `null`. |
+| `POST` | `/api/system/switch` | admin | Body: `{ version }`. Only `previous` or the latest release. Saves `backups/before-version-<from>-to-<to>.sqlite`, then asks the updater; **202** once it has started. `400` `VERSION_NOT_OFFERED` or `ALREADY_RUNNING`; `409` `BUSY`; `503` `UPDATER_OFFLINE`. |
+| `GET` | `/api/system/switch-status` | admin | The updater's last switch: `{ busy, current, last: { version, from, ok, step, finished } }`, where a failed `step` of `download` means nothing changed. `null` without the updater. |
+| `POST` | `/internal/voice/status` | internal key | The voice bridge checks in every minute: `{ version, speakers: [{ name, address, connected }] }`. |
+
+`POST /api/system/update` uses the updater when it answers, switching to the latest release, and Watchtower otherwise.
+
 ## WebSocket Events (Socket.io)
 
 Connect to `ws://<pi-ip>:3000` with a valid JWT:

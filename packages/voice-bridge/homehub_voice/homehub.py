@@ -51,6 +51,10 @@ class HomeHub:
             log.warning('%s; keeping %d known names', e, len(self.names))
         return self.names
 
+    def report(self, version: str, speakers: list[dict]) -> None:
+        """Checks in for HomeHub's Health page."""
+        self._call('/status', {'version': version, 'speakers': speakers})
+
     def command(self, text: str) -> CommandResult:
         res = self._call('/command', {'text': text})
         return CommandResult(bool(res.get('handled')), str(res.get('response') or ''))
