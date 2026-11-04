@@ -457,4 +457,25 @@ describe('motion rules', () => {
       await assert.rejects(motion.connectSensor(rule(), sensorAddress(), 'admin', 'right'), /did not save motion_on/);
     });
   });
+  it('finds Shelly Motion sensors, and says which rule uses each', async () => {
+    const { getDriver } = await import('../drivers/registry');
+    const shelly = getDriver('shelly');
+    const real = shelly.discover.bind(shelly);
+    shelly.discover = async () => [
+      { ip: '10.0.0.50', alias: 'shellymotionsensor-60A423', model: 'SHMOS-01', hasEmeter: false, driverType: 'shelly', needsLogin: true },
+      { ip: '10.0.0.51', alias: '10.0.0.51', model: 'SHMOS-02', hasEmeter: false, driverType: 'shelly' },
+      { ip: '10.0.0.52', alias: 'Porch relay', model: 'SHSW-1', hasEmeter: false, driverType: 'shelly' },
+      { ip: '10.0.0.53', alias: 'Bathroom H&T', model: 'SHHT-1', hasEmeter: false, driverType: 'shelly' },
+    ];
+    db.prepare("UPDATE motion_rules SET sensor_ip = '10.0.0.50' WHERE name = 'Kitchen'").run();
+    try {
+      const res = await fetch(`${baseUrl}/api/motion/discover`, { method: 'POST' });
+      assert.deepEqual(await res.json(), [
+        { ip: '10.0.0.50', name: 'shellymotionsensor-60A423', model: 'SHMOS-01', needsLogin: true, usedBy: 'Kitchen' },
+        { ip: '10.0.0.51', name: 'Shelly Motion', model: 'SHMOS-02', needsLogin: false, usedBy: null },
+      ]);
+    } finally {
+      shelly.discover = real;
+    }
+  });
 });

@@ -153,6 +153,32 @@ describe('device address updates', () => {
     assert.deepEqual(row(id), { ip: '192.168.86.77', mac: MAC });
   });
 
+  it('leaves sensors out of Discover: Shelly sensors, and motion sensors already in use', async () => {
+    const { getAllDrivers } = await import('../drivers/registry');
+    const fakes: Record<string, { ip: string; alias: string; model: string }[]> = {
+      shelly: [
+        { ip: '10.0.0.40', alias: 'shellymotionsensor', model: 'SHMOS-01' },
+        { ip: '10.0.0.41', alias: 'shellyht', model: 'SNSN-0013A' },
+        { ip: '10.0.0.42', alias: 'Porch relay', model: 'SHSW-1' },
+      ],
+      kasa: [{ ip: '10.0.0.43', alias: 'Plug used as a sensor', model: 'HS103' }],
+    };
+    const saved = new Map<string, () => Promise<unknown[]>>();
+    for (const d of getAllDrivers()) {
+      saved.set(d.type, d.discover.bind(d));
+      (d as { discover: () => Promise<unknown[]> }).discover = async () =>
+        (fakes[d.type] ?? []).map((f) => ({ ...f, hasEmeter: false, driverType: d.type }));
+    }
+    const lamp = register('Hall lamp', '10.0.0.44');
+    db.prepare("INSERT INTO motion_rules (name, token, device_id, off_after_minutes, sensor_ip) VALUES ('Hall', 'tok-hall', ?, 5, '10.0.0.43')").run(lamp);
+    try {
+      const res = await send('POST', '/discover', {});
+      assert.deepEqual(((await res.json()) as { ip: string }[]).map((d) => d.ip), ['10.0.0.42']);
+    } finally {
+      for (const d of getAllDrivers()) (d as { discover: unknown }).discover = saved.get(d.type)!;
+    }
+  });
+
   it('lets only admins add, change or delete devices', async () => {
     const id = register('Lamp', '10.0.0.9');
     assert.equal((await send('PATCH', `/${id}`, { alias: 'Renamed' }, 'member')).status, 403);

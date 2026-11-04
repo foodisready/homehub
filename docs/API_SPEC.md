@@ -334,6 +334,11 @@ Motion rules turn a light off after a room has had no motion for `offAfterMinute
 - `DELETE /api/motion/:id` removes a rule.
 - `POST /api/motion/:id/connect` takes `{ sensorIp, username, password }` and sets a Gen 1 Shelly Motion's `motion_on` and `motion_off` actions. The login is saved unless the sensor rejects it, a blank password reuses the saved one, and the password is never returned.
 
+### `POST /api/motion/discover` — `admin` only
+Searches the network for Shelly Motion sensors. **200** `[{ "ip": "192.168.1.60", "name": "shellymotionsensor-60A423", "model": "SHMOS-01", "needsLogin": true, "usedBy": "Kitchen" }]`, where `usedBy` is the rule already using that sensor, or `null`. Sleeping sensors answer only after their button is pressed.
+
+`POST /api/devices/discover` leaves out Shelly sensor-only models (motion, H&T, door/window, flood, smoke, button) and any address a motion rule uses as its sensor.
+
 ### `GET /motion/:token/on` and `GET /motion/:token/off`
 Called by the sensor. The token is the auth, so these need no login. Returns `204`, or `404` for an unknown token.
 

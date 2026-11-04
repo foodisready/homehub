@@ -33,6 +33,20 @@ async function shellyFetch(url: string, options: RequestInit = {}, auth?: Shelly
   return res.json();
 }
 
+/**
+ * Shelly models that are only sensors or buttons: nothing to switch, so
+ * Discover doesn't offer them as devices. Motion sensors are set up under
+ * Sensors → Motion lights instead.
+ * Gen 1: Motion (SHMOS), H&T (SHHT), Door/Window (SHDW), Flood (SHWT),
+ * Smoke (SHSM), Button (SHBTN). Gen 2 and 3: Plus H&T and Plus Smoke (SNSN),
+ * H&T Gen3 (S3SN). Only known models: a wrong guess would hide a real switch.
+ */
+const SENSOR_ONLY = /^(SHMOS|SHHT|SHDW|SHWT|SHSM|SHBTN|SNSN|S3SN)-/i;
+export const isSensorOnlyShelly = (model: string | undefined): boolean => !!model && SENSOR_ONLY.test(model.trim());
+
+/** Shelly Motion (Gen 1 and 2): what a motion light can use as its sensor. */
+export const isMotionShelly = (model: string | undefined): boolean => !!model && /^SHMOS-/i.test(model.trim());
+
 export class ShellyDriver implements DeviceDriver {
   readonly type = 'shelly';
 

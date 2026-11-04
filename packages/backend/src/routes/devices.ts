@@ -5,6 +5,7 @@ import { getDb } from '../db';
 import { getCachedState, getAllCachedStates, noteState, pollDeviceNow } from '../kasa/device.cache';
 import { forgetIfUnused } from '../matter/service';
 import { getDriver, getAllDrivers } from '../drivers/registry';
+import { isSensorOnlyShelly } from '../drivers/ShellyDriver';
 import { emitDeviceState } from '../socket';
 import { logger } from '../logger';
 import { cancelPowerTimer, clearOverride, isProtectedDevice, notifyPowerOff, setOverride } from '../devices/power';
@@ -254,7 +255,11 @@ devicesRouter.post('/discover', requireAdmin, async (_req: Request, res: Respons
         logger.warn({ err, driver: driver.type }, 'Driver discovery failed');
       }
     }
-    res.json(reconcileDiscovered(found));
+    // Not switchable, so not devices: Shelly sensors, and whatever already reports to a motion light.
+    const sensorIps = new Set((getDb().prepare('SELECT sensor_ip FROM motion_rules WHERE sensor_ip IS NOT NULL').all() as { sensor_ip: string }[])
+      .map((r) => r.sensor_ip.trim()));
+    const switchable = found.filter((d) => !sensorIps.has(d.ip) && !(d.driverType === 'shelly' && isSensorOnlyShelly(d.model)));
+    res.json(reconcileDiscovered(switchable));
   } catch (err) {
     logger.error(err, 'Discovery failed');
     res.status(500).json({ error: 'Discovery failed', code: 'DISCOVERY_FAILED' });

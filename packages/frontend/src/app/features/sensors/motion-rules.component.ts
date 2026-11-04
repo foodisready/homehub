@@ -22,6 +22,8 @@ interface MotionRule {
 
 const REFRESH_MS = 5000;
 
+interface FoundSensor { ip: string; name: string; model: string; needsLogin: boolean; usedBy: string | null }
+
 @Component({
   selector: 'app-motion-rules',
   standalone: true,
@@ -49,6 +51,12 @@ const REFRESH_MS = 5000;
     .countdown { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
     .ok { color: #4ade80; font-size: 0.85rem; }
     .err { color: #f87171; font-size: 0.85rem; }
+    .found { list-style: none; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+    .found li + li { border-top: 1px solid var(--border); }
+    .found button { display: flex; flex-direction: column; gap: 0.15rem; width: 100%; text-align: left; background: transparent;
+      color: var(--text); border-radius: 0; padding: 0.55rem 0.75rem; font-size: 0.88rem; }
+    .found button:hover, .found button.picked { background: rgba(59,130,246,0.15); }
+    .found .used { color: var(--text-muted); font-size: 0.78rem; white-space: nowrap; }
     .btn-remove { background: transparent; border: 1px solid var(--border); color: var(--text-muted); padding: 0.3rem 0.7rem; font-size: 0.8rem; }
   `],
   template: `
@@ -96,6 +104,27 @@ const REFRESH_MS = 5000;
           Turn on when motion starts
         </label>
         @if (connecting() === rule.id) {
+          <div class="fields">
+            <button class="btn-remove" type="button" (click)="findSensors()" [disabled]="searching()">
+              {{ searching() ? 'Searching…' : 'Find sensors' }}
+            </button>
+            @if (searching()) { <span class="meta">Press each sensor's button to wake it. This takes a few seconds.</span> }
+          </div>
+          @if (searched() && !searching()) {
+            @if (found().length) {
+              <ul class="found" aria-label="Motion sensors found">
+                @for (f of found(); track f.ip) {
+                  <li><button type="button" [class.picked]="sensorIp === f.ip" (click)="pick(f)">
+                    <span>{{ f.name }} <span class="meta">· {{ f.ip }}</span></span>
+                    @if (f.usedBy === rule.name) { <span class="used">This rule's sensor</span> }
+                    @else if (f.usedBy) { <span class="used">Used by {{ f.usedBy }}: picking it moves it here</span> }
+                  </button></li>
+                }
+              </ul>
+            } @else {
+              <span class="meta">No motion sensors answered. Press the sensor's button to wake it, then search again, or enter its address below.</span>
+            }
+          }
           <div class="fields">
             <input [(ngModel)]="sensorIp" placeholder="Sensor IP address" autocomplete="off" />
             <input [(ngModel)]="username" placeholder="Sensor username" autocomplete="off" />
@@ -162,6 +191,9 @@ export class MotionRulesComponent implements OnInit, OnDestroy {
   readonly messageFor = signal<number | null>(null);
   readonly failed     = signal(false);
   readonly switching  = signal<number | null>(null);
+  readonly searching  = signal(false);
+  readonly searched   = signal(false);
+  readonly found      = signal<FoundSensor[]>([]);
 
   ngOnInit(): void {
     this.load();
@@ -223,15 +255,17 @@ export class MotionRulesComponent implements OnInit, OnDestroy {
 
   create(): void {
     this.createError.set('');
-    this.http.post('/api/motion', {
+    this.http.post<MotionRule>('/api/motion', {
       name: this.newName.trim(), deviceId: this.newDeviceId,
       offAfterMinutes: Number(this.newMinutes), turnOnWithMotion: this.newTurnOn,
     }).subscribe({
-      next: () => {
+      next: (created) => {
         this.newName = '';
         this.newDeviceId = null;
         this.newMinutes = 10;
         this.load();
+        // Next step for a new rule: its sensor.
+        if (created?.id) this.startConnect(created);
       },
       error: (err) => this.createError.set(err.error?.error ?? 'Could not add the rule.'),
     });
@@ -269,6 +303,31 @@ export class MotionRulesComponent implements OnInit, OnDestroy {
     this.sensorIp = rule.sensorIp ?? '';
     this.username = rule.sensorUsername ?? '';
     this.password = '';
+    this.searched.set(false);
+    this.found.set([]);
+    // A first connection: look for sensors straight away.
+    if (!rule.sensorIp) this.findSensors();
+  }
+
+  findSensors(): void {
+    this.searching.set(true);
+    this.http.post<FoundSensor[]>('/api/motion/discover', {}).subscribe({
+      next: (list) => {
+        this.searching.set(false);
+        this.searched.set(true);
+        this.found.set(list);
+        // Only one, and it's free: choose it.
+        const free = list.filter((f) => !f.usedBy);
+        if (!this.sensorIp && list.length === 1 && free.length === 1) this.pick(free[0]);
+      },
+      error: () => { this.searching.set(false); this.searched.set(true); this.found.set([]); },
+    });
+  }
+
+  pick(f: FoundSensor): void {
+    this.sensorIp = f.ip;
+    // Shelly's own default login name.
+    if (!this.username && f.needsLogin) this.username = 'admin';
   }
 
   connect(rule: MotionRule): void {

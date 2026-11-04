@@ -244,8 +244,12 @@ Motion lights turn a light on when someone arrives, and off once the room has be
 1. Set up the sensor on your Wi-Fi with the Shelly app or its setup page, and reserve its address on your router.
 2. Open **Sensors** and go to **Motion lights**.
 3. Enter a name, choose a light and set the minutes, then select **Add**.
-4. Press the sensor's button to wake it, and select **Connect sensor**.
-5. Enter the sensor's IP address, plus its username and password if it has one, then select **Connect**.
+4. Press the sensor's button to wake it. A new rule searches for sensors straight away; for an existing one, select **Connect sensor**, then **Find sensors**.
+5. Pick your sensor from the list. HomeHub fills in its address, and the username `admin` if it has a login. Enter its password if it has one, then select **Connect**. If the sensor isn't listed, press its button and search again, or type its address.
+
+A sensor already used by another rule is marked. Picking it moves it to this rule.
+
+**+ Discover on network** in Settings leaves sensors out, since they have nothing to switch.
 6. Wave at the sensor to activate the rule.
 
 A rule does nothing until its sensor first reports. Its card shows what it's doing, including a countdown to when the light turns off. The countdown clears when the light goes off, within about a minute if you use a wall switch. Clear **Turn on when motion starts** to only turn lights off. You can edit a rule's name, light and minutes on its card, and test the light with the button next to it.

@@ -2,6 +2,8 @@ import { Router, Request, Response } from 'express';
 import { getDb } from '../db';
 import { isProtectedDevice, type PowerDevice } from '../devices/power';
 import { logger } from '../logger';
+import { getDriver } from '../drivers/registry';
+import { isMotionShelly } from '../drivers/ShellyDriver';
 import {
   SensorLoginError, SensorResponseError, connectSensor, createMotionRule, handleMotion, motionStatus,
   type RuleWithDevice,
@@ -132,6 +134,25 @@ motionRouter.delete('/:id', (req: Request, res: Response) => {
   const result = getDb().prepare('DELETE FROM motion_rules WHERE id = ?').run(req.params.id);
   if (result.changes === 0) return res.status(404).json({ error: 'Rule not found', code: 'NOT_FOUND' });
   res.status(204).end();
+});
+
+// POST /api/motion/discover — Shelly Motion sensors on the network, and which rule each one serves.
+// A sensor sleeps between motions, so one may only answer after its button is pressed.
+motionRouter.post('/discover', async (_req: Request, res: Response) => {
+  try {
+    const found = (await getDriver('shelly').discover()).filter((d) => isMotionShelly(d.model));
+    const rules = getDb().prepare('SELECT name, sensor_ip FROM motion_rules WHERE sensor_ip IS NOT NULL').all() as { name: string; sensor_ip: string }[];
+    res.json(found.map((d) => ({
+      ip: d.ip,
+      name: d.alias && d.alias !== d.ip ? d.alias : 'Shelly Motion',
+      model: d.model,
+      needsLogin: d.needsLogin === true,
+      usedBy: rules.find((r) => r.sensor_ip.trim() === d.ip)?.name ?? null,
+    })));
+  } catch (err) {
+    logger.error(err, 'Motion sensor search failed');
+    res.status(500).json({ error: 'The search didn’t finish. Try again.', code: 'DISCOVERY_FAILED' });
+  }
 });
 
 // POST /api/motion/:id/connect — configures the sensor and saves its login.
