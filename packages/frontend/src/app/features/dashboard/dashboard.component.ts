@@ -208,6 +208,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
   private unsubOnline?: () => void;
   private unsubOverride?: () => void;
   private unsubMotion?: () => void;
+  private unsubReconnect?: () => void;
   private autoOffTimer?: ReturnType<typeof setTimeout>;
   private autoOffInterval?: ReturnType<typeof setInterval>;
 
@@ -223,6 +224,16 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.subscribeSocket();
     // Schedules and motion rules can start a countdown on their own.
     this.autoOffInterval = setInterval(() => { if (!document.hidden) this.refreshAutoOff(0); }, 60_000);
+    // A phone browser pauses a page in the background and drops its live
+    // updates, so a timer that ended meanwhile would still show. Catch up.
+    this.unsubReconnect = this.socket.onReconnect(() => this.catchUp());
+    document.addEventListener('visibilitychange', this.onVisible);
+  }
+
+  private readonly onVisible = () => { if (!document.hidden) this.catchUp(); };
+
+  private catchUp(): void {
+    this.loadDevices(() => this.refreshAutoOff(0));
   }
 
   ngOnDestroy(): void {
@@ -230,6 +241,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.unsubOnline?.();
     this.unsubOverride?.();
     this.unsubMotion?.();
+    this.unsubReconnect?.();
+    document.removeEventListener('visibilitychange', this.onVisible);
     clearTimeout(this.autoOffTimer);
     clearInterval(this.autoOffInterval);
   }
@@ -248,9 +261,9 @@ export class DashboardComponent implements OnInit, OnDestroy {
     }, delayMs);
   }
 
-  private loadDevices(): void {
+  private loadDevices(then?: () => void): void {
     this.http.get<Device[]>('/api/devices').subscribe({
-      next:  (devices) => { this._devices.set(devices); this._loading.set(false); },
+      next:  (devices) => { this._devices.set(devices); this._loading.set(false); then?.(); },
       error: () => this._loading.set(false),
     });
   }

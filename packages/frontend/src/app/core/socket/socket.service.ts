@@ -72,6 +72,17 @@ export class SocketService implements OnDestroy {
     this.socket = null;
   }
 
+  /**
+   * The connection came back after dropping, as it does when a phone sleeps
+   * or switches networks. Events sent meanwhile were missed, so reload state.
+   */
+  onReconnect(callback: () => void): () => void {
+    let first = !this.socket?.connected;
+    const handler = () => { if (first) { first = false; return; } callback(); };
+    this.socket?.on('connect', handler);
+    return () => this.socket?.off('connect', handler);
+  }
+
   onDeviceState(callback: (event: DeviceStateEvent) => void): () => void {
     this.socket?.on('device:state', callback);
     return () => this.socket?.off('device:state', callback);
