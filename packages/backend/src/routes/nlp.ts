@@ -3,6 +3,7 @@ import { processMessage, processMessageStream, type ChatMessage } from '../nlp/n
 import { getCommandStats } from '../nlp/command-log';
 import { dismissMiss, listMisses, teach, TeachError, type MissSource } from '../nlp/teach';
 import { requireAdmin } from '../middleware/auth';
+import { BUILT_IN, MAX_CUSTOM, MAX_LENGTH, MOMENTS, ReplyError, getReplyChoices, saveReplyChoices } from '../nlp/replies';
 import { logger } from '../logger';
 import { activityMiddleware } from '../activity/activity';
 
@@ -96,4 +97,20 @@ nlpRouter.post('/stream', async (req: Request, res: Response) => {
   }
 
   res.end();
+});
+
+// GET /api/nlp/replies — the built-in replies to choose from and the current choices. Admin only.
+nlpRouter.get('/replies', requireAdmin, (_req: Request, res: Response) => {
+  res.json({ moments: MOMENTS, builtIn: BUILT_IN, chosen: getReplyChoices(), maxCustom: MAX_CUSTOM, maxLength: MAX_LENGTH });
+});
+
+// PUT /api/nlp/replies { on: { builtIn: [ids], custom: [text] }, off: …, timer: …, scene: …, not_understood: … }
+nlpRouter.put('/replies', requireAdmin, (req: Request, res: Response) => {
+  try {
+    res.json({ chosen: saveReplyChoices(req.body) });
+  } catch (err) {
+    if (err instanceof ReplyError) return res.status(400).json({ error: err.message, code: 'REPLY_ERROR' });
+    logger.error({ err }, 'Saving replies failed');
+    res.status(500).json({ error: 'Could not save the replies', code: 'INTERNAL_ERROR' });
+  }
 });

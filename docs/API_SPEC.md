@@ -201,6 +201,17 @@ Body: `{ source, id, phrase, deviceIds }` or `{ source, id, phrase, sceneId }`. 
 ### `POST /api/nlp/misses/dismiss` — `admin` only
 Body: `{ source, id }`. Leaves that miss, and any with the same wording, out of the list. **Response 204**
 
+### `GET /api/nlp/replies` — `admin` only
+What voice and Chat say after a command. Returns `{ moments, builtIn, chosen, maxCustom, maxLength }`:
+- `moments`: `on`, `off`, `timer`, `scene` and `not_understood`, each with its fill-ins (`{device}`, `{minutes}`, `{scene}`) and the one every reply must include.
+- `builtIn`: the built-in lines, each `{ id, moment, style, text }`, where `style` is `plain`, `friendly` or `funny`.
+- `chosen`: for each moment, `{ builtIn: [ids], custom: [text] }`. Until an admin saves, only the plain line is chosen.
+
+HomeHub picks one chosen line at random each time; with none chosen it uses the plain line. Protected devices, failures and "which one?" questions always use plain wording.
+
+### `PUT /api/nlp/replies` — `admin` only
+Body: the `chosen` object. Up to `maxCustom` of your own lines per moment, each under `maxLength` characters, using only that moment's fill-ins and including its required one. Otherwise `400` with code `REPLY_ERROR`, and nothing is saved. Returns `{ chosen }`.
+
 ---
 
 ### `GET /api/devices/:id/energy`

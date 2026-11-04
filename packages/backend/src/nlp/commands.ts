@@ -1,4 +1,5 @@
-import { applyPower, assistantMaySwitch, type PowerDevice } from '../devices/power';
+import { applyPower, assistantMaySwitch, isProtectedDevice, type PowerDevice } from '../devices/power';
+import { reply } from './replies';
 import { findDeviceByName, findDeviceGroup, findScene, type NamedScene } from './find-device';
 import { getDb } from '../db';
 import type { ActionTaken } from './nlp.service';
@@ -121,6 +122,15 @@ async function runGroupCommand(
   const switched = allowed.filter((_, i) => results[i].status === 'fulfilled').map((d) => d.alias);
   const failed   = allowed.filter((_, i) => results[i].status === 'rejected').map((d) => d.alias);
   const duration = minutes ? ` for ${formatDuration(minutes)}` : '';
+  // Everything switched: the chosen reply. Anything partial keeps the plain account of what happened.
+  if (switched.length && !failed.length && !protectedNames.length) {
+    const device = joinNames(switched);
+    const plain = allowed.some((d) => isProtectedDevice(d));
+    const response = minutes
+      ? reply('timer', { device, minutes: formatDuration(minutes) }, { plain })
+      : reply(state ? 'on' : 'off', { device }, { plain });
+    return { response, actions };
+  }
   const response = [
     switched.length ? `Turned ${action} ${joinNames(switched)}${duration}.` : '',
     failed.length ? `I couldn't reach ${joinNames(failed)}.` : '',
@@ -153,7 +163,8 @@ async function runScene(scene: NamedScene): Promise<{ response: string; actions:
   });
 
   const failed = allowed.filter((_, i) => results[i].status === 'rejected').map((d) => d.alias);
-  const ran = failed.length || protectedNames.length ? `Ran part of ${scene.name}.` : `Ran ${scene.name}.`;
+  if (!failed.length && !protectedNames.length) return { response: reply('scene', { scene: scene.name }), actions };
+  const ran = `Ran part of ${scene.name}.`;
   const response = [
     ran,
     failed.length ? `I couldn't reach ${joinNames(failed)}.` : '',
@@ -213,9 +224,11 @@ export async function runPowerCommand(
     };
   }
 
-  const duration = minutes ? ` for ${formatDuration(minutes)}` : '';
+  const plain = isProtectedDevice(device);
   return {
-    response: `Turned ${state ? 'on' : 'off'} ${device.alias}${duration}.`,
+    response: minutes
+      ? reply('timer', { device: device.alias, minutes: formatDuration(minutes) }, { plain })
+      : reply(state ? 'on' : 'off', { device: device.alias }, { plain }),
     actions:  [{ tool: 'set_power_state', args, result: { success: true, ...args } }],
   };
 }

@@ -194,6 +194,12 @@ When Chat or voice doesn't understand a command, it's listed under **Settings �
 
 HomeHub refuses words it would still read some other way, for example another device's name or a room's name, and says why.
 
+### Choose what HomeHub says back
+
+**Settings → Voice replies** (administrators only) sets what voice and Chat say after a command: turning something on or off, turning on with a timer, running a scene, and not understanding. Tick the built-in replies you like, in Plain, Friendly or Funny style, or use **Start from** to tick a whole style at once. Type your own under any of them and select **Add**; **▶** plays a reply with example names. HomeHub picks one ticked reply at random each time. Select **Save replies** when you're done.
+
+Your own replies can use `{device}`, `{minutes}` and `{scene}`, and must include the device or scene, so you always hear what changed. Garage doors, cameras and valves always get a plain confirmation.
+
 ## Schedules
 
 Open **Schedules** to add a time for a device. Each device has its own collapsible group, and a schedule can run:

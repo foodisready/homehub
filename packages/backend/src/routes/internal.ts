@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import { reply } from '../nlp/replies';
 import { requireInternalKey } from '../middleware/internal';
 import { getDb } from '../db';
 import { getDriver } from '../drivers/registry';
@@ -63,7 +64,7 @@ internalRouter.post('/voice/command', async (req: Request, res: Response) => {
 
   const handled = await withActivity({ source: 'voice' }, () => runPowerCommand(spoken));
   recordVoiceCommand(text.trim(), handled !== null);
-  if (!handled) return res.json({ handled: false, response: "Sorry, I didn't understand that.", actions: [] });
+  if (!handled) return res.json({ handled: false, response: reply('not_understood', {}), actions: [] });
 
   res.json({ handled: true, ...handled });
 });

@@ -14,6 +14,7 @@ import { HomeSettingsComponent } from './home-settings.component';
 import { AiConnectionComponent } from './ai-connection.component';
 import { CamerasToggleComponent } from './cameras-toggle.component';
 import { TeachCommandsComponent } from './teach-commands.component';
+import { VoiceRepliesComponent } from './voice-replies.component';
 import { AutomationsService } from '../../core/services/automations.service';
 
 interface ChatStats {
@@ -66,7 +67,7 @@ const DRIVER_LABEL: Record<string, string> = {
 @Component({
   selector: 'app-settings',
   standalone: true,
-  imports: [FormsModule, DeviceFilterComponent, BackupsComponent, MerossLoginComponent, OtherNetworksComponent, HomeSettingsComponent, AiConnectionComponent, CamerasToggleComponent, TeachCommandsComponent],
+  imports: [FormsModule, DeviceFilterComponent, BackupsComponent, MerossLoginComponent, OtherNetworksComponent, HomeSettingsComponent, AiConnectionComponent, CamerasToggleComponent, TeachCommandsComponent, VoiceRepliesComponent],
   styles: [`
     .topbar { display:flex; align-items:center; justify-content:space-between; margin-bottom:1.5rem; }
     .topbar h1 { font-size:1.4rem; font-weight:700; }
@@ -757,6 +758,18 @@ const DRIVER_LABEL: Record<string, string> = {
           </button>
           @if (isSectionOpen('teach')) {
             <div class="card"><app-teach-commands /></div>
+          }
+        </div>
+      }
+
+      <!-- ── Voice replies (admin only) ─────────────────────────── -->
+      @if (isAdmin()) {
+        <div class="section">
+          <button type="button" class="section-title section-toggle" (click)="toggleSection('replies')" [attr.aria-expanded]="isSectionOpen('replies')">
+            <span class="chev">{{ isSectionOpen('replies') ? '▾' : '▸' }}</span> Voice replies
+          </button>
+          @if (isSectionOpen('replies')) {
+            <div class="card"><app-voice-replies /></div>
           }
         </div>
       }
