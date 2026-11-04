@@ -1,0 +1,5 @@
+aioesphomeapi==46.26.0
+faster-whisper==1.2.1
+piper-tts==1.8.0
+numpy>=2.0
+zeroconf>=0.150

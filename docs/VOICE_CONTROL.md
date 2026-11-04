@@ -1,6 +1,6 @@
 # Voice Control Plan
 
-This is the plan for controlling HomeHub by voice without Google Home, Alexa or, if possible, Home Assistant. A full voice loop has worked with Ava on an Android tablet through a test bridge, but that bridge isn't part of HomeHub yet.
+This is the plan for controlling HomeHub by voice without Google Home, Alexa or, if possible, Home Assistant. The voice bridge is in [`packages/voice-bridge`](../packages/voice-bridge/README.md). It runs as a service on an always-on computer and works with Ava on an Android tablet.
 
 ## Goal
 
@@ -29,7 +29,7 @@ Chat and MCP refuse to switch a protected device, whether a rule or a model pick
 2. ~~Add rule-based command handling.~~ Done, in `packages/backend/src/nlp/commands.ts`. Anything the rules can't read goes to Ollama.
 3. Move HomeHub to the Raspberry Pi.
 4. Time Whisper on the Pi using a recorded phrase.
-5. Test the voice bridge with the Ava app on an Android tablet.
+5. ~~Test the voice bridge with the Ava app on an Android tablet.~~ Done, then packaged as `packages/voice-bridge`.
 6. If the bridge works, buy one Home Assistant Voice and test it in the room where it matters most.
 7. Add Julia 1 only if real commands show the rules missing too much.
 
@@ -163,7 +163,7 @@ To set one up:
    sudo systemctl enable --now mbpfan
    ```
 
-The speech software itself isn't packaged yet. The next step is to measure Whisper and SenseVoice there for English, Spanish, Vietnamese and Cantonese, using commands the household records.
+Then install the [voice bridge](../packages/voice-bridge/README.md). The next step after that is to measure Whisper and SenseVoice there for English, Spanish, Vietnamese and Cantonese, using commands the household records.
 
 ## Success criteria
 

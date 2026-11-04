@@ -47,7 +47,7 @@ For questions, bug reports and donation problems, [open an issue on GitHub](http
 - [Getting Started](docs/GETTING_STARTED.md) covers local development
 - [Architecture](docs/ARCHITECTURE.md) describes the system design
 - [API reference](docs/API_SPEC.md) lists the REST API
-- [Voice control plan](docs/VOICE_CONTROL.md) covers the voice work in progress
+- [Voice bridge](packages/voice-bridge/README.md) adds voice control on an always-on computer, and the [voice control plan](docs/VOICE_CONTROL.md) covers what's left
 
 ## Credits
 
