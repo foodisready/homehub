@@ -44,6 +44,7 @@ For questions, bug reports and donation problems, [open an issue on GitHub](http
 
 ## For developers
 
+- [Works with HomeHub](docs/DEVICES.md) lists the devices to buy, and which are tested
 - [Getting Started](docs/GETTING_STARTED.md) covers local development
 - [Architecture](docs/ARCHITECTURE.md) describes the system design
 - [API reference](docs/API_SPEC.md) lists the REST API

@@ -18,6 +18,8 @@ HomeHub controls devices directly over your home network. All of them are switch
 
 Zigbee devices aren't supported. "Works with Google or Alexa" on a box doesn't mean it works with HomeHub, but the **Matter** logo does.
 
+For what to buy, model by model, and which ones have been tested, see [Works with HomeHub](./DEVICES.md).
+
 ## Add a device
 
 Set up every device in its own app first, so it's on your home Wi-Fi. Then:
