@@ -45,7 +45,8 @@ export function causeText(c: Pick<LastChange, 'source' | 'detail' | 'via' | 'use
     case 'assistant': return 'by the AI assistant';
     case 'shutoff': return 'by automatic water shutoff';
     case 'outside': return 'outside HomeHub';
-    default: return c.detail ? `by HomeHub (${c.detail})` : 'by HomeHub';
+    // A detail here is HomeHub's own finding, e.g. "didn't respond to the switch", not something it did.
+    default: return c.detail ? `(${c.detail})` : 'by HomeHub';
   }
 }
 

@@ -1,4 +1,4 @@
-import { Component, OnDestroy, computed, effect, inject, input, output, signal } from '@angular/core';
+import { Component, OnDestroy, computed, effect, inject, input, output, signal, untracked } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { DecimalPipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
@@ -93,15 +93,17 @@ export interface OverrideRequest { device: Device; durationMinutes: number; }
           {{ device().model ?? device().driverType }}
           @if (device().hasEmeter && device().wattage != null) { · {{ device().wattage | number:'1.1-1' }} W }
         </span>
-        <span class="panel-label">{{ isDoor() ? (device().state ? 'Close after' : 'Keep closed for') : isCamera() ? (device().state ? 'Pause after' : 'Keep paused for') : (device().state ? 'Turn off after' : 'Keep off for') }}</span>
-        <div class="buttons">
-          @for (hours of [1, 2, 4]; track hours) {
-            <button class="small" type="button" (click)="setTimer(hours * 60)">{{ hours }}h</button>
-          }
-          @if (device().overrideUntil) {
-            <button class="small" type="button" (click)="overrideCancelled.emit(device())">Cancel timer</button>
-          }
-        </div>
+        @if (timerChoices().length || device().overrideUntil) {
+          <span class="panel-label">{{ isDoor() ? 'Close after' : isCamera() ? (device().state ? 'Pause after' : 'Keep paused for') : (device().state ? 'Turn off after' : 'Keep off for') }}</span>
+          <div class="buttons">
+            @for (minutes of timerChoices(); track minutes) {
+              <button class="small" type="button" (click)="setTimer(minutes)">{{ minutes < 60 ? minutes + ' min' : minutes / 60 + 'h' }}</button>
+            }
+            @if (device().overrideUntil) {
+              <button class="small" type="button" (click)="overrideCancelled.emit(device())">Cancel timer</button>
+            }
+          </div>
+        }
         @if (recent().length) {
           <span class="panel-label">Recent activity</span>
           <div class="recent">
@@ -146,10 +148,20 @@ export class DeviceRowComponent implements OnDestroy {
       if (timed && !this.ticker) this.ticker = setInterval(() => this.now.set(Date.now()), 1000);
       if (!timed && this.ticker) { clearInterval(this.ticker); this.ticker = undefined; }
     });
+    // While the panel is open, keep Recent activity current: the device can
+    // change again, or HomeHub can find it didn't do what was asked.
+    effect(() => {
+      const d = this.device();
+      void d.state; void d.lastChange;
+      if (!untracked(this.open)) return;
+      clearTimeout(this.recentTimer);
+      this.recentTimer = setTimeout(() => this.loadRecent(), 700);
+    });
   }
 
   ngOnDestroy(): void {
     if (this.ticker) clearInterval(this.ticker);
+    clearTimeout(this.recentTimer);
   }
 
   /**
@@ -208,21 +220,38 @@ export class DeviceRowComponent implements OnDestroy {
     return c && c.state === d.state ? when(c.at) : null;
   });
 
+  /**
+   * Timer lengths offered. A garage door is left open for minutes, not hours,
+   * and holding a closed door closed means nothing, so a closed door gets none.
+   */
+  readonly timerChoices = computed(() => {
+    if (this.isDoor()) return this.device().state ? [15, 30, 60] : [];
+    return [60, 120, 240];
+  });
+
   readonly recent = signal<ActivityEvent[]>([]);
   private readonly http = inject(HttpClient);
+  private recentTimer?: ReturnType<typeof setTimeout>;
 
   togglePanel(): void {
     this.open.update((open) => !open);
-    if (this.open()) {
-      this.http.get<ActivityEvent[]>(`/api/activity?deviceId=${this.device().id}&kind=power&limit=4`).subscribe({
-        next: (list) => this.recent.set(list),
-        error: () => this.recent.set([]),
-      });
-    }
+    if (this.open()) this.loadRecent();
+  }
+
+  private loadRecent(): void {
+    this.http.get<ActivityEvent[]>(`/api/activity?deviceId=${this.device().id}&kind=power&limit=4`).subscribe({
+      next: (list) => this.recent.set(list),
+      error: () => this.recent.set([]),
+    });
   }
 
   /** "6:35 PM" today, "Yesterday 12:30 AM", or "Nov 1, 6:12 PM": a time alone can't say which night. */
-  time = (iso: string) => { const t = when(iso); return t.charAt(0).toUpperCase() + t.slice(1); };
+  time = (iso: string) => {
+    const t = when(iso);
+    // when() gives today's events as a bare time; say "Today" so every line has its day.
+    if (t === clock(iso)) return `Today ${t}`;
+    return t.charAt(0).toUpperCase() + t.slice(1);
+  };
 
   recentText(e: ActivityEvent): string {
     return `${actionWord(e.driverType, e.state)} ${causeText(e)}`;

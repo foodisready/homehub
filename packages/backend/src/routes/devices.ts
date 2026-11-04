@@ -15,6 +15,9 @@ import {
   MAX_EXTRA_NETWORKS, displayNetwork, extraNetworks, ownNetworks, saveExtraNetworks, suggestedNetworks,
 } from '../discovery/networks';
 
+/** The latest switch per device, so only its check reports a mismatch. */
+const latestSwitch = new Map<number, number>();
+
 function confirmStateAsync(
   deviceId: number,
   alias: string,
@@ -23,7 +26,12 @@ function confirmStateAsync(
   config: Record<string, unknown> | undefined,
   expectedState: boolean,
 ): void {
+  const ticket = (latestSwitch.get(deviceId) ?? 0) + 1;
+  latestSwitch.set(deviceId, ticket);
   setTimeout(async () => {
+    // Switched again since: that switch's own check decides. Checking this one
+    // would call the newer state a failure (a garage door tapped open then closed).
+    if (latestSwitch.get(deviceId) !== ticket) return;
     try {
       const actual = await getDriver(driverType).getPower(ip, config);
       const states = getAllCachedStates();

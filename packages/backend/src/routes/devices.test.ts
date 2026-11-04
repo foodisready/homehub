@@ -180,4 +180,36 @@ describe('device address updates', () => {
     const stored = JSON.parse(db.prepare('SELECT driver_config FROM devices WHERE id = ?').pluck().get(id) as string);
     assert.equal(stored.auth.pass, 'secret-pw');
   });
+  it('checks only the latest switch, so quick taps are not reported as failures', async () => {
+    const id = register('Door', '10.0.0.9');
+    const { getDriver } = await import('../drivers/registry');
+    const driver = getDriver('kasa') as any;
+    const saved = { setPower: driver.setPower, getPower: driver.getPower, confirmAfterMs: driver.confirmAfterMs };
+    // Like a garage door: it takes a while to travel, and HomeHub checks after that.
+    let actual = true;
+    driver.setPower = async (_ip: string, on: boolean) => { setTimeout(() => { actual = on; }, 300); };
+    driver.getPower = async () => actual;
+    driver.confirmAfterMs = 500;
+    const mismatches = () => db.prepare("SELECT COUNT(*) FROM device_events WHERE device_id = ? AND detail LIKE 'didn%'").pluck().get(id);
+    const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+    try {
+      // Close, open, close again: the first close's check lands while the door
+      // is open from the second tap, which isn't a failure.
+      await send('POST', `/${id}/off`, {});
+      await wait(100);
+      await send('POST', `/${id}/on`, {});
+      await wait(350);
+      await send('POST', `/${id}/off`, {});
+      await wait(700);
+      assert.equal(mismatches(), 0, 'earlier taps were replaced, not failed');
+
+      driver.setPower = async () => { /* the device ignores it */ };
+      await send('POST', `/${id}/on`, {});
+      await wait(650);
+      assert.equal(mismatches(), 1, 'a switch that really did nothing is still reported');
+    } finally {
+      Object.assign(driver, saved);
+    }
+  });
 });
