@@ -49,7 +49,8 @@ Garage doors are always protected: HomeHub asks you to confirm, and Chat and voi
 
 | Device | Status | Local or cloud | How it's added |
 |---|---|---|---|
-| Wyze cameras supported by the [Wyze bridge](https://github.com/mrlt8/docker-wyze-bridge), such as Cam v3 and Pan v3 | 🟡 Should work | Cloud sign-in, then video stays on your network | Sign in to Wyze in **Settings → Integrations** with a Wyze API key. Check your model on the bridge's list. |
+| Wyze Cam Pan v3 and Cam v2 | ⚠️ Partly | Cloud sign-in | Sign in to Wyze in **Settings → Integrations** with a Wyze API key. Cameras appear and their motion snapshots come through your Wyze account, but live video doesn't connect on current camera firmware with the camera bridge HomeHub uses. |
+| Other Wyze cameras supported by the [Wyze bridge](https://github.com/mrlt8/docker-wyze-bridge) | ⚠️ Untested | Cloud sign-in | The same. Check your model on the bridge's list. |
 
 ## Voice
 
