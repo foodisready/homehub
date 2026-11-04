@@ -140,6 +140,31 @@ If it's used, use it only to pick the device, and take on or off and the duratio
 
 A Pi has no comparable GPU, so Ollama is unlikely to be usable for everyday commands there. Speech recognition may also be too slow: [fully local processing is recommended on an Intel N100 or better](https://smarthomeshopuk.com/products/home-assistant-voice-preview-edition). If Whisper feels slow on the Pi, run speech on a Mac or mini PC, and keep HomeHub on the Pi.
 
+### A voice computer from an old laptop
+
+An old laptop runs speech for the Pi while HomeHub stays on the Pi. The one in testing is a 2015 15" MacBook Pro (Core i7-4980HQ, 16 GB) with Ubuntu 26.04 Desktop. Its built-in Wi-Fi worked without extra drivers.
+
+To set one up:
+
+1. Install Ubuntu. Tick **Install OpenSSH server** if the installer offers it; otherwise install it afterwards:
+
+   ```bash
+   sudo apt update && sudo apt install -y openssh-server
+   sudo systemctl enable --now ssh
+   ```
+
+2. From the computer you'll manage it from, copy your SSH key so you don't need its password each time: `ssh-copy-id <user>@<laptop-address>`.
+3. Give it a fixed address. A reservation in your router's app is simplest. If you set it on the laptop instead, in Settings → Wi-Fi → the network's ⚙ → IPv4, choose **Manual** and fill in the address, netmask `255.255.255.0`, your router as the gateway, and your router as DNS. Reserve the address in the router too, so it isn't handed to another device.
+4. Keep it awake with the lid closed: see [On an old laptop](./INSTALL.md#on-an-old-laptop).
+5. Install the tools speech needs. On a MacBook, also turn on `mbpfan`, which runs the fans under Linux:
+
+   ```bash
+   sudo apt install -y git ffmpeg python3-venv python3-pip curl mbpfan
+   sudo systemctl enable --now mbpfan
+   ```
+
+The speech software itself isn't packaged yet. The next step is to measure Whisper and SenseVoice there for English, Spanish, Vietnamese and Cantonese, using commands the household records.
+
 ## Success criteria
 
 - A common command finishes within 2 to 3 seconds of speaking.

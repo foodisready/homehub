@@ -95,6 +95,21 @@ Keep `.env` private if you put passwords or secrets in it.
 
 In your router's settings, reserve the Pi's current IP address. This keeps the address from changing, which would break your bookmarks and any motion sensors reporting to it.
 
+### On an old laptop
+
+A laptop running Ubuntu also works as the computer HomeHub runs on, but out of the box it sleeps when you close the lid or leave it alone. To keep it awake, run these on the laptop:
+
+```bash
+# Keep running with the lid closed
+sudo mkdir -p /etc/systemd/logind.conf.d
+printf '[Login]\nHandleLidSwitch=ignore\nHandleLidSwitchExternalPower=ignore\nHandleLidSwitchDocked=ignore\n' | sudo tee /etc/systemd/logind.conf.d/homehub.conf
+
+# Ubuntu Desktop only: don't sleep when idle on mains power
+gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-ac-type 'nothing'
+```
+
+Then restart the laptop (`sudo reboot`) so the lid setting takes effect. On Ubuntu Desktop, run the `gsettings` line in a terminal on the laptop itself, or turn off Settings → Power → **Automatic Suspend**. Ubuntu Server has no desktop, so it skips that step.
+
 ## Step 5 (optional): Use HomeHub away from home
 
 [Tailscale](https://tailscale.com) gives your phone a private connection to HomeHub from anywhere, without opening your router to the internet. It's free for home use.
