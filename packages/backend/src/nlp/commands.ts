@@ -1,9 +1,11 @@
 import { applyPower, assistantMaySwitch, isProtectedDevice, type PowerDevice } from '../devices/power';
 import { reply } from './replies';
-import { findDeviceByName, findDeviceGroup, findScene, type NamedScene } from './find-device';
+import { findDeviceByName, findDeviceGroup, findScene, normalize, type NamedScene } from './find-device';
 import { getDb } from '../db';
 import type { ActionTaken } from './nlp.service';
-import { withActivity } from '../activity/activity';
+import { currentActivity, withActivity } from '../activity/activity';
+import { sendPushToAll } from '../push/push.service';
+import { logger } from '../logger';
 
 export interface PowerCommand {
   name:     string;
@@ -68,8 +70,9 @@ export function parsePowerCommand(text: string): PowerCommand | null {
     minutes = parsed;
   }
 
-  const stateFirst = command.match(/^(?:turn|switch)\s+(on|off)\s+(.+)$/);
-  const stateLast  = command.match(/^(turn|switch|keep|leave)\s+(.+?)\s+(on|off)$/);
+  // "Turn back on the cameras", "turn the cameras back on".
+  const stateFirst = command.match(/^(?:turn|switch)\s+(?:back\s+)?(on|off)\s+(.+)$/);
+  const stateLast  = command.match(/^(turn|switch|keep|leave)\s+(.+?)(?:\s+back)?\s+(on|off)$/);
 
   let name: string;
   let state: boolean;
@@ -91,6 +94,31 @@ export function parsePowerCommand(text: string): PowerCommand | null {
   return minutes ? { name, state, minutes } : { name, state };
 }
 
+/**
+ * "Pause the cameras", "resume the front door camera", "unpause the cams".
+ * Only cameras pause, so a name that isn't one is left for the model.
+ */
+export function parseCameraCommand(text: string): PowerCommand | null {
+  const match = cleanUp(text).match(/^(pause|resume|unpause|un-pause)\s+(.+?)(?:\s+again)?$/);
+  if (!match) return null;
+  return { name: match[2], state: match[1] !== 'pause' };
+}
+
+/**
+ * "The cameras", "all cameras", "every camera", "my cams": every camera,
+ * unless a device or room has that very name.
+ */
+export function findCameras(name: string): PowerDevice[] {
+  const wanted = normalize(name);
+  const match = wanted.match(/^(?:(all|every)\s+(?:of\s+)?(?:the\s+|my\s+)?)?(?:the\s+|my\s+)?(cameras|cams|camera|cam)$/);
+  if (!match) return [];
+  const plural = match[2].endsWith('s');
+  if (!plural && !match[1]) return [];   // "the camera" may mean one of several: findDeviceByName decides
+  const devices = getDb().prepare('SELECT * FROM devices').all() as (PowerDevice & { room?: string | null; driver_type?: string })[];
+  if (devices.some((d) => normalize(d.alias) === wanted || (typeof d.room === 'string' && normalize(d.room) === wanted))) return [];
+  return devices.filter(isCamera);
+}
+
 export function formatDuration(minutes: number): string {
   const unit = (count: number, name: string) => `${count} ${name}${count === 1 ? '' : 's'}`;
   const hours = Math.floor(minutes / 60);
@@ -101,6 +129,9 @@ export function formatDuration(minutes: number): string {
 
 const joinNames = (names: string[]) =>
   names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+
+const leftAlone = (names: string[]) =>
+  names.length > 1 ? `${joinNames(names)} are protected, so I left them alone.` : `${names[0]} is protected, so I left it alone.`;
 
 /** Switches every device sharing a nickname. A protected device is left alone. */
 async function runGroupCommand(
@@ -126,6 +157,7 @@ async function runGroupCommand(
   if (switched.length && !failed.length && !protectedNames.length) {
     const device = joinNames(switched);
     const plain = allowed.some((d) => isProtectedDevice(d));
+    if (state && !minutes && allowed.every(isCamera)) return { response: `Resumed ${device}.`, actions };
     const response = minutes
       ? reply('timer', { device, minutes: formatDuration(minutes) }, { plain })
       : reply(state ? 'on' : 'off', { device }, { plain });
@@ -134,12 +166,41 @@ async function runGroupCommand(
   const response = [
     switched.length ? `Turned ${action} ${joinNames(switched)}${duration}.` : '',
     failed.length ? `I couldn't reach ${joinNames(failed)}.` : '',
-    protectedNames.length ? `${joinNames(protectedNames)} is protected, so I left it alone.` : '',
+    protectedNames.length ? leftAlone(protectedNames) : '',
   ].filter(Boolean).join(' ');
   return { response, actions };
 }
 
 type SceneAction = PowerDevice & { scene_state: number };
+
+export const isCamera = (device: { driver_type?: string | null }) => device.driver_type === 'wyze';
+
+/** Said when voice or Chat is asked to pause a camera. It doesn't mention scenes, so it gives nothing away. */
+export const CAMERA_PAUSE_REFUSED = "For safety, I can't pause cameras that way.";
+
+/**
+ * Whether a scene run by voice or Chat may switch this device. Cameras can
+ * always be resumed; pausing one needs a scene an admin has allowed to, since
+ * anyone who says the wake word could otherwise turn the cameras off.
+ */
+function sceneMaySwitch(device: SceneAction, mayPause: boolean): boolean {
+  const on = device.scene_state === 1;
+  if (assistantMaySwitch(device, on)) return true;
+  return mayPause && !on && isCamera(device) && device.is_protected !== 1;
+}
+
+/** Tells everyone's phone that cameras were paused, and by what, so a stranger using the phrase is noticed. */
+function notifyCamerasPaused(sceneName: string, cameras: string[]): void {
+  if (!cameras.length) return;
+  const source = currentActivity().source;
+  const by = source === 'voice' ? 'by voice' : source === 'chat' ? 'from Chat' : '';
+  const body = `${sceneName}${by ? ` (${by})` : ''} paused ${joinNames(cameras)}.`;
+  try {
+    sendPushToAll(cameras.length === 1 ? 'Camera paused' : 'Cameras paused', body, { url: '/cameras' });
+  } catch (err) {
+    logger.warn({ err: (err as Error).message }, 'Could not send the cameras-paused notification');
+  }
+}
 
 /** Runs a scene for Chat or voice, which must leave protected devices alone. */
 async function runScene(scene: NamedScene): Promise<{ response: string; actions: ActionTaken[] }> {
@@ -150,8 +211,10 @@ async function runScene(scene: NamedScene): Promise<{ response: string; actions:
   `).all(scene.id) as SceneAction[];
   if (!devices.length) return { response: `${scene.name} has no devices in it.`, actions: [] };
 
-  const allowed = devices.filter((d) => assistantMaySwitch(d, d.scene_state === 1));
-  const protectedNames = devices.filter((d) => !assistantMaySwitch(d, d.scene_state === 1)).map((d) => d.alias);
+  const mayPause = (getDb().prepare('SELECT voice_may_pause FROM scenes WHERE id = ?')
+    .get(scene.id) as { voice_may_pause: number } | undefined)?.voice_may_pause === 1;
+  const allowed = devices.filter((d) => sceneMaySwitch(d, mayPause));
+  const protectedNames = devices.filter((d) => !sceneMaySwitch(d, mayPause)).map((d) => d.alias);
 
   const results = await withActivity({ source: 'scene', detail: scene.name }, () =>
     Promise.allSettled(allowed.map((d) => applyPower(d, d.scene_state === 1))));
@@ -163,12 +226,14 @@ async function runScene(scene: NamedScene): Promise<{ response: string; actions:
   });
 
   const failed = allowed.filter((_, i) => results[i].status === 'rejected').map((d) => d.alias);
+  notifyCamerasPaused(scene.name, allowed.filter((d, i) =>
+    isCamera(d) && d.scene_state !== 1 && results[i].status === 'fulfilled').map((d) => d.alias));
   if (!failed.length && !protectedNames.length) return { response: reply('scene', { scene: scene.name }), actions };
   const ran = `Ran part of ${scene.name}.`;
   const response = [
     ran,
     failed.length ? `I couldn't reach ${joinNames(failed)}.` : '',
-    protectedNames.length ? `${joinNames(protectedNames)} is protected, so I left it alone.` : '',
+    protectedNames.length ? leftAlone(protectedNames) : '',
   ].filter(Boolean).join(' ');
   return { response, actions };
 }
@@ -188,14 +253,22 @@ export async function runPowerCommand(
   const namedScene = sceneFromText(text);
   if (namedScene) return runScene(namedScene);
 
-  const command = parsePowerCommand(text);
+  const cameraCommand = parseCameraCommand(text);
+  const command = cameraCommand ?? parsePowerCommand(text);
   if (!command) return null;
 
-  const group = findDeviceGroup(command.name);
-  if (group.length) return runGroupCommand(group as unknown as PowerDevice[], command);
+  const cameras = findCameras(command.name);
+  let group = cameras.length ? cameras : findDeviceGroup(command.name) as unknown as PowerDevice[];
+  // "Pause the kitchen" pauses the kitchen's cameras, and nothing else.
+  if (cameraCommand) group = group.filter(isCamera);
+  if (group.length) {
+    if (!command.state && group.every(isCamera)) return { response: CAMERA_PAUSE_REFUSED, actions: [] };
+    return runGroupCommand(group, command);
+  }
 
   const match = findDeviceByName(command.name);
   if ('error' in match) {
+    if (cameraCommand) return null;
     if (!match.candidates) {
       // "Turn on movie time" means the scene if no device has that name.
       const scene = command.state && !command.minutes ? findScene(command.name) : null;
@@ -205,6 +278,8 @@ export async function runPowerCommand(
   }
 
   const device = match.device as unknown as PowerDevice;
+  if (cameraCommand && !isCamera(device)) return null;
+  if (!command.state && isCamera(device)) return { response: CAMERA_PAUSE_REFUSED, actions: [] };
   if (!assistantMaySwitch(device, command.state)) {
     return {
       response: `${device.alias} is protected, so Chat won't switch it. Use its tile on the dashboard.`,
@@ -225,6 +300,7 @@ export async function runPowerCommand(
   }
 
   const plain = isProtectedDevice(device);
+  if (state && !minutes && isCamera(device)) return { response: `Resumed ${device.alias}.`, actions: [{ tool: 'set_power_state', args, result: { success: true, ...args } }] };
   return {
     response: minutes
       ? reply('timer', { device: device.alias, minutes: formatDuration(minutes) }, { plain })

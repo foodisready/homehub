@@ -4,8 +4,8 @@ import { FormsModule } from '@angular/forms';
 import { AuthService } from '../../core/auth/auth.service';
 import { Device } from '../../shared/models/device.model';
 
-interface SceneAction { deviceId: number; alias: string; state: boolean }
-interface Scene { id: number; name: string; icon: string | null; actions: SceneAction[] }
+interface SceneAction { deviceId: number; alias: string; state: boolean; camera?: boolean }
+interface Scene { id: number; name: string; icon: string | null; actions: SceneAction[]; voiceMayPause?: boolean }
 
 const SCENE_ICONS = ['💡','🌙','🌅','🎬','🏠','🎉','😴','🔒','🌿','⚡'];
 
@@ -75,6 +75,15 @@ const SCENE_ICONS = ['💡','🌙','🌅','🎬','🏠','🎉','😴','🔒','�
     .btn-save { flex:2; }
     .error-msg { color:var(--red); font-size:0.82rem; margin-top:0.4rem; }
     .empty { text-align:center; padding:3rem 1rem; color:var(--text-muted); }
+
+    /* Voice may pause cameras */
+    .check { display:flex; align-items:flex-start; gap:0.5rem; font-size:0.85rem; color:var(--text); font-weight:500; margin:0; cursor:pointer; }
+    .check input { width:auto; margin-top:0.15rem; }
+    .check-help { font-size:0.78rem; color:var(--text-muted); margin:0.3rem 0 0 1.6rem; line-height:1.4; }
+    .voice-pause { font-size:0.75rem; color:var(--text-muted); text-align:left; width:100%; }
+    .voice-pause .check { font-size:0.75rem; font-weight:400; color:var(--text-muted); }
+    .voice-pause.on, .voice-pause.on .check { color:var(--amber, #f59e0b); }
+    .voice-err { color:var(--red); font-size:0.75rem; }
   `],
   template: `
     <div class="page">
@@ -104,6 +113,20 @@ const SCENE_ICONS = ['💡','🌙','🌅','🎬','🏠','🎉','😴','🔒','�
               </button>
               @if (runResult()[s.id]) {
                 <div class="result-msg">{{ runResult()[s.id] }}</div>
+              }
+              @if (pausesCameras(s)) {
+                <div class="voice-pause" [class.on]="s.voiceMayPause">
+                  @if (auth.user()?.role === 'admin') {
+                    <label class="check">
+                      <input type="checkbox" [checked]="!!s.voiceMayPause" [disabled]="savingVoice() === s.id"
+                             (change)="setVoiceMayPause(s, $any($event.target))" />
+                      🎙 Voice may pause cameras
+                    </label>
+                  } @else if (s.voiceMayPause) {
+                    🎙 Voice may pause cameras
+                  }
+                  @if (voiceError()[s.id]) { <div class="voice-err">{{ voiceError()[s.id] }}</div> }
+                </div>
               }
               @if (auth.user()?.role === 'admin') {
                 <button class="delete-btn" (click)="deleteScene(s)">✕ Delete</button>
@@ -139,13 +162,27 @@ const SCENE_ICONS = ['💡','🌙','🌅','🎬','🏠','🎉','😴','🔒','�
               <div class="device-action-row">
                 <span class="device-name">{{ d.alias }}</span>
                 <div class="state-toggle">
-                  <button class="state-btn" [class.active-on]="actionState(d.id) === true" (click)="setAction(d.id, true)">On</button>
-                  <button class="state-btn" [class.active-off]="actionState(d.id) === false" (click)="setAction(d.id, false)">Off</button>
+                  <button class="state-btn" [class.active-on]="actionState(d.id) === true" (click)="setAction(d.id, true)">{{ d.driverType === 'wyze' ? 'Resume' : 'On' }}</button>
+                  <button class="state-btn" [class.active-off]="actionState(d.id) === false" (click)="setAction(d.id, false)">{{ d.driverType === 'wyze' ? 'Pause' : 'Off' }}</button>
                   <button class="state-btn skip" [class.active-off]="actionState(d.id) === null" (click)="setAction(d.id, null)">Skip</button>
                 </div>
               </div>
             }
           </div>
+
+          @if (formPausesCameras()) {
+            <div class="field">
+              <label class="check">
+                <input type="checkbox" [(ngModel)]="form.voiceMayPause" />
+                Voice may pause cameras
+              </label>
+              <p class="check-help">
+                Without this, saying the scene's name leaves cameras on, because anyone who says the wake word could
+                otherwise turn them off. Pick a name a visitor wouldn't guess. Everyone's phone gets a notification
+                when voice or Chat pauses cameras.
+              </p>
+            </div>
+          }
 
           @if (formError()) { <p class="error-msg">{{ formError() }}</p> }
 
@@ -174,6 +211,14 @@ export class ScenesComponent implements OnInit {
   readonly saving    = signal(false);
   readonly formError = signal('');
   readonly runningId = signal<number | null>(null);
+  readonly savingVoice = signal<number | null>(null);
+  readonly voiceError = signal<Record<number, string>>({});
+  /** Bumped when the form's actions change, so formPausesCameras re-reads them. */
+  private readonly actionsChanged = signal(0);
+  readonly formPausesCameras = computed(() => {
+    this.actionsChanged();
+    return this.devices().some((d) => d.driverType === 'wyze' && this.actionMap.get(d.id) === false);
+  });
 
   form = this.blankForm();
   // Map deviceId → true/false/null(skip)
@@ -186,7 +231,32 @@ export class ScenesComponent implements OnInit {
     this.http.get<Device[]>('/api/devices').subscribe((d) => this._devices.set(d));
   }
 
-  private blankForm() { return { name: '', icon: '💡' }; }
+  private blankForm() { return { name: '', icon: '💡', voiceMayPause: false }; }
+
+  pausesCameras(scene: Scene): boolean {
+    return scene.actions.some((a) => a.camera && !a.state);
+  }
+
+  setVoiceMayPause(scene: Scene, box: HTMLInputElement): void {
+    const voiceMayPause = box.checked;
+    this.savingVoice.set(scene.id);
+    this._voiceErr(scene.id, '');
+    this.http.patch<Scene>(`/api/scenes/${scene.id}`, { voiceMayPause }).subscribe({
+      next: (updated) => {
+        this._scenes.update((list) => list.map((s) => (s.id === updated.id ? updated : s)));
+        this.savingVoice.set(null);
+      },
+      error: (err) => {
+        box.checked = !voiceMayPause;   // put the box back as it was
+        this._voiceErr(scene.id, err.error?.error ?? 'Couldn\'t save. Try again.');
+        this.savingVoice.set(null);
+      },
+    });
+  }
+
+  private _voiceErr(id: number, msg: string): void {
+    this.voiceError.update((e) => ({ ...e, [id]: msg }));
+  }
 
   actionState(deviceId: number): boolean | null {
     return this.actionMap.has(deviceId) ? (this.actionMap.get(deviceId) ?? null) : null;
@@ -195,12 +265,14 @@ export class ScenesComponent implements OnInit {
   setAction(deviceId: number, state: boolean | null): void {
     if (state === null) this.actionMap.delete(deviceId);
     else this.actionMap.set(deviceId, state);
+    this.actionsChanged.update((n) => n + 1);
   }
 
   closeForm(): void {
     this.showForm.set(false);
     this.form = this.blankForm();
     this.actionMap.clear();
+    this.actionsChanged.update((n) => n + 1);
     this.formError.set('');
   }
 
@@ -212,7 +284,10 @@ export class ScenesComponent implements OnInit {
     if (!actions.length) { this.formError.set('Add at least one device action.'); return; }
 
     this.saving.set(true);
-    this.http.post<Scene>('/api/scenes', { name: this.form.name.trim(), icon: this.form.icon, actions }).subscribe({
+    this.http.post<Scene>('/api/scenes', {
+      name: this.form.name.trim(), icon: this.form.icon, actions,
+      voiceMayPause: this.formPausesCameras() && this.form.voiceMayPause,
+    }).subscribe({
       next: (created) => {
         this._scenes.update((list) => [...list, created].sort((a, b) => a.name.localeCompare(b.name)));
         this.closeForm();

@@ -441,6 +441,25 @@ Enable or disable a schedule.
 
 ---
 
+## Scenes
+
+### `GET /api/scenes`
+Every scene, by name: `{ id, name, icon, nicknames, voiceMayPause, actions: [{ id, deviceId, alias, state, camera }] }`. `camera` is true for a camera, whose `state` false means paused.
+
+### `POST /api/scenes` — `admin` only
+**Body** `{ "name": "Pineapple time", "icon": "🌙", "actions": [{ "deviceId": 4, "state": false }], "voiceMayPause": true }`. `voiceMayPause` is optional, default false. **201** with the scene, **409** if the name is taken.
+
+### `PATCH /api/scenes/:id` — `admin` only
+**Body** `{ "voiceMayPause": true }`. Whether running this scene by voice or Chat may pause its cameras. Without it, voice and Chat leave cameras on, since anyone who says the wake word could otherwise turn them off. When voice or Chat does pause cameras, everyone with notifications on gets one. **200** with the scene, **400** for anything but true or false, **404** for an unknown scene.
+
+### `DELETE /api/scenes/:id` — `admin` only
+**Response 204**
+
+### `POST /api/scenes/:id/run`
+Runs it from the app, switching every device in it. Returns `{ scene, actions: [{ alias, state }], failed }`.
+
+---
+
 ## Natural Language (NLP)
 
 ### `POST /api/nlp`

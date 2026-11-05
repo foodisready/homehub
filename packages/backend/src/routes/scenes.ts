@@ -5,21 +5,28 @@ import { emitDeviceState } from '../socket';
 import { getCachedState, noteState } from '../kasa/device.cache';
 import { logger } from '../logger';
 import { withActivity } from '../activity/activity';
+import { requireAdmin } from '../middleware/auth';
 
 export const scenesRouter = Router();
 
-interface SceneRow     { id: number; name: string; icon: string | null; created_at: string }
+interface SceneRow     { id: number; name: string; icon: string | null; created_at: string; voice_may_pause?: number; nicknames?: string | null }
 interface ActionRow    { id: number; scene_id: number; device_id: number; state: number }
 interface DeviceRow    { id: number; alias: string; ip: string; driver_type: string; driver_config: string | null }
 
 function withActions(scene: SceneRow) {
   const db      = getDb();
   const actions = db.prepare(`
-    SELECT sa.id, sa.scene_id, sa.device_id, sa.state, d.alias
+    SELECT sa.id, sa.scene_id, sa.device_id, sa.state, d.alias, d.driver_type
     FROM scene_actions sa JOIN devices d ON d.id = sa.device_id
     WHERE sa.scene_id = ?
-  `).all(scene.id) as (ActionRow & { alias: string })[];
-  return { ...scene, actions: actions.map((a) => ({ id: a.id, deviceId: a.device_id, alias: a.alias, state: a.state === 1 })) };
+  `).all(scene.id) as (ActionRow & { alias: string; driver_type: string })[];
+  const { voice_may_pause, ...rest } = scene;
+  return {
+    ...rest,
+    // Whether voice and Chat may pause this scene's cameras. Only an admin can change it.
+    voiceMayPause: voice_may_pause === 1,
+    actions: actions.map((a) => ({ id: a.id, deviceId: a.device_id, alias: a.alias, state: a.state === 1, camera: a.driver_type === 'wyze' })),
+  };
 }
 
 // GET /api/scenes
@@ -29,19 +36,23 @@ scenesRouter.get('/', (_req, res) => {
 });
 
 // POST /api/scenes
-scenesRouter.post('/', (req: Request, res: Response) => {
-  const { name, icon, actions } = req.body as {
+scenesRouter.post('/', requireAdmin, (req: Request, res: Response) => {
+  const { name, icon, actions, voiceMayPause } = req.body as {
     name: string;
     icon?: string;
     actions: { deviceId: number; state: boolean }[];
+    voiceMayPause?: unknown;
   };
   if (!name?.trim() || !actions?.length) {
     return res.status(400).json({ error: 'name and actions are required', code: 'VALIDATION_ERROR' });
   }
+  if (voiceMayPause !== undefined && typeof voiceMayPause !== 'boolean') {
+    return res.status(400).json({ error: '`voiceMayPause` must be true or false', code: 'VALIDATION_ERROR' });
+  }
 
   const db = getDb();
   try {
-    const result = db.prepare('INSERT INTO scenes (name, icon) VALUES (?, ?)').run(name.trim(), icon ?? null);
+    const result = db.prepare('INSERT INTO scenes (name, icon, voice_may_pause) VALUES (?, ?, ?)').run(name.trim(), icon ?? null, voiceMayPause ? 1 : 0);
     const sceneId = result.lastInsertRowid;
     const insert  = db.prepare('INSERT INTO scene_actions (scene_id, device_id, state) VALUES (?, ?, ?)');
     for (const a of actions) insert.run(sceneId, a.deviceId, a.state ? 1 : 0);
@@ -55,8 +66,21 @@ scenesRouter.post('/', (req: Request, res: Response) => {
   }
 });
 
+// PATCH /api/scenes/:id  { voiceMayPause: boolean }
+scenesRouter.patch('/:id', requireAdmin, (req: Request, res: Response) => {
+  const { voiceMayPause } = req.body as { voiceMayPause?: unknown };
+  if (typeof voiceMayPause !== 'boolean') {
+    return res.status(400).json({ error: '`voiceMayPause` must be true or false', code: 'VALIDATION_ERROR' });
+  }
+  const db = getDb();
+  const result = db.prepare('UPDATE scenes SET voice_may_pause = ? WHERE id = ?').run(voiceMayPause ? 1 : 0, req.params.id);
+  if (result.changes === 0) return res.status(404).json({ error: 'Scene not found', code: 'NOT_FOUND' });
+  logger.info({ sceneId: Number(req.params.id), voiceMayPause, by: req.user?.name }, 'Scene voice pause changed');
+  res.json(withActions(db.prepare('SELECT * FROM scenes WHERE id = ?').get(req.params.id) as SceneRow));
+});
+
 // DELETE /api/scenes/:id
-scenesRouter.delete('/:id', (req: Request, res: Response) => {
+scenesRouter.delete('/:id', requireAdmin, (req: Request, res: Response) => {
   const result = getDb().prepare('DELETE FROM scenes WHERE id = ?').run(req.params.id);
   if (result.changes === 0) return res.status(404).json({ error: 'Scene not found', code: 'NOT_FOUND' });
   res.status(204).send();

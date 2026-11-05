@@ -59,7 +59,7 @@ describe('voice replies', () => {
 
   it('keeps protected devices plain, whatever was chosen', async () => {
     replies.saveReplyChoices({ on: { builtIn: ['on-funny-2'], custom: [] } });
-    assert.equal((await commands.runPowerCommand('turn on front cam'))!.response, 'Turned on Front cam.');
+    assert.equal((await commands.runPowerCommand('turn on front cam'))!.response, 'Resumed Front cam.');
   });
 
   it('refuses a reply that would hide what changed', () => {

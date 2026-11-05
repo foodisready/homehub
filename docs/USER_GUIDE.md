@@ -142,7 +142,7 @@ Each camera shows **Watching** only while its pictures actually arrive. **No pic
 
 **Pause** turns a camera off with Wyze's own switch, the same one as in the Wyze app, and asks you to confirm. A paused camera doesn't stream, record or detect motion, and a Pan v3 tucks its lens away. It stays on Wi-Fi, so **Resume** turns it back on; its picture returns within about 15 seconds. A camera works like any other device, so you can also pause or resume it from the dashboard, a scene or a schedule. For example, make an "I'm home" scene that pauses your cameras and a "Leaving" scene that resumes them.
 
-Cameras are protected: Chat and voice can resume a camera but can't pause one.
+Cameras are protected: Chat and voice can resume a camera, but pause one only through a scene allowed to. See [Pause cameras by voice](#pause-cameras-by-voice).
 
 HomeHub switches cameras through your Wyze account, using the sign-in you saved, so it needs the internet.
 
@@ -255,10 +255,24 @@ A schedule that turns a device **on** can also turn it off again: fill in **Turn
 A scene sets several devices at once, and each one can do something different. For example, "Goodnight" could turn off the living room but turn on the porch light.
 
 1. Open **Scenes** and create a new scene.
-2. Choose **On**, **Off** or **Skip** for each device.
+2. Choose **On**, **Off** or **Skip** for each device. For a camera, the choices are **Resume** and **Pause**.
 3. Save it.
 
 Run it from the Scenes page, or in Chat or voice with "run Goodnight". Chat and voice skip protected devices.
+
+### Pause cameras by voice
+
+Chat and voice never pause cameras on their own, because anyone who says the wake word, or a TV, could otherwise turn them off. To pause them by voice anyway, an administrator makes a scene for it:
+
+1. Create a scene with a name a visitor wouldn't guess, such as "Pineapple time", and set each camera to **Pause**.
+2. Tick **Voice may pause cameras**, then save. The box is also on the scene's card, to change later.
+3. Say the scene's name: "Okay Nabu, pineapple time".
+
+Each time voice or Chat pauses cameras, everyone with notifications on gets one, such as "Pineapple time (by voice) paused Front Door and Garage", so you'll know if someone else uses the phrase. Anyone with a HomeHub login can see scene names, and voice commands appear in **Activity**.
+
+To resume them, say "resume the cameras" or "turn the cameras back on". Anyone can resume cameras, since that is never a risk. You can also make a second scene that resumes them.
+
+"Pause the cameras" or "turn off the garage camera" gets "For safety, I can't pause cameras that way." The reply doesn't mention scenes.
 
 ## Motion lights
 
