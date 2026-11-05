@@ -142,11 +142,21 @@ HomeHub switches cameras through your Wyze account, using the sign-in you saved,
 
 ### Snapshots
 
-Select **Snapshot** to save a picture. Snapshots appear on the **Cameras** page, newest first, and you can filter them by camera. They're saved as JPG files in HomeHub's data folder, under `snapshots/<camera>/<date>/`, and deleted after 30 days, which administrators can change at the bottom of the page.
+Select **Snapshot** to save a picture yourself. Snapshots appear on the **Cameras** page, newest first, and you can filter them by camera. They're saved as JPG files in HomeHub's data folder, under `snapshots/<camera>/<date>/`, and deleted after 30 days, which administrators can change at the bottom of the page.
 
 Snapshots are history, so JSON backups leave them out. The install guide's full backup copies them.
 
-Saving a snapshot when a camera sees motion isn't available with the current camera bridge yet.
+### Motion snapshots
+
+When a camera sees motion, Wyze reports it to your account, and HomeHub saves a picture from the camera, usually 5 to 15 seconds later. Snapshots from motion are marked **motion**. HomeHub checks for motion every 10 seconds, which uses a small part of what Wyze allows your account; the Wyze app shares the same allowance.
+
+Administrators can change these settings at the bottom of the Cameras page:
+
+- **Save a snapshot on motion:** on by default.
+- **Notify my phone:** sends a notification with each motion snapshot, saying what Wyze saw, such as "a person" or "a pet".
+- **Wait between snapshots:** 30 seconds by default, so one visit doesn't fill the folder.
+
+Paused cameras don't report motion. Motion follows the camera's own detection settings in the Wyze app, such as its sensitivity and detection zones.
 
 The camera bridge is unofficial, and a Wyze firmware update can stop it working until the bridge is updated.
 

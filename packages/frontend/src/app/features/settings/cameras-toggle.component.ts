@@ -26,7 +26,7 @@ import { CamerasStateService } from '../../core/services/cameras-state.service';
               from HomeHub's <code>.env</code>, then run <code>docker compose -f docker-compose.yml up -d</code>.
             </div>
           } @else if (s.enabled) {
-            <div class="sub">Shown in the menu. Turn off to hide Cameras.</div>
+            <div class="sub">Shown in the menu. Turn off to hide Cameras and stop watching for motion.</div>
           } @else {
             <div class="sub">Off. Cameras is hidden from the menu and nothing is watched.</div>
           }

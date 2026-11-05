@@ -93,7 +93,14 @@ const wyze = {
   expireNext: false,
   power: {} as Record<string, boolean>,
   actions: [] as string[],
+  /** The account's events, as Wyze lists them. */
+  events: [] as Record<string, unknown>[],
+  /** Whether event pictures download (Wyze's signed links can expire). */
+  picturesWork: true,
+  eventRequests: [] as Record<string, any>[],
+  requestsLeft: 2000,
 };
+const WYZE_JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe1, 9, 9, 9, 0xff, 0xd9]);
 const md5x3 = (pw: string) => { let o = pw; for (let i = 0; i < 3; i++) o = crypto.createHash('md5').update(o).digest('hex'); return o; };
 const wyzeServer = http.createServer((req, res) => {
   let raw = '';
@@ -102,6 +109,22 @@ const wyzeServer = http.createServer((req, res) => {
     const body = raw ? JSON.parse(raw) : {};
     const json = (b: unknown) => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify(b)); };
     const url = req.url ?? '';
+    res.setHeader('x-ratelimit-remaining', String(wyze.requestsLeft));
+    if (url.startsWith('/pictures/')) {
+      if (!wyze.picturesWork) { res.writeHead(401, { 'content-type': 'application/json' }); return res.end('{"error": "Access token is invalid."}'); }
+      res.writeHead(200, { 'content-type': 'image/jpeg' });
+      return res.end(WYZE_JPEG);
+    }
+    if (url === '/app/v4/device/get_event_list') {
+      // Signed with the token in the headers, not carried in the body.
+      if (req.headers.access_token !== wyze.token || req.headers.appid !== '9319141212m2ik' || !req.headers.signature2) return json({ code: '2001', msg: 'access token is error' });
+      wyze.eventRequests.push(body);
+      const list = wyze.events
+        .filter((e) => (body.device_id_list as string[]).includes(e.device_id as string) && (e.event_ts as number) >= body.begin_time && (e.event_ts as number) <= body.end_time)
+        .sort((a, b) => (a.event_ts as number) - (b.event_ts as number))
+        .slice(0, body.count);
+      return json({ code: '1', data: { event_list: list } });
+    }
     if (url === '/api/user/login') {
       if (req.headers.apikey !== 'akey' || req.headers.keyid !== 'kid' || body.password !== md5x3('right')) return json({ code: '1000', msg: 'Invalid credentials, please check username, password, keyid or apikey' });
       wyze.logins++;
@@ -161,6 +184,8 @@ describe('Wyze cameras', () => {
     const wyzePort = (wyzeServer.address() as { port: number }).port;
     process.env.WYZE_AUTH_URL = `http://127.0.0.1:${wyzePort}`;
     process.env.WYZE_API_URL = `http://127.0.0.1:${wyzePort}/app`;
+    process.env.WYZE_CLOUD_URL = `http://127.0.0.1:${wyzePort}/app`;
+    process.env.WYZE_IMAGE_URL_PREFIX = `http://127.0.0.1:${wyzePort}/pictures/`;
     const port = (bridgeServer.address() as { port: number }).port;
     process.env.DB_PATH = path.join(TMP, 'db.sqlite');
     process.env.WYZE_BRIDGE_URL = `http://127.0.0.1:${port}`;
@@ -212,7 +237,7 @@ describe('Wyze cameras', () => {
     watch.resetMotionState();
     WyzeDriver.clearPowerCache();
     cloud.resetCloud();
-    Object.assign(wyze, { logins: 0, refreshes: 0, token: '', expireNext: false, power: {}, actions: [] });
+    Object.assign(wyze, { logins: 0, refreshes: 0, token: '', expireNext: false, power: {}, actions: [], events: [], picturesWork: true, eventRequests: [], requestsLeft: 2000 });
     signedIn();
   });
 
@@ -413,17 +438,125 @@ describe('Wyze cameras', () => {
       assert.deepEqual(snaps.listSnapshots().map((s) => s.id), [recent.id]);
     });
 
-    it('takes no motion snapshots, since this bridge reports no motion', async () => {
-      addCamera('Front Door', 'front_door', '192.168.1.40');
-      assert.equal(await watch.checkMotion(0), 0);
-      assert.equal(await watch.checkMotion(100_000), 0);
-    });
 
     it('validates settings', () => {
       assert.deepEqual(snaps.saveSettings({ keepDays: 7, notify: true }), { enabled: true, motionSnapshots: true, notify: true, keepDays: 7, cooldownSeconds: 30 });
       assert.throws(() => snaps.saveSettings({ enabled: 1 as never }), /enabled/);
       assert.throws(() => snaps.saveSettings({ keepDays: 0 }), /keepDays/);
       assert.throws(() => snaps.saveSettings({ notify: 'yes' as never }), /notify/);
+    });
+  });
+
+  describe('motion snapshots', () => {
+    const FRONT = '2CAA8E000001';
+    const PAN = '80482C000002';
+    let started = 0;
+    let n = 0;
+    const event = (mac: string, at: number, extra: Record<string, unknown> = {}) => {
+      const id = `ev${++n}`;
+      wyze.events.push({ event_id: id, device_id: mac, event_ts: at, event_value: '13', tag_list: [], file_list: [{ type: 1, url: `${process.env.WYZE_IMAGE_URL_PREFIX}${id}.jpg` }, { type: 2, url: 'https://example.invalid/clip.mp4' }], ...extra });
+      return id;
+    };
+    beforeEach(() => {
+      started = Date.now() - 10 * 60_000;
+      watch.resetMotionState(started);
+    });
+
+    it('signs event requests the way Wyze checks them', () => {
+      // The body and signature docker-wyze-bridge 2.x's Python code produces for these values.
+      const body = cloud.sortedJson({ nonce: '1700000000000', count: 20, order_by: 1, device_id_list: ['AABBCCDDEEFF'], begin_time: 1, end_time: 2, event_value_list: [], event_tag_list: [], z: { b: 1, a: [3, { d: 1, c: 2 }] } });
+      assert.equal(body, '{"begin_time":1,"count":20,"device_id_list":["AABBCCDDEEFF"],"end_time":2,"event_tag_list":[],"event_value_list":[],"nonce":"1700000000000","order_by":1,"z":{"a":[3,{"c":2,"d":1}],"b":1}}');
+      assert.equal(cloud.signBody(body, 'test-token'), '1fde9756cf0dac8c62ff4a59eae818aa');
+    });
+
+    it("saves Wyze's own picture of new motion, at the time it happened", async () => {
+      const id = addCamera('Front Door', 'front_door', '192.168.1.40', FRONT);
+      const now = Date.now();
+      event(FRONT, now - 20_000, { tag_list: [101] });
+      assert.equal(await watch.checkMotion(now), 1);
+      const [snap] = snaps.listSnapshots();
+      assert.deepEqual([snap.deviceId, snap.trigger, snap.cameraName], [id, 'motion', 'Front Door']);
+      assert.deepEqual(fs.readFileSync(snaps.snapshotFile(snap.id)!), WYZE_JPEG);
+      assert.equal(Date.parse(snap.takenAt), Math.floor((now - 20_000) / 1000) * 1000);
+      assert.deepEqual(wyze.eventRequests[0].device_id_list, [FRONT]);
+      assert.equal(watch.lastMotionFor(id), new Date(now - 20_000).toISOString());
+    });
+
+    it("uses a frame from the bridge when Wyze's picture won't download", async () => {
+      addCamera('Front Door', 'front_door', '192.168.1.40', FRONT);
+      wyze.picturesWork = false;
+      event(FRONT, Date.now() - 5000);
+      assert.equal(await watch.checkMotion(), 1);
+      assert.deepEqual(fs.readFileSync(snaps.snapshotFile(snaps.listSnapshots()[0].id)!), JPEG);
+    });
+
+    it('saves each event once, though every check looks back a few minutes', async () => {
+      addCamera('Front Door', 'front_door', '192.168.1.40', FRONT);
+      event(FRONT, Date.now() - 5000);
+      assert.equal(await watch.checkMotion(), 1);
+      assert.equal(await watch.checkMotion(), 0);
+      assert.equal(wyze.eventRequests.length, 2);
+    });
+
+    it('treats events from before it started as old news, and looks back only a few minutes', async () => {
+      const id = addCamera('Front Door', 'front_door', '192.168.1.40', FRONT);
+      const now = Date.now();
+      watch.resetMotionState(now - 30_000);
+      event(FRONT, now - 50_000);   // before HomeHub started watching
+      assert.equal(await watch.checkMotion(now), 0);
+      assert.equal(watch.lastMotionFor(id), new Date(now - 50_000).toISOString(), 'still shown as the last motion');
+      wyze.events = [];
+      watch.resetMotionState(now - 20 * 60_000);
+      event(FRONT, now - 4 * 60_000);
+      assert.equal(await watch.checkMotion(now), 0, 'outside the look-back');
+      assert.ok(wyze.eventRequests.at(-1)!.begin_time >= now - 3 * 60_000);
+    });
+
+    it('ignores sound, cameras not in HomeHub, and the setting turned off', async () => {
+      addCamera('Front Door', 'front_door', '192.168.1.40', FRONT);
+      event(FRONT, Date.now() - 9000, { event_value: '2' });
+      event(PAN, Date.now() - 8000);
+      assert.equal(await watch.checkMotion(), 0);
+      snaps.saveSettings({ motionSnapshots: false });
+      event(FRONT, Date.now() - 4000);
+      assert.equal(await watch.checkMotion(), 0);
+      assert.equal(snaps.listSnapshots().length, 0);
+    });
+
+    it('waits out the cooldown between snapshots from one camera', async () => {
+      addCamera('Front Door', 'front_door', '192.168.1.40', FRONT);
+      addCamera('Living Pan', 'living_pan', '192.168.0.32', PAN);
+      const now = Date.now();
+      event(FRONT, now - 60_000);
+      event(FRONT, now - 50_000);   // 10 s later: within 30 s
+      event(PAN, now - 49_000);     // another camera: its own cooldown
+      event(FRONT, now - 20_000);   // 40 s later
+      assert.equal(await watch.checkMotion(now), 3);
+    });
+
+    it('reads past a full page of events', async () => {
+      addCamera('Front Door', 'front_door', '192.168.1.40', FRONT);
+      snaps.saveSettings({ cooldownSeconds: 5 });
+      const now = Date.now();
+      for (let i = 0; i < 25; i++) event(FRONT, now - 150_000 + i * 6000);
+      assert.equal(await watch.checkMotion(now), 25);
+      assert.equal(wyze.eventRequests.length, 2);
+    });
+
+    it('notes how many requests Wyze says are left', async () => {
+      addCamera('Front Door', 'front_door', '192.168.1.40', FRONT);
+      wyze.requestsLeft = 42;
+      await watch.checkMotion();
+      assert.equal(cloud.wyzeRequestsLeft(), 42);
+    });
+
+    it('shows the last motion on the camera list', async () => {
+      const id = addCamera('Front Door', 'front_door', '192.168.1.40', FRONT);
+      const at = Date.now() - 7000;
+      event(FRONT, at);
+      await watch.checkMotion();
+      const body = await (await api('GET', '')).json() as any;
+      assert.equal(body.cameras.find((c: any) => c.deviceId === id).lastMotionAt, new Date(at).toISOString());
     });
   });
 

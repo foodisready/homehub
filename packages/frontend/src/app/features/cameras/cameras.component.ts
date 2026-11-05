@@ -111,7 +111,7 @@ const PAGE = 48;
             @switch (b.state) {
               @case ('off') {
                 <strong>Cameras are off</strong>
-                <p class="muted" style="margin-top:0.4rem">They're hidden from the menu.</p>
+                <p class="muted" style="margin-top:0.4rem">They're hidden from the menu, and HomeHub isn't watching for motion.</p>
                 @if (isAdmin()) {
                   <button class="btn-sm btn-primary" type="button" style="margin-top:0.6rem" (click)="turnOn()" [disabled]="busy()">Turn on cameras</button>
                 } @else {
@@ -254,7 +254,7 @@ const PAGE = 48;
           }
         </div>
         @if (!snapshots().length) {
-          <p class="muted">No snapshots yet. Press Snapshot on a camera to save a picture here.</p>
+          <p class="muted">No snapshots yet. When a camera sees motion, a picture is saved here. Press Snapshot on a camera to save one yourself.</p>
         }
         @for (day of days(); track day.label) {
           <div class="day">{{ day.label }}</div>
@@ -276,6 +276,18 @@ const PAGE = 48;
         <h2>Camera settings</h2>
         <div class="card">
           <div class="settings-row">
+            <span class="label">Save a snapshot on motion<small>When Wyze reports motion from a camera, usually within half a minute</small></span>
+            <input type="checkbox" [checked]="st.motionSnapshots" (change)="saveSettings({ motionSnapshots: $any($event.target).checked })" aria-label="Save a snapshot on motion" />
+          </div>
+          <div class="settings-row">
+            <span class="label">Notify my phone<small>Sends a notification with each motion snapshot</small></span>
+            <input type="checkbox" [checked]="st.notify" (change)="saveSettings({ notify: $any($event.target).checked })" aria-label="Notify on motion" />
+          </div>
+          <div class="settings-row">
+            <span class="label">Wait between snapshots<small>From the same camera, so one visit doesn't fill the folder</small></span>
+            <input type="number" min="5" max="3600" [value]="st.cooldownSeconds" (change)="saveSettings({ cooldownSeconds: +$any($event.target).value })" aria-label="Seconds between snapshots" /> sec
+          </div>
+          <div class="settings-row">
             <span class="label">Keep snapshots for<small>Older ones are deleted automatically</small></span>
             <input type="number" min="1" max="365" [value]="st.keepDays" (change)="saveSettings({ keepDays: +$any($event.target).value })" aria-label="Days to keep snapshots" /> days
           </div>
@@ -289,7 +301,7 @@ const PAGE = 48;
             }
           </div>
           <div class="settings-row">
-            <span class="label">Cameras in HomeHub<small>Turn off to hide Cameras from the menu</small></span>
+            <span class="label">Cameras in HomeHub<small>Turn off to hide Cameras from the menu and stop watching for motion</small></span>
             <button class="btn-sm ghost" type="button" (click)="turnOff()" [disabled]="busy()">Turn off</button>
           </div>
           @if (settingsMsg()) { <p class="msg" [class.err]="settingsErr()" [class.ok]="!settingsErr()">{{ settingsMsg() }}</p> }

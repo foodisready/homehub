@@ -7,7 +7,7 @@ import { requireAdmin } from '../middleware/auth';
 import { getCachedState } from '../kasa/device.cache';
 import * as bridge from '../cameras/bridge';
 import * as snaps from '../cameras/snapshots';
-import { cameraDevices, liveCameras } from '../cameras/watch';
+import { cameraDevices, lastMotionFor, liveCameras } from '../cameras/watch';
 import { clearPowerCache } from '../drivers/WyzeDriver';
 
 /**
@@ -142,7 +142,7 @@ camerasRouter.get('/', async (_req: Request, res: Response) => {
         watching: cached?.state ?? null,      // null until the first check
         online: cached?.online ?? null,
         streaming: cam?.connected ?? false,
-        lastMotionAt: cam?.motionTs ? new Date(cam.motionTs * 1000).toISOString() : null,
+        lastMotionAt: lastMotionFor(d.id),
         latestSnapshot: snaps.latestFor(d.id),
       };
     }),

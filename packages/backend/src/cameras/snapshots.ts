@@ -103,13 +103,14 @@ function localStamp(d: Date): { day: string; time: string } {
   };
 }
 
-/** Takes a picture from the camera now and saves it. */
+/** Saves a picture: `picture` if given (Wyze's own of a motion event), or one from the camera now. */
 export async function capture(
   device: { id: number | null; alias: string; cam: string },
   trigger: 'motion' | 'manual',
   now = new Date(),
+  picture?: Buffer,
 ): Promise<Snapshot> {
-  const jpeg = await bridge.snapshot(device.cam);
+  const jpeg = picture ?? await bridge.snapshot(device.cam);
   const { day, time } = localStamp(now);
   const dir = path.join(snapshotDir(), segment(device.cam), day);
   fs.mkdirSync(dir, { recursive: true });

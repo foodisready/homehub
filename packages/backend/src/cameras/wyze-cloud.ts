@@ -44,8 +44,16 @@ let pending: Promise<Auth> | null = null;
 
 const authFile = () => process.env.WYZE_AUTH_FILE || path.join(signInDir(), 'homehub-auth.json');
 
+/** What Wyze last said about requests left (X-RateLimit-Remaining), and when. */
+let requestsLeft: { count: number; at: number } | null = null;
+
+/** Requests Wyze says are left, if it said so in the last 10 minutes. */
+export function wyzeRequestsLeft(now = Date.now()): number | null {
+  return requestsLeft && now - requestsLeft.at < 10 * 60_000 ? requestsLeft.count : null;
+}
+
 /** For tests. */
-export function resetCloud(): void { auth = null; lastFailedLogin = 0; pending = null; }
+export function resetCloud(): void { auth = null; lastFailedLogin = 0; pending = null; requestsLeft = null; }
 
 function readLogin(): { email: string; password: string; keyId: string; apiKey: string } {
   const dir = signInDir();
@@ -97,11 +105,17 @@ function payload(a: Auth, endpoint: string): Record<string, unknown> {
 async function post(url: string, body: unknown, headers: Record<string, string>): Promise<Record<string, any>> {
   let res: Response;
   try {
-    res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal: AbortSignal.timeout(TIMEOUT_MS) });
+    res = await fetch(url, { method: 'POST', headers, body: typeof body === 'string' ? body : JSON.stringify(body), signal: AbortSignal.timeout(TIMEOUT_MS) });
   } catch (err) {
     throw new WyzeCloudError(`Couldn't reach Wyze: ${(err as Error).message}`, 503, 'UNREACHABLE');
   }
-  if (res.status === 429) throw new WyzeCloudError('Wyze is limiting requests for now. Try again in a few minutes.', 429, 'RATE_LIMITED');
+  // Wyze counts requests per account. A low count isn't a failure, but the motion watch slows down for it.
+  const remaining = res.headers.has('x-ratelimit-remaining') ? Number(res.headers.get('x-ratelimit-remaining')) : NaN;
+  if (Number.isFinite(remaining)) requestsLeft = { count: remaining, at: Date.now() };
+  if (res.status === 429) {
+    requestsLeft = { count: 0, at: Date.now() };
+    throw new WyzeCloudError('Wyze is limiting requests for now. Try again in a few minutes.', 429, 'RATE_LIMITED');
+  }
   let json: Record<string, any>;
   try { json = (await res.json()) as Record<string, any>; } catch { throw new WyzeCloudError(`Wyze answered HTTP ${res.status}`); }
   const code = String(json.code ?? json.errorCode ?? (res.ok ? 0 : res.status));
@@ -173,6 +187,85 @@ async function call(endpoint: string, url: string, params: Record<string, unknow
 }
 
 export interface CloudCamera { mac: string; model: string }
+
+// ── Events (motion) ───────────────────────────────────────────────
+
+const CLOUD_API = () => (process.env.WYZE_CLOUD_URL || 'https://app-core.cloud.wyze.com/app').replace(/\/+$/, '');
+/** Event pictures are only fetched from addresses like this. Tests point it at a local server. */
+const imagePrefix = () => process.env.WYZE_IMAGE_URL_PREFIX || 'https://';
+const APP_ID = '9319141212m2ik';
+const APP_SECRET = 'wyze_app_secret_key_132';
+
+/** JSON with keys sorted at every level, as Wyze signs it (Python's json.dumps(sort_keys=True)). */
+export function sortedJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(sortedJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value).sort().map((k) => `${JSON.stringify(k)}:${sortedJson((value as Record<string, unknown>)[k])}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+/** Wyze's v4 request signature: HMAC-MD5 of the body, keyed by md5(token + app secret) in hex. */
+export function signBody(body: string, accessToken: string): string {
+  const key = crypto.createHash('md5').update(accessToken + APP_SECRET).digest('hex');
+  return crypto.createHmac('md5', key).update(body).digest('hex');
+}
+
+function signedHeaders(a: Auth, body: string): Record<string, string> {
+  return {
+    'content-type': 'application/json', phoneid: a.phoneId,
+    'user-agent': `wyze_ios_${APP_VERSION}`, appinfo: `wyze_ios_${APP_VERSION}`, appversion: APP_VERSION,
+    access_token: a.accessToken, appid: APP_ID, env: 'prod', signature2: signBody(body, a.accessToken),
+  };
+}
+
+export interface WyzeEvent {
+  id: string;
+  /** The camera's hardware address, as the bridge and HomeHub store it. */
+  mac: string;
+  /** When it happened, ms since the epoch. */
+  at: number;
+  /** Wyze's picture of the moment, if it has one. */
+  imageUrl: string | null;
+  /** Wyze's event kind (`event_value`): "2" is sound alone. */
+  kind: string;
+  /** What Wyze's detection saw: 101 a person, 102 a vehicle, 103 a pet, 104 a package. */
+  tags: number[];
+}
+
+/**
+ * The account's camera events (motion, sound and the like) from `since`,
+ * newest first, at most 20. Uses the request docker-wyze-bridge 2.x made for
+ * its motion snapshots: signed, and without the app fields other calls carry.
+ */
+export async function getEvents(macs: string[], since: number, now = Date.now()): Promise<WyzeEvent[]> {
+  if (!macs.length) return [];
+  const send = async (a: Auth) => {
+    const body = sortedJson({
+      count: 20, order_by: 1, begin_time: since, end_time: now + 60_000, nonce: String(Date.now()),
+      device_id_list: [...new Set(macs)], event_value_list: [], event_tag_list: [],
+    });
+    return post(`${CLOUD_API()}/v4/device/get_event_list`, body, signedHeaders(a, body));
+  };
+  let r: Record<string, any>;
+  try {
+    r = await send(await token());
+  } catch (err) {
+    if (!(err instanceof WyzeCloudError) || err.code !== 'TOKEN_EXPIRED') throw err;
+    r = await send(await token(true));
+  }
+  const list = Array.isArray(r.event_list) ? (r.event_list as Record<string, any>[]) : [];
+  return list.flatMap((e) => {
+    const id = e.event_id != null ? String(e.event_id) : '';
+    const mac = typeof e.device_id === 'string' ? e.device_id : typeof e.device_mac === 'string' ? e.device_mac : '';
+    const at = Number(e.event_ts);
+    if (!id || !mac || !Number.isFinite(at)) return [];
+    const files = Array.isArray(e.file_list) ? (e.file_list as Record<string, any>[]) : [];
+    const image = files.find((f) => Number(f.type) === 1 && typeof f.url === 'string' && f.url.startsWith(imagePrefix()));
+    const tags = Array.isArray(e.tag_list) ? (e.tag_list as unknown[]).map(Number).filter(Number.isFinite) : [];
+    return [{ id, mac: mac.replace(/[^0-9a-f]/gi, '').toUpperCase(), at, imageUrl: image?.url ?? null, kind: String(e.event_value ?? ''), tags }];
+  });
+}
 
 /** Turns a camera on (watching) or off (paused), like its switch in the Wyze app. */
 export async function setCameraPower(cam: CloudCamera, on: boolean): Promise<void> {
