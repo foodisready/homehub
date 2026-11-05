@@ -8,6 +8,7 @@ import { getCachedState } from '../kasa/device.cache';
 import * as bridge from '../cameras/bridge';
 import * as snaps from '../cameras/snapshots';
 import { cameraDevices, lastMotionFor, liveCameras } from '../cameras/watch';
+import { noPictureHint, pictureHealth } from '../cameras/picture-status';
 import { clearPowerCache } from '../drivers/WyzeDriver';
 
 /**
@@ -118,35 +119,42 @@ camerasRouter.delete('/snapshots/:id', requireAdmin, (req: Request, res: Respons
 
 // GET /api/cameras — the cameras added to HomeHub, with what the bridge knows about each
 camerasRouter.get('/', async (_req: Request, res: Response) => {
-  const devices = cameraDevices();
-  const rooms = new Map((getDb().prepare("SELECT id, room FROM devices WHERE driver_type = 'wyze'").all() as { id: number; room: string | null }[])
-    .map((r) => [r.id, r.room]));
   let live: bridge.BridgeCamera[] = [];
   let bridgeError: string | null = null;
   try {
-    live = await liveCameras();
+    live = await liveCameras();   // first, so cameras renamed on the bridge are relinked
   } catch (err) {
     bridgeError = (err as Error).message;
   }
-  res.json({
-    bridgeError,
-    cameras: devices.map((d) => {
-      const cam = live.find((c) => c.id === d.cam);
-      const cached = getCachedState(d.id);
-      return {
-        deviceId: d.id,
-        name: d.alias,
-        room: rooms.get(d.id) ?? null,
-        cam: d.cam,
-        model: cam?.modelName ?? cam?.model ?? null,
-        watching: cached?.state ?? null,      // null until the first check
-        online: cached?.online ?? null,
-        streaming: cam?.connected ?? false,
-        lastMotionAt: lastMotionFor(d.id),
-        latestSnapshot: snaps.latestFor(d.id),
-      };
-    }),
-  });
+  const devices = cameraDevices();
+  const rooms = new Map((getDb().prepare("SELECT id, room FROM devices WHERE driver_type = 'wyze'").all() as { id: number; room: string | null }[])
+    .map((r) => [r.id, r.room]));
+  const iso = (ms: number | null) => (ms ? new Date(ms).toISOString() : null);
+  const cameras = await Promise.all(devices.map(async (d) => {
+    const cam = live.find((c) => c.id === d.cam);
+    const cached = getCachedState(d.id);
+    const picture = pictureHealth(d.cam);
+    return {
+      deviceId: d.id,
+      name: d.alias,
+      room: rooms.get(d.id) ?? null,
+      cam: d.cam,
+      model: cam?.modelName ?? cam?.model ?? null,
+      watching: cached?.state ?? null,      // null until the first check
+      online: cached?.online ?? null,
+      streaming: cam?.connected ?? false,
+      // Whether pictures actually arrive: 'ok', 'failing' or 'unknown' (not checked lately).
+      picture: picture.state,
+      lastPictureAt: iso(picture.lastOkAt),
+      noPictureSince: iso(picture.failingSince),
+      noPictureHint: picture.state === 'failing' && cached?.state !== false
+        ? await noPictureHint(d.cam, d.mac ?? cam?.mac ?? null, cam?.ip ?? null)
+        : null,
+      lastMotionAt: lastMotionFor(d.id),
+      latestSnapshot: snaps.latestFor(d.id),
+    };
+  }));
+  res.json({ bridgeError, cameras });
 });
 
 // GET /api/cameras/:deviceId/live.jpg?cached=1 — a picture from the camera now

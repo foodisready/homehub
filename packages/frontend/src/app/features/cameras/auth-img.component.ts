@@ -1,4 +1,4 @@
-import { Component, OnDestroy, effect, inject, input, signal, untracked } from '@angular/core';
+import { Component, OnDestroy, effect, inject, input, output, signal, untracked } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Subscription } from 'rxjs';
 
@@ -35,6 +35,8 @@ export class AuthImgComponent implements OnDestroy {
   readonly alt = input('');
   readonly refreshSeconds = input(0);
   readonly failedText = input('');
+  /** Whether each load brought a picture. */
+  readonly result = output<boolean>();
 
   readonly url = signal<string | null>(null);
   readonly failed = signal(false);
@@ -65,10 +67,12 @@ export class AuthImgComponent implements OnDestroy {
         this.url.set(URL.createObjectURL(blob));
         this.failed.set(false);
         if (old) URL.revokeObjectURL(old);
+        this.result.emit(true);
       },
       error: () => {
         // Keep the last good picture on a failed refresh.
         if (!this.url()) this.failed.set(true);
+        this.result.emit(false);
       },
     });
   }

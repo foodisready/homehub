@@ -6,6 +6,8 @@ import { signInSavedAt } from './bridge';
 import * as cloud from './wyze-cloud';
 import { capture, getSettings, pruneSnapshots } from './snapshots';
 import { automationsPaused } from '../automation/pause';
+import { getCachedState } from '../kasa/device.cache';
+import { lastAsked, onLocalNetwork, pictureHealth } from './picture-status';
 
 /**
  * Watches for motion through the Wyze account: every few seconds HomeHub asks
@@ -173,6 +175,7 @@ export async function checkMotion(now = Date.now()): Promise<number> {
 /** For tests: forget everything, as if HomeHub had just started at `startedAt`. */
 export function resetMotionState(startedAt = Date.now()): void {
   seen.clear();
+  lastRepair.clear();
   lastMotion.clear();
   lastShot.clear();
   watchStartedAt = startedAt;
@@ -185,6 +188,61 @@ function note(problem: string): void {
   if (problem) logger.warn({ reason: problem }, 'Camera motion watch paused');
   else if (lastProblem) logger.info('Camera motion watch working again');
   lastProblem = problem;
+}
+
+// ── Checking that quiet cameras still send pictures ─────────────
+
+/** A camera nobody has looked at for this long gets a picture taken, to see that it still works. */
+const PICTURE_CHECK_MS = 5 * 60_000;
+let pictureTimer: NodeJS.Timeout | null = null;
+let checkingPictures = false;
+
+/** At most this often per camera, a camera on the network that sends no picture gets its stream restarted. */
+const REPAIR_EVERY_MS = 10 * 60_000;
+const lastRepair = new Map<string, number>();
+
+/**
+ * Restarts the bridge's stream for a camera that's on the network but sends
+ * no picture, which clears a stuck connection. Not for a camera that isn't
+ * on the network at all: restarting can't help that. Returns whether it did.
+ */
+export async function repairIfStuck(device: CameraDevice, ip: string | null, now = Date.now()): Promise<boolean> {
+  if (pictureHealth(device.cam, now).state !== 'failing') return false;
+  if (now - (lastRepair.get(device.cam) ?? 0) < REPAIR_EVERY_MS) return false;
+  if (device.mac && (await onLocalNetwork(device.mac, ip)) === false) return false;
+  lastRepair.set(device.cam, now);
+  try {
+    await bridge.restartStream(device.cam);
+    return true;
+  } catch (err) {
+    bridge.logBridgeError(err, `Couldn't restart ${device.alias}'s stream`);
+    return false;
+  }
+}
+
+/**
+ * Asks for one picture from each camera that's on and hasn't been asked
+ * for lately, so its status on the Cameras page and Health stays true, and
+ * restarts the stream of one that's stuck. One camera at a time. Returns
+ * how many it asked, for tests.
+ */
+export async function checkPictures(now = Date.now()): Promise<number> {
+  if (checkingPictures || !getSettings().enabled || signInSavedAt() === null) return 0;
+  checkingPictures = true;
+  let asked = 0;
+  try {
+    for (const device of cameraDevices()) {
+      if (getCachedState(device.id)?.state === false) continue;   // paused: no picture expected
+      await repairIfStuck(device, null, now);
+      const last = lastAsked(device.cam);
+      if (last !== null && now - last < PICTURE_CHECK_MS) continue;
+      asked++;
+      await bridge.snapshot(device.cam, 2).catch(() => undefined);   // the result is noted either way
+    }
+  } finally {
+    checkingPictures = false;
+  }
+  return asked;
 }
 
 export function startCameraWatch(): void {
@@ -220,6 +278,8 @@ export function startCameraWatch(): void {
   watchStartedAt = Date.now();
   timer = setTimeout(loop, POLL_MS);
 
+  pictureTimer = setInterval(() => { checkPictures().catch(() => undefined); }, 60_000);
+
   pruneSnapshots();
   setInterval(() => {
     try { pruneSnapshots(); } catch (err) { logger.error({ err }, 'Snapshot prune failed'); }
@@ -230,4 +290,6 @@ export function startCameraWatch(): void {
 export function stopCameraWatch(): void {
   if (timer) clearTimeout(timer);
   timer = null;
+  if (pictureTimer) clearInterval(pictureTimer);
+  pictureTimer = null;
 }

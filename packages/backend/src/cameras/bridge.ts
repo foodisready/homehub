@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { logger } from '../logger';
+import { notePicture } from './picture-status';
 
 /**
  * Client for the Wyze camera bridge: IDisposable's docker-wyze-bridge 4.x,
@@ -189,8 +190,12 @@ export async function getState(now = Date.now()): Promise<BridgeState> {
     if (now - savedAt < SIGN_IN_WAIT_MS) return { state: 'starting' };
     return { state: 'unreachable', detail: (err as Error).message };
   }
-  // Still the bridge from before the sign-in was saved: it restarts within seconds.
-  if (typeof h.uptime === 'number' && now - h.uptime * 1000 < savedAt - 2000) return { state: 'starting' };
+  // Still the bridge from before the sign-in was saved: it restarts within seconds, so if it hasn't, say so.
+  if (typeof h.uptime === 'number' && now - h.uptime * 1000 < savedAt - 2000) {
+    return now - savedAt < SIGN_IN_WAIT_MS
+      ? { state: 'starting' }
+      : { state: 'unreachable', detail: 'The camera bridge hasn\'t restarted with the new Wyze sign-in. Restart the wyze-bridge service on the HomeHub computer.' };
+  }
   const auth = h.issues?.find((i) => i.ID === 'wyzeapi/auth');
   if (auth) return { state: 'sign-in-failed', detail: signInProblem(auth) };
   try {
@@ -225,14 +230,41 @@ export async function signIn(login: WyzeLogin, opts: { waitMs?: number; pollMs?:
  */
 export async function snapshot(cam: string, attempts = 2): Promise<Buffer> {
   for (let i = 1; ; i++) {
-    const res = await call(`/api/snapshot/${enc(cam)}`, {}, SNAPSHOT_TIMEOUT_MS);
-    if (res.status === 404) throw new BridgeError('Camera not found on the bridge', 404);
+    let res: Response;
+    try {
+      res = await call(`/api/snapshot/${enc(cam)}`, {}, SNAPSHOT_TIMEOUT_MS);
+    } catch (err) {
+      // A timeout is the camera not answering; anything else is the bridge, not the camera.
+      if ((err as Error).name === 'TimeoutError') notePicture(cam, false);
+      throw err;
+    }
     if (res.status === 401) throw new BridgeError('The bridge rejected HomeHub\'s API key', 401);
+    if (res.status === 404) {
+      notePicture(cam, false);
+      throw new BridgeError('Camera not found on the bridge', 404);
+    }
     const type = res.headers.get('content-type') ?? '';
     const body = res.ok ? Buffer.from(await res.arrayBuffer()) : Buffer.alloc(0);
-    if (type.startsWith('image/') && body.length > 0) return body;
-    if (i >= attempts) throw new BridgeError('No picture from this camera right now', 404);
+    if (type.startsWith('image/') && body.length > 0) {
+      notePicture(cam, true);
+      return body;
+    }
+    if (i >= attempts) {
+      notePicture(cam, false);
+      throw new BridgeError('No picture from this camera right now', 404);
+    }
   }
+}
+
+/**
+ * Has the bridge connect to the camera afresh. go2rtc can stay stuck on a
+ * dead connection, such as after the camera was turned off and on, and
+ * this clears it. The camera itself isn't touched.
+ */
+export async function restartStream(cam: string): Promise<void> {
+  const res = await call(`/api/cameras/${enc(cam)}/restart`, { method: 'POST' });
+  if (!res.ok) throw new BridgeError(`The bridge couldn't restart ${cam} (HTTP ${res.status})`);
+  logger.info({ cam }, 'Camera stream restarted on the bridge');
 }
 
 /**

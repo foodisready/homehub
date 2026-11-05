@@ -117,6 +117,9 @@ describe('Matter devices', { timeout: 120_000 }, () => {
     db.prepare('DELETE FROM devices WHERE id = ?').run(deviceId);
     service.forgetIfUnused(nodeId);
     await waitFor(/DECOMMISSIONED/);
-    assert.equal((db.prepare("SELECT COUNT(*) AS n FROM matter_storage WHERE context LIKE 'nodes.%'").get() as { n: number }).n, 0, 'HomeHub forgot it too');
+    // HomeHub drops its own record once the device confirms, a moment after the device logs it.
+    const remembered = () => (db.prepare("SELECT COUNT(*) AS n FROM matter_storage WHERE context LIKE 'nodes.%'").get() as { n: number }).n;
+    await until(() => remembered() === 0, 5000).catch(() => undefined);
+    assert.equal(remembered(), 0, 'HomeHub forgot it too');
   });
 });

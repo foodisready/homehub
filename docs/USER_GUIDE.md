@@ -132,7 +132,11 @@ Until someone signs in to Wyze, the camera bridge waits and uses almost no memor
 
 ### Watch, pause and resume
 
-On the **Cameras** page, select a camera's picture or **Live** to watch. Live video can be a few seconds behind.
+On the **Cameras** page, select a camera's picture or **Live** to watch. Live video can be a few seconds behind, and starts with the sound off; the 🔇 button turns it on.
+
+To zoom, pinch or double-tap on a phone, or scroll, double-click or press **+** and **−** on a computer. Drag to look around while zoomed, and double-tap or press **0** to see the whole picture again. Zoom enlarges the picture, as in the Wyze app; it doesn't turn the camera.
+
+Each camera shows **Watching** only while its pictures actually arrive. **No picture** means HomeHub couldn't get one twice in a row, with the likely reason: the camera isn't on HomeHub's network (it may have joined another Wi-Fi, or another device may be using its address), or it's on the network but not sending video. In that second case HomeHub reconnects to it by itself, at most every 10 minutes. **More → Health** also mentions a camera with no picture for 10 minutes.
 
 **Pause** turns a camera off with Wyze's own switch, the same one as in the Wyze app, and asks you to confirm. A paused camera doesn't stream, record or detect motion, and a Pan v3 tucks its lens away. It stays on Wi-Fi, so **Resume** turns it back on; its picture returns within about 15 seconds. A camera works like any other device, so you can also pause or resume it from the dashboard, a scene or a schedule. For example, make an "I'm home" scene that pauses your cameras and a "Leaving" scene that resumes them.
 
@@ -379,7 +383,7 @@ Say a command to a speaker or tablet, and HomeHub does it and answers, with no c
 
 **Wyze sign-in didn't work:** check the email, password, API key ID and API key, then sign in again. Wyze also limits how often an account can sign in, so after several tries, wait a few minutes.
 
-**A camera shows no picture:** it may be paused, off, on another network, or still connecting. Select **Snapshot** or **Live** to make the bridge connect to it.
+**A camera shows no picture:** the card says why. A camera HomeHub can't find on its network needs to be back on the same Wi-Fi as HomeHub; check its Wi-Fi in the Wyze app (**Settings → Device Info**), and that no other device has its address. One that's on the network but sends nothing usually recovers after HomeHub reconnects to it; if not, unplug it for 10 seconds.
 
 **A schedule runs at the wrong time:** check the time zone in **Settings → Home**. Sunrise and sunset schedules also need your home's location there. **Settings → Home** shows today's sunrise and sunset, so you can check them.
 

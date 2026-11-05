@@ -6,6 +6,8 @@ import { automationsPaused } from '../automation/pause';
 import { cameraBridgeInstalled } from '../secrets';
 import { getSettings as cameraSettings } from '../cameras/snapshots';
 import { bridgeUrl, signInSavedAt } from '../cameras/bridge';
+import { pictureHealth } from '../cameras/picture-status';
+import { cameraDevices } from '../cameras/watch';
 import { bridgeSeenAt, lastBridgeReport } from './voice-bridge';
 
 /**
@@ -142,6 +144,32 @@ function devices(): HealthItem[] {
   return [{ id: 'devices', group: 'Devices', label: 'Devices', level: 'ok', detail: `All ${rows.length} are responding` }];
 }
 
+/** A camera with no picture for this long is worth mentioning. */
+const NO_PICTURE_MS = 10 * 60_000;
+
+function cameraPictures(now: number): HealthItem[] {
+  if (!cameraBridgeInstalled() || !cameraSettings().enabled || signInSavedAt() === null) return [];
+  const cams = cameraDevices();
+  if (!cams.length) return [];
+  const states = getAllCachedStates();
+  const watching = cams.filter((c) => states.get(c.id)?.state !== false);   // paused cameras send no picture by design
+  const failing = watching.filter((c) => {
+    const p = pictureHealth(c.cam, now);
+    return p.state === 'failing' && p.failingSince !== null && now - p.failingSince >= NO_PICTURE_MS;
+  });
+  const base: Pick<HealthItem, 'id' | 'group' | 'label' | 'link'> = { id: 'camera-pictures', group: 'Devices', label: 'Cameras', link: '/cameras' };
+  if (failing.length) {
+    const first = pictureHealth(failing[0].cam, now);
+    const since = failing.length === 1 && first.lastOkAt ? ` The last one was ${ago(now - first.lastOkAt)}.` : '';
+    return [{ ...base, level: 'warn', detail: `No picture from ${list(failing.map((c) => c.alias))}.${since} The Cameras page says why.` }];
+  }
+  const recent = watching.filter((c) => pictureHealth(c.cam, now).state === 'failing');
+  if (recent.length) return [{ ...base, level: 'info', detail: `No picture from ${list(recent.map((c) => c.alias))} for a few minutes. Checking again…` }];
+  const ok = watching.filter((c) => pictureHealth(c.cam, now).state === 'ok').length;
+  if (ok < watching.length) return [{ ...base, level: 'info', detail: `Checking ${watching.length - ok} of ${watching.length}…` }];
+  return [{ ...base, level: 'ok', detail: watching.length ? `All ${watching.length} sending pictures` : 'All paused' }];
+}
+
 function sensors(): HealthItem[] {
   const rows = getDb().prepare('SELECT alias, stale_since FROM sensors').all() as { alias: string; stale_since: string | null }[];
   if (!rows.length) return [];
@@ -256,6 +284,7 @@ export async function checkHealth(opts: { probe?: Probe; now?: number; dataDir?:
   const items = [
     ...(await services(opts.probe ?? httpProbe)),
     ...devices(),
+    ...cameraPictures(now),
     ...sensors(),
     ...voice(now),
     ...backups(dataDir, now),

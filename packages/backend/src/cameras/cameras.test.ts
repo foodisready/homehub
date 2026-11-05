@@ -36,6 +36,8 @@ const fake = {
   signedIn: false,
   /** Empty pictures to answer before a real one, as while a camera connects. */
   emptyShots: 0,
+  /** Streams restarted, by camera name. */
+  restarts: [] as string[],
   calls: [] as string[],
 };
 
@@ -75,6 +77,8 @@ const bridgeServer = http.createServer((req, res) => {
   }
   if (req.headers.authorization !== `Bearer ${KEY}`) { res.writeHead(401); return res.end('Unauthorized'); }
   if (url.pathname === '/api/cameras') return json(200, fake.signedIn ? cameras() : []);
+  const restart = url.pathname.match(/^\/api\/cameras\/([^/]+)\/restart$/);
+  if (restart && req.method === 'POST') { fake.restarts.push(restart[1]); return json(200, { status: 'ok' }); }
   const snap = url.pathname.match(/^\/api\/snapshot\/([^/]+)$/);
   if (snap) {
     if (fake.emptyShots > 0) { fake.emptyShots--; res.writeHead(200, { 'content-type': 'image/jpeg' }); return res.end(); }
@@ -152,6 +156,14 @@ const wyzeServer = http.createServer((req, res) => {
 let db: Database.Database;
 let bridge: typeof import('./bridge');
 let cloud: typeof import('./wyze-cloud');
+let pictures: typeof import('./picture-status');
+let deviceCache: typeof import('../kasa/device.cache');
+let health: typeof import('../system/health');
+const ARP = path.join(TMP, 'arp');
+const arpTable = (rows: [string, string][]) => fs.writeFileSync(ARP,
+  'IP address       HW type     Flags       HW address            Mask     Device\n' +
+  rows.map(([ip, mac]) => `${ip}  0x1  0x2  ${mac}  *  wlan0`).join('\n') + '\n');
+const setPaused = (id: number, paused: boolean) => deviceCache.getAllCachedStates().set(id, { state: !paused, online: true, wattage: null, lastPolled: new Date() });
 let snaps: typeof import('./snapshots');
 let watch: typeof import('./watch');
 let power: typeof import('../devices/power');
@@ -192,10 +204,15 @@ describe('Wyze cameras', () => {
     process.env.WYZE_GO2RTC_URL = `http://127.0.0.1:${port}`;
     process.env.WYZE_BRIDGE_API_KEY = KEY;
     process.env.WYZE_SIGNIN_DIR = SIGNIN;
+    process.env.WYZE_RECONNECT_AFTER_MS = '30';
 
     db = (await import('../db')).getDb();
     bridge = await import('./bridge');
     cloud = await import('./wyze-cloud');
+    pictures = await import('./picture-status');
+    deviceCache = await import('../kasa/device.cache');
+    health = await import('../system/health');
+    process.env.HOMEHUB_ARP_FILE = ARP;
     snaps = await import('./snapshots');
     watch = await import('./watch');
     power = await import('../devices/power');
@@ -232,11 +249,14 @@ describe('Wyze cameras', () => {
     db.pragma('foreign_keys = ON');
     fs.rmSync(snaps.snapshotDir(), { recursive: true, force: true });
     fs.rmSync(SIGNIN, { recursive: true, force: true });
-    Object.assign(fake, { up: true, frozen: false, version: '', signedIn: false, emptyShots: 0, calls: [] });
+    Object.assign(fake, { up: true, frozen: false, version: '', signedIn: false, emptyShots: 0, calls: [], restarts: [] });
     process.env.WYZE_BRIDGE_API_KEY = KEY;
     watch.resetMotionState();
     WyzeDriver.clearPowerCache();
     cloud.resetCloud();
+    pictures.resetPictureStatus();
+    deviceCache.getAllCachedStates().clear();
+    fs.rmSync(ARP, { force: true });
     Object.assign(wyze, { logins: 0, refreshes: 0, token: '', expireNext: false, power: {}, actions: [], events: [], picturesWork: true, eventRequests: [], requestsLeft: 2000 });
     signedIn();
   });
@@ -268,6 +288,10 @@ describe('Wyze cameras', () => {
       const at = Date.now();
       bridge.saveSignIn(RIGHT, at);
       assert.deepEqual(await bridge.getState(at + 1000), { state: 'starting' });
+      fake.startedAt = at - 10 * 60_000;   // five minutes on, the same old bridge
+      const stuck = await bridge.getState(at + 5 * 60_000);
+      assert.equal(stuck.state, 'unreachable', 'a bridge that never restarts is a problem, not "starting"');
+      assert.match((stuck as { detail: string }).detail, /hasn't restarted/);
       fake.up = false;
       assert.deepEqual(await bridge.getState(at + 5000), { state: 'starting' }, 'down while restarting');
       assert.equal((await bridge.getState(at + 10 * 60_000)).state, 'unreachable', 'down for long');
@@ -557,6 +581,113 @@ describe('Wyze cameras', () => {
       await watch.checkMotion();
       const body = await (await api('GET', '')).json() as any;
       assert.equal(body.cameras.find((c: any) => c.deviceId === id).lastMotionAt, new Date(at).toISOString());
+    });
+  });
+
+  describe('picture status', () => {
+    it('calls a camera broken after two failures in a row, not one', async () => {
+      fake.emptyShots = 1;
+      await assert.rejects(bridge.snapshot('front_door', 1));
+      assert.equal(pictures.pictureHealth('front_door').state, 'unknown', 'one failure, never a picture');
+      await bridge.snapshot('front_door');
+      assert.equal(pictures.pictureHealth('front_door').state, 'ok');
+      fake.emptyShots = 1;
+      await assert.rejects(bridge.snapshot('front_door', 1));
+      assert.equal(pictures.pictureHealth('front_door').state, 'ok', 'a hiccup after good pictures');
+      fake.emptyShots = 2;
+      await assert.rejects(bridge.snapshot('front_door', 2));
+      const h = pictures.pictureHealth('front_door');
+      assert.equal(h.state, 'failing');
+      assert.ok(h.failingSince && h.lastOkAt);
+      assert.equal(pictures.pictureHealth('front_door', Date.now() + 20 * 60_000).state, 'unknown', 'old news');
+    });
+
+    it("doesn't blame the camera when the bridge is down or rejects HomeHub", async () => {
+      fake.up = false;
+      await assert.rejects(bridge.snapshot('front_door', 1));
+      await assert.rejects(bridge.snapshot('front_door', 1));
+      fake.up = true;
+      process.env.WYZE_BRIDGE_API_KEY = 'wrong';
+      await assert.rejects(bridge.snapshot('front_door', 1));
+      assert.equal(pictures.lastAsked('front_door'), null);
+    });
+
+    it("says whether a camera with no picture is on HomeHub's network", async () => {
+      arpTable([['192.168.1.40', '04:e4:b6:ac:81:d8']]);   // another device has the camera's address
+      assert.match(await pictures.noPictureHint('front_door', '2CAA8E000001', '192.168.1.40'), /can't find this camera on its network/);
+      arpTable([['192.168.1.41', '2c:aa:8e:00:00:01']]);
+      assert.match(await pictures.noPictureHint('front_door', '2CAA8E000001', null), /can't find/, 'remembered for two minutes');
+      assert.match(await pictures.noPictureHint('front_door', '2CAA8E000001', null, Date.now() + 3 * 60_000), /on the network but isn't sending video/);
+      fs.rmSync(ARP);
+      assert.match(await pictures.noPictureHint('living_pan', '80482C000002', null), /Check that the camera is on/, 'no address table');
+    });
+
+    it('checks cameras nobody has looked at lately, but not paused ones', async () => {
+      addCamera('Front Door', 'front_door', '192.168.1.40', '2CAA8E000001');
+      const pan = addCamera('Living Pan', 'living_pan', '192.168.0.32', '80482C000002');
+      setPaused(pan, true);
+      assert.equal(await watch.checkPictures(), 1);
+      assert.equal(pictures.pictureHealth('front_door').state, 'ok');
+      assert.equal(pictures.lastAsked('living_pan'), null, 'paused: not asked');
+      assert.equal(await watch.checkPictures(), 0, 'just checked');
+      assert.equal(await watch.checkPictures(Date.now() + 6 * 60_000), 1);
+    });
+
+    it('restarts the stream of a camera that is on the network but sends nothing, now and then', async () => {
+      const front = { id: 1, alias: 'Front Door', cam: 'front_door', mac: '2CAA8E000001' };
+      arpTable([['192.168.1.40', '2c:aa:8e:00:00:01']]);
+      assert.equal(await watch.repairIfStuck(front, null), false, 'not failing');
+      fake.emptyShots = 4;
+      await assert.rejects(bridge.snapshot('front_door', 2));
+      await assert.rejects(bridge.snapshot('front_door', 2));
+      assert.equal(await watch.repairIfStuck(front, null), true);
+      assert.equal(await watch.repairIfStuck(front, null), false, 'not again so soon');
+      assert.equal(await watch.repairIfStuck(front, null, Date.now() + 11 * 60_000), true, 'still stuck ten minutes on: try again');
+      assert.deepEqual(fake.restarts, ['front_door', 'front_door']);
+    });
+
+    it("doesn't restart a camera that isn't on the network, which a restart can't fix", async () => {
+      arpTable([['192.168.1.40', '04:e4:b6:ac:81:d8']]);
+      fake.emptyShots = 4;
+      await assert.rejects(bridge.snapshot('front_door', 2));
+      await assert.rejects(bridge.snapshot('front_door', 2));
+      assert.equal(await watch.repairIfStuck({ id: 1, alias: 'Front Door', cam: 'front_door', mac: '2CAA8E000001' }, null), false);
+      assert.deepEqual(fake.restarts, []);
+    });
+
+    it('reconnects a camera on the bridge after resuming it', async () => {
+      await new WyzeDriver.WyzeDriver().setPower('ip', true, { cam: 'living_pan' });
+      await new Promise((r) => setTimeout(r, 100));
+      assert.deepEqual(fake.restarts, ['living_pan']);
+      await new WyzeDriver.WyzeDriver().setPower('ip', false, { cam: 'living_pan' });
+      await new Promise((r) => setTimeout(r, 100));
+      assert.deepEqual(fake.restarts, ['living_pan'], 'not after pausing');
+    });
+
+    it("shows each camera's picture status, with a hint when there is none", async () => {
+      const id = addCamera('Front Door', 'front_door', '192.168.1.40', '2CAA8E000001');
+      arpTable([]);
+      fake.emptyShots = 4;
+      await assert.rejects(bridge.snapshot('front_door', 2));
+      await assert.rejects(bridge.snapshot('front_door', 2));
+      const cam = ((await (await api('GET', '')).json()) as any).cameras.find((c: any) => c.deviceId === id);
+      assert.equal(cam.picture, 'failing');
+      assert.ok(cam.noPictureSince);
+      assert.match(cam.noPictureHint, /can't find this camera/);
+    });
+
+    it('warns on the Health page after ten minutes without a picture', async () => {
+      addCamera('Front Door', 'front_door', '192.168.1.40', '2CAA8E000001');
+      const item = async (now: number) => (await health.checkHealth({ probe: async () => true, now })).items.find((i) => i.id === 'camera-pictures');
+      await bridge.snapshot('front_door');
+      assert.equal((await item(Date.now()))?.level, 'ok');
+      fake.emptyShots = 4;
+      await assert.rejects(bridge.snapshot('front_door', 2));
+      await assert.rejects(bridge.snapshot('front_door', 2));
+      assert.equal((await item(Date.now()))?.level, 'info', 'not yet');
+      const later = await item(Date.now() + 11 * 60_000);
+      assert.equal(later?.level, 'warn');
+      assert.match(later!.detail, /No picture from Front Door\. The last one was 11 minutes ago/);
     });
   });
 

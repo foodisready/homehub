@@ -16,6 +16,8 @@ interface Snapshot { id: number; deviceId: number | null; camera: string; camera
 interface Camera {
   deviceId: number; name: string; room: string | null; cam: string; model: string | null;
   watching: boolean | null; online: boolean | null; streaming: boolean;
+  /** Whether pictures actually arrive from the camera. */
+  picture: 'ok' | 'failing' | 'unknown'; lastPictureAt: string | null; noPictureSince: string | null; noPictureHint: string | null;
   lastMotionAt: string | null; latestSnapshot: Snapshot | null;
 }
 interface AccountCamera { cam: string; name: string; model: string | null; ip: string | null; mac: string | null; streaming: boolean; added: boolean }
@@ -68,6 +70,8 @@ const PAGE = 48;
     .pill.watching { border-color: var(--green); color: #4ade80; }
     .pill.paused { border-color: #f59e0b; color: #fbbf24; }
     .pill.offline { border-color: var(--red); color: #f87171; }
+    .pill.nopicture { border-color: #f59e0b; color: #fbbf24; }
+    .hint { font-size: 0.78rem; color: #fbbf24; margin: -0.3rem 0 0.6rem; line-height: 1.45; }
     .cam-sub { font-size: 0.75rem; color: var(--text-muted); margin: 0.2rem 0 0.6rem; }
     .cam-actions { display: flex; gap: 0.4rem; flex-wrap: wrap; }
     .confirm { margin-top: 0.6rem; display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; font-size: 0.82rem; }
@@ -203,7 +207,7 @@ const PAGE = 48;
         <div class="grid">
           @for (c of cameras(); track c.deviceId) {
             <div class="card cam">
-              <app-auth-img [src]="'/api/cameras/' + c.deviceId + '/live.jpg?cached=1'" [refreshSeconds]="c.watching === false ? 0 : 20"
+              <app-auth-img [src]="'/api/cameras/' + c.deviceId + '/live.jpg?cached=1'" (result)="thumbResult(c, $event)" [refreshSeconds]="c.watching === false ? 0 : 20"
                             [alt]="c.name" [failedText]="c.watching === false ? 'Paused' : c.streaming ? 'No picture right now' : 'Not connected to this camera yet'"
                             (click)="openLive(c)" role="button" [attr.aria-label]="'Watch ' + c.name + ' live'" />
               <div class="cam-body">
@@ -215,8 +219,11 @@ const PAGE = 48;
                   {{ c.room ?? 'No room' }}{{ c.model ? ' · ' + c.model : '' }}
                   @if (c.lastMotionAt) { · motion {{ ago(c.lastMotionAt) }} }
                 </div>
-                @if (c.watching !== false && c.online !== false && !c.streaming) {
-                  <p class="cam-sub" style="color:#fbbf24;margin-top:-0.3rem">Not connected to the bridge yet. It keeps trying.</p>
+                @if (statusOf(c) === 'nopicture') {
+                  <p class="hint">
+                    {{ c.lastPictureAt ? 'Last picture ' + ago(c.lastPictureAt) + '.' : 'No picture yet.' }}
+                    {{ c.noPictureHint }}
+                  </p>
                 }
                 <div class="cam-actions">
                   <button class="btn-sm btn-primary" type="button" (click)="openLive(c)" [disabled]="c.watching === false">Live</button>
@@ -573,14 +580,24 @@ export class CamerasComponent implements OnInit, OnDestroy {
     });
   }
 
+  /** A picture this page just loaded: good news before HomeHub's next camera list says so. */
+  private readonly thumbOk = signal<Record<number, boolean>>({});
+
+  thumbResult(c: Camera, ok: boolean): void {
+    if (this.thumbOk()[c.deviceId] !== ok) this.thumbOk.update((m) => ({ ...m, [c.deviceId]: ok }));
+  }
+
+  /** "Watching" only when pictures actually arrive; the bridge's own word for it can't be trusted. */
   statusOf(c: Camera): string {
     if (c.online === false) return 'offline';
     if (c.watching === false) return 'paused';
-    return c.watching ? 'watching' : '';
+    if (c.picture === 'failing') return 'nopicture';
+    if (c.watching && (c.picture === 'ok' || this.thumbOk()[c.deviceId] === true)) return 'watching';
+    return '';
   }
 
   statusLabel(c: Camera): string {
-    return ({ offline: 'Offline', paused: 'Paused', watching: 'Watching' } as Record<string, string>)[this.statusOf(c)] ?? 'Checking…';
+    return ({ offline: 'Offline', paused: 'Paused', watching: 'Watching', nopicture: 'No picture' } as Record<string, string>)[this.statusOf(c)] ?? 'Checking…';
   }
 
   ago(iso: string): string {

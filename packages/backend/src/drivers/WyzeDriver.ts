@@ -17,6 +17,8 @@ import { liveCameras } from '../cameras/watch';
  */
 
 const LIST_CACHE_MS = 10_000;
+/** A resumed camera takes a few seconds to come back; then the bridge connects to it afresh. */
+const RECONNECT_AFTER_RESUME_MS = Number(process.env.WYZE_RECONNECT_AFTER_MS) || 15_000;
 const POWER_CACHE_MS = 5 * 60 * 1000;
 let listCache: { at: number; cameras: Promise<bridge.BridgeCamera[]> } | null = null;
 const powerCache = new Map<string, { on: boolean; at: number }>();
@@ -59,6 +61,12 @@ export class WyzeDriver implements DeviceDriver {
     const cam = await find(name);
     await cloud.setCameraPower(cam, on);
     powerCache.set(name, { on, at: Date.now() });
+    // go2rtc can stay stuck on the connection that died when the camera went off.
+    if (on) {
+      setTimeout(() => {
+        bridge.restartStream(name).catch((err) => bridge.logBridgeError(err, `Couldn't reconnect ${cam.name} after resuming it`));
+      }, RECONNECT_AFTER_RESUME_MS).unref();
+    }
   }
 
   async getPower(_ip: string, config?: Record<string, unknown>): Promise<boolean> {
