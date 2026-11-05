@@ -886,7 +886,7 @@ const DRIVER_LABEL: Record<string, string> = {
                   Pause automations
                   <div class="pref-sub">
                     For a second HomeHub, such as a development copy, that uses the same devices as your main one.
-                    While paused, this HomeHub runs no schedules, motion rules, timers, camera snapshots or automatic water shutoff.
+                    While paused, this HomeHub runs no schedules, motion rules, timers or automatic water shutoff.
                     You can still switch devices by hand.
                   </div>
                 </div>

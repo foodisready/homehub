@@ -7,13 +7,13 @@ import { requireAdmin } from '../middleware/auth';
 import { getCachedState } from '../kasa/device.cache';
 import * as bridge from '../cameras/bridge';
 import * as snaps from '../cameras/snapshots';
-import { cameraDevices } from '../cameras/watch';
+import { cameraDevices, liveCameras } from '../cameras/watch';
 import { clearPowerCache } from '../drivers/WyzeDriver';
 
 /**
- * Wyze cameras through docker-wyze-bridge. Everyone signed in can watch and
- * see snapshots; signing the bridge in, changing settings and deleting
- * snapshots are admin only. Pausing a camera uses the normal device on/off.
+ * Wyze cameras through the camera bridge. Everyone signed in can watch and
+ * see snapshots; signing in to Wyze, changing settings and deleting
+ * snapshots are admin only.
  */
 export const camerasRouter = Router();
 
@@ -40,25 +40,35 @@ camerasRouter.get('/bridge', async (_req: Request, res: Response) => {
   res.json(await bridge.getState());
 });
 
-// POST /api/cameras/bridge/login { email, password, keyId, apiKey } — passed to the bridge, not stored
+// POST /api/cameras/bridge/login { email, password, keyId, apiKey } — saved for the bridge, which restarts with it
 camerasRouter.post('/bridge/login', requireAdmin, async (req: Request, res: Response) => {
   const { email, password, keyId, apiKey } = req.body as Record<string, unknown>;
   const fields = { email, password, keyId, apiKey };
-  if (Object.values(fields).some((v) => typeof v !== 'string' || !v.trim())) {
+  if (Object.values(fields).some((v) => typeof v !== 'string' || !v.trim() || v.length > 500 || /[\r\n\0]/.test(v))) {
     return res.status(400).json({ error: 'Enter your Wyze email, password, API key ID and API key', code: 'VALIDATION_ERROR' });
   }
+  if (!process.env.WYZE_BRIDGE_API_KEY) {
+    return res.status(409).json({ error: 'The camera bridge is left out of this HomeHub', code: 'NOT_CONFIGURED' });
+  }
   try {
-    await bridge.signIn({ email: (email as string).trim(), password: password as string, keyId: (keyId as string).trim(), apiKey: (apiKey as string).trim() });
+    const state = await bridge.signIn({ email: (email as string).trim(), password: password as string, keyId: (keyId as string).trim(), apiKey: (apiKey as string).trim() });
     clearPowerCache();
-    res.json(await bridge.getState());
+    res.json(state);
   } catch (err) { fail(res, err, 'Wyze sign-in failed'); }
+});
+
+// DELETE /api/cameras/bridge/login — sign out of Wyze: the saved sign-in is deleted and the bridge stops
+camerasRouter.delete('/bridge/login', requireAdmin, async (_req: Request, res: Response) => {
+  bridge.clearSignIn();
+  clearPowerCache();
+  res.json(await bridge.getState());
 });
 
 // GET /api/cameras/bridge/cameras — every camera on the Wyze account, and whether it's in HomeHub
 camerasRouter.get('/bridge/cameras', requireAdmin, async (_req: Request, res: Response) => {
   try {
     const added = new Set(cameraDevices().map((d) => d.cam));
-    res.json((await bridge.listCameras()).map((c) => ({
+    res.json((await liveCameras()).map((c) => ({
       cam: c.id, name: c.name, model: c.modelName ?? c.model, ip: c.ip, mac: c.mac,
       streaming: c.connected, added: added.has(c.id),
     })));
@@ -114,7 +124,7 @@ camerasRouter.get('/', async (_req: Request, res: Response) => {
   let live: bridge.BridgeCamera[] = [];
   let bridgeError: string | null = null;
   try {
-    live = await bridge.listCameras();
+    live = await liveCameras();
   } catch (err) {
     bridgeError = (err as Error).message;
   }
@@ -140,11 +150,12 @@ camerasRouter.get('/', async (_req: Request, res: Response) => {
 });
 
 // GET /api/cameras/:deviceId/live.jpg?cached=1 — a picture from the camera now
+// (cached=1, for thumbnails that refresh themselves: one try, no retry)
 camerasRouter.get('/:deviceId/live.jpg', async (req: Request, res: Response) => {
   const device = deviceParam(req);
   if (!device) return res.status(404).json({ error: 'Camera not found', code: 'NOT_FOUND' });
   try {
-    const jpeg = await bridge.snapshot(device.cam, req.query.cached !== '1');
+    const jpeg = await bridge.snapshot(device.cam, req.query.cached === '1' ? 1 : 2);
     res.setHeader('Cache-Control', 'no-store');
     res.type('jpeg').send(jpeg);
   } catch (err) { fail(res, err, 'No picture from this camera'); }
@@ -161,7 +172,9 @@ camerasRouter.post('/:deviceId/snapshots', async (req: Request, res: Response) =
 
 /**
  * GET /api/cameras/:deviceId/hls/<file> — live video, relayed from the bridge's
- * HLS server so it works over HomeHub's own HTTPS address and login.
+ * go2rtc so it works over HomeHub's own HTTPS address and login. index.m3u8
+ * starts the stream; it points at hls/playlist.m3u8, which points at
+ * hls/segment.ts (or .m4s), each naming go2rtc's session in the query.
  */
 camerasRouter.get('/:deviceId/hls/*path', async (req: Request, res: Response) => {
   const device = deviceParam(req);
@@ -169,14 +182,14 @@ camerasRouter.get('/:deviceId/hls/*path', async (req: Request, res: Response) =>
   // Express 5 gives a named wildcard as its path segments.
   const raw = (req.params as Record<string, unknown>).path;
   const rest = Array.isArray(raw) ? raw.join('/') : String(raw ?? '');
-  if (!/^[A-Za-z0-9._\-/]+$/.test(rest) || rest.includes('..')) {
+  if (rest !== 'index.m3u8' && !/^hls\/[A-Za-z0-9_-]+\.(m3u8|ts|m4s|mp4)$/.test(rest)) {
     return res.status(400).json({ error: 'Bad stream path', code: 'VALIDATION_ERROR' });
   }
   const query = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
   const abort = new AbortController();
   req.on('close', () => abort.abort());
   try {
-    const upstream = await bridge.hlsFetch(`${encodeURIComponent(device.cam)}/${rest}${query}`, abort.signal);
+    const upstream = await bridge.hlsFetch(device.cam, rest, query, abort.signal);
     res.status(upstream.status);
     for (const h of ['content-type', 'cache-control', 'content-length']) {
       const v = upstream.headers.get(h);

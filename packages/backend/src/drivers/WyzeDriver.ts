@@ -1,45 +1,55 @@
 import type { DeviceDriver, DiscoveredDevice, EnergyMetrics } from './DeviceDriver';
 import * as bridge from '../cameras/bridge';
+import { liveCameras } from '../cameras/watch';
 
 /**
- * Wyze cameras, through docker-wyze-bridge. "On" means the camera is
- * watching; "off" pauses it (Wyze's own power-off, which also tucks a Pan's
- * lens away). driver_config is { cam: "<bridge name>" }.
+ * Wyze cameras, through the camera bridge. driver_config is { cam: "<bridge name>" }.
  *
- * Reading the power state asks Wyze's cloud, so answers are cached for a few
- * minutes; a switch from HomeHub updates the cache at once.
+ * "On" means the camera is watching. The current bridge can't pause a camera
+ * (Wyze's power-off), so a camera on the bridge reads as on, one the bridge
+ * doesn't know as offline, and pausing is refused with an explanation.
+ * Pausing will come back through the Wyze account.
+ *
+ * The camera list is cached for a moment, because device polling asks about
+ * each camera in turn.
  */
 
-const POWER_CACHE_MS = 5 * 60 * 1000;
-const powerCache = new Map<string, { on: boolean; at: number }>();
+const LIST_CACHE_MS = 10_000;
+let listCache: { at: number; cameras: Promise<bridge.BridgeCamera[]> } | null = null;
+
+export const PAUSE_UNAVAILABLE = 'Pausing Wyze cameras isn\'t available with the current camera bridge yet.';
 
 export function cameraName(config?: Record<string, unknown>): string {
   const cam = config?.cam;
-  if (typeof cam !== 'string' || !cam) throw new Error('This camera has no bridge name; add it again from Discover');
+  if (typeof cam !== 'string' || !cam) throw new Error('This camera has no bridge name; add it again from Cameras');
   return cam;
 }
 
 /** For tests and after a bridge sign-in. */
-export function clearPowerCache(): void { powerCache.clear(); }
+export function clearPowerCache(): void { listCache = null; }
+
+function cameras(): Promise<bridge.BridgeCamera[]> {
+  if (!listCache || Date.now() - listCache.at > LIST_CACHE_MS) {
+    const pending = liveCameras();
+    listCache = { at: Date.now(), cameras: pending };
+    pending.catch(() => { if (listCache?.cameras === pending) listCache = null; });
+  }
+  return listCache.cameras;
+}
 
 export class WyzeDriver implements DeviceDriver {
   readonly type = 'wyze';
-  /** Wyze takes a few seconds to apply a power change. */
-  readonly confirmAfterMs = 8000;
 
-  async setPower(_ip: string, on: boolean, config?: Record<string, unknown>): Promise<void> {
-    const cam = cameraName(config);
-    await bridge.setPower(cam, on);
-    powerCache.set(cam, { on, at: Date.now() });
+  async setPower(_ip: string, _on: boolean, config?: Record<string, unknown>): Promise<void> {
+    cameraName(config);
+    throw new bridge.BridgeError(PAUSE_UNAVAILABLE, 501);
   }
 
   async getPower(_ip: string, config?: Record<string, unknown>): Promise<boolean> {
     const cam = cameraName(config);
-    const cached = powerCache.get(cam);
-    if (cached && Date.now() - cached.at < POWER_CACHE_MS) return cached.on;
-    const on = await bridge.getPower(cam);
-    powerCache.set(cam, { on, at: Date.now() });
-    return on;
+    const found = (await cameras()).find((c) => c.id === cam);
+    if (!found) throw new Error('The camera bridge doesn\'t have this camera');
+    return found.enabled;
   }
 
   async getEnergy(): Promise<EnergyMetrics | null> {
@@ -48,8 +58,8 @@ export class WyzeDriver implements DeviceDriver {
 
   /** Accepts a camera's IP address or its bridge name. */
   async probe(ipOrName: string): Promise<Omit<DiscoveredDevice, 'driverType'> | null> {
-    const cameras = await bridge.listCameras().catch(() => []);
-    const cam = cameras.find((c) => c.ip === ipOrName || c.id === ipOrName);
+    const list = await bridge.listCameras().catch(() => []);
+    const cam = list.find((c) => c.ip === ipOrName || c.id === ipOrName);
     return cam ? toDiscovered(cam) : null;
   }
 

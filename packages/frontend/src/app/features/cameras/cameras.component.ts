@@ -9,6 +9,7 @@ import { LiveViewComponent } from './live-view.component';
 
 type BridgeState =
   | { state: 'not-configured' } | { state: 'off' } | { state: 'unreachable'; detail: string } | { state: 'signed-out' }
+  | { state: 'starting' } | { state: 'sign-in-failed'; detail: string }
   | { state: 'unauthorized' } | { state: 'ready'; cameras: number };
 
 interface Snapshot { id: number; deviceId: number | null; camera: string; cameraName: string; trigger: 'motion' | 'manual'; sizeBytes: number; takenAt: string }
@@ -22,7 +23,7 @@ interface Settings { enabled: boolean; motionSnapshots: boolean; notify: boolean
 
 const PAGE = 48;
 
-/** Wyze cameras: set up the bridge, watch live, pause and resume, and look through snapshots. */
+/** Wyze cameras: sign in to Wyze, watch live, take snapshots and look through them. */
 @Component({
   selector: 'app-cameras',
   standalone: true,
@@ -110,7 +111,7 @@ const PAGE = 48;
             @switch (b.state) {
               @case ('off') {
                 <strong>Cameras are off</strong>
-                <p class="muted" style="margin-top:0.4rem">They're hidden from the menu, and HomeHub isn't watching for motion.</p>
+                <p class="muted" style="margin-top:0.4rem">They're hidden from the menu.</p>
                 @if (isAdmin()) {
                   <button class="btn-sm btn-primary" type="button" style="margin-top:0.6rem" (click)="turnOn()" [disabled]="busy()">Turn on cameras</button>
                 } @else {
@@ -133,13 +134,24 @@ const PAGE = 48;
                 <strong>The camera bridge rejected HomeHub's key</strong>
                 <p class="muted" style="margin-top:0.4rem">HomeHub and the bridge normally share a key HomeHub makes itself. If you set <code>WYZE_BRIDGE_API_KEY</code> in <code>.env</code>, remove it or make sure both use the same value, then run <code>docker compose -f docker-compose.yml up -d</code>.</p>
               }
+              @case ('starting') {
+                <strong>Signing in to Wyze…</strong>
+                <p class="muted" style="margin-top:0.4rem">The camera bridge is starting with your Wyze account. This takes up to a minute.</p>
+              }
+              @case ('sign-in-failed') {
+                <strong>Wyze sign-in didn't work</strong>
+                <p class="msg err">{{ $any(b).detail }}</p>
+              }
               @case ('signed-out') {
                 <strong>Sign in to Wyze</strong>
+              }
+            }
+            @if (b.state === 'signed-out' || b.state === 'sign-in-failed') {
                 @if (isAdmin()) {
                   <p class="muted" style="margin-top:0.4rem">
                     Wyze needs your account and a free developer API key. Create the key at
                     <a href="https://developer-api-console.wyze.com/" target="_blank" rel="noopener">developer-api-console.wyze.com</a>.
-                    HomeHub passes these to the camera bridge and doesn't keep them.
+                    HomeHub keeps these on this computer, for the camera bridge only, until you sign out.
                   </p>
                   <div class="form">
                     <input type="email" [(ngModel)]="email" placeholder="Wyze email" aria-label="Wyze email" autocomplete="off" />
@@ -160,7 +172,6 @@ const PAGE = 48;
                 } @else {
                   <p class="muted" style="margin-top:0.4rem">Ask an administrator to sign in to Wyze.</p>
                 }
-              }
             }
             @if (message()) { <p class="msg" [class.err]="isError()" [class.ok]="!isError()">{{ message() }}</p> }
           </div>
@@ -204,27 +215,15 @@ const PAGE = 48;
                   {{ c.room ?? 'No room' }}{{ c.model ? ' · ' + c.model : '' }}
                   @if (c.lastMotionAt) { · motion {{ ago(c.lastMotionAt) }} }
                 </div>
-                @if (c.watching !== false && !c.streaming) {
+                @if (c.online !== false && !c.streaming) {
                   <p class="cam-sub" style="color:#fbbf24;margin-top:-0.3rem">Not connected to the bridge yet. It keeps trying.</p>
                 }
                 <div class="cam-actions">
-                  <button class="btn-sm btn-primary" type="button" (click)="openLive(c)" [disabled]="c.watching === false">Live</button>
-                  <button class="btn-sm ghost" type="button" (click)="takeSnapshot(c)" [disabled]="c.watching === false || busyId() === c.deviceId">
+                  <button class="btn-sm btn-primary" type="button" (click)="openLive(c)">Live</button>
+                  <button class="btn-sm ghost" type="button" (click)="takeSnapshot(c)" [disabled]="busyId() === c.deviceId">
                     {{ busyId() === c.deviceId ? 'Saving…' : 'Snapshot' }}
                   </button>
-                  @if (c.watching === false) {
-                    <button class="btn-sm ghost" type="button" (click)="setWatching(c, true)" [disabled]="busyId() === c.deviceId">Resume</button>
-                  } @else {
-                    <button class="btn-sm ghost" type="button" (click)="confirmPause.set(c.deviceId)" [disabled]="busyId() === c.deviceId">Pause</button>
-                  }
                 </div>
-                @if (confirmPause() === c.deviceId) {
-                  <div class="confirm">
-                    <span>Pause {{ c.name }}? It stops watching until you resume it.</span>
-                    <button class="btn-sm danger" type="button" (click)="setWatching(c, false)">Pause</button>
-                    <button class="btn-sm ghost" type="button" (click)="confirmPause.set(null)">Cancel</button>
-                  </div>
-                }
               </div>
             </div>
           }
@@ -243,7 +242,7 @@ const PAGE = 48;
           }
         </div>
         @if (!snapshots().length) {
-          <p class="muted">No snapshots yet. When a camera sees motion, a picture is saved here.</p>
+          <p class="muted">No snapshots yet. Press Snapshot on a camera to save a picture here.</p>
         }
         @for (day of days(); track day.label) {
           <div class="day">{{ day.label }}</div>
@@ -262,26 +261,23 @@ const PAGE = 48;
       }
 
       @if (isAdmin() && bridge()?.state === 'ready' && settings(); as st) {
-        <h2>Snapshot settings</h2>
+        <h2>Camera settings</h2>
         <div class="card">
-          <div class="settings-row">
-            <span class="label">Save a snapshot on motion<small>When a camera reports motion through your Wyze account</small></span>
-            <input type="checkbox" [checked]="st.motionSnapshots" (change)="saveSettings({ motionSnapshots: $any($event.target).checked })" aria-label="Save a snapshot on motion" />
-          </div>
-          <div class="settings-row">
-            <span class="label">Notify my phone<small>Sends a notification with each motion snapshot</small></span>
-            <input type="checkbox" [checked]="st.notify" (change)="saveSettings({ notify: $any($event.target).checked })" aria-label="Notify on motion" />
-          </div>
           <div class="settings-row">
             <span class="label">Keep snapshots for<small>Older ones are deleted automatically</small></span>
             <input type="number" min="1" max="365" [value]="st.keepDays" (change)="saveSettings({ keepDays: +$any($event.target).value })" aria-label="Days to keep snapshots" /> days
           </div>
           <div class="settings-row">
-            <span class="label">Wait between snapshots<small>From the same camera, so one visit doesn't fill the folder</small></span>
-            <input type="number" min="5" max="3600" [value]="st.cooldownSeconds" (change)="saveSettings({ cooldownSeconds: +$any($event.target).value })" aria-label="Seconds between snapshots" /> sec
+            <span class="label">Wyze account<small>Signing out deletes your Wyze sign-in from HomeHub and stops the camera bridge</small></span>
+            @if (confirmSignOut()) {
+              <button class="btn-sm danger" type="button" (click)="signOut()" [disabled]="busy()">Sign out</button>
+              <button class="btn-sm ghost" type="button" (click)="confirmSignOut.set(false)">Cancel</button>
+            } @else {
+              <button class="btn-sm ghost" type="button" (click)="confirmSignOut.set(true)" [disabled]="busy()">Sign out of Wyze</button>
+            }
           </div>
           <div class="settings-row">
-            <span class="label">Cameras in HomeHub<small>Turn off to hide Cameras from the menu and stop watching for motion</small></span>
+            <span class="label">Cameras in HomeHub<small>Turn off to hide Cameras from the menu</small></span>
             <button class="btn-sm ghost" type="button" (click)="turnOff()" [disabled]="busy()">Turn off</button>
           </div>
           @if (settingsMsg()) { <p class="msg" [class.err]="settingsErr()" [class.ok]="!settingsErr()">{{ settingsMsg() }}</p> }
@@ -330,7 +326,7 @@ export class CamerasComponent implements OnInit, OnDestroy {
 
   readonly busy = signal(false);
   readonly busyId = signal<number | null>(null);
-  readonly confirmPause = signal<number | null>(null);
+  readonly confirmSignOut = signal(false);
   readonly live = signal<Camera | null>(null);
   readonly shot = signal<Snapshot | null>(null);
   readonly message = signal('');
@@ -361,7 +357,14 @@ export class CamerasComponent implements OnInit, OnDestroy {
   ngOnInit(): void {
     this.refresh();
     this.loadSnapshots();
-    this.timer = setInterval(() => { if (!document.hidden) this.loadCameras(); }, 15_000);
+    let tick = 0;
+    this.timer = setInterval(() => {
+      if (document.hidden) return;
+      tick++;
+      // While the bridge starts with a new sign-in, look often; otherwise refresh the cameras now and then.
+      if (this.bridge()?.state === 'starting') this.refresh();
+      else if (tick % 3 === 0) this.loadCameras();
+    }, 5000);
     this.stopSnapshots = this.socket.onCameraSnapshot(() => this.loadSnapshots());
     this.stopState = this.socket.onDeviceState((ev) => {
       this.cameras.update((list) => list.map((c) => (c.deviceId === ev.id ? { ...c, watching: ev.state } : c)));
@@ -425,6 +428,7 @@ export class CamerasComponent implements OnInit, OnDestroy {
   signIn(): void {
     this.busy.set(true);
     this.show('');
+    this.show('Signing in. The camera bridge restarts with your account, which takes up to a minute.');
     this.http.post<BridgeState>('/api/cameras/bridge/login', { email: this.email.trim(), password: this.password, keyId: this.keyId.trim(), apiKey: this.apiKey.trim() }).subscribe({
       next: () => {
         this.busy.set(false);
@@ -434,6 +438,15 @@ export class CamerasComponent implements OnInit, OnDestroy {
         this.refresh();
       },
       error: (err: HttpErrorResponse) => { this.busy.set(false); this.show(err.error?.error ?? 'Wyze sign-in failed.', true); },
+    });
+  }
+
+  signOut(): void {
+    this.busy.set(true);
+    this.confirmSignOut.set(false);
+    this.http.delete<BridgeState>('/api/cameras/bridge/login').subscribe({
+      next: () => { this.busy.set(false); this.account.set([]); this.refresh(); },
+      error: (err: HttpErrorResponse) => { this.busy.set(false); this.settingsMsg.set(err.error?.error ?? 'Could not sign out.'); this.settingsErr.set(true); },
     });
   }
 
@@ -478,19 +491,6 @@ export class CamerasComponent implements OnInit, OnDestroy {
     this.addCamera(first, () => { if (rest.length) this.addAll(); });
   }
 
-  setWatching(c: Camera, on: boolean): void {
-    this.confirmPause.set(null);
-    this.busyId.set(c.deviceId);
-    this.cameraMsg.set('');
-    this.http.post(`/api/devices/${c.deviceId}/${on ? 'on' : 'off'}`, {}).subscribe({
-      next: () => {
-        this.busyId.set(null);
-        this.cameras.update((list) => list.map((x) => (x.deviceId === c.deviceId ? { ...x, watching: on } : x)));
-      },
-      error: () => { this.busyId.set(null); this.cameraMsg.set(`Couldn't ${on ? 'resume' : 'pause'} ${c.name}. Try again.`); },
-    });
-  }
-
   takeSnapshot(c: Camera): void {
     this.busyId.set(c.deviceId);
     this.cameraMsg.set('');
@@ -508,7 +508,7 @@ export class CamerasComponent implements OnInit, OnDestroy {
   }
 
   openLive(c: Camera): void {
-    if (c.watching !== false) this.live.set(c);
+    this.live.set(c);
   }
 
   openShot(s: Snapshot): void { this.shot.set(s); }

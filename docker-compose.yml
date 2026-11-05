@@ -63,9 +63,9 @@ services:
       # networking so it reaches Watchtower via the localhost-bound
       # port mapping (8080) rather than service-name DNS.
       - WATCHTOWER_URL=http://localhost:8080
-      # Wyze camera bridge, on its localhost-bound ports
-      - WYZE_BRIDGE_URL=http://localhost:5050
-      - WYZE_BRIDGE_HLS_URL=http://localhost:8888
+      # Wyze camera bridge: its API, and its go2rtc for live video
+      - WYZE_BRIDGE_URL=http://localhost:5080
+      - WYZE_GO2RTC_URL=http://localhost:1984
       - WATCHTOWER_HTTP_API_TOKEN=${WATCHTOWER_HTTP_API_TOKEN:-}
       # Tells the backend whether the camera bridge is part of this install.
       - HOMEHUB_CAMERA_BRIDGE=${HOMEHUB_CAMERA_BRIDGE:-1}
@@ -254,44 +254,62 @@ services:
     logging: *default-logging
 
   # ── Wyze camera bridge ─────────────────────────────────────────
-  # Connects to Wyze cameras with your Wyze account and serves their
-  # video locally. HomeHub signs it in, relays live video, pauses
-  # cameras and saves motion snapshots through it.
+  # Connects to Wyze cameras with your Wyze account and serves their video
+  # locally: IDisposable's maintained docker-wyze-bridge, with go2rtc.
+  # HomeHub signs it in, lists the cameras, relays live video and takes
+  # snapshots through it.
   #
-  # Its ports are bound to 127.0.0.1, so only this machine reaches it.
-  # The backend (host networking) uses them; its sign-in page is never
-  # exposed to the network. Port 5050 avoids macOS's AirPlay on 5000.
+  # Host networking, because the cameras are only found by a broadcast on
+  # the home network. go2rtc, which has the video, listens on 127.0.0.1
+  # only. The bridge's own page and API (port 5080) are on the network but
+  # need HomeHub's key.
+  #
+  # It waits, using almost no memory, until someone signs in to Wyze on the
+  # Cameras page. HomeHub saves the sign-in in its data volume's `wyze`
+  # folder; the bridge reads it at start and restarts when it changes.
+  # HOMEHUB_CAMERA_BRIDGE=0 in .env leaves the bridge out.
   wyze-bridge:
-    image: mrlt8/wyze-bridge:2.10.3
-    # Runs with HomeHub, idle until someone signs in to Wyze on the Cameras
-    # page (about 90 MB of memory). HOMEHUB_CAMERA_BRIDGE=0 in .env leaves it
-    # out; Settings can also turn cameras off without removing it.
+    image: idisposablegithub365/wyze-bridge:4.5.0
     deploy:
       replicas: ${HOMEHUB_CAMERA_BRIDGE:-1}
-    ports:
-      - "127.0.0.1:5050:5000"   # API and sign-in
-      - "127.0.0.1:8888:8888"   # HLS live video
+    network_mode: host
     environment:
-      - WB_AUTH=true
-      # HomeHub sends this in the `api` header. Set WYZE_BRIDGE_API_KEY in
-      # .env, or leave it out and the bridge reads the key the backend
-      # generated (see entrypoint).
-      - WB_API=${WYZE_BRIDGE_API_KEY:-}
-      # Report motion from the Wyze account, for motion snapshots.
-      - MOTION_API=true
-      # Keep streams connected, so a motion snapshot is near-instant.
-      - ON_DEMAND=false
+      # HomeHub's key for the bridge's API. Leave it out of .env and the
+      # bridge reads the one the backend made.
+      - WYZE_BRIDGE_API_KEY=${WYZE_BRIDGE_API_KEY:-}
       - TZ=${TZ:-UTC}
     volumes:
-      - wyze-tokens:/tokens
-      - wyze-img:/img
+      - wyze-bridge-state:/config
       - homehub-data:/homehub:ro
     entrypoint:
       - /bin/sh
       - -c
       - |
-        if [ -z "$$WB_API" ]; then export WB_API="$$(cat /homehub/secrets/WYZE_BRIDGE_API_KEY)"; fi
-        exec flask run --host=0.0.0.0
+        signin=/homehub/wyze
+        trap 'kill $$b $$g 2>/dev/null; exit 0' TERM INT
+        key="$$WYZE_BRIDGE_API_KEY"
+        [ -n "$$key" ] || key="$$(cat /homehub/secrets/WYZE_BRIDGE_API_KEY)"
+        echo "Waiting for a Wyze sign-in on HomeHub's Cameras page"
+        until [ -s "$$signin/version" ]; do sleep 3; done
+        ver="$$(cat "$$signin/version")"
+        # A new sign-in starts afresh, or the bridge would keep the last account's login.
+        if [ "$$(cat /config/.homehub-signin 2>/dev/null)" != "$$ver" ]; then
+          rm -f /config/wyze-bridge.state.json
+          echo "$$ver" > /config/.homehub-signin
+        fi
+        export WYZE_EMAIL="$$(cat "$$signin/email")" WYZE_PASSWORD="$$(cat "$$signin/password")"
+        export WYZE_API_ID="$$(cat "$$signin/key-id")" WYZE_API_KEY="$$(cat "$$signin/api-key")"
+        export BRIDGE_AUTH=true BRIDGE_API_TOKEN="$$key" BRIDGE_PASSWORD="$$key"
+        export GO2RTC_URL=http://127.0.0.1:1984 STATE_DIR=/config
+        # HomeHub's own go2rtc, on this computer only; the bridge adds the cameras to it.
+        printf 'api:\n  listen: "127.0.0.1:1984"\nrtsp:\n  listen: "127.0.0.1:8554"\nwebrtc:\n  listen: ""\nsrtp:\n  listen: ""\n' > /tmp/go2rtc.yaml
+        /usr/local/bin/go2rtc -config /tmp/go2rtc.yaml & g=$$!
+        until wget -q -O /dev/null http://127.0.0.1:1984/api/streams 2>/dev/null; do sleep 1; done
+        /usr/local/bin/wyze-bridge & b=$$!
+        # A new sign-in, or signing out, changes the version: stop, and Docker starts it again.
+        while kill -0 $$b 2>/dev/null && kill -0 $$g 2>/dev/null && [ "$$(cat "$$signin/version" 2>/dev/null)" = "$$ver" ]; do sleep 3; done
+        kill $$b $$g 2>/dev/null
+        wait
     depends_on:
       backend:
         condition: service_healthy   # it makes the key file
@@ -299,8 +317,6 @@ services:
       - "com.centurylinklabs.watchtower.enable=true"
     restart: unless-stopped
     logging: *default-logging
-    networks:
-      - homehub-net
 
   # ── Tailscale sidecar (remote access) ─────────────────────────
   tailscale:
@@ -326,8 +342,7 @@ volumes:
   homehub-data:
   ollama-models:
   tailscale-state:
-  wyze-tokens:
-  wyze-img:
+  wyze-bridge-state:
 
 networks:
   homehub-net:

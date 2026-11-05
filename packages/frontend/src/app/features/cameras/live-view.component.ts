@@ -87,7 +87,7 @@ export class LiveViewComponent implements AfterViewInit, OnDestroy {
         setTimeout(() => this.hls?.startLoad(), 2000);
         return;
       }
-      this.status.set(code === 404 ? 'No live video from this camera. It may be paused or offline.' : 'Live video stopped. Close and try again.');
+      this.status.set(code === 404 ? 'No live video from this camera. It may be off, on another network, or still connecting.' : 'Live video stopped. Close and try again.');
       this.playing.set(false);
     });
     this.hls.on(Hls.Events.MANIFEST_PARSED, () => {

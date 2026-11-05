@@ -109,7 +109,7 @@ export async function capture(
   trigger: 'motion' | 'manual',
   now = new Date(),
 ): Promise<Snapshot> {
-  const jpeg = await bridge.snapshot(device.cam, true);
+  const jpeg = await bridge.snapshot(device.cam);
   const { day, time } = localStamp(now);
   const dir = path.join(snapshotDir(), segment(device.cam), day);
   fs.mkdirSync(dir, { recursive: true });

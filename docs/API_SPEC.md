@@ -631,23 +631,24 @@ Every device change and its cause. Anyone signed in can read it.
 
 ## Cameras (Wyze)
 
-Cameras are devices with `driverType: "wyze"` and `driverConfig: { cam: "<bridge name>" }`. `POST /api/devices/:id/on` resumes one and `/off` pauses it. They're always protected; Chat and voice may resume them but not pause them.
+Cameras are devices with `driverType: "wyze"` and `driverConfig: { cam: "<bridge name>" }`. A camera the bridge has reads as on; one it lacks, as offline. The current bridge can't pause cameras, so `POST /api/devices/:id/off` answers `501` with `code: "NOT_SUPPORTED"`. Cameras added under another bridge name are relinked by `mac`.
 
 | Method | Path | Who | Does |
 |---|---|---|---|
-| `GET` | `/api/cameras/bridge` | any | `{ state }`: `off` (turned off in Settings), `not-configured` (`HOMEHUB_CAMERA_BRIDGE=0`), `unreachable`, `signed-out`, `unauthorized` or `ready` (with `cameras`) |
-| `POST` | `/api/cameras/bridge/login` | admin | Body: `{ email, password, keyId, apiKey }`. Passed to the bridge's `/login`, not stored. Returns the new state. |
+| `GET` | `/api/cameras/bridge` | any | `{ state }`: `off` (turned off in Settings), `not-configured` (`HOMEHUB_CAMERA_BRIDGE=0`), `signed-out`, `starting` (restarting with a new sign-in), `sign-in-failed` (with `detail`), `unreachable`, `unauthorized` or `ready` (with `cameras`) |
+| `POST` | `/api/cameras/bridge/login` | admin | Body: `{ email, password, keyId, apiKey }`. Saved in the data volume's `wyze` folder (mode 0600) for the bridge, which restarts with it. Waits up to 90 s, then returns the new state; `422` if Wyze turns it down. |
+| `DELETE` | `/api/cameras/bridge/login` | admin | Signs out: deletes the saved sign-in, and the bridge stops. Returns the new state. |
 | `GET` | `/api/cameras/bridge/cameras` | admin | Cameras on the Wyze account: `[{ cam, name, model, ip, mac, streaming, added }]` |
 | `GET` | `/api/cameras` | any | Added cameras: `{ bridgeError, cameras: [{ deviceId, name, room, cam, model, watching, online, streaming, lastMotionAt, latestSnapshot }] }` |
-| `GET` | `/api/cameras/:deviceId/live.jpg` | any | A picture now. `?cached=1` allows one up to a minute old. `404` when paused or offline. |
+| `GET` | `/api/cameras/:deviceId/live.jpg` | any | A picture now, tried twice. `?cached=1` (for thumbnails) tries once. `404` when the camera gives none. |
 | `POST` | `/api/cameras/:deviceId/snapshots` | any | Saves a picture now. Returns the snapshot. |
-| `GET` | `/api/cameras/:deviceId/hls/<file>` | any | Live HLS video relayed from the bridge, starting at `index.m3u8` |
+| `GET` | `/api/cameras/:deviceId/hls/<file>` | any | Live HLS video relayed from the bridge's go2rtc, starting at `index.m3u8`, then `hls/playlist.m3u8` and `hls/segment.ts` |
 | `GET` | `/api/cameras/snapshots` | any | Newest first. Query: `deviceId`, `before` (an id, for paging), `limit` (max 200) |
 | `GET` | `/api/cameras/snapshots/:id/image` | any | The JPEG |
 | `DELETE` | `/api/cameras/snapshots/:id` | admin | Deletes it. Returns `204`. |
-| `GET` / `PUT` | `/api/cameras/settings` | any / admin | `{ enabled, motionSnapshots, notify, keepDays (1–365), cooldownSeconds (5–3600) }`. `enabled: false` hides Cameras from the menu and stops the motion watch. Responses add `bridgeInstalled` (false with `HOMEHUB_CAMERA_BRIDGE=0`). |
+| `GET` / `PUT` | `/api/cameras/settings` | any / admin | `{ enabled, motionSnapshots, notify, keepDays (1–365), cooldownSeconds (5–3600) }`. `enabled: false` hides Cameras from the menu. `motionSnapshots`, `notify` and `cooldownSeconds` have no effect with the current bridge, which doesn't report motion. Responses add `bridgeInstalled` (false with `HOMEHUB_CAMERA_BRIDGE=0`). |
 
-A `camera:snapshot` socket event announces each new snapshot. The backend reaches the bridge at `WYZE_BRIDGE_URL` and `WYZE_BRIDGE_HLS_URL`, sending `WYZE_BRIDGE_API_KEY` in the `api` header.
+A `camera:snapshot` socket event announces each new snapshot. The backend reaches the bridge's API at `WYZE_BRIDGE_URL` (default `http://127.0.0.1:5080`), sending `WYZE_BRIDGE_API_KEY` as a Bearer token, and its go2rtc at `WYZE_GO2RTC_URL` (default `http://127.0.0.1:1984`).
 
 ---
 

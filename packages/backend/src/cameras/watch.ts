@@ -6,15 +6,16 @@ import { capture, getSettings, pruneSnapshots } from './snapshots';
 import { automationsPaused } from '../automation/pause';
 
 /**
- * Watches the bridge for motion. The bridge learns about motion from the Wyze
- * account (MOTION_API), and reports it per camera with the time it happened.
- * A newer time than last seen means new motion, so HomeHub saves a snapshot.
+ * Watches the cameras for motion: each reports the time of its last motion,
+ * and a newer time than last seen means new motion, so HomeHub saves a
+ * snapshot. Only cameras added to HomeHub are watched.
  *
- * Only cameras added to HomeHub are watched. Paused cameras report no motion,
- * so they're skipped naturally.
+ * The current camera bridge doesn't report motion (motionTs stays null), so
+ * for now this only keeps camera names linked and old snapshots pruned. Motion
+ * will come from the Wyze account's events.
  */
 
-const POLL_MS = 3000;
+const POLL_MS = 15_000;
 const IDLE_POLL_MS = 30_000;   // when the bridge is down or signed out
 
 interface CameraDevice { id: number; alias: string; cam: string }
@@ -38,11 +39,43 @@ export function cameraDevices(): CameraDevice[] {
   });
 }
 
+/**
+ * Points cameras added under another bridge name at the bridge's current one,
+ * matched by hardware address. The bridge names a camera after its Wyze name
+ * (and the bridge before v0.1.16 spelled names differently), so a rename
+ * would otherwise lose the camera. Returns how many were updated.
+ */
+export function relinkCameras(cameras: bridge.BridgeCamera[]): number {
+  const names = new Set(cameras.map((c) => c.id));
+  const rows = getDb().prepare("SELECT id, mac, driver_config FROM devices WHERE driver_type = 'wyze' AND mac IS NOT NULL").all() as
+    { id: number; mac: string; driver_config: string | null }[];
+  const update = getDb().prepare('UPDATE devices SET driver_config = ? WHERE id = ?');
+  let changed = 0;
+  for (const row of rows) {
+    let config: Record<string, unknown>;
+    try { config = JSON.parse(row.driver_config ?? '{}'); } catch { config = {}; }
+    if (typeof config.cam === 'string' && names.has(config.cam)) continue;
+    const match = cameras.find((c) => c.mac && c.mac === row.mac.replace(/[^0-9a-f]/gi, '').toUpperCase());
+    if (!match) continue;
+    update.run(JSON.stringify({ ...config, cam: match.id }), row.id);
+    logger.info({ deviceId: row.id, from: config.cam, to: match.id }, 'Camera relinked to its bridge name');
+    changed++;
+  }
+  return changed;
+}
+
+/** The bridge's cameras, after relinking any whose name changed. */
+export async function liveCameras(): Promise<bridge.BridgeCamera[]> {
+  const cameras = await bridge.listCameras();
+  relinkCameras(cameras);
+  return cameras;
+}
+
 /** One check. Returns the snapshots it took, for tests. */
 export async function checkMotion(now = Date.now()): Promise<number> {
+  if (!cameraDevices().length) return 0;
+  const cameras = await liveCameras();
   const devices = cameraDevices();
-  if (!devices.length) return 0;
-  const cameras = await bridge.listCameras();
   const settings = getSettings();
   let taken = 0;
 

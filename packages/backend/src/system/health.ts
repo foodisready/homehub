@@ -5,7 +5,7 @@ import { getAllCachedStates } from '../kasa/device.cache';
 import { automationsPaused } from '../automation/pause';
 import { cameraBridgeInstalled } from '../secrets';
 import { getSettings as cameraSettings } from '../cameras/snapshots';
-import { bridgeUrl } from '../cameras/bridge';
+import { bridgeUrl, signInSavedAt } from '../cameras/bridge';
 import { bridgeSeenAt, lastBridgeReport } from './voice-bridge';
 
 /**
@@ -87,9 +87,10 @@ async function services(probe: Probe): Promise<HealthItem[]> {
     },
     {
       id: 'cameras', label: 'Cameras', level: 'warn',
-      url: bridgeUrl(),
+      url: `${bridgeUrl()}/api/health`,
       down: "The camera service isn't answering, so cameras won't show.",
-      when: cameraBridgeInstalled() && cameraSettings().enabled,
+      // It waits, not listening, until someone signs in to Wyze on the Cameras page.
+      when: cameraBridgeInstalled() && cameraSettings().enabled && signInSavedAt() !== null,
     },
   ];
   const results = await Promise.all(checks.map((c) => (c.when === false ? Promise.resolve(null) : probe(c.url))));

@@ -110,44 +110,35 @@ HomeHub keeps its Matter pairings in its database, so backups include them and a
 
 ## Cameras
 
-HomeHub can show Wyze cameras live, pause them while you're home, and save a snapshot when one sees motion. It works through the camera bridge, a service that comes with HomeHub, and needs a free Wyze developer API key.
+HomeHub can show Wyze cameras live and save snapshots from them. It works through the camera bridge, a service that comes with HomeHub, and needs a free Wyze developer API key.
 
 ### Add your cameras
 
 1. Create an API key at the [Wyze developer console](https://developer-api-console.wyze.com/), signed in with your Wyze account. Keep the key and its ID handy.
-2. Open **Cameras** (under **More** on a phone), and sign in with your Wyze email, password, API key ID and API key. HomeHub passes these to the bridge and doesn't keep them.
+2. Open **Cameras** (under **More** on a phone), and sign in with your Wyze email, password, API key ID and API key. The camera bridge restarts with your account, which takes up to a minute.
 3. Select **Add** next to each camera, or **Add all**. Then give each one a room in **Settings → Devices**.
 
-Cameras on another Wi-Fi network work too, because the bridge finds them through your Wyze account.
+HomeHub keeps your Wyze sign-in on the HomeHub computer, in its data folder, where only the camera bridge reads it. It's needed again whenever the bridge restarts. **Sign out of Wyze**, at the bottom of the Cameras page, deletes it and stops the bridge.
+
+If your Wyze account uses two-step verification, the bridge can't sign in yet; turn it off in the Wyze app first.
+
+The cameras need to be on the same network as the HomeHub computer. A camera on another network, such as a second router's Wi-Fi, appears but shows no picture.
 
 ### Turn cameras off
 
-No Wyze cameras? Select **Turn cameras off** on the Cameras page, or clear **Wyze cameras** under **Settings → Integrations**. Cameras disappears from the menu and HomeHub stops watching for motion. Turn it back on in the same place.
+No Wyze cameras? Select **Turn cameras off** on the Cameras page, or clear **Wyze cameras** under **Settings → Integrations**. Cameras disappears from the menu. Turn it back on in the same place.
 
-The bridge itself keeps running, idle, using about 90 MB of memory. To leave it out of HomeHub entirely, set `HOMEHUB_CAMERA_BRIDGE=0` in `.env` and run `docker compose -f docker-compose.yml up -d`. Remove the line and run the command again to bring it back.
+Until someone signs in to Wyze, the camera bridge waits and uses almost no memory. To leave it out of HomeHub entirely, set `HOMEHUB_CAMERA_BRIDGE=0` in `.env` and run `docker compose -f docker-compose.yml up -d`. Remove the line and run the command again to bring it back.
 
-### Watch, pause and resume
+### Watch and take snapshots
 
 On the **Cameras** page, select a camera's picture or **Live** to watch. Live video can be a few seconds behind.
 
-**Pause** stops a camera watching, using Wyze's own off switch, and asks you to confirm. **Resume** turns it back on. A camera works like any other device, so you can also pause or resume it from the dashboard, a scene or a schedule. For example, make an "I'm home" scene that pauses your cameras and a "Leaving" scene that resumes them.
-
-Cameras are protected: Chat and voice can resume a camera but can't pause one.
-
-### Motion snapshots
-
-When a camera reports motion through your Wyze account, HomeHub saves a picture from it. Snapshots appear on the **Cameras** page, newest first, and you can filter them by camera. They're saved as JPG files in HomeHub's data folder, under `snapshots/<camera>/<date>/`.
-
-Administrators can change these settings at the bottom of the page:
-
-- **Save a snapshot on motion:** on by default.
-- **Notify my phone:** sends a notification with each motion snapshot.
-- **Keep snapshots for:** 30 days by default. Older ones are deleted automatically.
-- **Wait between snapshots:** 30 seconds by default, so one visit doesn't fill the folder.
-
-Motion is reported through Wyze's servers, so a snapshot can come a few seconds after the motion. Paused cameras don't report motion. Select **Snapshot** on a camera to save a picture yourself at any time.
+Select **Snapshot** to save a picture. Snapshots appear on the **Cameras** page, newest first, and you can filter them by camera. They're saved as JPG files in HomeHub's data folder, under `snapshots/<camera>/<date>/`, and deleted after 30 days, which administrators can change at the bottom of the page.
 
 Snapshots are history, so JSON backups leave them out. The install guide's full backup copies them.
+
+Pausing cameras from HomeHub, and saving a snapshot when a camera sees motion, aren't available with the current camera bridge. Use the Wyze app for those for now.
 
 The camera bridge is unofficial, and a Wyze firmware update can stop it working until the bridge is updated.
 
@@ -169,7 +160,7 @@ When something will turn a device off by itself, its dashboard row says when and
 - **"Off in 45 min · timer":** a timer you set. In the last minute it counts seconds.
 - **"Off at 9:30 PM · schedule":** a "turn off after" schedule. More than an hour away, it shows the time instead of a countdown.
 
-If more than one applies, it shows whichever comes first. Garage doors say "Closes in" and cameras "Pauses in".
+If more than one applies, it shows whichever comes first. Garage doors say "Closes in".
 
 ## Activity
 
@@ -299,7 +290,7 @@ HomeHub also makes a full copy of its database once a day and keeps the last 7. 
 
 This is for developers. If you run a development copy of HomeHub against the same devices as your main one, pause automations on it so the two don't undo each other. On the development copy, open **Settings → Preferences** and select **Pause automations** (administrators only). The option doesn't appear on HomeHubs installed from a release, unless one is already paused.
 
-While paused, that HomeHub runs no schedules, motion rules, "Turn off after" timers, camera motion snapshots or automatic water shutoff. You can still switch devices by hand, use Chat and run scenes. A banner on every page says it's paused, with a **Resume** button. Timers that ran out while paused end without switching anything.
+While paused, that HomeHub runs no schedules, motion rules, "Turn off after" timers or automatic water shutoff. You can still switch devices by hand, use Chat and run scenes. A banner on every page says it's paused, with a **Resume** button. Timers that ran out while paused end without switching anything.
 
 Don't pause your main HomeHub for long: automatic water shutoff is off while paused. The setting isn't included in backups, so restoring a backup never pauses or resumes a HomeHub.
 
@@ -366,9 +357,11 @@ Say a command to a speaker or tablet, and HomeHub does it and answers, with no c
 
 **A motion rule says it's waiting for the first report:** select **Connect sensor** and wait for "Sensor connected", then wave at it. It ignores new motion for a short time after each report.
 
-**The Cameras page says it can't reach the bridge:** the bridge can take a minute to start. Check it's running with `docker compose -f docker-compose.yml ps wyze-bridge`, and that `.env` doesn't set `HOMEHUB_CAMERA_BRIDGE=0`.
+**The Cameras page says it can't reach the bridge:** the bridge can take a minute to start. Check it's running with `docker compose -f docker-compose.yml ps wyze-bridge`, and that `.env` doesn't set `HOMEHUB_CAMERA_BRIDGE=0`. `docker compose -f docker-compose.yml logs wyze-bridge` shows what it's doing.
 
-**A camera shows no picture:** it may be paused, offline or still connecting. Wyze cameras connect to the bridge a little while after it starts.
+**Wyze sign-in didn't work:** check the email, password, API key ID and API key, then sign in again. Wyze also limits how often an account can sign in, so after several tries, wait a few minutes.
+
+**A camera shows no picture:** it may be off, on another network, or still connecting. Select **Snapshot** or **Live** to make the bridge connect to it.
 
 **A schedule runs at the wrong time:** check the time zone in **Settings → Home**. Sunrise and sunset schedules also need your home's location there. **Settings → Home** shows today's sunrise and sunset, so you can check them.
 
