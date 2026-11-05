@@ -115,10 +115,10 @@ export function saveSignIn(login: WyzeLogin, now = Date.now()): void {
   fs.renameSync(`${versionFile()}.tmp`, versionFile());
 }
 
-/** Signs the bridge out of Wyze: it stops and waits for a new sign-in. */
+/** Signs HomeHub and the bridge out of Wyze: the bridge stops and waits for a new sign-in. */
 export function clearSignIn(): void {
   fs.rmSync(versionFile(), { force: true });
-  for (const file of Object.values(FILES)) fs.rmSync(path.join(signInDir(), file), { force: true });
+  for (const file of [...Object.values(FILES), 'homehub-auth.json']) fs.rmSync(path.join(signInDir(), file), { force: true });
 }
 
 // ── Reading the bridge ────────────────────────────────────────────

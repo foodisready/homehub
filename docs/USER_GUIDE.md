@@ -110,7 +110,7 @@ HomeHub keeps its Matter pairings in its database, so backups include them and a
 
 ## Cameras
 
-HomeHub can show Wyze cameras live and save snapshots from them. It works through the camera bridge, a service that comes with HomeHub, and needs a free Wyze developer API key.
+HomeHub can show Wyze cameras live, pause them while you're home, and save snapshots from them. It works through the camera bridge, a service that comes with HomeHub, and needs a free Wyze developer API key.
 
 ### Add your cameras
 
@@ -130,15 +130,23 @@ No Wyze cameras? Select **Turn cameras off** on the Cameras page, or clear **Wyz
 
 Until someone signs in to Wyze, the camera bridge waits and uses almost no memory. To leave it out of HomeHub entirely, set `HOMEHUB_CAMERA_BRIDGE=0` in `.env` and run `docker compose -f docker-compose.yml up -d`. Remove the line and run the command again to bring it back.
 
-### Watch and take snapshots
+### Watch, pause and resume
 
 On the **Cameras** page, select a camera's picture or **Live** to watch. Live video can be a few seconds behind.
+
+**Pause** turns a camera off with Wyze's own switch, the same one as in the Wyze app, and asks you to confirm. A paused camera doesn't stream, record or detect motion, and a Pan v3 tucks its lens away. It stays on Wi-Fi, so **Resume** turns it back on; its picture returns within about 15 seconds. A camera works like any other device, so you can also pause or resume it from the dashboard, a scene or a schedule. For example, make an "I'm home" scene that pauses your cameras and a "Leaving" scene that resumes them.
+
+Cameras are protected: Chat and voice can resume a camera but can't pause one.
+
+HomeHub switches cameras through your Wyze account, using the sign-in you saved, so it needs the internet.
+
+### Snapshots
 
 Select **Snapshot** to save a picture. Snapshots appear on the **Cameras** page, newest first, and you can filter them by camera. They're saved as JPG files in HomeHub's data folder, under `snapshots/<camera>/<date>/`, and deleted after 30 days, which administrators can change at the bottom of the page.
 
 Snapshots are history, so JSON backups leave them out. The install guide's full backup copies them.
 
-Pausing cameras from HomeHub, and saving a snapshot when a camera sees motion, aren't available with the current camera bridge. Use the Wyze app for those for now.
+Saving a snapshot when a camera sees motion isn't available with the current camera bridge yet.
 
 The camera bridge is unofficial, and a Wyze firmware update can stop it working until the bridge is updated.
 
@@ -361,7 +369,7 @@ Say a command to a speaker or tablet, and HomeHub does it and answers, with no c
 
 **Wyze sign-in didn't work:** check the email, password, API key ID and API key, then sign in again. Wyze also limits how often an account can sign in, so after several tries, wait a few minutes.
 
-**A camera shows no picture:** it may be off, on another network, or still connecting. Select **Snapshot** or **Live** to make the bridge connect to it.
+**A camera shows no picture:** it may be paused, off, on another network, or still connecting. Select **Snapshot** or **Live** to make the bridge connect to it.
 
 **A schedule runs at the wrong time:** check the time zone in **Settings → Home**. Sunrise and sunset schedules also need your home's location there. **Settings → Home** shows today's sunrise and sunset, so you can check them.
 

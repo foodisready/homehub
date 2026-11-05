@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import { WyzeCloudError } from '../cameras/wyze-cloud';
 import { reconcileDiscovered } from '../drivers/reconcile';
 import type { DiscoveredDevice } from '../drivers/DeviceDriver';
 import { getDb } from '../db';
@@ -150,8 +151,8 @@ devicesRouter.post('/:id/on', async (req: Request, res: Response) => {
     confirmStateAsync(device.id, device.alias, device.driver_type ?? 'kasa', device.ip, config, true);
     res.json({ alias: device.alias, state: true });
   } catch (err) {
-    if ((err as { status?: number }).status === 501) {
-      return res.status(501).json({ error: (err as Error).message, code: 'NOT_SUPPORTED' });
+    if (err instanceof WyzeCloudError) {
+      return res.status(err.status >= 400 && err.status < 600 ? err.status : 502).json({ error: err.message, code: 'CAMERA_ERROR' });
     }
     logger.error(err, 'Failed to turn on device');
     res.status(503).json({ error: 'Device unreachable', code: 'DEVICE_UNREACHABLE' });
@@ -176,8 +177,8 @@ devicesRouter.post('/:id/off', async (req: Request, res: Response) => {
     confirmStateAsync(device.id, device.alias, device.driver_type ?? 'kasa', device.ip, config, false);
     res.json({ alias: device.alias, state: false });
   } catch (err) {
-    if ((err as { status?: number }).status === 501) {
-      return res.status(501).json({ error: (err as Error).message, code: 'NOT_SUPPORTED' });
+    if (err instanceof WyzeCloudError) {
+      return res.status(err.status >= 400 && err.status < 600 ? err.status : 502).json({ error: err.message, code: 'CAMERA_ERROR' });
     }
     logger.error(err, 'Failed to turn off device');
     res.status(503).json({ error: 'Device unreachable', code: 'DEVICE_UNREACHABLE' });

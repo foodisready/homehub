@@ -70,13 +70,11 @@ export interface OverrideRequest { device: Device; durationMinutes: number; }
         <span class="alias">{{ device().alias }}</span>
         @if (detail(); as text) { <span class="detail" [class.timer]="device().overrideUntil || autoOffText()" [class.door-open]="isDoor() && device().online && device().state && !device().overrideUntil && !autoOffText()">{{ text }}</span> }
       </button>
-      @if (!isCamera()) {
-        <button class="timer-btn" type="button" [class.active]="device().overrideUntil || device().autoOff"
-                [attr.aria-label]="'Timer for ' + device().alias" (click)="togglePanel()">⏱</button>
-        <button class="switch" type="button" role="switch" [class.on]="device().state"
-                [attr.aria-checked]="device().state" [attr.aria-label]="device().alias"
-                [disabled]="busy() || !device().online" (click)="tapSwitch()"></button>
-      }
+      <button class="timer-btn" type="button" [class.active]="device().overrideUntil || device().autoOff"
+              [attr.aria-label]="'Timer for ' + device().alias" (click)="togglePanel()">⏱</button>
+      <button class="switch" type="button" role="switch" [class.on]="device().state"
+              [attr.aria-checked]="device().state" [attr.aria-label]="device().alias"
+              [disabled]="busy() || !device().online" (click)="tapSwitch()"></button>
     </div>
 
     @if (confirming()) {
@@ -137,7 +135,7 @@ export class DeviceRowComponent implements OnDestroy {
 
   /** Garage door openers: "on" means open. */
   readonly isDoor = computed(() => this.device().driverType === 'meross');
-  /** Wyze cameras: "on" means watching. They can't be paused from HomeHub for now. */
+  /** Wyze cameras: "on" means watching, "off" paused. */
   readonly isCamera = computed(() => this.device().driverType === 'wyze');
 
   /** Ticks while a turn-off is coming, so the countdown moves. */
@@ -227,8 +225,6 @@ export class DeviceRowComponent implements OnDestroy {
    * and holding a closed door closed means nothing, so a closed door gets none.
    */
   readonly timerChoices = computed(() => {
-    // The camera bridge can't pause cameras yet, so they have no switch or timer.
-    if (this.isCamera()) return [];
     if (this.isDoor()) return this.device().state ? [15, 30, 60] : [];
     return [60, 120, 240];
   });

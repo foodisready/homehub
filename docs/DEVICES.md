@@ -49,7 +49,7 @@ Garage doors are always protected: HomeHub asks you to confirm, and Chat and voi
 
 | Device | Status | Local or cloud | How it's added |
 |---|---|---|---|
-| Wyze Cam Pan v3 | ✅ Tested (3 in one home) | Cloud sign-in, then local video | Sign in to Wyze on the **Cameras** page with a free Wyze API key. Live video and snapshots. Pausing and motion snapshots aren't available yet. |
+| Wyze Cam Pan v3 | ✅ Tested (3 in one home) | Cloud sign-in, then local video | Sign in to Wyze on the **Cameras** page with a free Wyze API key. Live video, snapshots, and pause and resume. Motion snapshots aren't available yet. |
 | Wyze Cam v2 | ⚠️ Untested on the same network | Cloud sign-in, then local video | The same. The one tested was on another network, where no camera connects. |
 | Other Wyze cameras supported by the [camera bridge](https://github.com/IDisposable/docker-wyze-bridge) | 🟡 Should work | Cloud sign-in, then local video | The same. Check your model on the bridge's list. |
 

@@ -23,7 +23,7 @@ interface Settings { enabled: boolean; motionSnapshots: boolean; notify: boolean
 
 const PAGE = 48;
 
-/** Wyze cameras: sign in to Wyze, watch live, take snapshots and look through them. */
+/** Wyze cameras: sign in to Wyze, watch live, pause and resume, take snapshots and look through them. */
 @Component({
   selector: 'app-cameras',
   standalone: true,
@@ -215,15 +215,27 @@ const PAGE = 48;
                   {{ c.room ?? 'No room' }}{{ c.model ? ' · ' + c.model : '' }}
                   @if (c.lastMotionAt) { · motion {{ ago(c.lastMotionAt) }} }
                 </div>
-                @if (c.online !== false && !c.streaming) {
+                @if (c.watching !== false && c.online !== false && !c.streaming) {
                   <p class="cam-sub" style="color:#fbbf24;margin-top:-0.3rem">Not connected to the bridge yet. It keeps trying.</p>
                 }
                 <div class="cam-actions">
-                  <button class="btn-sm btn-primary" type="button" (click)="openLive(c)">Live</button>
-                  <button class="btn-sm ghost" type="button" (click)="takeSnapshot(c)" [disabled]="busyId() === c.deviceId">
+                  <button class="btn-sm btn-primary" type="button" (click)="openLive(c)" [disabled]="c.watching === false">Live</button>
+                  <button class="btn-sm ghost" type="button" (click)="takeSnapshot(c)" [disabled]="c.watching === false || busyId() === c.deviceId">
                     {{ busyId() === c.deviceId ? 'Saving…' : 'Snapshot' }}
                   </button>
+                  @if (c.watching === false) {
+                    <button class="btn-sm ghost" type="button" (click)="setWatching(c, true)" [disabled]="busyId() === c.deviceId">Resume</button>
+                  } @else {
+                    <button class="btn-sm ghost" type="button" (click)="confirmPause.set(c.deviceId)" [disabled]="busyId() === c.deviceId">Pause</button>
+                  }
                 </div>
+                @if (confirmPause() === c.deviceId) {
+                  <div class="confirm">
+                    <span>Pause {{ c.name }}? It stops watching, recording and detecting motion until you resume it.</span>
+                    <button class="btn-sm danger" type="button" (click)="setWatching(c, false)">Pause</button>
+                    <button class="btn-sm ghost" type="button" (click)="confirmPause.set(null)">Cancel</button>
+                  </div>
+                }
               </div>
             </div>
           }
@@ -327,6 +339,7 @@ export class CamerasComponent implements OnInit, OnDestroy {
   readonly busy = signal(false);
   readonly busyId = signal<number | null>(null);
   readonly confirmSignOut = signal(false);
+  readonly confirmPause = signal<number | null>(null);
   readonly live = signal<Camera | null>(null);
   readonly shot = signal<Snapshot | null>(null);
   readonly message = signal('');
@@ -491,6 +504,22 @@ export class CamerasComponent implements OnInit, OnDestroy {
     this.addCamera(first, () => { if (rest.length) this.addAll(); });
   }
 
+  setWatching(c: Camera, on: boolean): void {
+    this.confirmPause.set(null);
+    this.busyId.set(c.deviceId);
+    this.cameraMsg.set('');
+    this.http.post(`/api/devices/${c.deviceId}/${on ? 'on' : 'off'}`, {}).subscribe({
+      next: () => {
+        this.busyId.set(null);
+        this.cameras.update((list) => list.map((x) => (x.deviceId === c.deviceId ? { ...x, watching: on } : x)));
+      },
+      error: (err: HttpErrorResponse) => {
+        this.busyId.set(null);
+        this.cameraMsg.set(err.error?.code === 'CAMERA_ERROR' ? err.error.error : `Couldn't ${on ? 'resume' : 'pause'} ${c.name}. Try again.`);
+      },
+    });
+  }
+
   takeSnapshot(c: Camera): void {
     this.busyId.set(c.deviceId);
     this.cameraMsg.set('');
@@ -508,7 +537,7 @@ export class CamerasComponent implements OnInit, OnDestroy {
   }
 
   openLive(c: Camera): void {
-    this.live.set(c);
+    if (c.watching !== false) this.live.set(c);
   }
 
   openShot(s: Snapshot): void { this.shot.set(s); }

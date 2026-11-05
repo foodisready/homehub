@@ -1,23 +1,25 @@
 import type { DeviceDriver, DiscoveredDevice, EnergyMetrics } from './DeviceDriver';
 import * as bridge from '../cameras/bridge';
+import * as cloud from '../cameras/wyze-cloud';
 import { liveCameras } from '../cameras/watch';
 
 /**
- * Wyze cameras, through the camera bridge. driver_config is { cam: "<bridge name>" }.
+ * Wyze cameras: video through the camera bridge, on/off through the Wyze
+ * cloud. driver_config is { cam: "<bridge name>" }.
  *
- * "On" means the camera is watching. The current bridge can't pause a camera
- * (Wyze's power-off), so a camera on the bridge reads as on, one the bridge
- * doesn't know as offline, and pausing is refused with an explanation.
- * Pausing will come back through the Wyze account.
+ * "On" means the camera is watching; "off" pauses it with Wyze's own power
+ * switch, which stops it streaming, recording and detecting motion (a Pan
+ * also tucks its lens away). It stays on Wi-Fi, so it can be resumed.
  *
- * The camera list is cached for a moment, because device polling asks about
- * each camera in turn.
+ * A camera the bridge doesn't know reads as offline. Asking Wyze whether a
+ * camera is on is slow and rate-limited, so the answer is cached for a few
+ * minutes; a switch from HomeHub updates the cache at once.
  */
 
 const LIST_CACHE_MS = 10_000;
+const POWER_CACHE_MS = 5 * 60 * 1000;
 let listCache: { at: number; cameras: Promise<bridge.BridgeCamera[]> } | null = null;
-
-export const PAUSE_UNAVAILABLE = 'Pausing Wyze cameras isn\'t available with the current camera bridge yet.';
+const powerCache = new Map<string, { on: boolean; at: number }>();
 
 export function cameraName(config?: Record<string, unknown>): string {
   const cam = config?.cam;
@@ -25,8 +27,11 @@ export function cameraName(config?: Record<string, unknown>): string {
   return cam;
 }
 
-/** For tests and after a bridge sign-in. */
-export function clearPowerCache(): void { listCache = null; }
+/** For tests and after a Wyze sign-in. */
+export function clearPowerCache(): void {
+  listCache = null;
+  powerCache.clear();
+}
 
 function cameras(): Promise<bridge.BridgeCamera[]> {
   if (!listCache || Date.now() - listCache.at > LIST_CACHE_MS) {
@@ -37,19 +42,40 @@ function cameras(): Promise<bridge.BridgeCamera[]> {
   return listCache.cameras;
 }
 
+async function find(cam: string): Promise<bridge.BridgeCamera & { mac: string; model: string }> {
+  const found = (await cameras()).find((c) => c.id === cam);
+  if (!found) throw new Error('The camera bridge doesn\'t have this camera');
+  if (!found.mac || !found.model) throw new Error('The camera bridge doesn\'t know this camera\'s hardware address');
+  return found as bridge.BridgeCamera & { mac: string; model: string };
+}
+
 export class WyzeDriver implements DeviceDriver {
   readonly type = 'wyze';
+  /** Wyze takes a few seconds to apply a power change. */
+  readonly confirmAfterMs = 8000;
 
-  async setPower(_ip: string, _on: boolean, config?: Record<string, unknown>): Promise<void> {
-    cameraName(config);
-    throw new bridge.BridgeError(PAUSE_UNAVAILABLE, 501);
+  async setPower(_ip: string, on: boolean, config?: Record<string, unknown>): Promise<void> {
+    const name = cameraName(config);
+    const cam = await find(name);
+    await cloud.setCameraPower(cam, on);
+    powerCache.set(name, { on, at: Date.now() });
   }
 
   async getPower(_ip: string, config?: Record<string, unknown>): Promise<boolean> {
-    const cam = cameraName(config);
-    const found = (await cameras()).find((c) => c.id === cam);
-    if (!found) throw new Error('The camera bridge doesn\'t have this camera');
-    return found.enabled;
+    const name = cameraName(config);
+    const cam = await find(name);
+    const cached = powerCache.get(name);
+    if (cached && Date.now() - cached.at < POWER_CACHE_MS) return cached.on;
+    try {
+      const on = await cloud.getCameraPower(cam);
+      powerCache.set(name, { on, at: Date.now() });
+      return on;
+    } catch (err) {
+      // Wyze unreachable or not signed in: the bridge having the camera is the best answer there is.
+      if (cached) return cached.on;
+      bridge.logBridgeError(err, `Couldn't ask Wyze whether ${cam.name} is on`);
+      return cam.enabled;
+    }
   }
 
   async getEnergy(): Promise<EnergyMetrics | null> {

@@ -13,6 +13,7 @@ import http from 'node:http';
 import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import express from 'express';
 import type Database from 'better-sqlite3';
 
@@ -83,8 +84,51 @@ const bridgeServer = http.createServer((req, res) => {
   json(404, { error: 'not found' });
 });
 
+/** A fake Wyze cloud: sign-in, token refresh, and each camera's power, keyed by MAC. */
+const wyze = {
+  logins: 0,
+  refreshes: 0,
+  token: '',
+  /** The next request with a token answers "expired", as Wyze does after about a day. */
+  expireNext: false,
+  power: {} as Record<string, boolean>,
+  actions: [] as string[],
+};
+const md5x3 = (pw: string) => { let o = pw; for (let i = 0; i < 3; i++) o = crypto.createHash('md5').update(o).digest('hex'); return o; };
+const wyzeServer = http.createServer((req, res) => {
+  let raw = '';
+  req.on('data', (c) => (raw += c));
+  req.on('end', () => {
+    const body = raw ? JSON.parse(raw) : {};
+    const json = (b: unknown) => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify(b)); };
+    const url = req.url ?? '';
+    if (url === '/api/user/login') {
+      if (req.headers.apikey !== 'akey' || req.headers.keyid !== 'kid' || body.password !== md5x3('right')) return json({ code: '1000', msg: 'Invalid credentials, please check username, password, keyid or apikey' });
+      wyze.logins++;
+      wyze.token = `tok${wyze.logins}`;
+      return json({ access_token: wyze.token, refresh_token: 'ref', user_id: 'u1' });
+    }
+    if (url === '/app/user/refresh_token') {
+      wyze.refreshes++;
+      wyze.token = `tok-r${wyze.refreshes}`;
+      return json({ code: '1', data: { access_token: wyze.token, refresh_token: 'ref' } });
+    }
+    if (body.access_token !== wyze.token || wyze.expireNext) { wyze.expireNext = false; return json({ code: '2001', msg: 'access token is error' }); }
+    if (url === '/app/v2/auto/run_action') {
+      wyze.actions.push(`${body.action_key} ${body.instance_id} ${body.provider_key}`);
+      wyze.power[body.instance_id] = body.action_key === 'power_on';
+      return json({ code: '1', data: { result: 'ok' } });
+    }
+    if (url === '/app/v2/device/get_device_Info') {
+      return json({ code: '1', data: { property_list: [{ pid: 'P1', value: '1' }, { pid: 'P3', value: wyze.power[body.device_mac] === false ? '0' : '1' }] } });
+    }
+    json({ code: '404', msg: 'unknown' });
+  });
+});
+
 let db: Database.Database;
 let bridge: typeof import('./bridge');
+let cloud: typeof import('./wyze-cloud');
 let snaps: typeof import('./snapshots');
 let watch: typeof import('./watch');
 let power: typeof import('../devices/power');
@@ -113,6 +157,10 @@ function signedIn(): void {
 describe('Wyze cameras', () => {
   before(async () => {
     await new Promise<void>((ok) => bridgeServer.listen(0, '127.0.0.1', ok));
+    await new Promise<void>((ok) => wyzeServer.listen(0, '127.0.0.1', ok));
+    const wyzePort = (wyzeServer.address() as { port: number }).port;
+    process.env.WYZE_AUTH_URL = `http://127.0.0.1:${wyzePort}`;
+    process.env.WYZE_API_URL = `http://127.0.0.1:${wyzePort}/app`;
     const port = (bridgeServer.address() as { port: number }).port;
     process.env.DB_PATH = path.join(TMP, 'db.sqlite');
     process.env.WYZE_BRIDGE_URL = `http://127.0.0.1:${port}`;
@@ -122,6 +170,7 @@ describe('Wyze cameras', () => {
 
     db = (await import('../db')).getDb();
     bridge = await import('./bridge');
+    cloud = await import('./wyze-cloud');
     snaps = await import('./snapshots');
     watch = await import('./watch');
     power = await import('../devices/power');
@@ -144,6 +193,8 @@ describe('Wyze cameras', () => {
     await new Promise<void>((ok) => app.close(() => ok()));
     bridgeServer.closeAllConnections();
     bridgeServer.close();
+    wyzeServer.closeAllConnections();
+    wyzeServer.close();
     db.close();
     fs.rmSync(TMP, { recursive: true, force: true });
   });
@@ -160,6 +211,8 @@ describe('Wyze cameras', () => {
     process.env.WYZE_BRIDGE_API_KEY = KEY;
     watch.resetMotionState();
     WyzeDriver.clearPowerCache();
+    cloud.resetCloud();
+    Object.assign(wyze, { logins: 0, refreshes: 0, token: '', expireNext: false, power: {}, actions: [] });
     signedIn();
   });
 
@@ -232,6 +285,46 @@ describe('Wyze cameras', () => {
     });
   });
 
+  describe('Wyze cloud', () => {
+    const pan = { mac: '80482C000002', model: 'HL_PAN3' };
+
+    it('keeps its token, in a file only it reads, rather than signing in each time', async () => {
+      await cloud.getCameraPower(pan);
+      await cloud.setCameraPower(pan, false);
+      assert.equal(wyze.logins, 1);
+      const file = path.join(SIGNIN, 'homehub-auth.json');
+      assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+      cloud.resetCloud();   // as after a restart
+      assert.equal(await cloud.getCameraPower(pan), false);
+      assert.equal(wyze.logins, 1, 'the saved token was used');
+    });
+
+    it('refreshes an expired token and tries again', async () => {
+      await cloud.getCameraPower(pan);
+      wyze.expireNext = true;
+      await cloud.setCameraPower(pan, false);
+      assert.deepEqual([wyze.logins, wyze.refreshes], [1, 1]);
+      assert.deepEqual(wyze.actions, ['power_off 80482C000002 HL_PAN3']);
+    });
+
+    it('explains a rejected sign-in, and waits before trying again', async () => {
+      bridge.saveSignIn({ ...RIGHT, password: 'wrong' });
+      await assert.rejects(cloud.getCameraPower(pan), /didn't accept the saved sign-in/);
+      await assert.rejects(cloud.getCameraPower(pan), (err: Error & { code?: string }) => err.code === 'BACKOFF');
+      assert.equal(wyze.logins, 0);
+    });
+
+    it('starts afresh after a new sign-in, and forgets its token on sign-out', async () => {
+      await cloud.getCameraPower(pan);
+      bridge.saveSignIn(RIGHT);
+      await cloud.getCameraPower(pan);
+      assert.equal(wyze.logins, 2, 'a new sign-in gets a new token');
+      bridge.clearSignIn();
+      assert.equal(fs.existsSync(path.join(SIGNIN, 'homehub-auth.json')), false);
+      await assert.rejects(cloud.getCameraPower(pan), (err: Error & { status?: number }) => err.status === 409);
+    });
+  });
+
   describe('driver', () => {
     it('reads a camera on the bridge as watching, and one it lacks as offline', async () => {
       const d = new WyzeDriver.WyzeDriver();
@@ -242,12 +335,31 @@ describe('Wyze cameras', () => {
       assert.equal(fake.calls.filter((c) => c.startsWith('GET /api/cameras')).length, calls, 'the list is cached');
     });
 
-    it("explains that pausing isn't available", async () => {
-      await assert.rejects(new WyzeDriver.WyzeDriver().setPower('ip', false, { cam: 'front_door' }), (err: Error & { status?: number }) => {
-        assert.equal(err.status, 501);
-        assert.match(err.message, /isn't available/);
-        return true;
-      });
+    it('pauses and resumes a camera through Wyze, and caches its state', async () => {
+      const d = new WyzeDriver.WyzeDriver();
+      await d.setPower('ip', false, { cam: 'living_pan' });
+      assert.deepEqual(wyze.actions, ['power_off 80482C000002 HL_PAN3']);
+      assert.equal(await d.getPower('ip', { cam: 'living_pan' }), false, 'from the cache');
+      WyzeDriver.clearPowerCache();
+      assert.equal(await d.getPower('ip', { cam: 'living_pan' }), false, 'from Wyze');
+      await d.setPower('ip', true, { cam: 'living_pan' });
+      WyzeDriver.clearPowerCache();
+      assert.equal(await d.getPower('ip', { cam: 'living_pan' }), true);
+      assert.equal(wyze.logins, 1, 'signed in once');
+    });
+
+    it('says when the camera bridge lacks the camera', async () => {
+      await assert.rejects(new WyzeDriver.WyzeDriver().setPower('ip', false, { cam: 'gone' }), /doesn't have this camera/);
+      assert.deepEqual(wyze.actions, []);
+    });
+
+    it('falls back to the bridge when Wyze can\'t be asked', async () => {
+      process.env.WYZE_API_URL = 'http://127.0.0.1:1/app';
+      try {
+        assert.equal(await new WyzeDriver.WyzeDriver().getPower('ip', { cam: 'front_door' }), true);
+      } finally {
+        process.env.WYZE_API_URL = `${process.env.WYZE_AUTH_URL}/app`;
+      }
     });
 
     it('discovers the cameras on the account', async () => {

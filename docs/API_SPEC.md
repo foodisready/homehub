@@ -631,13 +631,13 @@ Every device change and its cause. Anyone signed in can read it.
 
 ## Cameras (Wyze)
 
-Cameras are devices with `driverType: "wyze"` and `driverConfig: { cam: "<bridge name>" }`. A camera the bridge has reads as on; one it lacks, as offline. The current bridge can't pause cameras, so `POST /api/devices/:id/off` answers `501` with `code: "NOT_SUPPORTED"`. Cameras added under another bridge name are relinked by `mac`.
+Cameras are devices with `driverType: "wyze"` and `driverConfig: { cam: "<bridge name>" }`. `POST /api/devices/:id/on` resumes one and `/off` pauses it, through the Wyze cloud (`run_action` `power_on`/`power_off`); its state is Wyze's property `P3`, cached for 5 minutes. A Wyze problem answers with its status and `code: "CAMERA_ERROR"`, such as `409` when signed out. A camera the bridge lacks reads as offline. They're always protected; Chat and voice may resume them but not pause them. Cameras added under another bridge name are relinked by `mac`.
 
 | Method | Path | Who | Does |
 |---|---|---|---|
 | `GET` | `/api/cameras/bridge` | any | `{ state }`: `off` (turned off in Settings), `not-configured` (`HOMEHUB_CAMERA_BRIDGE=0`), `signed-out`, `starting` (restarting with a new sign-in), `sign-in-failed` (with `detail`), `unreachable`, `unauthorized` or `ready` (with `cameras`) |
-| `POST` | `/api/cameras/bridge/login` | admin | Body: `{ email, password, keyId, apiKey }`. Saved in the data volume's `wyze` folder (mode 0600) for the bridge, which restarts with it. Waits up to 90 s, then returns the new state; `422` if Wyze turns it down. |
-| `DELETE` | `/api/cameras/bridge/login` | admin | Signs out: deletes the saved sign-in, and the bridge stops. Returns the new state. |
+| `POST` | `/api/cameras/bridge/login` | admin | Body: `{ email, password, keyId, apiKey }`. Saved in the data volume's `wyze` folder (mode 0600) for the bridge, which restarts with it. HomeHub uses it too, for pausing, keeping its Wyze token there as `homehub-auth.json`. Waits up to 90 s, then returns the new state; `422` if Wyze turns it down. |
+| `DELETE` | `/api/cameras/bridge/login` | admin | Signs out: deletes the saved sign-in and HomeHub's Wyze token, and the bridge stops. Returns the new state. |
 | `GET` | `/api/cameras/bridge/cameras` | admin | Cameras on the Wyze account: `[{ cam, name, model, ip, mac, streaming, added }]` |
 | `GET` | `/api/cameras` | any | Added cameras: `{ bridgeError, cameras: [{ deviceId, name, room, cam, model, watching, online, streaming, lastMotionAt, latestSnapshot }] }` |
 | `GET` | `/api/cameras/:deviceId/live.jpg` | any | A picture now, tried twice. `?cached=1` (for thumbnails) tries once. `404` when the camera gives none. |
