@@ -56,7 +56,8 @@ export function setOverride(deviceId: number, state: boolean, minutes: number): 
     UPDATE devices
        SET override_state = ?,
            override_until = datetime('now', ?),
-           timer_off_at   = CASE WHEN ? = 1 THEN datetime('now', ?) ELSE NULL END
+           timer_off_at   = CASE WHEN ? = 1 THEN datetime('now', ?) ELSE NULL END,
+           timer_label    = NULL
      WHERE id = ?
   `).run(state ? 1 : 0, offset, state ? 1 : 0, offset, deviceId);
 
@@ -70,6 +71,16 @@ export function clearOverride(deviceId: number): void {
     'UPDATE devices SET override_state = NULL, override_until = NULL, timer_off_at = NULL WHERE id = ?'
   ).run(deviceId);
   emitDeviceOverride(deviceId, null, null);
+}
+
+/**
+ * A Turn ON schedule's "Turn off after": a timer like one set by hand, but
+ * without holding off other schedules, and named after the schedule. Switching
+ * the device by hand cancels it, as it does any timer.
+ */
+export function setScheduleTimer(deviceId: number, minutes: number, label: string): void {
+  getDb().prepare("UPDATE devices SET timer_off_at = datetime('now', ?), timer_label = ? WHERE id = ?")
+    .run(`${minutes} minutes`, label, deviceId);
 }
 
 /** Switching a device by hand replaces its timer, so it can't fire later. */
@@ -131,9 +142,12 @@ export function assistantMaySwitch(
 
 const unreachable = new Set<number>();
 
-async function expireTimer(device: PowerDevice & { timer_off_at: string }): Promise<void> {
+async function expireTimer(device: PowerDevice & { timer_off_at: string; timer_label?: string | null }): Promise<void> {
   try {
-    await withActivity({ source: 'timer' }, () => sendPower(device, false));
+    const cause = device.timer_label
+      ? { source: 'schedule' as const, detail: device.timer_label }
+      : { source: 'timer' as const };
+    await withActivity(cause, () => sendPower(device, false));
   } catch (err) {
     // The timer stays set, so the next sweep tries again.
     if (!unreachable.has(device.id)) {
@@ -168,7 +182,7 @@ export async function sweepPowerTimers(): Promise<void> {
 
     if (automationsPaused()) return;
     const due = db.prepare("SELECT * FROM devices WHERE timer_off_at <= datetime('now')")
-      .all() as (PowerDevice & { timer_off_at: string })[];
+      .all() as (PowerDevice & { timer_off_at: string; timer_label: string | null })[];
     await Promise.all(due.map(expireTimer));
   } finally {
     sweeping = false;

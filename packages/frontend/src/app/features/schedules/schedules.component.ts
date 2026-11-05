@@ -3,7 +3,7 @@ import { HttpClient } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
 import { AuthService } from '../../core/auth/auth.service';
 import { Device } from '../../shared/models/device.model';
-import { SOLAR_EVENTS, cronProblem, describeCron, describeTiming, timingOrder } from './schedule-text';
+import { SOLAR_EVENTS, cronProblem, describeCron, describeDuration, describeTiming, timingOrder } from './schedule-text';
 
 interface Schedule {
   id: number;
@@ -15,6 +15,8 @@ interface Schedule {
   solarEvent: string | null;
   solarOffsetMinutes: number;
   durationMinutes: number | null;
+  /** On a Turn ON schedule: turns the device off again this many minutes later. */
+  stayOnMinutes?: number | null;
   state: boolean;
   enabled: boolean;
   /** Set when the scheduler can't read it, so it never runs. */
@@ -184,6 +186,9 @@ const CRON_PRESETS = [
     }
     select:focus { border-color: var(--accent); }
     .row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+    .stay-row { display: grid; grid-template-columns: 1fr auto; gap: 0.5rem; }
+    .field-help { font-size: 0.8rem; color: var(--text-muted); margin: 0.35rem 0 0; line-height: 1.4; }
+    .stay-on { font-size: 0.85rem; font-weight: 500; color: var(--text-muted); margin-left: 0.35rem; }
     .form-actions { display: flex; gap: 0.75rem; margin-top: 1.25rem; }
     .btn-cancel {
       flex: 1; background: transparent;
@@ -277,6 +282,9 @@ const CRON_PRESETS = [
                       <span class="badge" [class.badge-on]="s.state" [class.badge-off]="!s.state">
                         {{ s.state ? 'ON' : 'OFF' }}
                       </span>
+                      @if (s.state && s.stayOnMinutes) {
+                        <span class="stay-on">for {{ duration(s.stayOnMinutes) }}</span>
+                      }
                     </div>
                     @if (s.label !== timing(s)) {
                       <div class="schedule-meta">{{ s.label }}</div>
@@ -361,6 +369,25 @@ const CRON_PRESETS = [
                 <label>Offset (minutes)</label>
                 <input type="number" [(ngModel)]="form.solarOffsetMinutes" placeholder="0" />
               </div>
+            </div>
+          }
+
+          @if (form.triggerType !== 'auto_off' && form.state) {
+            <div class="field">
+              <label for="stay-on">Turn off after (optional)</label>
+              <div class="stay-row">
+                <input id="stay-on" type="number" min="1" [max]="form.stayOnUnit === 'h' ? 24 : 1440" step="any"
+                       [(ngModel)]="form.stayOnValue" placeholder="Stays on" aria-describedby="stay-on-help" />
+                <select [(ngModel)]="form.stayOnUnit" aria-label="Unit">
+                  <option value="min">minutes</option>
+                  <option value="h">hours</option>
+                </select>
+              </div>
+              <p id="stay-on-help" class="field-help">
+                @if (stayOnPreview(); as p) { Turns off {{ p }} after this schedule turns it on. }
+                @else { Leave empty and it stays on until something turns it off. }
+                Switching it yourself in the meantime cancels this.
+              </p>
             </div>
           }
 
@@ -485,6 +512,8 @@ export class SchedulesComponent implements OnInit {
       cronExpression:     '',
       selectedPreset:     '',
       durationMinutes:    15,
+      stayOnValue:        '' as number | '',
+      stayOnUnit:         'min' as 'min' | 'h',
     };
   }
 
@@ -536,6 +565,9 @@ export class SchedulesComponent implements OnInit {
       cronExpression:     expr,
       selectedPreset:     matchedPreset ? matchedPreset.value : '',
       durationMinutes:    s.durationMinutes ?? 15,
+      // Whole hours show as hours.
+      stayOnValue:        s.stayOnMinutes ? (s.stayOnMinutes % 60 === 0 ? s.stayOnMinutes / 60 : s.stayOnMinutes) : '',
+      stayOnUnit:         s.stayOnMinutes && s.stayOnMinutes % 60 === 0 ? 'h' : 'min',
     };
     this.showForm.set(true);
   }
@@ -568,11 +600,30 @@ export class SchedulesComponent implements OnInit {
     return describeTiming(s);
   }
 
+  duration(minutes: number): string {
+    return describeDuration(minutes);
+  }
+
+  /** The form's "Turn off after" in minutes: null when empty, NaN when it isn't 1 minute to 24 hours. */
+  private stayOnMinutes(): number | null {
+    const v = this.form.stayOnValue;
+    if (v === '' || v === null || v === undefined) return null;
+    const minutes = Math.round(Number(v) * (this.form.stayOnUnit === 'h' ? 60 : 1));
+    return Number.isFinite(minutes) && minutes >= 1 && minutes <= 1440 ? minutes : NaN;
+  }
+
+  stayOnPreview(): string | null {
+    const m = this.stayOnMinutes();
+    return m && !Number.isNaN(m) ? describeDuration(m) : null;
+  }
+
   save(): void {
     const { deviceId, triggerType, state, solarEvent, solarOffsetMinutes, cronExpression, durationMinutes } = this.form;
     if (!deviceId) { this.formError.set('Device is required.'); return; }
     if (triggerType === 'cron' && !cronExpression) { this.formError.set('Cron expression is required.'); return; }
     if (triggerType === 'auto_off' && (!durationMinutes || durationMinutes <= 0)) { this.formError.set('Duration must be greater than 0.'); return; }
+    const stayOn = triggerType !== 'auto_off' && state ? this.stayOnMinutes() : null;
+    if (stayOn !== null && Number.isNaN(stayOn)) { this.formError.set('Turn off after must be from 1 minute to 24 hours, or empty.'); return; }
 
     this.saving.set(true);
     this.formError.set('');
@@ -591,6 +642,7 @@ export class SchedulesComponent implements OnInit {
       ...(triggerType === 'solar'    ? { solarEvent, solarOffsetMinutes: Number(solarOffsetMinutes) } : {}),
       ...(triggerType === 'cron'     ? { cronExpression } : {}),
       ...(triggerType === 'auto_off' ? { durationMinutes: Number(durationMinutes) } : {}),
+      stayOnMinutes: stayOn,
     };
 
     const id = this.editingId();

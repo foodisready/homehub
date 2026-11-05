@@ -6,6 +6,7 @@ import { SocketService } from '../../core/socket/socket.service';
 import { CamerasStateService } from '../../core/services/cameras-state.service';
 import { AuthImgComponent } from './auth-img.component';
 import { LiveViewComponent } from './live-view.component';
+import { MAX_SHARE, canShareFiles, shareOrSave, snapshotFileName } from './snapshot-share';
 
 type BridgeState =
   | { state: 'not-configured' } | { state: 'off' } | { state: 'unreachable'; detail: string } | { state: 'signed-out' }
@@ -92,6 +93,17 @@ const PAGE = 48;
       display: flex; justify-content: space-between; gap: 0.3rem;
     }
     .more { margin-top: 0.85rem; text-align: center; }
+    .select-bar { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin: -0.25rem 0 0.5rem; min-height: 2rem; }
+    .select-bar .count { flex: 1; font-size: 0.85rem; color: var(--text-muted); }
+    .shot.selected { outline: 3px solid var(--accent); outline-offset: -3px; }
+    .shot .tick {
+      position: absolute; top: 0.35rem; right: 0.35rem; width: 1.5rem; height: 1.5rem; border-radius: 999px;
+      border: 2px solid #fff; background: rgba(0, 0, 0, 0.35); color: #fff; font-size: 0.85rem; font-weight: 700;
+      display: flex; align-items: center; justify-content: center; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+    }
+    .shot.selected .tick { background: var(--accent); border-color: var(--accent); }
+    .share-msg { font-size: 0.82rem; color: var(--text-muted); margin: 0 0 0.6rem; }
+    .lightbox .share-msg { color: #cbd5e1; margin: 0.5rem 0 0; }
 
     .lightbox { position: fixed; inset: 0; z-index: 60; background: rgba(0, 0, 0, 0.9); display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 1rem; }
     .lightbox-frame { width: min(100%, 1100px); }
@@ -262,6 +274,19 @@ const PAGE = 48;
             <button class="chip" type="button" [class.active]="filterId() === c.deviceId" (click)="setFilter(c.deviceId)">{{ c.name }}</button>
           }
         </div>
+        @if (snapshots().length) {
+          <div class="select-bar">
+            @if (selecting()) {
+              <span class="count" aria-live="polite">{{ selected().size ? selected().size + ' selected' : 'Tap pictures to select them' }}</span>
+              <button class="btn-sm" type="button" (click)="shareSelected()" [disabled]="!selectedReady()">{{ shareWord }}</button>
+              <button class="btn-sm ghost" type="button" (click)="stopSelecting()">Cancel</button>
+            } @else {
+              <span class="count"></span>
+              <button class="btn-sm ghost" type="button" (click)="selecting.set(true)">Select</button>
+            }
+          </div>
+          @if (shareMsg() && !shot()) { <p class="share-msg" role="status">{{ shareMsg() }}</p> }
+        }
         @if (!snapshots().length) {
           <p class="muted">No snapshots yet. When a camera sees motion, a picture is saved here. Press Snapshot on a camera to save one yourself.</p>
         }
@@ -269,8 +294,11 @@ const PAGE = 48;
           <div class="day">{{ day.label }}</div>
           <div class="shots">
             @for (s of day.items; track s.id) {
-              <button class="shot" type="button" (click)="openShot(s)" [attr.aria-label]="s.cameraName + ', ' + time(s.takenAt)">
+              <button class="shot" type="button" (click)="selecting() ? toggleSelect(s) : openShot(s)"
+                      [class.selected]="selected().has(s.id)" [attr.aria-pressed]="selecting() ? selected().has(s.id) : null"
+                      [attr.aria-label]="s.cameraName + ', ' + time(s.takenAt)">
                 <app-auth-img [src]="'/api/cameras/snapshots/' + s.id + '/image'" [alt]="s.cameraName" />
+                @if (selecting()) { <span class="tick" aria-hidden="true">{{ selected().has(s.id) ? '✓' : '' }}</span> }
                 <span class="shot-meta"><span>{{ s.cameraName }}</span><span>{{ time(s.takenAt) }}{{ s.trigger === 'motion' ? ' · motion' : '' }}</span></span>
               </button>
             }
@@ -323,18 +351,20 @@ const PAGE = 48;
     }
 
     @if (shot(); as s) {
-      <div class="lightbox" (click)="shot.set(null)">
+      <div class="lightbox" (click)="closeShot()">
         <div class="lightbox-frame" (click)="$event.stopPropagation()" role="dialog" [attr.aria-label]="'Snapshot from ' + s.cameraName">
           <div class="lightbox-bar">
             <span><strong>{{ s.cameraName }}</strong> · {{ dateTime(s.takenAt) }}{{ s.trigger === 'motion' ? ' · motion' : '' }}</span>
             <span class="lightbox-nav">
               <button class="btn-sm ghost" type="button" (click)="step(-1)" [disabled]="!neighbor(-1)" aria-label="Newer">‹</button>
               <button class="btn-sm ghost" type="button" (click)="step(1)" [disabled]="!neighbor(1)" aria-label="Older">›</button>
+              <button class="btn-sm ghost" type="button" (click)="shareOne(s)" [disabled]="!ready()[s.id]">{{ shareWord }}</button>
               @if (isAdmin()) { <button class="btn-sm ghost" type="button" (click)="deleteShot(s)">Delete</button> }
-              <button class="btn-sm ghost" type="button" (click)="shot.set(null)">Close</button>
+              <button class="btn-sm ghost" type="button" (click)="closeShot()">Close</button>
             </span>
           </div>
           <app-auth-img [src]="'/api/cameras/snapshots/' + s.id + '/image'" [alt]="s.cameraName" />
+          @if (shareMsg()) { <p class="share-msg" role="status">{{ shareMsg() }}</p> }
         </div>
       </div>
     }
@@ -456,6 +486,7 @@ export class CamerasComponent implements OnInit, OnDestroy {
 
   setFilter(id: number | null): void {
     this.filterId.set(id);
+    this.stopSelecting();
     this.loadSnapshots();
   }
 
@@ -561,7 +592,90 @@ export class CamerasComponent implements OnInit, OnDestroy {
     if (c.watching !== false) this.live.set(c);
   }
 
-  openShot(s: Snapshot): void { this.shot.set(s); }
+  openShot(s: Snapshot): void {
+    this.shareMsg.set('');
+    this.shot.set(s);
+    this.prepare(s);
+  }
+
+  closeShot(): void {
+    this.shot.set(null);
+    this.shareMsg.set('');
+  }
+
+  // ── Sharing ───────────────────────────────────────────────────
+
+  /** "Share" where the phone can share pictures; "Save" where it can only download them. */
+  readonly shareWord = canShareFiles() ? 'Share' : 'Save';
+  readonly selecting = signal(false);
+  readonly selected = signal<Set<number>>(new Set());
+  readonly shareMsg = signal('');
+  /** Pictures loaded and ready to share, by snapshot id. */
+  readonly ready = signal<Record<number, File>>({});
+  private readonly loading = new Set<number>();
+  readonly selectedReady = computed(() => {
+    const ids = [...this.selected()];
+    return ids.length > 0 && ids.every((id) => !!this.ready()[id]);
+  });
+
+  /** Loads a picture ahead of a tap on Share: browsers share only straight from the tap. */
+  private prepare(s: Snapshot): void {
+    if (this.ready()[s.id] || this.loading.has(s.id)) return;
+    this.loading.add(s.id);
+    this.http.get(`/api/cameras/snapshots/${s.id}/image`, { responseType: 'blob' }).subscribe({
+      next: (blob) => {
+        this.loading.delete(s.id);
+        const file = new File([blob], snapshotFileName(s.cameraName, s.takenAt), { type: 'image/jpeg', lastModified: Date.parse(s.takenAt) });
+        this.ready.update((m) => ({ ...m, [s.id]: file }));
+      },
+      error: () => { this.loading.delete(s.id); this.shareMsg.set('That picture couldn\'t be loaded.'); },
+    });
+  }
+
+  toggleSelect(s: Snapshot): void {
+    const next = new Set(this.selected());
+    if (next.has(s.id)) next.delete(s.id);
+    else if (next.size >= MAX_SHARE) { this.shareMsg.set(`Up to ${MAX_SHARE} pictures at a time.`); return; }
+    else { next.add(s.id); this.prepare(s); }
+    this.shareMsg.set('');
+    this.selected.set(next);
+  }
+
+  stopSelecting(): void {
+    this.selecting.set(false);
+    this.selected.set(new Set());
+    this.shareMsg.set('');
+  }
+
+  shareOne(s: Snapshot): void {
+    const file = this.ready()[s.id];
+    if (file) this.share([file], `${s.cameraName}, ${this.dateTime(s.takenAt)}`);
+  }
+
+  shareSelected(): void {
+    const seen = new Map<string, number>();
+    const files = [...this.selected()].map((id) => this.ready()[id]).filter((f): f is File => !!f).map((f) => {
+      // Two pictures from one camera in the same second would share a name: number the repeats.
+      const n = (seen.get(f.name) ?? 0) + 1;
+      seen.set(f.name, n);
+      return n === 1 ? f : new File([f], f.name.replace(/\.jpg$/, `-${n}.jpg`), { type: f.type, lastModified: f.lastModified });
+    });
+    if (files.length) this.share(files, files.length === 1 ? 'HomeHub snapshot' : `${files.length} HomeHub snapshots`, () => this.stopSelecting());
+  }
+
+  private share(files: File[], title: string, done?: () => void): void {
+    this.shareMsg.set('');
+    shareOrSave(files, title).then((result) => {
+      if (result === 'cancelled') return;
+      done?.();
+      if (result === 'saved') {
+        const n = files.length === 1 ? 'The picture was' : `The ${files.length} pictures were`;
+        this.shareMsg.set(window.isSecureContext
+          ? `${n} saved. This browser can't share pictures.`
+          : `${n} saved. To share instead, open HomeHub at its secure (https) address, such as the one you use away from home.`);
+      }
+    }).catch(() => this.shareMsg.set('Sharing didn\'t work. Try again, or save the picture instead.'));
+  }
 
   neighbor(dir: -1 | 1): Snapshot | null {
     const list = this.snapshots();
@@ -571,7 +685,7 @@ export class CamerasComponent implements OnInit, OnDestroy {
 
   step(dir: -1 | 1): void {
     const next = this.neighbor(dir);
-    if (next) this.shot.set(next);
+    if (next) { this.shot.set(next); this.prepare(next); this.shareMsg.set(''); }
   }
 
   deleteShot(s: Snapshot): void {
@@ -579,6 +693,7 @@ export class CamerasComponent implements OnInit, OnDestroy {
     this.http.delete(`/api/cameras/snapshots/${s.id}`).subscribe(() => {
       this.snapshots.update((l) => l.filter((x) => x.id !== s.id));
       this.shot.set(next);
+      if (next) this.prepare(next);
     });
   }
 

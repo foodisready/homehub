@@ -150,6 +150,10 @@ HomeHub switches cameras through your Wyze account, using the sign-in you saved,
 
 Select **Snapshot** to save a picture yourself. Snapshots appear on the **Cameras** page, newest first, and you can filter them by camera. They're saved as JPG files in HomeHub's data folder, under `snapshots/<camera>/<date>/`, and deleted after 30 days, which administrators can change at the bottom of the page.
 
+To send pictures to someone, open one and select **Share**, or select **Select** above the snapshots, tap the pictures you want (up to 20) and select **Share**. Your phone's own share menu opens, for Messages, email, Photos and so on. The pictures go only where you send them.
+
+Phones share pictures only from a secure address, so **Share** needs HomeHub's `https://` address, such as the one you use away from home ([Remote Access](REMOTE_ACCESS.md)). At its plain `http://` home address, and on computers whose browser can't share, the button says **Save** instead and downloads the pictures.
+
 Snapshots are history, so JSON backups leave them out. The install guide's full backup copies them.
 
 ### Motion snapshots
@@ -243,6 +247,8 @@ Open **Schedules** to add a time for a device. Each device has its own collapsib
 - **After a device turns on,** such as turning off after 10 minutes
 
 Sun schedules need your location in `.env`.
+
+A schedule that turns a device **on** can also turn it off again: fill in **Turn off after**, in minutes or hours (up to 24 hours), and the schedule's card reads, for example, "Sunset ON for 3 h". Leave it empty and the device stays on. While it's on, the dashboard shows when it will turn off, and **Activity** names the schedule that did it. If someone switches the device in the meantime, by hand, in Chat or by voice, the turn-off is cancelled, so a lamp you turned off early doesn't come back and one you turned back on stays on. It's kept through a restart, and a device whose time ran out while HomeHub was off turns off when it starts.
 
 ## Scenes
 

@@ -124,6 +124,8 @@ function migrate(db: Database.Database): void {
   try { db.exec('ALTER TABLE devices ADD COLUMN override_state INTEGER'); } catch {}
   try { db.exec('ALTER TABLE devices ADD COLUMN override_until TEXT'); } catch {}
   try { db.exec('ALTER TABLE devices ADD COLUMN timer_off_at TEXT'); } catch {}
+  // The schedule that set the timer, when one did ("Turn off after" on a Turn ON schedule).
+  try { db.exec('ALTER TABLE devices ADD COLUMN timer_label TEXT'); } catch {}
   try { db.exec('ALTER TABLE devices ADD COLUMN nicknames TEXT'); } catch {}
   try { db.exec('ALTER TABLE scenes ADD COLUMN nicknames TEXT'); } catch {}
   // Set when someone teaches HomeHub what a missed command meant, or dismisses it.
@@ -164,6 +166,9 @@ function migrate(db: Database.Database): void {
       COMMIT;
     `);
   }
+  // A Turn ON schedule's "Turn off after": the device's timer it sets when it runs.
+  // After the rebuild above, which would drop it.
+  try { db.exec('ALTER TABLE schedules ADD COLUMN stay_on_minutes INTEGER'); } catch {}
 
   // ── AuraFlow / sensor subsystem ────────────────────────────────
   db.exec(`

@@ -4,8 +4,9 @@ import { motionStatus, type RuleWithDevice } from '../sensors/motion';
 
 /**
  * When each device that's on will next turn itself off, and why. Three
- * things can do it: a timer someone set, a motion rule once the room is
- * empty, and a "turn off after X minutes" schedule. The earliest wins.
+ * things can do it: a timer (set by someone, or by a Turn ON schedule's
+ * "Turn off after"), a motion rule once the room is empty, and a "turn off
+ * after X minutes" schedule. The earliest wins.
  *
  * Each uses the same rules as the code that acts on it, so the dashboard's
  * countdown matches what happens.
@@ -27,6 +28,7 @@ const toMs = (time: string | null) =>
 interface DeviceRow {
   id: number;
   timer_off_at: string | null;
+  timer_label: string | null;
   override_until: string | null;
   turned_on_at: string | null;
 }
@@ -47,13 +49,15 @@ function better(a: AutoOff | undefined, b: AutoOff): AutoOff {
 export function pendingAutoOff(now = Date.now()): Map<number, AutoOff> {
   const db = getDb();
   const result = new Map<number, AutoOff>();
-  const devices = db.prepare('SELECT id, timer_off_at, override_until, turned_on_at FROM devices').all() as DeviceRow[];
+  const devices = db.prepare('SELECT id, timer_off_at, timer_label, override_until, turned_on_at FROM devices').all() as DeviceRow[];
   const on = new Map(devices.filter(isOn).map((d) => [d.id, d]));
   const offer = (id: number, a: AutoOff) => result.set(id, better(result.get(id), a));
 
-  // 1. Timers someone set ("turn off after 1 h").
+  // 1. Timers someone set ("turn off after 1 h"), or a Turn ON schedule's "Turn off after".
   for (const d of on.values()) {
-    if (d.timer_off_at) offer(d.id, { at: new Date(toMs(d.timer_off_at)).toISOString(), cause: 'timer', detail: null });
+    if (!d.timer_off_at) continue;
+    const at = new Date(toMs(d.timer_off_at)).toISOString();
+    offer(d.id, d.timer_label ? { at, cause: 'schedule', detail: d.timer_label } : { at, cause: 'timer', detail: null });
   }
 
   // 2. Motion rules.

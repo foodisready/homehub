@@ -23,6 +23,8 @@ interface ScheduleRow {
   solar_event: SolarEvent | null;
   solar_offset_minutes: number;
   duration_minutes: number | null;
+  /** On a Turn ON schedule: the backend turns the device off this many minutes later. Older databases lack it. */
+  stay_on_minutes?: number | null;
   state: number;
   enabled: number;
 }
@@ -233,7 +235,11 @@ export class SchedulerService {
         'x-internal-key': this.internalKey,
       },
       // The label shows in HomeHub's Activity as the cause.
-      body: JSON.stringify({ state: row.state === 1, label: row.label }),
+      body: JSON.stringify({
+        state: row.state === 1,
+        label: row.label,
+        ...(row.state === 1 && row.stay_on_minutes ? { stayOnMinutes: row.stay_on_minutes } : {}),
+      }),
     });
 
     if (!res.ok) {

@@ -18,6 +18,8 @@ export interface ScheduleRow {
   solar_event: SolarEvent | null;
   solar_offset_minutes: number;
   duration_minutes: number | null;
+  /** On a Turn ON schedule: turn the device off again this many minutes later. */
+  stay_on_minutes: number | null;
   state: number;
   enabled: number;
   created_at: string;
@@ -34,12 +36,29 @@ function toPublic(row: ScheduleRow & { device_alias?: string }) {
     solarEvent:         row.solar_event,
     solarOffsetMinutes: row.solar_offset_minutes,
     durationMinutes:    row.duration_minutes,
+    stayOnMinutes:      row.stay_on_minutes ?? null,
     state:              row.state === 1,
     enabled:            row.enabled === 1,
     createdAt:          row.created_at,
     /** Why the scheduler can't run it, so it never fires; null when fine. */
     problem:            row.trigger_type === 'cron' ? cronProblem(row.cron_expression ?? '') : null,
   };
+}
+
+/** Longest "Turn off after": a day. */
+export const MAX_STAY_ON_MINUTES = 24 * 60;
+
+/**
+ * "Turn off after" on a Turn ON schedule: a whole number of minutes, up to a
+ * day, or nothing (it stays on). Ignored on Turn OFF and auto-off schedules.
+ */
+function stayOnMinutes(body: { stayOnMinutes?: unknown; state?: unknown; triggerType?: unknown }): number | null | { error: string } {
+  const v = body.stayOnMinutes;
+  if (v === undefined || v === null || v === '' || body.state !== true || body.triggerType === 'auto_off') return null;
+  if (typeof v !== 'number' || !Number.isInteger(v) || v < 1 || v > MAX_STAY_ON_MINUTES) {
+    return { error: `stayOnMinutes must be a whole number of minutes from 1 to ${MAX_STAY_ON_MINUTES}` };
+  }
+  return v;
 }
 
 const LIST_SQL = `
@@ -89,6 +108,8 @@ schedulesRouter.post('/', requireAdmin, (req: Request, res: Response) => {
   if (triggerType === 'auto_off' && (!durationMinutes || durationMinutes <= 0)) {
     return res.status(400).json({ error: 'durationMinutes (>0) required for auto_off trigger', code: 'VALIDATION_ERROR' });
   }
+  const stayOn = stayOnMinutes(req.body);
+  if (stayOn !== null && typeof stayOn === 'object') return res.status(400).json({ error: stayOn.error, code: 'VALIDATION_ERROR' });
 
   const db = getDb();
   const device = db.prepare('SELECT id FROM devices WHERE id = ?').get(deviceId);
@@ -96,9 +117,9 @@ schedulesRouter.post('/', requireAdmin, (req: Request, res: Response) => {
 
   try {
     const result = db.prepare(`
-      INSERT INTO schedules (device_id, label, trigger_type, cron_expression, solar_event, solar_offset_minutes, duration_minutes, state)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(deviceId, label, triggerType, cronExpression ?? null, solarEvent ?? null, solarOffsetMinutes, durationMinutes ?? null, state ? 1 : 0);
+      INSERT INTO schedules (device_id, label, trigger_type, cron_expression, solar_event, solar_offset_minutes, duration_minutes, stay_on_minutes, state)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(deviceId, label, triggerType, cronExpression ?? null, solarEvent ?? null, solarOffsetMinutes, durationMinutes ?? null, stayOn, state ? 1 : 0);
 
     const created = db.prepare(
       'SELECT s.*, d.alias AS device_alias FROM schedules s JOIN devices d ON d.id = s.device_id WHERE s.id = ?'
@@ -137,6 +158,8 @@ schedulesRouter.put('/:id', requireAdmin, (req: Request, res: Response) => {
   if (triggerType === 'auto_off' && (!durationMinutes || durationMinutes <= 0)) {
     return res.status(400).json({ error: 'durationMinutes (>0) required for auto_off trigger', code: 'VALIDATION_ERROR' });
   }
+  const stayOn = stayOnMinutes(req.body);
+  if (stayOn !== null && typeof stayOn === 'object') return res.status(400).json({ error: stayOn.error, code: 'VALIDATION_ERROR' });
 
   const db = getDb();
   const device = db.prepare('SELECT id FROM devices WHERE id = ?').get(deviceId);
@@ -145,9 +168,9 @@ schedulesRouter.put('/:id', requireAdmin, (req: Request, res: Response) => {
   const result = db.prepare(`
     UPDATE schedules
     SET device_id = ?, label = ?, trigger_type = ?, cron_expression = ?,
-        solar_event = ?, solar_offset_minutes = ?, duration_minutes = ?, state = ?
+        solar_event = ?, solar_offset_minutes = ?, duration_minutes = ?, stay_on_minutes = ?, state = ?
     WHERE id = ?
-  `).run(deviceId, label, triggerType, cronExpression ?? null, solarEvent ?? null, solarOffsetMinutes, durationMinutes ?? null, state ? 1 : 0, req.params.id);
+  `).run(deviceId, label, triggerType, cronExpression ?? null, solarEvent ?? null, solarOffsetMinutes, durationMinutes ?? null, stayOn, state ? 1 : 0, req.params.id);
 
   if (result.changes === 0) return res.status(404).json({ error: 'Schedule not found', code: 'NOT_FOUND' });
 

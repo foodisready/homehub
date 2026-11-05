@@ -368,6 +368,7 @@ Called by the sensor. The token is the auth, so these need no login. Returns `20
     "triggerType": "solar",
     "solarEvent": "sunset",
     "solarOffsetMinutes": 0,
+    "stayOnMinutes": 180,
     "state": true,
     "enabled": true,
     "nextRun": "2026-03-12T19:42:00Z"
@@ -417,6 +418,8 @@ The minute comes first. An expression the scheduler can't run is refused with `4
 ```
 
 Valid `solarEvent` values: `sunrise` · `sunset` · `dawn` · `dusk` · `goldenHour` · `solarNoon`
+
+`stayOnMinutes` (optional, on a cron or solar schedule with `state: true`): a whole number of minutes from 1 to 1440. When the schedule runs, the device's timer is set to turn it off that much later, named after the schedule, so `GET /api/devices/auto-off` reports it with `cause: "schedule"` and Activity records the turn-off as the schedule. It doesn't hold off the device's other schedules. Switching the device by hand, in Chat or by voice cancels it, and a Turn OFF schedule clears it. `null` or left out: the device stays on. It's ignored on Turn OFF and `auto_off` schedules, and anything else is refused with `400`.
 
 **Response 201** — created schedule object
 

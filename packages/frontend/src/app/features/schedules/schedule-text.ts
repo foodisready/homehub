@@ -83,6 +83,13 @@ export function describeTiming(schedule: ScheduleTiming): string {
   return `${Math.abs(offset)} min ${offset < 0 ? 'before' : 'after'} ${name.toLowerCase()}`;
 }
 
+/** "3 h", "90 min" or "1 h 30 min", for a Turn ON schedule's "Turn off after". */
+export function describeDuration(minutes: number): string {
+  if (minutes < 60) return `${minutes} min`;
+  const h = Math.floor(minutes / 60), m = minutes % 60;
+  return m === 0 ? `${h} h` : `${h} h ${m} min`;
+}
+
 /** Orders one device's schedules: sun events, then fixed times, then auto-off. */
 export function timingOrder(schedule: ScheduleTiming): number {
   if (schedule.triggerType === 'auto_off') return 3000;

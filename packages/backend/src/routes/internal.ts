@@ -19,6 +19,8 @@ import { withActivity } from '../activity/activity';
 import { issueTokens, serviceUser } from '../auth/auth.service';
 import { automationsPaused } from '../automation/pause';
 import { recordBridgeReport } from '../system/voice-bridge';
+import { cancelPowerTimer, setScheduleTimer } from '../devices/power';
+import { MAX_STAY_ON_MINUTES } from './schedules';
 
 export const internalRouter = Router();
 
@@ -79,8 +81,9 @@ internalRouter.post('/voice/command', async (req: Request, res: Response) => {
   res.json({ handled: true, ...handled });
 });
 
-// POST /internal/devices/:id/execute  { state: boolean }
-// Called by the scheduler when a scheduled action fires.
+// POST /internal/devices/:id/execute  { state: boolean, label?, stayOnMinutes? }
+// Called by the scheduler when a scheduled action fires. stayOnMinutes, on a
+// Turn ON schedule, sets the device's timer to turn it off again.
 internalRouter.post('/devices/:id/execute', async (req: Request, res: Response) => {
   const db = getDb();
   const device = db.prepare('SELECT id, alias, ip, driver_type, driver_config FROM devices WHERE id = ?')
@@ -90,7 +93,7 @@ internalRouter.post('/devices/:id/execute', async (req: Request, res: Response) 
     return res.status(404).json({ error: 'Device not found', code: 'DEVICE_NOT_FOUND' });
   }
 
-  const { state, label } = req.body as { state: boolean; label?: unknown };
+  const { state, label, stayOnMinutes } = req.body as { state: boolean; label?: unknown; stayOnMinutes?: unknown };
   if (typeof state !== 'boolean') {
     return res.status(400).json({ error: '`state` must be a boolean', code: 'VALIDATION_ERROR' });
   }
@@ -114,14 +117,20 @@ internalRouter.post('/devices/:id/execute', async (req: Request, res: Response) 
     const config = device.driver_config ? JSON.parse(device.driver_config) : undefined;
     await getDriver(device.driver_type ?? 'kasa').setPower(device.ip, state, config);
     withActivity({ source: 'schedule', detail: typeof label === 'string' ? label : null }, () => noteState(device.id, state));
+    const name = typeof label === 'string' && label ? label : 'Schedule';
+    const stayOn = state && typeof stayOnMinutes === 'number' && Number.isInteger(stayOnMinutes)
+      && stayOnMinutes >= 1 && stayOnMinutes <= MAX_STAY_ON_MINUTES ? stayOnMinutes : null;
     if (state) {
       db.prepare("UPDATE devices SET turned_on_at = datetime('now') WHERE id = ?").run(device.id);
+      if (stayOn) setScheduleTimer(device.id, stayOn, name);
     } else {
       db.prepare('UPDATE devices SET turned_on_at = NULL WHERE id = ?').run(device.id);
+      // Off already: a timer left from a "Turn off after" has nothing left to do.
+      cancelPowerTimer(device.id);
     }
     emitDeviceState(device.id, device.alias, state, getCachedState(device.id)?.wattage ?? null);
-    logger.info({ deviceId: device.id, alias: device.alias, state }, 'Scheduled action executed');
-    res.json({ alias: device.alias, state });
+    logger.info({ deviceId: device.id, alias: device.alias, state, ...(stayOn ? { stayOnMinutes: stayOn } : {}) }, 'Scheduled action executed');
+    res.json({ alias: device.alias, state, ...(stayOn ? { stayOnMinutes: stayOn } : {}) });
   } catch (err) {
     logger.error(err, 'Scheduled execute failed');
     res.status(503).json({ error: 'Device unreachable', code: 'DEVICE_UNREACHABLE' });

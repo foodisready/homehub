@@ -251,3 +251,74 @@ describe('/internal/voice', () => {
     assert.deepEqual(lastBridgeReport()?.speakers, [{ name: 'Tablet', address: '10.9.0.20', connected: true }]);
   });
 });
+
+describe('/internal/devices/:id/execute — a Turn ON schedule\'s "Turn off after"', () => {
+  const calls: { ip: string; state: boolean }[] = [];
+  let id = 0;
+  const run = (body: unknown) => fetch(`${baseUrl}/internal/devices/${id}/execute`, { method: 'POST', headers: HEADERS, body: JSON.stringify(body) });
+  const row = () => getDb().prepare('SELECT timer_off_at, timer_label, override_until FROM devices WHERE id = ?').get(id) as
+    { timer_off_at: string | null; timer_label: string | null; override_until: string | null };
+  const minutesLeft = () => (Date.parse(row().timer_off_at!.replace(' ', 'T') + 'Z') - Date.now()) / 60_000;
+
+  before(() => {
+    getDriver('kasa').setPower = async (ip: string, state: boolean) => { calls.push({ ip, state }); };
+    id = Number(getDb().prepare('INSERT INTO devices (alias, ip) VALUES (?, ?)').run('Porch light', '10.9.1.1').lastInsertRowid);
+  });
+
+  beforeEach(() => {
+    calls.length = 0;
+    getDb().prepare('UPDATE devices SET timer_off_at = NULL, timer_label = NULL, override_state = NULL, override_until = NULL WHERE id = ?').run(id);
+  });
+
+  it('turns the device on and sets its timer, named after the schedule', async () => {
+    const res = await run({ state: true, label: 'Porch at sunset', stayOnMinutes: 180 });
+    assert.equal(res.status, 200);
+    assert.deepEqual(calls, [{ ip: '10.9.1.1', state: true }]);
+    assert.equal(row().timer_label, 'Porch at sunset');
+    assert.ok(Math.abs(minutesLeft() - 180) < 1, `about 180 minutes left, got ${minutesLeft()}`);
+    assert.equal(row().override_until, null, 'other schedules for the device still run');
+
+    const { pendingAutoOff } = await import('../devices/auto-off');
+    const { noteState } = await import('../kasa/device.cache');
+    noteState(id, true);
+    const off = pendingAutoOff().get(id);
+    assert.equal(off?.cause, 'schedule');
+    assert.equal(off?.detail, 'Porch at sunset');
+  });
+
+  it('turns it off when the time is up, recorded as the schedule', async () => {
+    await run({ state: true, label: 'Porch at sunset', stayOnMinutes: 30 });
+    getDb().prepare("UPDATE devices SET timer_off_at = datetime('now', '-1 minute') WHERE id = ?").run(id);   // as if 30 minutes passed
+    calls.length = 0;
+    const { sweepPowerTimers } = await import('../devices/power');
+    await sweepPowerTimers();
+    assert.deepEqual(calls, [{ ip: '10.9.1.1', state: false }]);
+    assert.equal(row().timer_off_at, null);
+    const event = getDb().prepare("SELECT state, source, detail FROM device_events WHERE device_id = ? ORDER BY id DESC LIMIT 1").get(id);
+    assert.deepEqual(event, { state: 0, source: 'schedule', detail: 'Porch at sunset' });
+  });
+
+  it('sets no timer without one, for a Turn OFF, or for nonsense', async () => {
+    await run({ state: true, label: 'On at 6' });
+    assert.equal(row().timer_off_at, null);
+    for (const stayOnMinutes of [0, -5, 1.5, 100_000, '60']) {
+      await run({ state: true, label: 'On at 6', stayOnMinutes });
+      assert.equal(row().timer_off_at, null, String(stayOnMinutes));
+    }
+    await run({ state: false, label: 'Off at 11', stayOnMinutes: 60 });
+    assert.equal(row().timer_off_at, null);
+  });
+
+  it('a Turn OFF schedule clears a timer left over', async () => {
+    await run({ state: true, label: 'Porch at sunset', stayOnMinutes: 180 });
+    await run({ state: false, label: 'Off at 11' });
+    assert.equal(row().timer_off_at, null);
+  });
+
+  it('switching by hand cancels it, so it can\'t turn the device off later', async () => {
+    await run({ state: true, label: 'Porch at sunset', stayOnMinutes: 180 });
+    const { cancelPowerTimer } = await import('../devices/power');
+    cancelPowerTimer(id);   // what the dashboard, Chat and voice do on every switch
+    assert.equal(row().timer_off_at, null);
+  });
+});
