@@ -15,6 +15,8 @@ type BridgeState =
 interface Snapshot { id: number; deviceId: number | null; camera: string; cameraName: string; trigger: 'motion' | 'manual'; sizeBytes: number; takenAt: string }
 interface Camera {
   deviceId: number; name: string; room: string | null; cam: string; model: string | null;
+  /** A Pan camera, which live view can turn. */
+  canPan: boolean;
   watching: boolean | null; online: boolean | null; streaming: boolean;
   /** Whether pictures actually arrive from the camera. */
   picture: 'ok' | 'failing' | 'unknown'; lastPictureAt: string | null; noPictureSince: string | null; noPictureHint: string | null;
@@ -317,7 +319,7 @@ const PAGE = 48;
     </div>
 
     @if (live(); as c) {
-      <app-live-view [deviceId]="c.deviceId" [name]="c.name" (closed)="live.set(null)" />
+      <app-live-view [deviceId]="c.deviceId" [name]="c.name" [canPan]="c.canPan" (closed)="live.set(null)" />
     }
 
     @if (shot(); as s) {

@@ -1,9 +1,19 @@
 import { AfterViewInit, Component, ElementRef, HostListener, OnDestroy, inject, input, output, signal, viewChild } from '@angular/core';
+import { NgTemplateOutlet } from '@angular/common';
+import { HttpClient, HttpErrorResponse } from '@angular/common/http';
+import { firstValueFrom } from 'rxjs';
 import Hls from 'hls.js';
 import { AuthService } from '../../core/auth/auth.service';
 
 const MAX_ZOOM = 5;
 const DOUBLE_TAP_MS = 300;
+/** While an arrow is held, how often HomeHub hears that it still is. Its safety stop waits 1.5 s. */
+const TURN_REPEAT_MS = 500;
+/** A tap turns the camera this long: a small nudge. */
+const MIN_TURN_MS = 250;
+
+type Turn = 'left' | 'right' | 'up' | 'down';
+const ARROW_KEYS: Record<string, Turn> = { ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'up', ArrowDown: 'down' };
 
 /**
  * Live video from one camera, in a full-screen dialog. The stream is HLS,
@@ -14,17 +24,22 @@ const DOUBLE_TAP_MS = 300;
  * scroll, double-click or + and − on a computer, and drag to look around
  * while zoomed. The browser's own video controls are replaced by HomeHub's,
  * since they would be magnified along with the picture.
+ *
+ * Pan cameras also get arrows to turn the camera itself: hold one (or an
+ * arrow key) to keep turning, let go to stop; a tap is a small nudge.
  */
 @Component({
   selector: 'app-live-view',
   standalone: true,
+  imports: [NgTemplateOutlet],
   styles: [`
     .backdrop {
       position: fixed; inset: 0; z-index: 60; background: rgba(0, 0, 0, 0.88);
       display: flex; flex-direction: column; align-items: center; justify-content: center;
       padding: max(1rem, env(safe-area-inset-top, 0px)) 1rem max(1rem, env(safe-area-inset-bottom, 0px));
     }
-    .frame { width: min(100%, 1100px); }
+    /* Wide enough to fill the screen, but never taller than it: a phone turned sideways is short. */
+    .frame { width: min(100%, 1100px, calc((100dvh - 6rem) * 16 / 9)); }
     .bar { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 0.6rem; color: #fff; }
     .title { font-weight: 700; }
     .live { font-size: 0.72rem; font-weight: 700; color: #fff; background: var(--red); border-radius: 4px; padding: 0.05rem 0.4rem; margin-left: 0.5rem; }
@@ -51,6 +66,29 @@ const DOUBLE_TAP_MS = 300;
       background: rgba(15, 23, 42, 0.72); color: #fff; border: 1px solid rgba(255, 255, 255, 0.25);
     }
     .controls button:disabled { opacity: 0.4; }
+    .pad {
+      position: absolute; left: 0.5rem; bottom: 0.5rem; display: grid; gap: 0.2rem;
+      grid-template-columns: repeat(3, 2.5rem); grid-template-rows: repeat(3, 2.5rem);
+      grid-template-areas: ". up ." "left . right" ". down .";
+    }
+    .pad button {
+      width: 2.5rem; height: 2.5rem; padding: 0; border-radius: 999px; font-size: 1rem; line-height: 1;
+      background: rgba(15, 23, 42, 0.72); color: #fff; border: 1px solid rgba(255, 255, 255, 0.25);
+      touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+    }
+    .pad button.on { background: var(--accent, #3b82f6); border-color: transparent; }
+    /* A phone held upright: the arrows go under the picture, where there's room, and are bigger. */
+    .pad.below { display: none; position: static; margin: 0.9rem auto 0; width: max-content;
+      grid-template-columns: repeat(3, 3.25rem); grid-template-rows: repeat(3, 3.25rem); gap: 0.35rem; }
+    .pad.below button { width: 3.25rem; height: 3.25rem; font-size: 1.2rem; background: rgba(255, 255, 255, 0.12); }
+    @media (max-width: 700px) and (orientation: portrait) {
+      .pad.below { display: grid; }
+      .video-wrap:not(:fullscreen) .pad.over { display: none; }
+    }
+    .turn-error {
+      position: absolute; left: 0.5rem; right: 0.5rem; top: 0.5rem; text-align: center; pointer-events: none;
+      color: #fff; font-size: 0.8rem; background: rgba(127, 29, 29, 0.85); border-radius: 6px; padding: 0.3rem 0.5rem;
+    }
     .level { font-size: 0.75rem; color: #fff; background: rgba(15, 23, 42, 0.72); border-radius: 999px; padding: 0.2rem 0.55rem; }
   `],
   template: `
@@ -73,6 +111,12 @@ const DOUBLE_TAP_MS = 300;
               @if (needsTap()) { <button class="close" type="button" (pointerdown)="$event.stopPropagation()" (click)="play()">Play</button> }
             </div>
           }
+          @if (canPan()) {
+            <div class="pad over" role="group" aria-label="Turn the camera" (pointerdown)="$event.stopPropagation()" (dblclick)="$event.stopPropagation()">
+              <ng-container [ngTemplateOutlet]="arrows" />
+            </div>
+          }
+          @if (turnError()) { <div class="turn-error" role="alert">{{ turnError() }}</div> }
           <div class="controls" (pointerdown)="$event.stopPropagation()" (dblclick)="$event.stopPropagation()">
             @if (zoom() > 1) { <span class="level">{{ zoom().toFixed(1) }}×</span> }
             <button type="button" (click)="zoomBy(1 / 1.5)" [disabled]="zoom() <= 1" aria-label="Zoom out">−</button>
@@ -82,15 +126,31 @@ const DOUBLE_TAP_MS = 300;
             <button type="button" (click)="toggleFullscreen()" aria-label="Full screen">⛶</button>
           </div>
         </div>
+        @if (canPan()) {
+          <div class="pad below" role="group" aria-label="Turn the camera">
+            <ng-container [ngTemplateOutlet]="arrows" />
+          </div>
+        }
       </div>
     </div>
+    <ng-template #arrows>
+      @for (t of turns; track t.action) {
+        <button type="button" [style.grid-area]="t.action" [class.on]="turning() === t.action" [attr.aria-label]="t.label"
+                (pointerdown)="startTurn(t.action, $event)" (pointerup)="endTurn()" (pointercancel)="endTurn()"
+                (lostpointercapture)="endTurn()" (contextmenu)="$event.preventDefault()"
+                (keydown.enter)="nudge(t.action)" (keydown.space)="$event.preventDefault(); nudge(t.action)">{{ t.symbol }}</button>
+      }
+    </ng-template>
   `,
 })
 export class LiveViewComponent implements AfterViewInit, OnDestroy {
   private readonly auth = inject(AuthService);
+  private readonly http = inject(HttpClient);
 
   readonly deviceId = input.required<number>();
   readonly name = input('');
+  /** A Pan camera, which HomeHub can turn. */
+  readonly canPan = input(false);
   readonly closed = output<void>();
 
   private readonly video = viewChild.required<ElementRef<HTMLVideoElement>>('video');
@@ -114,6 +174,23 @@ export class LiveViewComponent implements AfterViewInit, OnDestroy {
   /** Touch screens also fire dblclick after a double tap, which is already handled. */
   private lastPointerType = 'mouse';
 
+  // Turning a Pan camera.
+  readonly turns: { action: Turn; symbol: string; label: string }[] = [
+    { action: 'up', symbol: '▲', label: 'Turn up' }, { action: 'left', symbol: '◀', label: 'Turn left' },
+    { action: 'right', symbol: '▶', label: 'Turn right' }, { action: 'down', symbol: '▼', label: 'Turn down' },
+  ];
+  readonly turning = signal<Turn | null>(null);
+  readonly turnError = signal<string | null>(null);
+  private turnStartedAt = 0;
+  private turnRepeat?: ReturnType<typeof setInterval>;
+  private pendingStop?: ReturnType<typeof setTimeout>;
+  /** Commands go one after another, so a stop can't overtake the move before it. */
+  private sending: Promise<void> = Promise.resolve();
+  private inFlight = 0;
+  private turnErrorTimer?: ReturnType<typeof setTimeout>;
+  private readonly onBlur = () => this.endTurn(true);
+  private readonly onHidden = () => { if (document.hidden) this.endTurn(true); };
+
   private hls?: Hls;
   private retries = 0;
   private readonly onWheel = (e: WheelEvent) => this.wheel(e);
@@ -129,6 +206,8 @@ export class LiveViewComponent implements AfterViewInit, OnDestroy {
     // Not passive, so scrolling over the video zooms it instead of scrolling the page.
     this.wrap().nativeElement.addEventListener('wheel', this.onWheel, { passive: false });
     document.addEventListener('fullscreenchange', this.onFullscreen);
+    window.addEventListener('blur', this.onBlur);
+    document.addEventListener('visibilitychange', this.onHidden);
 
     if (!Hls.isSupported()) {
       // Safari on iPhone plays HLS itself, without hls.js, but can't send the sign-in token.
@@ -187,6 +266,67 @@ export class LiveViewComponent implements AfterViewInit, OnDestroy {
     if (document.fullscreenElement) { document.exitFullscreen().catch(() => undefined); return; }
     if (wrap.requestFullscreen) wrap.requestFullscreen().catch(() => video.webkitEnterFullscreen?.());
     else video.webkitEnterFullscreen?.();   // iPhone: only the video itself can go full screen
+  }
+
+  // ── Turning ───────────────────────────────────────────────────
+
+  private send(action: Turn | 'stop'): Promise<void> {
+    this.inFlight++;
+    const run = async () => {
+      try {
+        await firstValueFrom(this.http.post(`/api/cameras/${this.deviceId()}/ptz`, { action }));
+      } catch (err) {
+        const e = err as HttpErrorResponse;
+        if (action !== 'stop') this.endTurn(true, false);
+        this.showTurnError(e.error?.error ?? 'The camera didn\'t turn.');
+      } finally {
+        this.inFlight--;
+      }
+    };
+    this.sending = this.sending.then(run, run);
+    return this.sending;
+  }
+
+  private showTurnError(msg: string): void {
+    this.turnError.set(msg);
+    clearTimeout(this.turnErrorTimer);
+    this.turnErrorTimer = setTimeout(() => this.turnError.set(null), 5000);
+  }
+
+  /** Starts turning, until endTurn. */
+  startTurn(action: Turn, e?: PointerEvent): void {
+    if (e) {
+      e.preventDefault();
+      (e.currentTarget as Element | null)?.setPointerCapture?.(e.pointerId);
+    }
+    clearTimeout(this.pendingStop);
+    this.pendingStop = undefined;
+    if (this.turning() === action) return;
+    clearInterval(this.turnRepeat);
+    this.turning.set(action);
+    this.turnStartedAt = Date.now();
+    this.turnError.set(null);
+    this.send(action);
+    // Still held: a repeat, unless the last one hasn't been answered yet.
+    this.turnRepeat = setInterval(() => { if (this.inFlight === 0) this.send(action); }, TURN_REPEAT_MS);
+  }
+
+  /** Stops turning: at once, or after a tap's worth of turning. */
+  endTurn(now = false, sendStop = true): void {
+    if (!this.turning()) return;
+    clearInterval(this.turnRepeat);
+    this.turning.set(null);
+    if (!sendStop) return;
+    const wait = now ? 0 : Math.max(0, MIN_TURN_MS - (Date.now() - this.turnStartedAt));
+    clearTimeout(this.pendingStop);
+    if (wait === 0) { this.send('stop'); return; }
+    this.pendingStop = setTimeout(() => { this.pendingStop = undefined; this.send('stop'); }, wait);
+  }
+
+  /** A keyboard press of an on-screen arrow: a small nudge. */
+  nudge(action: Turn): void {
+    this.startTurn(action);
+    this.endTurn();
   }
 
   // ── Zoom ──────────────────────────────────────────────────────
@@ -299,13 +439,30 @@ export class LiveViewComponent implements AfterViewInit, OnDestroy {
 
   @HostListener('document:keydown', ['$event'])
   onKey(e: KeyboardEvent): void {
+    const turn = this.canPan() ? ARROW_KEYS[e.key] : undefined;
+    if (turn) {
+      e.preventDefault();
+      if (!e.repeat) this.startTurn(turn);
+      return;
+    }
     if (e.key === 'Escape') this.closed.emit();
     else if (e.key === '+' || e.key === '=') this.zoomBy(1.5);
     else if (e.key === '-' || e.key === '_') this.zoomBy(1 / 1.5);
     else if (e.key === '0') this.resetZoom();
   }
 
+  @HostListener('document:keyup', ['$event'])
+  onKeyUp(e: KeyboardEvent): void {
+    const turn = this.canPan() ? ARROW_KEYS[e.key] : undefined;
+    if (turn && this.turning() === turn) this.endTurn();
+  }
+
   ngOnDestroy(): void {
+    if (this.pendingStop) { clearTimeout(this.pendingStop); this.send('stop'); }
+    this.endTurn(true);
+    clearTimeout(this.turnErrorTimer);
+    window.removeEventListener('blur', this.onBlur);
+    document.removeEventListener('visibilitychange', this.onHidden);
     this.wrap().nativeElement.removeEventListener('wheel', this.onWheel);
     document.removeEventListener('fullscreenchange', this.onFullscreen);
     this.hls?.destroy();

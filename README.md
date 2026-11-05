@@ -23,6 +23,7 @@ curl -fsSL https://raw.githubusercontent.com/foodisready/homehub/main/scripts/in
 
 Then open `http://homehub.local:4200` and create your account.
 
+- **[Works with HomeHub](docs/DEVICES.md):** which plugs, switches, cameras and sensors to buy, and how each one is set up
 - **[Install HomeHub](docs/INSTALL.md):** set up Docker and get HomeHub running
 - **[User Guide](docs/USER_GUIDE.md):** add devices and use each feature
 - **[Remote Access](docs/REMOTE_ACCESS.md):** reach HomeHub away from home
@@ -44,7 +45,6 @@ For questions, bug reports and donation problems, [open an issue on GitHub](http
 
 ## For developers
 
-- [Works with HomeHub](docs/DEVICES.md) lists the devices to buy, and which are tested
 - [Getting Started](docs/GETTING_STARTED.md) covers local development
 - [Architecture](docs/ARCHITECTURE.md) describes the system design
 - [API reference](docs/API_SPEC.md) lists the REST API

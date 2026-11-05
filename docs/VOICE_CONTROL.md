@@ -163,7 +163,7 @@ To set one up:
    sudo systemctl enable --now mbpfan
    ```
 
-Then install the [voice bridge](../packages/voice-bridge/README.md). The next step after that is to measure Whisper and SenseVoice there for English, Spanish, Vietnamese and Cantonese, using commands the household records.
+Then install the [voice bridge](../packages/voice-bridge/README.md). The next step after that is to measure Whisper and SenseVoice there for English, Spanish, Vietnamese and Cantonese, using commands the household records ([how to record them](VOICE_LANGUAGE_TEST.md)).
 
 ## Success criteria
 

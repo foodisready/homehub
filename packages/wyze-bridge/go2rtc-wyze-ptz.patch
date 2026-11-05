@@ -1,0 +1,693 @@
+diff --git a/internal/wyze/ptz.go b/internal/wyze/ptz.go
+new file mode 100644
+index 0000000..1743287
+--- /dev/null
++++ b/internal/wyze/ptz.go
+@@ -0,0 +1,157 @@
++package wyze
++
++import (
++	"encoding/hex"
++	"errors"
++	"net/http"
++	"strconv"
++	"strings"
++
++	"github.com/AlexxIT/go2rtc/internal/api"
++	"github.com/AlexxIT/go2rtc/internal/streams"
++	"github.com/AlexxIT/go2rtc/pkg/wyze"
++)
++
++// Pan and tilt for Wyze Pan cameras.
++//
++//	GET  api/wyze/ptz?src=<stream>                     -> {"position":{"horizontal":h,"vertical":v},"motion_tracking":bool}
++//	POST api/wyze/ptz?src=<stream>&action=left|right|up|down[&speed=1-9]   start turning
++//	POST api/wyze/ptz?src=<stream>&action=stop
++//	POST api/wyze/ptz?src=<stream>&action=goto&h=<0-360>&v=<0-180>
++//	POST api/wyze/ptz?src=<stream>&action=tracking&on=true|false
++//
++// On a Pan v3, left/right/up/down start the lens turning, and it keeps
++// turning until stop, another move, or the end of its range: a caller
++// holding an arrow sends stop when it's let go. POST answers with the
++// camera's reply, in hex ("01" when it accepts).
++//
++// Commands use the stream's connection when someone is watching, or a
++// connection kept open for commands for a short while.
++
++var errNoStream = errors.New("wyze: no such Wyze stream")
++
++// sourceFor finds the wyze:// source behind a stream name; tests replace it.
++var sourceFor = func(name string) (string, error) {
++	stream := streams.Get(name)
++	if stream == nil {
++		return "", errNoStream
++	}
++	for _, src := range stream.Sources() {
++		if strings.HasPrefix(src, "wyze://") {
++			return src, nil
++		}
++	}
++	return "", errNoStream
++}
++
++var withCamera = wyze.WithCamera
++
++type ptzState struct {
++	Position       *wyze.Position `json:"position,omitempty"`
++	MotionTracking *bool          `json:"motion_tracking,omitempty"`
++}
++
++func apiPTZ(w http.ResponseWriter, r *http.Request) {
++	query := r.URL.Query()
++	src, err := sourceFor(query.Get("src"))
++	if err != nil {
++		http.Error(w, err.Error(), http.StatusNotFound)
++		return
++	}
++
++	switch r.Method {
++	case "GET":
++		var state ptzState
++		err = withCamera(src, func(c *wyze.Client) error {
++			pos, err := c.Position()
++			if err != nil {
++				return err
++			}
++			state.Position = &pos
++			// Older Pans may not answer this; the position is still worth having.
++			if on, err := c.MotionTracking(); err == nil {
++				state.MotionTracking = &on
++			}
++			return nil
++		})
++		if err != nil {
++			http.Error(w, err.Error(), http.StatusBadGateway)
++			return
++		}
++		api.ResponseJSON(w, state)
++
++	case "POST":
++		run, status, msg := ptzAction(query)
++		if run == nil {
++			http.Error(w, msg, status)
++			return
++		}
++		var reply []byte
++		err = withCamera(src, func(c *wyze.Client) error {
++			if err := run(c); err != nil {
++				return err
++			}
++			reply = c.LastReply()
++			return nil
++		})
++		if err != nil {
++			http.Error(w, err.Error(), http.StatusBadGateway)
++			return
++		}
++		api.ResponseJSON(w, map[string]string{"camera_reply": hex.EncodeToString(reply)})
++
++	default:
++		http.Error(w, "", http.StatusMethodNotAllowed)
++	}
++}
++
++func ptzAction(query map[string][]string) (func(*wyze.Client) error, int, string) {
++	get := func(k string) string {
++		if v := query[k]; len(v) > 0 {
++			return v[0]
++		}
++		return ""
++	}
++
++	var speed byte
++	if s := get("speed"); s != "" {
++		n, err := strconv.Atoi(s)
++		if err != nil || n < 1 || n > 9 {
++			return nil, http.StatusBadRequest, "speed must be 1-9"
++		}
++		speed = byte(n)
++	}
++
++	move := func(pan, tilt byte) func(*wyze.Client) error {
++		return func(c *wyze.Client) error { return c.Move(pan, tilt, speed) }
++	}
++
++	switch get("action") {
++	case "left":
++		return move(wyze.PanLeft, wyze.TiltNone), 0, ""
++	case "right":
++		return move(wyze.PanRight, wyze.TiltNone), 0, ""
++	case "up":
++		return move(wyze.PanNone, wyze.TiltUp), 0, ""
++	case "down":
++		return move(wyze.PanNone, wyze.TiltDown), 0, ""
++	case "stop":
++		return move(wyze.PanNone, wyze.TiltNone), 0, ""
++	case "goto":
++		h, errH := strconv.Atoi(get("h"))
++		v, errV := strconv.Atoi(get("v"))
++		if errH != nil || errV != nil || h < 0 || h > 360 || v < 0 || v > 180 {
++			return nil, http.StatusBadRequest, "goto needs h (0-360) and v (0-180)"
++		}
++		pos := wyze.Position{Horizontal: uint16(h), Vertical: uint8(v)}
++		return func(c *wyze.Client) error { return c.SetPosition(pos) }, 0, ""
++	case "tracking":
++		on, err := strconv.ParseBool(get("on"))
++		if err != nil {
++			return nil, http.StatusBadRequest, "tracking needs on=true or on=false"
++		}
++		return func(c *wyze.Client) error { return c.SetMotionTracking(on) }, 0, ""
++	default:
++		return nil, http.StatusBadRequest, "action must be left, right, up, down, stop, goto or tracking"
++	}
++}
+diff --git a/internal/wyze/ptz_test.go b/internal/wyze/ptz_test.go
+new file mode 100644
+index 0000000..b121364
+--- /dev/null
++++ b/internal/wyze/ptz_test.go
+@@ -0,0 +1,59 @@
++package wyze
++
++import (
++	"errors"
++	"net/http"
++	"net/http/httptest"
++	"testing"
++
++	"github.com/AlexxIT/go2rtc/pkg/wyze"
++	"github.com/stretchr/testify/require"
++)
++
++func TestPTZAPI(t *testing.T) {
++	sourceFor = func(name string) (string, error) {
++		if name == "general" {
++			return "wyze://general", nil
++		}
++		return "", errNoStream
++	}
++	var ran []string
++	withCamera = func(src string, fn func(*wyze.Client) error) error {
++		ran = append(ran, src)
++		return errors.New("camera reached")
++	}
++
++	call := func(method, query string) *httptest.ResponseRecorder {
++		w := httptest.NewRecorder()
++		apiPTZ(w, httptest.NewRequest(method, "/api/wyze/ptz?"+query, nil))
++		return w
++	}
++
++	require.Equal(t, http.StatusNotFound, call("POST", "src=nope&action=left").Code)
++	require.Equal(t, http.StatusBadRequest, call("POST", "src=general&action=spin").Code)
++	require.Equal(t, http.StatusBadRequest, call("POST", "src=general&action=left&speed=12").Code)
++	require.Equal(t, http.StatusBadRequest, call("POST", "src=general&action=goto&h=400&v=10").Code)
++	require.Equal(t, http.StatusBadRequest, call("POST", "src=general&action=tracking&on=maybe").Code)
++	require.Equal(t, http.StatusMethodNotAllowed, call("DELETE", "src=general").Code)
++	require.Empty(t, ran, "nothing reaches the camera until the request is valid")
++
++	w := call("POST", "src=general&action=left")
++	require.Equal(t, http.StatusBadGateway, w.Code)
++	require.Contains(t, w.Body.String(), "camera reached")
++	require.Equal(t, []string{"wyze://general"}, ran)
++
++	withCamera = func(src string, fn func(*wyze.Client) error) error { return nil }
++	for _, q := range []string{"action=left", "action=down&speed=3", "action=goto&h=90&v=10", "action=tracking&on=false"} {
++		require.Equal(t, http.StatusOK, call("POST", "src=general&"+q).Code, q)
++	}
++}
++
++func TestPTZActionsBuildTheRightMove(t *testing.T) {
++	for action, valid := range map[string]bool{"left": true, "right": true, "up": true, "down": true, "stop": true, "center": false, "": false} {
++		run, status, _ := ptzAction(map[string][]string{"action": {action}})
++		require.Equal(t, valid, run != nil, action)
++		if !valid {
++			require.Equal(t, http.StatusBadRequest, status)
++		}
++	}
++}
+diff --git a/internal/wyze/wyze.go b/internal/wyze/wyze.go
+index 982a16e..ba41d79 100644
+--- a/internal/wyze/wyze.go
++++ b/internal/wyze/wyze.go
+@@ -37,6 +37,7 @@ func Init() {
+ 	})
+ 
+ 	api.HandleFunc("api/wyze", apiWyze)
++	api.HandleFunc("api/wyze/ptz", apiPTZ)
+ }
+ 
+ func getCloud(email string) (*wyze.Cloud, error) {
+diff --git a/pkg/wyze/client.go b/pkg/wyze/client.go
+index 0fe878e..654c6c4 100644
+--- a/pkg/wyze/client.go
++++ b/pkg/wyze/client.go
+@@ -52,6 +52,12 @@ const (
+ type Client struct {
+ 	conn *dtls.DTLSConn
+ 
++	// Pan and tilt (ptz.go).
++	ptzMu       sync.Mutex
++	sendCommand func(payload []byte, match func([]byte) bool, timeout time.Duration) ([]byte, error)
++	liveURL     string
++	lastReply   []byte
++
+ 	host  string
+ 	uid   string
+ 	enr   string
+@@ -276,6 +282,8 @@ func (c *Client) Close() error {
+ 	c.closed = true
+ 	c.closeMu.Unlock()
+ 
++	unregisterLive(c)
++
+ 	if c.verbose {
+ 		fmt.Printf("[Wyze] Closing connection\n")
+ 	}
+diff --git a/pkg/wyze/producer.go b/pkg/wyze/producer.go
+index 16219c4..965c617 100644
+--- a/pkg/wyze/producer.go
++++ b/pkg/wyze/producer.go
+@@ -60,6 +60,8 @@ func NewProducer(rawURL string) (*Producer, error) {
+ 		model:  query.Get("model"),
+ 	}
+ 
++	registerLive(rawURL, client)
++
+ 	return prod, nil
+ }
+ 
+diff --git a/pkg/wyze/ptz.go b/pkg/wyze/ptz.go
+new file mode 100644
+index 0000000..19c7c82
+--- /dev/null
++++ b/pkg/wyze/ptz.go
+@@ -0,0 +1,244 @@
++package wyze
++
++import (
++	"encoding/binary"
++	"fmt"
++	"sync"
++	"time"
++
++	"github.com/AlexxIT/go2rtc/pkg/tutk"
++)
++
++// Pan and tilt for Wyze Pan cameras (Pan v1-v3, Pan Pro), sent on the same
++// command channel the stream already uses. Each command is answered with
++// the next code up (11002 -> 11003).
++const (
++	KCmdRotateByAction    = 11002 // start turning left/right/up/down, or stop
++	KCmdGetPosition       = 11006
++	KCmdSetPosition       = 11018 // go to an angle
++	KCmdGetMotionTracking = 11020
++	KCmdSetMotionTracking = 11022
++)
++
++// Directions for Move. Left lowers the horizontal angle.
++const (
++	PanNone  byte = 0
++	PanLeft  byte = 1
++	PanRight byte = 2
++	TiltNone byte = 0
++	TiltUp   byte = 1
++	TiltDown byte = 2
++)
++
++const ptzTimeout = 5 * time.Second
++
++// Position is where the lens points, in the camera's own degrees.
++type Position struct {
++	Horizontal uint16 `json:"horizontal"`
++	Vertical   uint8  `json:"vertical"`
++}
++
++// buildHL wraps a command payload in the 16-byte "HL" header.
++func buildHL(cmd uint16, payload []byte) []byte {
++	b := make([]byte, 16+len(payload))
++	copy(b, "HL")
++	b[2] = 5
++	binary.LittleEndian.PutUint16(b[4:], cmd)
++	binary.LittleEndian.PutUint16(b[6:], uint16(len(payload)))
++	copy(b[16:], payload)
++	return b
++}
++
++func buildMove(pan, tilt, speed byte) []byte {
++	if pan > PanRight {
++		pan = PanNone
++	}
++	if tilt > TiltDown {
++		tilt = TiltNone
++	}
++	if speed < 1 || speed > 9 {
++		speed = 5
++	}
++	return buildHL(KCmdRotateByAction, []byte{pan, tilt, speed})
++}
++
++func buildSetPosition(p Position, now time.Time) []byte {
++	payload := make([]byte, 7)
++	binary.LittleEndian.PutUint32(payload, uint32(now.UnixMilli()%1_000_000_000))
++	payload[4] = p.Vertical
++	binary.LittleEndian.PutUint16(payload[5:], p.Horizontal)
++	return buildHL(KCmdSetPosition, payload)
++}
++
++func buildGetPosition(now time.Time) []byte {
++	payload := make([]byte, 4)
++	binary.LittleEndian.PutUint32(payload, uint32(now.Unix()))
++	return buildHL(KCmdGetPosition, payload)
++}
++
++func parsePosition(payload []byte) (Position, error) {
++	if len(payload) < 7 {
++		return Position{}, fmt.Errorf("wyze: short position reply (%d bytes)", len(payload))
++	}
++	return Position{Vertical: payload[4], Horizontal: binary.LittleEndian.Uint16(payload[5:])}, nil
++}
++
++// command sends one command and returns the payload of the camera's reply.
++// Commands are sent one at a time; a resent copy carries the same sequence
++// number, so the camera acts on it once.
++func (c *Client) command(cmd uint16, req []byte) ([]byte, error) {
++	c.ptzMu.Lock()
++	defer c.ptzMu.Unlock()
++
++	send := c.sendCommand
++	if send == nil {
++		if c.conn == nil {
++			return nil, fmt.Errorf("wyze: not connected")
++		}
++		send = c.conn.WriteAndWaitIOCtrl
++	}
++
++	data, err := send(req, c.matchHL(cmd+1), ptzTimeout)
++	if err != nil {
++		return nil, fmt.Errorf("wyze: command %d: %w", cmd, err)
++	}
++	hl := c.extractHL(data)
++	if hl == nil {
++		hl = data
++	}
++	_, payload, ok := tutk.ParseHL(hl)
++	if !ok {
++		return nil, fmt.Errorf("wyze: command %d: unreadable reply", cmd)
++	}
++	c.lastReply = append([]byte(nil), payload...)
++	return payload, nil
++}
++
++// LastReply is the payload of the camera's answer to the last command.
++func (c *Client) LastReply() []byte {
++	c.ptzMu.Lock()
++	defer c.ptzMu.Unlock()
++	return c.lastReply
++}
++
++// Move starts the lens turning; Move(PanNone, TiltNone, 0) stops it. On a
++// Pan v3 it keeps turning until stopped or the end of its range. Speed is
++// 1-9; 0 means the camera's default, 5.
++func (c *Client) Move(pan, tilt, speed byte) error {
++	_, err := c.command(KCmdRotateByAction, buildMove(pan, tilt, speed))
++	return err
++}
++
++func (c *Client) Position() (Position, error) {
++	payload, err := c.command(KCmdGetPosition, buildGetPosition(time.Now()))
++	if err != nil {
++		return Position{}, err
++	}
++	return parsePosition(payload)
++}
++
++func (c *Client) SetPosition(p Position) error {
++	_, err := c.command(KCmdSetPosition, buildSetPosition(p, time.Now()))
++	return err
++}
++
++func (c *Client) MotionTracking() (bool, error) {
++	payload, err := c.command(KCmdGetMotionTracking, buildHL(KCmdGetMotionTracking, nil))
++	if err != nil {
++		return false, err
++	}
++	if len(payload) < 1 {
++		return false, fmt.Errorf("wyze: empty motion tracking reply")
++	}
++	return payload[0] == 1, nil
++}
++
++func (c *Client) SetMotionTracking(on bool) error {
++	v := byte(2)
++	if on {
++		v = 1
++	}
++	_, err := c.command(KCmdSetMotionTracking, buildHL(KCmdSetMotionTracking, []byte{v}))
++	return err
++}
++
++// Live connections, by source URL, so a command reaches the camera on the
++// connection that is already streaming instead of opening a second one.
++var live sync.Map // string -> *Client
++
++func registerLive(rawURL string, c *Client) {
++	c.liveURL = rawURL
++	live.Store(rawURL, c)
++}
++
++func unregisterLive(c *Client) {
++	if c.liveURL != "" {
++		live.CompareAndDelete(c.liveURL, c)
++	}
++}
++
++// dial opens a connection for a command when nobody is watching; tests replace it.
++var dial = Dial
++
++// How long a connection opened for commands stays open after the last one.
++// Holding an arrow sends a command every few hundred milliseconds, and
++// opening a connection for each one is slow and makes the camera refuse some.
++var commandIdle = 30 * time.Second
++
++type commandConn struct {
++	client *Client
++	timer  *time.Timer
++}
++
++var (
++	commandMu    sync.Mutex
++	commandConns = map[string]*commandConn{}
++)
++
++// commandClient returns an open command connection for rawURL, opening one
++// if needed, and pushes back its idle close.
++func commandClient(rawURL string) (*Client, error) {
++	commandMu.Lock()
++	defer commandMu.Unlock()
++
++	if cc := commandConns[rawURL]; cc != nil {
++		cc.timer.Reset(commandIdle)
++		return cc.client, nil
++	}
++	c, err := dial(rawURL)
++	if err != nil {
++		return nil, err
++	}
++	cc := &commandConn{client: c}
++	cc.timer = time.AfterFunc(commandIdle, func() { dropCommandClient(rawURL, c) })
++	commandConns[rawURL] = cc
++	return c, nil
++}
++
++func dropCommandClient(rawURL string, c *Client) {
++	commandMu.Lock()
++	if cc := commandConns[rawURL]; cc != nil && cc.client == c {
++		cc.timer.Stop()
++		delete(commandConns, rawURL)
++	}
++	commandMu.Unlock()
++	_ = c.Close()
++}
++
++// WithCamera runs fn on the camera behind rawURL: on its live stream when
++// there is one, or else on a connection kept open for commands for a short
++// while. A command that fails drops that connection, so the next one starts
++// afresh.
++func WithCamera(rawURL string, fn func(*Client) error) error {
++	if v, ok := live.Load(rawURL); ok {
++		return fn(v.(*Client))
++	}
++	c, err := commandClient(rawURL)
++	if err != nil {
++		return err
++	}
++	if err = fn(c); err != nil {
++		dropCommandClient(rawURL, c)
++	}
++	return err
++}
+diff --git a/pkg/wyze/ptz_test.go b/pkg/wyze/ptz_test.go
+new file mode 100644
+index 0000000..873e4e2
+--- /dev/null
++++ b/pkg/wyze/ptz_test.go
+@@ -0,0 +1,158 @@
++package wyze
++
++import (
++	"encoding/binary"
++	"encoding/hex"
++	"errors"
++	"testing"
++	"time"
++
++	"github.com/stretchr/testify/require"
++)
++
++// Expected bytes come from the Python encoder in docker-wyze-bridge
++// (wyzecam/tutk/tutk_protocol.py), which drove Pan cameras for years.
++func TestPTZEncoding(t *testing.T) {
++	hexOf := func(b []byte) string { return hex.EncodeToString(b) }
++
++	require.Equal(t, "484c0500fa2a03000000000000000000010005", hexOf(buildMove(PanLeft, TiltNone, 5)))
++	require.Equal(t, "484c0500fa2a03000000000000000000010005", hexOf(buildMove(PanLeft, TiltNone, 0)), "speed 0 means the default, 5")
++	require.Equal(t, "484c0500fa2a03000000000000000000000005", hexOf(buildMove(7, TiltNone, 5)), "a bad direction doesn't move")
++	require.Equal(t, "484c0500fa2a03000000000000000000000005", hexOf(buildMove(PanNone, TiltNone, 0)), "stop")
++	require.Equal(t, "484c05000a2b0700000000000000000015cd5b0714b400",
++		hexOf(buildSetPosition(Position{Horizontal: 180, Vertical: 20}, time.UnixMilli(1_123_456_789))))
++	require.Equal(t, "484c0500fe2a0400000000000000000000f15365", hexOf(buildGetPosition(time.Unix(1700000000, 0))))
++	require.Equal(t, "484c05000e2b0100000000000000000002", hexOf(buildHL(KCmdSetMotionTracking, []byte{2})))
++	require.Equal(t, "484c05000c2b00000000000000000000", hexOf(buildHL(KCmdGetMotionTracking, nil)))
++}
++
++// fakeCamera answers commands the way a Pan does: an IOCtrl frame whose
++// payload is an HL message with the next code up.
++type fakeCamera struct {
++	sent     [][]byte
++	position Position
++	tracking byte
++	silent   bool
++}
++
++func (f *fakeCamera) send(req []byte, match func([]byte) bool, _ time.Duration) ([]byte, error) {
++	f.sent = append(f.sent, req)
++	if f.silent {
++		return nil, errors.New("timeout waiting for response")
++	}
++	cmd := binary.LittleEndian.Uint16(req[4:])
++	var payload []byte
++	switch cmd {
++	case KCmdRotateByAction, KCmdSetPosition, KCmdSetMotionTracking:
++		payload = []byte{1}
++		if cmd == KCmdSetMotionTracking {
++			f.tracking = req[16]
++		}
++		if cmd == KCmdSetPosition {
++			f.position = Position{Vertical: req[20], Horizontal: binary.LittleEndian.Uint16(req[21:])}
++		}
++	case KCmdGetPosition:
++		payload = make([]byte, 7)
++		payload[4] = f.position.Vertical
++		binary.LittleEndian.PutUint16(payload[5:], f.position.Horizontal)
++	case KCmdGetMotionTracking:
++		payload = []byte{f.tracking}
++	}
++	frame := append(make([]byte, 40), buildHL(cmd+1, payload)...)
++	binary.LittleEndian.PutUint16(frame[16:], 0x7000)
++	if !match(frame) {
++		return nil, errors.New("reply didn't match")
++	}
++	return frame, nil
++}
++
++func newFakeClient(cam *fakeCamera) *Client {
++	return &Client{sendCommand: cam.send}
++}
++
++func TestPTZCommands(t *testing.T) {
++	cam := &fakeCamera{tracking: 2}
++	c := newFakeClient(cam)
++
++	require.NoError(t, c.Move(PanRight, TiltNone, 0))
++	require.Equal(t, []byte{PanRight, TiltNone, 5}, cam.sent[0][16:])
++
++	require.NoError(t, c.SetPosition(Position{Horizontal: 270, Vertical: 30}))
++	pos, err := c.Position()
++	require.NoError(t, err)
++	require.Equal(t, Position{Horizontal: 270, Vertical: 30}, pos)
++
++	on, err := c.MotionTracking()
++	require.NoError(t, err)
++	require.False(t, on)
++	require.NoError(t, c.SetMotionTracking(true))
++	on, err = c.MotionTracking()
++	require.NoError(t, err)
++	require.True(t, on)
++
++	require.NoError(t, c.Move(PanNone, TiltNone, 0))
++	require.Equal(t, []byte{PanNone, TiltNone, 5}, cam.sent[len(cam.sent)-1][16:], "stop")
++}
++
++func TestPTZNoAnswer(t *testing.T) {
++	c := newFakeClient(&fakeCamera{silent: true})
++	require.ErrorContains(t, c.Move(PanLeft, TiltNone, 0), "command 11002")
++	_, err := c.Position()
++	require.Error(t, err)
++}
++
++func TestPTZNotConnected(t *testing.T) {
++	require.ErrorContains(t, (&Client{}).Move(PanLeft, TiltNone, 0), "not connected")
++}
++
++func TestWithCameraUsesTheLiveStream(t *testing.T) {
++	cam := &fakeCamera{}
++	streaming := newFakeClient(cam)
++	registerLive("wyze://cam-a", streaming)
++
++	dials := 0
++	dial = func(string) (*Client, error) { dials++; return newFakeClient(&fakeCamera{}), nil }
++	defer func() { dial = Dial }()
++
++	require.NoError(t, WithCamera("wyze://cam-a", func(c *Client) error {
++		require.Same(t, streaming, c)
++		return c.Move(PanLeft, TiltNone, 0)
++	}))
++	require.Equal(t, 0, dials)
++	require.Len(t, cam.sent, 1)
++
++	// Once the stream closes, commands open their own connection, and a burst
++	// of them (an arrow held down) shares it.
++	commandIdle = 100 * time.Millisecond
++	defer func() { commandIdle = 30 * time.Second }()
++	require.NoError(t, streaming.Close())
++	var opened []*Client
++	for i := 0; i < 5; i++ {
++		require.NoError(t, WithCamera("wyze://cam-a", func(c *Client) error {
++			opened = append(opened, c)
++			return c.Move(PanLeft, TiltNone, 0)
++		}))
++	}
++	require.Equal(t, 1, dials)
++	require.NotSame(t, streaming, opened[0])
++	for _, c := range opened {
++		require.Same(t, opened[0], c)
++	}
++
++	// It closes once the commands stop.
++	require.Eventually(t, func() bool {
++		opened[0].closeMu.Lock()
++		defer opened[0].closeMu.Unlock()
++		return opened[0].closed
++	}, time.Second, 10*time.Millisecond)
++
++	// A command that fails drops the connection, so the next one starts afresh.
++	require.Error(t, WithCamera("wyze://cam-a", func(c *Client) error { return errors.New("no answer") }))
++	require.Equal(t, 2, dials)
++	require.NoError(t, WithCamera("wyze://cam-a", func(*Client) error { return nil }))
++	require.Equal(t, 3, dials)
++
++	dial = func(string) (*Client, error) { return nil, errors.New("camera offline") }
++	time.Sleep(150 * time.Millisecond) // let the last connection idle out
++	require.ErrorContains(t, WithCamera("wyze://cam-a", func(*Client) error { return nil }), "camera offline")
++}

@@ -256,6 +256,8 @@ services:
   # ── Wyze camera bridge ─────────────────────────────────────────
   # Connects to Wyze cameras with your Wyze account and serves their video
   # locally: IDisposable's maintained docker-wyze-bridge, with go2rtc.
+  # HomeHub's image is that one with go2rtc rebuilt to add pan and tilt for
+  # Wyze Pan cameras (packages/wyze-bridge).
   # HomeHub signs it in, lists the cameras, relays live video and takes
   # snapshots through it.
   #
@@ -269,7 +271,10 @@ services:
   # folder; the bridge reads it at start and restarts when it changes.
   # HOMEHUB_CAMERA_BRIDGE=0 in .env leaves the bridge out.
   wyze-bridge:
-    image: idisposablegithub365/wyze-bridge:4.5.0
+    image: ${HOMEHUB_IMAGE_PREFIX:-ghcr.io/foodisready}/homehub-wyze-bridge:${HOMEHUB_TAG:-latest}
+    build:
+      context: ./packages/wyze-bridge
+      target: production
     deploy:
       replicas: ${HOMEHUB_CAMERA_BRIDGE:-1}
     network_mode: host

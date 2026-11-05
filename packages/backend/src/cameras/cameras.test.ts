@@ -39,6 +39,12 @@ const fake = {
   /** Streams restarted, by camera name. */
   restarts: [] as string[],
   calls: [] as string[],
+  /** Pan and tilt commands go2rtc was sent, as "<cam> <action>". */
+  ptz: [] as string[],
+  /** An older bridge image, whose go2rtc lacks pan and tilt. */
+  noPtz: false,
+  /** The camera doesn't answer pan and tilt commands. */
+  ptzSilent: false,
 };
 
 function restartIfNeeded(): void {
@@ -67,6 +73,14 @@ const bridgeServer = http.createServer((req, res) => {
   if (url.pathname === '/api/stream.m3u8' || url.pathname.startsWith('/api/hls/')) {
     res.writeHead(200, { 'content-type': 'application/vnd.apple.mpegurl' });
     return res.end(`#EXTM3U\n#path=${url.pathname}${url.search}\n`);
+  }
+  if (url.pathname === '/api/wyze/ptz' && req.method === 'POST') {
+    if (fake.noPtz) { res.writeHead(404); return res.end('404 page not found'); }
+    const src = url.searchParams.get('src') ?? '';
+    if (!['front_door', 'living_pan'].includes(src)) { res.writeHead(404); return res.end('wyze: no such Wyze stream'); }
+    if (fake.ptzSilent) { res.writeHead(502); return res.end('wyze: command 11002: timeout waiting for response'); }
+    fake.ptz.push(`${src} ${url.searchParams.get('action')}`);
+    return json(200, { camera_reply: '01' });
   }
   restartIfNeeded();
   if (url.pathname === '/api/health') {
@@ -168,6 +182,7 @@ let snaps: typeof import('./snapshots');
 let watch: typeof import('./watch');
 let power: typeof import('../devices/power');
 let WyzeDriver: typeof import('../drivers/WyzeDriver');
+let ptz: typeof import('./ptz');
 let app: http.Server;
 let base = '';
 
@@ -217,6 +232,7 @@ describe('Wyze cameras', () => {
     watch = await import('./watch');
     power = await import('../devices/power');
     WyzeDriver = await import('../drivers/WyzeDriver');
+    ptz = await import('./ptz');
     const { camerasRouter } = await import('../routes/cameras');
 
     const server = express();
@@ -249,7 +265,8 @@ describe('Wyze cameras', () => {
     db.pragma('foreign_keys = ON');
     fs.rmSync(snaps.snapshotDir(), { recursive: true, force: true });
     fs.rmSync(SIGNIN, { recursive: true, force: true });
-    Object.assign(fake, { up: true, frozen: false, version: '', signedIn: false, emptyShots: 0, calls: [], restarts: [] });
+    Object.assign(fake, { up: true, frozen: false, version: '', signedIn: false, emptyShots: 0, calls: [], restarts: [], ptz: [], noPtz: false, ptzSilent: false });
+    ptz.resetPtz();
     process.env.WYZE_BRIDGE_API_KEY = KEY;
     watch.resetMotionState();
     WyzeDriver.clearPowerCache();
@@ -777,6 +794,81 @@ describe('Wyze cameras', () => {
     it('signs out', async () => {
       assert.deepEqual(await (await api('DELETE', '/bridge/login')).json(), { state: 'signed-out' });
       assert.equal(bridge.signInSavedAt(), null);
+    });
+  });
+
+  describe('pan and tilt', () => {
+    const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+    it('marks Pan cameras as able to turn', async () => {
+      addCamera('Front Door', 'front_door', '192.168.1.40');
+      addCamera('Living Pan', 'living_pan', '192.168.0.32');
+      const body = await (await api('GET', '')).json() as any;
+      assert.deepEqual(body.cameras.map((c: any) => [c.cam, c.canPan]).sort(), [['front_door', false], ['living_pan', true]]);
+      assert.equal(ptz.canPan({ model: 'HL_PAN2', modelName: null }), true);
+      assert.equal(ptz.canPan({ model: null, modelName: 'Pan v3' }), true);
+      assert.equal(ptz.canPan({ model: 'WYZE_CAKP2JFUS', modelName: 'V3' }), false);
+      assert.equal(ptz.canPan(undefined), false);
+    });
+
+    it('turns while the arrow is held, and stops when it is let go', async () => {
+      const id = addCamera('Living Pan', 'living_pan', '192.168.0.32');
+      assert.equal((await api('POST', `/${id}/ptz`, { action: 'left' }, 'member')).status, 204, 'anyone signed in can turn a camera');
+      // Repeats say the arrow is still held; the camera is already turning, so they don't reach it.
+      for (let i = 0; i < 3; i++) assert.equal((await api('POST', `/${id}/ptz`, { action: 'left' })).status, 204);
+      assert.equal((await api('POST', `/${id}/ptz`, { action: 'stop' })).status, 204);
+      assert.equal((await api('POST', `/${id}/ptz`, { action: 'up' })).status, 204);
+      assert.equal((await api('POST', `/${id}/ptz`, { action: 'stop' })).status, 204);
+      assert.deepEqual(fake.ptz, ['living_pan left', 'living_pan stop', 'living_pan up', 'living_pan stop']);
+    });
+
+    it('stops a camera itself when the page stops saying the arrow is held', async () => {
+      process.env.WYZE_PTZ_HOLD_MS = '120';
+      try {
+        const id = addCamera('Living Pan', 'living_pan', '192.168.0.32');
+        await api('POST', `/${id}/ptz`, { action: 'right' });
+        await wait(70);
+        await api('POST', `/${id}/ptz`, { action: 'right' });   // still held
+        await wait(70);
+        assert.deepEqual(fake.ptz, ['living_pan right'], 'a repeat keeps it going');
+        await wait(150);
+        assert.deepEqual(fake.ptz, ['living_pan right', 'living_pan stop'], 'stopped once the repeats stopped');
+        // A new direction replaces the old move, without a stop in between.
+        await api('POST', `/${id}/ptz`, { action: 'down' });
+        await api('POST', `/${id}/ptz`, { action: 'left' });
+        await wait(200);
+        assert.deepEqual(fake.ptz.slice(2), ['living_pan down', 'living_pan left', 'living_pan stop']);
+      } finally {
+        delete process.env.WYZE_PTZ_HOLD_MS;
+      }
+    });
+
+    it('refuses cameras that don\'t turn and actions it doesn\'t know', async () => {
+      const fixed = addCamera('Front Door', 'front_door', '192.168.1.40');
+      const pan = addCamera('Living Pan', 'living_pan', '192.168.0.32');
+      assert.equal((await api('POST', `/${fixed}/ptz`, { action: 'left' })).status, 409);
+      for (const action of ['spin', '', 5, undefined]) {
+        assert.equal((await api('POST', `/${pan}/ptz`, { action })).status, 400, String(action));
+      }
+      assert.equal((await api('POST', '/999/ptz', { action: 'left' })).status, 404);
+      assert.deepEqual(fake.ptz, []);
+    });
+
+    it('says when the bridge is too old to turn cameras, or the camera doesn\'t answer', async () => {
+      const id = addCamera('Living Pan', 'living_pan', '192.168.0.32');
+      fake.noPtz = true;
+      const old = await api('POST', `/${id}/ptz`, { action: 'left' });
+      assert.equal(old.status, 501);
+      assert.match(((await old.json()) as any).error, /Update HomeHub/);
+      fake.noPtz = false;
+      fake.ptzSilent = true;
+      const silent = await api('POST', `/${id}/ptz`, { action: 'left' });
+      assert.equal(silent.status, 502);
+      assert.match(((await silent.json()) as any).error, /didn't turn/);
+      fake.ptzSilent = false;
+      // A failed move isn't remembered as under way, so the next press tries the camera again.
+      assert.equal((await api('POST', `/${id}/ptz`, { action: 'left' })).status, 204);
+      assert.deepEqual(fake.ptz, ['living_pan left']);
     });
   });
 });

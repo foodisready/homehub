@@ -29,6 +29,21 @@ Links go to the maker's own page. HomeHub earns nothing from them.
 
 HomeHub switches lights on and off; dimming and colour aren't supported yet.
 
+### Setting up a new plug: which need the maker's app
+
+Before HomeHub can find a plug, the plug has to join your Wi-Fi. How it does that depends on the brand.
+
+| Brand | App or account needed | How it joins your Wi-Fi |
+|---|---|---|
+| **Shelly** | None | The plug starts its own Wi-Fi network. Join it from a phone or laptop, open `http://192.168.33.1`, and enter your home Wi-Fi. Then run Discover in HomeHub. The Shelly app also works, but isn't needed. |
+| **Kasa** | The Kasa app, and a TP-Link account | Set it up in the Kasa app, then run Discover in HomeHub. |
+| **Matter** | A Matter app: Apple Home, Google Home, Alexa or SmartThings | Add it in that app first, which puts it on your Wi-Fi, then share it with HomeHub using a pairing code. On an iPhone, Apple Home is already installed. |
+| **Tuya brands** | The maker's app, and a free Tuya developer account | Set it up in the maker's app, then get its Local Key from the developer account. |
+
+To avoid the maker's app entirely, buy **Shelly**. The [Shelly Plug US Gen4](https://us.shelly.com/collections/all-products) is the plug to choose: it's marked **Should work** because HomeHub talks to it the same way as the tested Shelly relays, but that exact plug hasn't been tested yet.
+
+Plugs sold with Tasmota or ESPHome already installed, such as Athom's, are also set up from a web page, but HomeHub can't control them yet.
+
 ## Sensors
 
 | Device | Status | Local or cloud | How it's added |
@@ -49,7 +64,7 @@ Garage doors are always protected: HomeHub asks you to confirm, and Chat and voi
 
 | Device | Status | Local or cloud | How it's added |
 |---|---|---|---|
-| Wyze Cam Pan v3 | ✅ Tested (3 in one home) | Cloud sign-in, then local video | Sign in to Wyze on the **Cameras** page with a free Wyze API key. Live video, snapshots, motion snapshots, and pause and resume. |
+| Wyze Cam Pan v3 | ✅ Tested (3 in one home) | Cloud sign-in, then local video | Sign in to Wyze on the **Cameras** page with a free Wyze API key. Live video, snapshots, motion snapshots, pause and resume, and turning the camera from live view. |
 | Wyze Cam v2 | ⚠️ Untested on the same network | Cloud sign-in, then local video | The same. The one tested was on another network, where no camera connects. |
 | Other Wyze cameras supported by the [camera bridge](https://github.com/IDisposable/docker-wyze-bridge) | 🟡 Should work | Cloud sign-in, then local video | The same. Check your model on the bridge's list. |
 

@@ -10,6 +10,7 @@ import * as snaps from '../cameras/snapshots';
 import { cameraDevices, lastMotionFor, liveCameras } from '../cameras/watch';
 import { noPictureHint, pictureHealth } from '../cameras/picture-status';
 import { clearPowerCache } from '../drivers/WyzeDriver';
+import { canPan, isMoving, ptz, PTZ_ACTIONS, type PtzAction } from '../cameras/ptz';
 
 /**
  * Wyze cameras through the camera bridge. Everyone signed in can watch and
@@ -140,6 +141,7 @@ camerasRouter.get('/', async (_req: Request, res: Response) => {
       room: rooms.get(d.id) ?? null,
       cam: d.cam,
       model: cam?.modelName ?? cam?.model ?? null,
+      canPan: canPan(cam),
       watching: cached?.state ?? null,      // null until the first check
       online: cached?.online ?? null,
       streaming: cam?.connected ?? false,
@@ -176,6 +178,28 @@ camerasRouter.post('/:deviceId/snapshots', async (req: Request, res: Response) =
   try {
     res.status(201).json(await snaps.capture(device, 'manual'));
   } catch (err) { fail(res, err, 'Could not take a snapshot'); }
+});
+
+/**
+ * POST /api/cameras/:deviceId/ptz { action: left|right|up|down|stop } — turn a
+ * Pan camera. A move keeps going until stop; repeat it at least every second
+ * while the arrow is held, or HomeHub stops the camera.
+ */
+camerasRouter.post('/:deviceId/ptz', async (req: Request, res: Response) => {
+  const device = deviceParam(req);
+  if (!device) return res.status(404).json({ error: 'Camera not found', code: 'NOT_FOUND' });
+  const action = (req.body as { action?: unknown } | undefined)?.action;
+  if (typeof action !== 'string' || !PTZ_ACTIONS.includes(action as PtzAction)) {
+    return res.status(400).json({ error: `action must be one of ${PTZ_ACTIONS.join(', ')}`, code: 'VALIDATION_ERROR' });
+  }
+  try {
+    if (action !== 'stop' && !isMoving(device.cam, action as PtzAction)) {
+      const cam = (await liveCameras()).find((c) => c.id === device.cam);
+      if (!canPan(cam)) return res.status(409).json({ error: 'This camera doesn\'t turn', code: 'NOT_SUPPORTED' });
+    }
+    await ptz(device.cam, action as PtzAction);
+    res.status(204).end();
+  } catch (err) { fail(res, err, 'The camera didn\'t turn'); }
 });
 
 /**
