@@ -46,7 +46,7 @@ export function cleanUp(text: string): string {
   return text
     .toLowerCase()
     .trim()
-    .replace(/[.!?,]+$/, '')
+    .replace(/[.!?,。！？，]+$/, '')
     .replace(/^(?:(?:hey\s+)?homehub[,\s]+)?(?:please\s+|(?:can|could|would|will)\s+you\s+(?:please\s+)?)?/, '')
     .replace(/\s+please$/, '')
     .trim();

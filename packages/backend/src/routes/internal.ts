@@ -14,11 +14,10 @@ import { realInvoker, realNotifier } from '../sensors/shutoff-runtime';
 import { notifyStaleRecovery } from '../sensors/stale-check';
 import { runPowerCommand } from '../nlp/commands';
 import { recordVoiceCommand } from '../nlp/command-log';
-import { listDeviceNames, listSceneNames } from '../nlp/find-device';
 import { withActivity } from '../activity/activity';
 import { issueTokens, serviceUser } from '../auth/auth.service';
 import { automationsPaused } from '../automation/pause';
-import { recordBridgeReport } from '../system/voice-bridge';
+import { bridgeInstructions, recordBridgeReport, voiceNames } from '../system/voice-bridge';
 import { cancelPowerTimer, setScheduleTimer } from '../devices/power';
 import { MAX_STAY_ON_MINUTES } from './schedules';
 
@@ -51,16 +50,18 @@ internalRouter.post('/service-token', (_req: Request, res: Response) => {
 // GET /internal/voice/device-names
 // Lets the voice bridge tell speech recognition which names to expect.
 internalRouter.get('/voice/device-names', (_req: Request, res: Response) => {
-  res.json({ names: [...listDeviceNames(), ...listSceneNames()] });
+  res.json(voiceNames());
 });
 
 // POST /internal/voice/status  { version?, speakers: [{ name, address, connected }] }
-// The voice bridge checks in every minute, for the Health page.
+// The voice bridge checks in every minute, for the Health page. The answer says
+// whether its names are out of date, and whether an admin asked it to restart.
 internalRouter.post('/voice/status', (req: Request, res: Response) => {
   if (!recordBridgeReport(req.body)) {
     return res.status(400).json({ error: '`speakers` must be a list', code: 'VALIDATION_ERROR' });
   }
-  res.json({ ok: true });
+  // namesVersion changes when a device, nickname, room or scene name does, so the bridge fetches them again.
+  res.json({ ok: true, ...bridgeInstructions() });
 });
 
 // POST /internal/voice/command  { text: string }

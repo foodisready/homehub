@@ -36,6 +36,25 @@ if [ ! -f "$CONF/config.env" ]; then
   cp "$HERE/config.env.example" "$CONF/config.env"
   echo "== Settings written to $CONF/config.env"
 fi
+
+# Cantonese (LANGUAGES=en yue): SenseVoice to hear it, and a Cantonese voice to answer.
+MODELS="https://github.com/k2-fsa/sherpa-onnx/releases/download"
+fetch_model() {   # url, folder name in the archive, where to keep it, files to keep
+  local url="$1" inside="$2" dest="$3"; shift 3
+  [ -s "$dest/$1" ] && return 0
+  local tmp; tmp="$(mktemp -d "$DATA/download.XXXXXX")"
+  curl -fsSL "$url" | tar xj -C "$tmp"
+  mkdir -p "$dest"
+  for f in "$@"; do mv "$tmp/$inside/$f" "$dest/"; done
+  rm -rf "$tmp"
+}
+if grep -Eq '^LANGUAGES=.*\byue\b' "$CONF/config.env"; then
+  echo "== Cantonese: SenseVoice (downloads about 1 GB, keeps 230 MB) and a Cantonese voice (110 MB)"
+  fetch_model "$MODELS/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17.tar.bz2" \
+    sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17 "$DATA/sensevoice" model.int8.onnx tokens.txt
+  fetch_model "$MODELS/tts-models/vits-cantonese-hf-xiaomaiiwn.tar.bz2" \
+    vits-cantonese-hf-xiaomaiiwn "$DATA/cantonese-voice" vits-cantonese-hf-xiaomaiiwn.onnx lexicon.txt tokens.txt rule.fst
+fi
 chmod 700 "$CONF"
 chmod 600 "$CONF/config.env"
 [ -f "$CONF/internal-key" ] && chmod 600 "$CONF/internal-key"

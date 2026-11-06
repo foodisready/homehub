@@ -26,6 +26,7 @@ export interface HealthItem {
   level: 'ok' | 'warn' | 'error' | 'info';
   detail: string;
   link?: string;
+  action?: 'restart-voice-bridge';
 }
 
 export interface HealthReport {
@@ -46,6 +47,10 @@ export class SystemService {
 
   version(): Observable<SystemVersion> {
     return this.http.get<SystemVersion>('/api/system/version');
+  }
+
+  restartVoiceBridge(): Observable<{ asked: boolean }> {
+    return this.http.post<{ asked: boolean }>('/api/system/voice-bridge/restart', {});
   }
 
   health(): Observable<HealthReport> {

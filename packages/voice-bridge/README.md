@@ -51,6 +51,21 @@ systemctl --user restart homehub-voice
 
 - **Add a speaker by address** if it isn't found: `SPEAKERS=192.168.0.40`. For one with an encryption key: `SPEAKERS=192.168.0.40|<key>`.
 - **Speech model:** `WHISPER_MODEL=base.en` is English and fastest. `small` is more accurate and handles other languages, set with `LANGUAGE`, but takes about three times as long.
+- **Cantonese:** see below.
+
+## Cantonese
+
+With Cantonese on, each command can be English or Cantonese, and is answered in the same language.
+
+1. In `config.env`, set `LANGUAGES=en yue`, then run `./install.sh` again. It downloads SenseVoice Small (about 1 GB, of which it keeps 230 MB) and a Cantonese voice (110 MB).
+2. In HomeHub, give each device you want to use a Cantonese nickname, in **Settings → Devices**: for example 廚房燈 on the kitchen lights, or 寫字樓燈 and 書房燈 on the office lamp. Giving two devices the same nickname, such as 卓希房燈, switches both. You can also teach one from a missed command, in **Settings → Teach HomeHub**. The bridge picks up new nicknames within a minute.
+3. Say the verb, then the nickname: 開廚房燈, 着廚房燈, 關廚房燈, 熄廚房燈. 幫我 or 唔該 first, and 啦 or 呀 at the end, are fine. A scene with a Cantonese name runs by its name alone.
+
+How it works: SenseVoice hears each command first and says which language it's in, in about 0.1 seconds. English then goes to Whisper as before. Cantonese is matched to your Cantonese nicknames by how it sounds, using Jyutping with tones ignored, because speech recognition often writes a word with a different character that sounds the same (民房 for 文房). Only the first word is read as the verb, so a name that starts with a verb's sound, such as 卓 and 着, still works. A command that doesn't clearly match one nickname isn't guessed: the speaker says 唔好意思，我聽唔明, and HomeHub lists it with the commands it missed. HomeHub's rules still decide what happens, so protected devices and cameras are as safe as in English.
+
+On the household's 37 test recordings, it read all 33 commands for devices that exist correctly, and refused the 4 for a room with no light. Its matching was tuned on those same recordings, so expect some misses on new ones.
+
+Not yet in Cantonese: timers ("for an hour"), pausing or resuming cameras by name, and the replies HomeHub's settings let you choose.
 
 ## Checking on it
 
@@ -59,7 +74,7 @@ systemctl --user status homehub-voice
 journalctl --user -u homehub-voice -f
 ```
 
-Each command is logged with what was heard, HomeHub's reply and how long each step took. The bridge also checks in with HomeHub every minute, so HomeHub's **Health** page shows whether it's running and which speakers are connected.
+Each command is logged with what was heard, HomeHub's reply and how long each step took. The bridge also checks in with HomeHub every minute, so HomeHub's **Health** page shows whether it's running and which speakers are connected. HomeHub's answer tells it when device or scene names have changed, so it fetches them again, and when an admin selected **Restart voice bridge** on the Health page. It then stops with exit code 75, and systemd starts it again.
 
 ## Measured speed
 
@@ -68,7 +83,7 @@ On a 2015 MacBook Pro (Core i7-4980HQ) with `base.en`, recognising a 2 to 4 seco
 ## Not done yet
 
 - **Home Assistant Voice:** its firmware expects Home Assistant to set its encryption key, so whether the bridge can connect to one out of the box hasn't been tested.
-- Languages other than English: HomeHub's command rules and the Piper voice are English only.
+- Languages other than English and Cantonese.
 
 ## Tests
 

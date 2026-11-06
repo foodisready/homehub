@@ -125,6 +125,26 @@ describe('checkHealth', () => {
     assert.equal(item(r, 'speaker:10.0.0.21')?.level, 'warn');
   });
 
+  it('offers a restart, and shows it happening', async () => {
+    const vb = await import('./voice-bridge');
+    recordBridgeReport({ speakers: [] }, NOW - 30_000);
+    assert.equal(item(await checkHealth({ probe: up, now: NOW, dataDir: TMP }), 'voice-bridge')?.action, 'restart-voice-bridge');
+
+    vb.requestBridgeRestart(NOW);
+    let r = await checkHealth({ probe: up, now: NOW, dataDir: TMP });
+    assert.match(item(r, 'voice-bridge')!.detail, /Asked to restart/);
+    assert.equal(item(r, 'voice-bridge')?.action, undefined, 'no second request while one is waiting');
+
+    vb.bridgeInstructions(NOW + 20_000);   // its next check-in: told to restart
+    r = await checkHealth({ probe: up, now: NOW + 21_000, dataDir: TMP });
+    assert.equal(item(r, 'voice-bridge')?.detail, 'Restarting…');
+
+    recordBridgeReport({ speakers: [] }, NOW + 40_000);   // back, and checking in
+    vb.bridgeInstructions(NOW + 40_000);
+    r = await checkHealth({ probe: up, now: NOW + 41_000, dataDir: TMP });
+    assert.equal(item(r, 'voice-bridge')?.level, 'ok');
+  });
+
   it('notices a bridge that stopped checking in, even after a restart', async () => {
     recordBridgeReport({ speakers: [] }, NOW - 20 * 60_000);
     let r = await checkHealth({ probe: up, now: NOW, dataDir: TMP });

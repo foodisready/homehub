@@ -27,7 +27,21 @@ export class TeachError extends Error {}
 
 const MAX_PHRASE = 60;
 
+const CHINESE = /[\u3400-\u9fff]/;
+// Cantonese: "please" first, a verb, the name, then a particle. The voice bridge writes traditional characters.
+const CANTONESE_POLITE = /^(?:幫我|帮我|唔該|唔该|請|请)/;
+const CANTONESE_VERB = /^(?:打開|打开|開|开|着|著|關閉|关闭|關|关|熄|閂|闩|鎖|锁)/;
+const CANTONESE_PARTICLES = /(?:啦|呀|吖|囉|啰|咧|喇|嘅|吓)+$/;
+
+/** "唔該開主人房燈啦。" → 主人房燈, a device; "晚安" → a scene. */
+function suggestCantonese(text: string): { phrase: string; kind: 'device' | 'scene' } {
+  const words = text.replace(/[\s.,!?。，！？、：:；;「」"']/g, '').replace(CANTONESE_POLITE, '');
+  const name = words.replace(CANTONESE_VERB, '').replace(CANTONESE_PARTICLES, '');
+  return CANTONESE_VERB.test(words) && name ? { phrase: name, kind: 'device' } : { phrase: words.replace(CANTONESE_PARTICLES, ''), kind: 'scene' };
+}
+
 export function suggestPhrase(text: string): { phrase: string; kind: 'device' | 'scene' } {
+  if (CHINESE.test(text)) return suggestCantonese(text);
   const command = parsePowerCommand(text);
   if (command) return { phrase: command.name.replace(/^(?:the|my)\s+/, ''), kind: 'device' };
   const scene = cleanUp(text).replace(/^(?:(?:run|start|activate|trigger|set)\s+)?(?:the\s+)?(?:scene\s+)?/, '').replace(/\s+scene$/, '');
@@ -105,7 +119,7 @@ function devicesFor(phrase: string): number[] {
 function checkPhrase(phrase: unknown): string {
   if (typeof phrase !== 'string') throw new TeachError('Enter the words to teach.');
   const trimmed = phrase.trim().replace(/\s+/g, ' ');
-  if (!/[a-z0-9]/i.test(trimmed)) throw new TeachError('Enter the words to teach.');
+  if (!/[a-z0-9\u3400-\u9fff]/i.test(trimmed)) throw new TeachError('Enter the words to teach.');
   if (trimmed.length > MAX_PHRASE) throw new TeachError(`Use ${MAX_PHRASE} characters or fewer.`);
   return trimmed;
 }

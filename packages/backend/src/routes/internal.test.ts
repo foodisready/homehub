@@ -250,6 +250,31 @@ describe('/internal/voice', () => {
     const { lastBridgeReport } = await import('../system/voice-bridge');
     assert.deepEqual(lastBridgeReport()?.speakers, [{ name: 'Tablet', address: '10.9.0.20', connected: true }]);
   });
+
+  it('tells the bridge when the names change, and when to restart', async () => {
+    const vb = await import('../system/voice-bridge');
+    vb.resetBridgeReport();
+    const checkIn = async () => (await fetch(`${baseUrl}/internal/voice/status`, {
+      method: 'POST', headers: key, body: JSON.stringify({ speakers: [] }),
+    })).json() as Promise<{ namesVersion: string; restart: boolean }>;
+    const names = async () => (await fetch(`${baseUrl}/internal/voice/device-names`, { headers: key })).json() as Promise<{ names: string[]; version: string }>;
+
+    const first = await checkIn();
+    assert.equal(first.restart, false);
+    assert.equal(first.namesVersion, (await names()).version, 'the same version as the names');
+    assert.equal((await checkIn()).namesVersion, first.namesVersion, 'unchanged');
+
+    getDb().prepare("UPDATE devices SET nicknames = ? WHERE alias = 'My office lamp'").run('["desk light","寫字樓燈"]');
+    const changed = await checkIn();
+    assert.notEqual(changed.namesVersion, first.namesVersion, 'a new nickname changes it');
+    assert.ok((await names()).names.includes('寫字樓燈'));
+
+    vb.requestBridgeRestart();
+    assert.equal(vb.bridgeRestartState(), 'asked');
+    assert.equal((await checkIn()).restart, true);
+    assert.equal(vb.bridgeRestartState(), 'restarting');
+    assert.equal((await checkIn()).restart, false, 'asked once only');
+  });
 });
 
 describe('/internal/devices/:id/execute — a Turn ON schedule\'s "Turn off after"', () => {

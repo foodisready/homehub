@@ -8,7 +8,7 @@ import { getSettings as cameraSettings } from '../cameras/snapshots';
 import { bridgeUrl, signInSavedAt } from '../cameras/bridge';
 import { pictureHealth } from '../cameras/picture-status';
 import { cameraDevices } from '../cameras/watch';
-import { bridgeSeenAt, lastBridgeReport } from './voice-bridge';
+import { bridgeRestartState, bridgeSeenAt, lastBridgeReport } from './voice-bridge';
 
 /**
  * One look at whether HomeHub is working: its services, devices, sensors,
@@ -26,6 +26,8 @@ export interface HealthItem {
   detail: string;
   /** A page in the app that helps, such as /settings. */
   link?: string;
+  /** Something an admin can do from the Health page. */
+  action?: 'restart-voice-bridge';
 }
 
 export interface HealthReport {
@@ -49,7 +51,7 @@ export const httpProbe: Probe = async (url) => {
 };
 
 const HOUR = 3_600_000;
-const BRIDGE_LATE_MS = 3 * 60_000;
+export const BRIDGE_LATE_MS = 3 * 60_000;
 const startedAt = Date.now();
 
 export function ago(ms: number): string {
@@ -192,7 +194,17 @@ function voice(now: number): HealthItem[] {
       detail: `Last heard from ${ago(now - seen)}, so speakers won't answer. On the computer it runs on, run: systemctl --user restart homehub-voice`,
     }];
   }
-  const items: HealthItem[] = [{ id: 'voice-bridge', group: 'Voice', label: 'Voice bridge', level: 'ok', detail: report.version ? `Running (${report.version})` : 'Running' }];
+  const restart = bridgeRestartState();
+  if (restart) {
+    return [{
+      id: 'voice-bridge', group: 'Voice', label: 'Voice bridge', level: 'info',
+      detail: restart === 'asked' ? 'Asked to restart. It restarts when it next checks in, within a minute.' : 'Restarting…',
+    }];
+  }
+  const items: HealthItem[] = [{
+    id: 'voice-bridge', group: 'Voice', label: 'Voice bridge', level: 'ok', action: 'restart-voice-bridge',
+    detail: report.version ? `Running (${report.version})` : 'Running',
+  }];
   if (!report.speakers.length) {
     items.push({ id: 'speakers', group: 'Voice', label: 'Speakers', level: 'warn', detail: 'No speakers found. Check the speaker or tablet is on, and the voice app is open.' });
   }

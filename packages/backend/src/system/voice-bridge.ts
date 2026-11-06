@@ -1,4 +1,6 @@
+import { createHash } from 'node:crypto';
 import { getDb } from '../db';
+import { listDeviceNames, listSceneNames } from '../nlp/find-device';
 
 /**
  * What the voice bridge last reported: it runs outside HomeHub, on this
@@ -59,7 +61,43 @@ export function forgetBridge(): void {
   getDb().prepare('DELETE FROM settings WHERE key = ?').run(SEEN_KEY);
 }
 
+/** Every device, nickname, room and scene name, for the bridge's speech recognition and Cantonese matching. */
+export function voiceNames(): { names: string[]; version: string } {
+  const names = [...listDeviceNames(), ...listSceneNames()];
+  return { names, version: createHash('sha1').update(JSON.stringify(names)).digest('hex').slice(0, 12) };
+}
+
+// An admin asked for a restart, which the bridge picks up at its next check-in.
+let restartAskedAt: number | null = null;
+// When it was handed to the bridge, until the bridge checks in again after restarting.
+let restartingSince: number | null = null;
+/** A report this soon after the bridge was told to restart is still from before it stopped. */
+const RESTART_SETTLE_MS = 5_000;
+
+export function requestBridgeRestart(now = Date.now()): void {
+  restartAskedAt = now;
+}
+
+/** What HomeHub tells the bridge when it checks in: the names' version, and whether to restart. */
+export function bridgeInstructions(now = Date.now()): { namesVersion: string; restart: boolean } {
+  const restart = restartAskedAt !== null;
+  if (restart) {
+    restartAskedAt = null;
+    restartingSince = now;
+  } else if (restartingSince !== null && now - restartingSince > RESTART_SETTLE_MS) {
+    restartingSince = null;   // checked in again: restarted
+  }
+  return { namesVersion: voiceNames().version, restart };
+}
+
+/** 'asked' until the bridge checks in, then 'restarting' until it checks in again. */
+export function bridgeRestartState(): 'asked' | 'restarting' | null {
+  return restartAskedAt !== null ? 'asked' : restartingSince !== null ? 'restarting' : null;
+}
+
 /** For tests. */
 export function resetBridgeReport(): void {
   last = null;
+  restartAskedAt = null;
+  restartingSince = null;
 }

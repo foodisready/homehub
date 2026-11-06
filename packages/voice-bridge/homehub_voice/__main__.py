@@ -1,4 +1,4 @@
-"""HomeHub voice bridge: speakers → Whisper → HomeHub → Piper → speakers.
+"""HomeHub voice bridge: speakers → Whisper (or SenseVoice for Cantonese) → HomeHub → Piper → speakers.
 
 Run with `python -m homehub_voice`. Settings come from environment variables;
 see config.env.example.
@@ -20,6 +20,10 @@ from .speakers import SpeakerLink, Speakers
 log = logging.getLogger('homehub-voice')
 
 NAMES_EVERY_S = 600
+# While HomeHub hasn't answered yet (it may still be starting), ask for the names this often.
+NAMES_RETRY_S = 15
+# Exit code when HomeHub asks for a restart: not 0, so systemd (Restart=on-failure) starts it again.
+RESTART_EXIT = 75
 # How often the bridge checks in with HomeHub's Health page, at most. Changes are reported straight away.
 REPORT_EVERY_S = 60
 
@@ -37,25 +41,34 @@ async def main() -> int:
         log.error('%s', e)
         return 2
 
-    from .speech import Listener, Speaker as Voice
+    from .speech import CantoneseVoice, Listener, SenseVoice, Speaker as Voice
 
     log.info('HomeHub voice bridge %s: loading Whisper %s and the Piper voice', __version__, conf.whisper_model)
     listener = Listener(conf.whisper_model, conf.language)
-    voice = Voice(conf.piper_voice)
+    voices = {'en': Voice(conf.piper_voice)}
+    ears = None
+    if conf.cantonese:
+        log.info('Cantonese on: loading SenseVoice and the Cantonese voice')
+        try:
+            ears = SenseVoice(conf.sensevoice_dir)
+            voices['yue'] = CantoneseVoice(conf.cantonese_voice_dir)
+        except FileNotFoundError as e:
+            log.error('%s', e)
+            return 2
     replies = ReplyServer(conf.reply_port)
     homehub = HomeHub(conf.homehub_url, conf.internal_key)
     log.info('HomeHub at %s knows %d device and scene names', conf.homehub_url, len(homehub.refresh_names()))
 
-    def speak(text: str, host: str) -> str:
+    def speak(text: str, host: str, lang: str = 'en') -> str:
         path, name = replies.new_file()
-        voice.say(text, path)
+        voices.get(lang, voices['en']).say(text, path)
         return replies.url(name, host)
 
     speakers: Speakers
     speakers = Speakers(
         conf.speakers,
         lambda s, listed: SpeakerLink(
-            s, lambda audio, spoke: answer(audio, spoke, listener, homehub), speak, listed,
+            s, lambda audio, spoke: answer(audio, spoke, listener, homehub, ears), speak, listed,
             on_change=lambda: speakers.changed.set(),
         ),
         conf.discover,
@@ -66,10 +79,13 @@ async def main() -> int:
 
     async def refresh_names() -> None:
         while True:
-            await asyncio.sleep(NAMES_EVERY_S)
+            await asyncio.sleep(NAMES_EVERY_S if homehub.names else NAMES_RETRY_S)
             await asyncio.get_running_loop().run_in_executor(None, homehub.refresh_names)
 
+    restart = False
+
     async def report() -> None:
+        nonlocal restart
         failing = False
         while True:
             try:
@@ -79,7 +95,16 @@ async def main() -> int:
                 pass
             speakers.changed.clear()
             try:
-                await asyncio.get_running_loop().run_in_executor(None, homehub.report, __version__, speakers.status())
+                res = await asyncio.get_running_loop().run_in_executor(None, homehub.report, __version__, speakers.status())
+                if res.get('restart'):
+                    log.info('HomeHub asked for a restart')
+                    restart = True
+                    stop.set()
+                    return
+                if res.get('namesVersion') and res['namesVersion'] != homehub.names_version:
+                    count = len(homehub.names)
+                    await asyncio.get_running_loop().run_in_executor(None, homehub.refresh_names)
+                    log.info('names changed in HomeHub: now %d (were %d)', len(homehub.names), count)
                 if failing:
                     log.info('checking in with HomeHub again')
                 failing = False
@@ -101,7 +126,7 @@ async def main() -> int:
         if link.task:
             link.task.cancel()
     replies.close()
-    return 0
+    return RESTART_EXIT if restart else 0
 
 
 if __name__ == '__main__':

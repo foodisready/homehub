@@ -5,7 +5,7 @@ import json
 import logging
 import urllib.error
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 log = logging.getLogger('homehub-voice')
 
@@ -18,6 +18,8 @@ class HomeHubError(Exception):
 class CommandResult:
     handled: bool
     response: str
+    # Devices HomeHub couldn't switch, from its list of actions.
+    failed: list[str] = field(default_factory=list)
 
 
 class HomeHub:
@@ -26,6 +28,8 @@ class HomeHub:
         self.key = key
         self.timeout = timeout
         self.names: list[str] = []
+        # HomeHub's version of the names, so the bridge knows when they change.
+        self.names_version: str | None = None
 
     def _call(self, path: str, body: dict | None = None) -> dict:
         req = urllib.request.Request(
@@ -46,15 +50,19 @@ class HomeHub:
     def refresh_names(self) -> list[str]:
         """Device and scene names, which help speech recognition spell them right. Keeps the old list on failure."""
         try:
-            self.names = list(self._call('/device-names').get('names', []))
+            res = self._call('/device-names')
+            self.names = list(res.get('names', []))
+            self.names_version = res.get('version')
         except HomeHubError as e:
             log.warning('%s; keeping %d known names', e, len(self.names))
         return self.names
 
-    def report(self, version: str, speakers: list[dict]) -> None:
-        """Checks in for HomeHub's Health page."""
-        self._call('/status', {'version': version, 'speakers': speakers})
+    def report(self, version: str, speakers: list[dict]) -> dict:
+        """Checks in for HomeHub's Health page. HomeHub answers with the names' version and whether to restart."""
+        return self._call('/status', {'version': version, 'speakers': speakers})
 
     def command(self, text: str) -> CommandResult:
         res = self._call('/command', {'text': text})
-        return CommandResult(bool(res.get('handled')), str(res.get('response') or ''))
+        failed = [str((a.get('args') or {}).get('alias', '')) for a in res.get('actions') or []
+                  if isinstance(a, dict) and isinstance(a.get('result'), dict) and a['result'].get('error')]
+        return CommandResult(bool(res.get('handled')), str(res.get('response') or ''), failed)

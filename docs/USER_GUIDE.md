@@ -379,6 +379,10 @@ To reach HomeHub away from home, set up [Remote Access](./REMOTE_ACCESS.md). Don
 
 **More → Health** shows whether HomeHub is working, in plain words: its services, devices that aren't responding, voice speakers, the nightly backup, disk space and the computer's temperature. Anything that needs a look comes first, with what to do about it. Admins also see a notice on the Home page when something does.
 
+### Restart the voice bridge
+
+If speakers stop answering, administrators can select **Restart voice bridge** under **Voice**. The bridge restarts when it next checks in, within a minute, and the page shows it restarting. You don't need it for new nicknames: the bridge picks those up by itself within a minute.
+
 ### Go back a version
 
 If something stopped working after an update, open **Health**, and under **Version** select **Go back to** the version HomeHub ran before. HomeHub saves a copy of its database, switches back and restarts, which takes a minute or two. Your devices, schedules and settings stay. When a fixed version is out, the Update card on the Home page offers it as usual.
@@ -388,6 +392,10 @@ If Health says to run the installer once more, your HomeHub was installed before
 ## Voice control
 
 Say a command to a speaker or tablet, and HomeHub does it and answers, with no cloud. It needs the [voice bridge](../packages/voice-bridge/README.md) running on an always-on computer, such as the one HomeHub runs on, and a voice speaker such as the Ava app on an Android tablet. Its speakers appear under **Health**. See the [voice control plan](./VOICE_CONTROL.md) for what's still to come.
+
+Voice also understands Cantonese, and answers in it, once the bridge's Cantonese is turned on and your devices have Cantonese nicknames, such as 廚房燈. Say the verb, then the nickname: 開廚房燈, 熄廚房燈. See [Cantonese](../packages/voice-bridge/README.md#cantonese).
+
+A Cantonese command HomeHub didn't understand is listed under **Settings → Teach HomeHub**, like an English one. **Teach** suggests the name without its verb, such as 主人房燈 from 開主人房燈. Choose its devices and save, and voice understands it within a minute.
 
 ## Troubleshooting
 

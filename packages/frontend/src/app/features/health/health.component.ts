@@ -1,4 +1,5 @@
 import { Component, OnDestroy, OnInit, computed, inject, signal } from '@angular/core';
+import { NgTemplateOutlet } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { AuthService } from '../../core/auth/auth.service';
 import { HealthItem, HealthReport, SystemService, SystemVersion } from '../../core/services/system.service';
@@ -22,7 +23,7 @@ const SUMMARY: Record<HealthReport['status'], string> = {
 @Component({
   selector: 'app-health',
   standalone: true,
-  imports: [RouterLink],
+  imports: [RouterLink, NgTemplateOutlet],
   styles: [`
     h1 { font-size: 1.4rem; font-weight: 700; margin-bottom: 1rem; }
     .summary { display: flex; align-items: center; gap: 0.85rem; padding: 1rem 1.1rem; margin-bottom: 1.25rem; }
@@ -87,6 +88,7 @@ const SUMMARY: Record<HealthReport['status'], string> = {
                 <div class="body">
                   <div class="label">{{ i.label }}@if (i.group !== i.label) {<span class="group">{{ i.group }}</span>}</div>
                   <div class="detail">{{ i.detail }}@if (i.link) {<a [routerLink]="i.link">Open</a>}</div>
+                  <ng-container *ngTemplateOutlet="itemAction; context: { $implicit: i }" />
                 </div>
               </div>
             }
@@ -102,6 +104,7 @@ const SUMMARY: Record<HealthReport['status'], string> = {
                 <div class="body">
                   <div class="label">{{ i.label }}</div>
                   <div class="detail">{{ i.detail }}</div>
+                  <ng-container *ngTemplateOutlet="itemAction; context: { $implicit: i }" />
                 </div>
               </div>
             }
@@ -156,6 +159,18 @@ const SUMMARY: Record<HealthReport['status'], string> = {
       }
     </div>
 
+    <ng-template #itemAction let-i>
+      @if (isAdmin() && i.action === 'restart-voice-bridge') {
+        <div class="actions">
+          <button class="btn-sm ghost" type="button" (click)="restartBridge()" [disabled]="restartingBridge()">
+            {{ restartingBridge() ? 'Asking…' : 'Restart voice bridge' }}
+          </button>
+          <span class="detail">If speakers stop answering. It also picks up new nicknames by itself within a minute.</span>
+        </div>
+      }
+      @if (i.id === 'voice-bridge' && bridgeError()) { <div class="err" style="margin-top:0.5rem">{{ bridgeError() }}</div> }
+    </ng-template>
+
     @if (switching(); as target) {
       <div class="overlay" role="alertdialog" aria-modal="true" aria-live="polite" aria-labelledby="switch-title">
         <div class="panel">
@@ -183,6 +198,8 @@ export class HealthComponent implements OnInit, OnDestroy {
   readonly switching = signal<string | null>(null);
   readonly restarted = signal(false);
   readonly switchError = signal('');
+  readonly restartingBridge = signal(false);
+  readonly bridgeError = signal('');
   private switchTimer?: ReturnType<typeof setInterval>;
 
   readonly levelText: Record<HealthItem['level'], string> = { ok: 'Working', warn: 'Needs a look', error: 'Problem', info: 'Note' };
@@ -266,6 +283,19 @@ export class HealthComponent implements OnInit, OnDestroy {
   private stopSwitch(): void {
     if (this.switchTimer) { clearInterval(this.switchTimer); this.switchTimer = undefined; }
     this.switching.set(null);
+  }
+
+  /** Asks the voice bridge to restart at its next check-in; the list then shows it happening. */
+  restartBridge(): void {
+    this.restartingBridge.set(true);
+    this.bridgeError.set('');
+    this.svc.restartVoiceBridge().subscribe({
+      next: () => { this.restartingBridge.set(false); this.load(); },
+      error: (err) => {
+        this.restartingBridge.set(false);
+        this.bridgeError.set(err?.error?.error ?? "Couldn't ask the voice bridge to restart. Try again.");
+      },
+    });
   }
 
   load(): void {

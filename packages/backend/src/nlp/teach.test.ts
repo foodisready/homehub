@@ -117,6 +117,38 @@ describe('teaching missed commands', () => {
     assert.throws(() => teachMod.teach({ source: 'voice', id: 12345, phrase: 'thing', deviceIds: [id('Desk')] }), /no longer in the list/);
   });
 
+  describe('Cantonese', () => {
+    for (const [text, phrase, kind] of [
+      ['開主人房燈', '主人房燈', 'device'],
+      ['唔該熄主人房燈啦。', '主人房燈', 'device'],
+      ['打開客廳燈', '客廳燈', 'device'],
+      ['关主人房灯。', '主人房灯', 'device'],
+      ['晚安', '晚安', 'scene'],
+      ['晚安呀', '晚安', 'scene'],
+    ] as const) {
+      it(`suggests "${phrase}" from "${text}"`, () => {
+        assert.deepEqual(teachMod.suggestPhrase(text), { phrase, kind });
+      });
+    }
+
+    it('teaches a Cantonese name, which voice then switches', async () => {
+      const miss = voiceMiss('開主人房燈');
+      assert.deepEqual(teachMod.listMisses()[0], { source: 'voice', id: miss, text: '開主人房燈', createdAt: teachMod.listMisses()[0].createdAt, phrase: '主人房燈', kind: 'device' });
+      const r = teachMod.teach({ source: 'voice', id: miss, phrase: '主人房燈', deviceIds: [id('Brenden bed lamp'), id('Desk')] });
+      assert.deepEqual(r.devices, ['Brenden bed lamp', 'Desk']);
+      assert.deepEqual(nicknames('Desk'), ['主人房燈']);
+      assert.deepEqual(teachMod.listMisses(), []);
+      await commands.runPowerCommand('turn on 主人房燈');
+      assert.equal(calls.length, 2);
+    });
+
+    it('lists a miss once, with or without its full stop', () => {
+      voiceMiss('開主人房燈');
+      voiceMiss('開主人房燈。');
+      assert.equal(teachMod.listMisses().length, 1);
+    });
+  });
+
   it('dismisses a miss', () => {
     const miss = voiceMiss('What is the weather.');
     teachMod.dismissMiss('voice', miss);

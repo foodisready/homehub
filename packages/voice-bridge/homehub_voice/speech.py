@@ -1,4 +1,4 @@
-"""Speech to text (Whisper) and text to speech (Piper)."""
+"""Speech to text (Whisper; SenseVoice for Cantonese) and text to speech (Piper; VITS for Cantonese)."""
 from __future__ import annotations
 
 import threading
@@ -39,3 +39,66 @@ class Speaker:
     def say(self, text: str, path: Path) -> None:
         with self.lock, wave.open(str(path), 'wb') as w:
             self.voice.synthesize_wav(text, w)
+
+
+def _pcm(audio: bytes) -> np.ndarray:
+    return np.frombuffer(audio[: len(audio) // 2 * 2], dtype=np.int16).astype(np.float32) / 32768
+
+
+class SenseVoice:
+    """Cantonese speech to text, and which language a command is in (sherpa-onnx SenseVoice Small)."""
+
+    def __init__(self, folder: Path, threads: int = 2) -> None:
+        import sherpa_onnx
+
+        model, tokens = folder / 'model.int8.onnx', folder / 'tokens.txt'
+        if not model.exists() or not tokens.exists():
+            raise FileNotFoundError(f'SenseVoice not found in {folder}: run install.sh with LANGUAGES=en yue')
+        make = lambda lang: sherpa_onnx.OfflineRecognizer.from_sense_voice(  # noqa: E731
+            model=str(model), tokens=str(tokens), language=lang, use_itn=True, num_threads=threads)
+        # "auto" tells the language; forcing Cantonese then hears the words better.
+        self.auto, self.yue = make('auto'), make('yue')
+        self.lock = threading.Lock()
+
+    def _run(self, rec, audio: bytes):
+        s = rec.create_stream()
+        s.accept_waveform(16000, _pcm(audio))
+        with self.lock:
+            rec.decode_stream(s)
+        return s.result
+
+    def language(self, audio: bytes) -> str:
+        """'en', 'yue', 'zh', ... from a tag like <|yue|>."""
+        return self._run(self.auto, audio).lang.strip('<|>') or 'en'
+
+    def transcribe(self, audio: bytes) -> str:
+        return self._run(self.yue, audio).text.strip()
+
+
+class CantoneseVoice:
+    """Spoken Cantonese replies (sherpa-onnx VITS). Its dictionary knows simplified characters best."""
+
+    def __init__(self, folder: Path, threads: int = 2) -> None:
+        import opencc
+        import sherpa_onnx
+
+        model = folder / 'vits-cantonese-hf-xiaomaiiwn.onnx'
+        if not model.exists():
+            raise FileNotFoundError(f'Cantonese voice not found in {folder}: run install.sh with LANGUAGES=en yue')
+        v = sherpa_onnx.OfflineTtsVitsModelConfig(
+            model=str(model), lexicon=str(folder / 'lexicon.txt'), tokens=str(folder / 'tokens.txt'))
+        self.tts = sherpa_onnx.OfflineTts(sherpa_onnx.OfflineTtsConfig(
+            model=sherpa_onnx.OfflineTtsModelConfig(vits=v, num_threads=threads),
+            rule_fsts=str(folder / 'rule.fst')))
+        self.simplify = opencc.OpenCC('t2s').convert
+        self.lock = threading.Lock()
+
+    def say(self, text: str, path: Path) -> None:
+        with self.lock:
+            sound = self.tts.generate(self.simplify(text), sid=0, speed=1.0)
+        pcm = (np.clip(np.asarray(sound.samples, dtype=np.float32), -1, 1) * 32767).astype(np.int16)
+        with wave.open(str(path), 'wb') as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)
+            w.setframerate(sound.sample_rate)
+            w.writeframes(pcm.tobytes())

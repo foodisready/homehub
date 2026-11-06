@@ -2,7 +2,8 @@ import { Router, Request, Response } from 'express';
 import { requireAdmin } from '../middleware/auth';
 import { logger } from '../logger';
 import { automationsPaused, setAutomationsPaused } from '../automation/pause';
-import { checkHealth } from '../system/health';
+import { BRIDGE_LATE_MS, checkHealth } from '../system/health';
+import { lastBridgeReport, requestBridgeRestart } from '../system/voice-bridge';
 import { UpdaterError, VERSION_RE, previousVersion, requestSwitch, switchStatus, updaterAvailable } from '../system/updater';
 import { backupBefore } from '../db/backup';
 
@@ -143,6 +144,22 @@ systemRouter.get('/switch-status', requireAdmin, async (_req: Request, res: Resp
  * settings, each with what to do about it. For the Health page. */
 systemRouter.get('/health', async (_req: Request, res: Response) => {
   res.json(await checkHealth());
+});
+
+/* POST /api/system/voice-bridge/restart (admin)
+ * The bridge runs outside HomeHub, so it's asked at its next check-in, within a
+ * minute, and then stops; its service starts it again. */
+systemRouter.post('/voice-bridge/restart', requireAdmin, (req: Request, res: Response) => {
+  const report = lastBridgeReport();
+  if (!report || Date.now() - report.at > BRIDGE_LATE_MS) {
+    return res.status(409).json({
+      error: "The voice bridge isn't checking in, so it can't be asked to restart. On the computer it runs on, run: systemctl --user restart homehub-voice",
+      code: 'BRIDGE_NOT_RUNNING',
+    });
+  }
+  requestBridgeRestart();
+  logger.info({ by: req.user?.name }, 'Voice bridge restart requested');
+  res.status(202).json({ asked: true });
 });
 
 /* GET /api/system/automations — { paused }, for the banner every page shows while paused.

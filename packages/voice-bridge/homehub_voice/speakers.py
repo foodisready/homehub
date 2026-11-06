@@ -40,13 +40,13 @@ class SpeakerLink:
         self,
         speaker: Speaker,
         answer: Callable[[bytes, bool], Answer],
-        speak: Callable[[str, str], str],
+        speak: Callable[[str, str, str], str],
         listed: bool,
         on_change: Callable[[], None] = lambda: None,
     ) -> None:
         self.speaker = speaker
         self.answer = answer
-        self.speak = speak  # (text, speaker host) -> URL of the spoken reply
+        self.speak = speak  # (text, speaker host, language) -> URL of the spoken reply
         self.listed = listed  # listed in SPEAKERS rather than found on the network
         self.name = speaker.label
         self.run: Run | None = None
@@ -148,7 +148,7 @@ class SpeakerLink:
                 event(E.VOICE_ASSISTANT_INTENT_START)
                 event(E.VOICE_ASSISTANT_INTENT_END, {'conversation_id': run.conversation})
                 event(E.VOICE_ASSISTANT_TTS_START, {'text': a.reply})
-                url = await loop.run_in_executor(None, self.speak, a.reply, self.speaker.host)
+                url = await loop.run_in_executor(None, self.speak, a.reply, self.speaker.host, a.lang)
                 event(E.VOICE_ASSISTANT_TTS_END, {'url': url})
                 log.info(
                     '%s #%d heard %r -> %r (%s; speech %.1fs, recognise %.2fs, HomeHub %.2fs, reply ready %.2fs after speech ended)',

@@ -148,11 +148,16 @@ class StubHomeHub(http.server.BaseHTTPRequestHandler):
         StubHomeHub.seen.append((self.path, self.headers.get('X-Internal-Key'), None))
         if self.headers.get('X-Internal-Key') != 'k':
             return self._send(401, {'error': 'no'})
-        self._send(200, {'names': ['Office Lamp', 'Goodnight']})
+        self._send(200, {'names': ['Office Lamp', 'Goodnight'], 'version': 'v1'})
 
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
         StubHomeHub.seen.append((self.path, self.headers.get('X-Internal-Key'), body))
+        if self.path.endswith('/status'):
+            return self._send(200, {'ok': True, 'namesVersion': 'v2', 'restart': False})
+        if 'garage' in body.get('text', ''):
+            return self._send(200, {'handled': True, 'response': "I couldn't reach Garage.", 'actions': [
+                {'tool': 'set_power_state', 'args': {'alias': 'Garage', 'state': 'on'}, 'result': {'error': 'timeout'}}]})
         self._send(200, {'handled': True, 'response': 'Done.', 'actions': []})
 
     def log_message(self, *a):
@@ -173,11 +178,14 @@ class HomeHubClientTest(unittest.TestCase):
     def test_names_and_command(self):
         h = HomeHub(self.url, 'k')
         self.assertEqual(h.refresh_names(), ['Office Lamp', 'Goodnight'])
+        self.assertEqual(h.names_version, 'v1')
+        self.assertEqual(h.command('turn on garage').failed, ['Garage'])
         self.assertEqual(h.command('turn on office lamp'), CommandResult(True, 'Done.'))
         self.assertEqual(StubHomeHub.seen[-1], ('/internal/voice/command', 'k', {'text': 'turn on office lamp'}))
 
     def test_report(self):
-        HomeHub(self.url, 'k').report('0.1.0', [{'name': 'Tablet', 'address': '10.0.0.20', 'connected': True}])
+        res = HomeHub(self.url, 'k').report('0.1.0', [{'name': 'Tablet', 'address': '10.0.0.20', 'connected': True}])
+        self.assertEqual((res['namesVersion'], res['restart']), ('v2', False))
         self.assertEqual(StubHomeHub.seen[-1], ('/internal/voice/status', 'k', {'version': '0.1.0', 'speakers': [{'name': 'Tablet', 'address': '10.0.0.20', 'connected': True}]}))
 
     def test_wrong_key_keeps_old_names(self):
@@ -227,7 +235,7 @@ class SpeakerLinkTest(unittest.IsolatedAsyncioTestCase):
     async def connected_link(self, answer_fn):
         from homehub_voice import speakers
 
-        link = speakers.SpeakerLink(cfg.Speaker('10.0.0.5'), answer_fn, lambda text, host: f'http://me/{len(text)}.wav', listed=True)
+        link = speakers.SpeakerLink(cfg.Speaker('10.0.0.5'), answer_fn, lambda text, host, lang='en': f'http://me/{len(text)}.wav', listed=True)
         with mock.patch.object(speakers.api, 'APIClient', FakeClient):
             link.start()
             for _ in range(50):
@@ -241,7 +249,7 @@ class SpeakerLinkTest(unittest.IsolatedAsyncioTestCase):
 
         def answer_fn(audio, spoke):
             heard.append((len(audio), spoke))
-            return mock.Mock(heard='turn on office lamp', reply='Office Lamp is on.', handled=True, stt_s=0.1, homehub_s=0.1)
+            return mock.Mock(heard='turn on office lamp', reply='Office Lamp is on.', handled=True, stt_s=0.1, homehub_s=0.1, lang='en')
 
         link, c = await self.connected_link(answer_fn)
         self.assertEqual(link.name, 'Test Speaker')

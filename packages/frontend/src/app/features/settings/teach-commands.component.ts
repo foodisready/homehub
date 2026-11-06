@@ -100,7 +100,8 @@ interface SceneLite { id: number; name: string }
               <button class="btn-sm btn-primary" type="button" (click)="save(m)"
                       [disabled]="busy() || !phrase.trim() || (kind === 'device' ? !chosen().size : sceneId === null)">Save</button>
               <span class="hint">
-                @if (kind === 'device') { Then "turn on {{ phrase.trim() || '…' }}" switches {{ chosen().size === 1 ? 'that device' : 'those devices' }}. }
+                @if (kind === 'device' && isChinese(phrase)) { Then "開{{ phrase.trim() }}" and "熄{{ phrase.trim() }}" switch {{ chosen().size === 1 ? 'that device' : 'those devices' }}. }
+                @else if (kind === 'device') { Then "turn on {{ phrase.trim() || '…' }}" switches {{ chosen().size === 1 ? 'that device' : 'those devices' }}. }
                 @else { Then "{{ phrase.trim() || '…' }}" runs the scene. }
               </span>
             </div>
@@ -128,6 +129,8 @@ export class TeachCommandsComponent implements OnInit {
 
   phrase = '';
   kind: 'device' | 'scene' = 'device';
+  /** Cantonese words, which voice says with 開 or 熄 rather than "turn on". */
+  isChinese(text: string): boolean { return /[\u3400-\u9fff]/.test(text); }
   sceneId: number | null = null;
 
   readonly rooms = computed(() => {

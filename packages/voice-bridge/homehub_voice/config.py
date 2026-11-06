@@ -26,6 +26,10 @@ class Config:
     whisper_model: str = 'base.en'
     language: str = 'en'
     piper_voice: Path = Path()
+    # Spoken languages besides Whisper's: 'yue' adds Cantonese.
+    cantonese: bool = False
+    sensevoice_dir: Path = Path()
+    cantonese_voice_dir: Path = Path()
     reply_port: int = 39500
     # Look for speakers on the network as well as any listed in SPEAKERS.
     discover: bool = True
@@ -76,6 +80,11 @@ def load(env: dict[str, str] | None = None) -> Config:
 
     voice = Path(env.get('PIPER_VOICE', '').strip() or '~/.local/share/homehub-voice/en_US-lessac-medium.onnx').expanduser()
     port = env.get('REPLY_PORT', '39500').strip()
+    data = Path('~/.local/share/homehub-voice').expanduser()
+    extra = {x.strip().lower() for x in env.get('LANGUAGES', '').replace(',', ' ').split()}
+    unknown = extra - {'en', 'yue'}
+    if unknown:
+        raise ConfigError(f'LANGUAGES: {", ".join(sorted(unknown))} isn\'t supported yet. Use en and yue (Cantonese).')
     if not port.isdigit():
         raise ConfigError('REPLY_PORT must be a number')
 
@@ -88,4 +97,7 @@ def load(env: dict[str, str] | None = None) -> Config:
         piper_voice=voice,
         reply_port=int(port),
         discover=_flag(env.get('DISCOVER'), True),
+        cantonese='yue' in extra,
+        sensevoice_dir=Path(env.get('SENSEVOICE_DIR', '').strip() or data / 'sensevoice').expanduser(),
+        cantonese_voice_dir=Path(env.get('CANTONESE_VOICE_DIR', '').strip() or data / 'cantonese-voice').expanduser(),
     )
