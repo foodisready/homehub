@@ -162,6 +162,42 @@ class PipelineTest(unittest.TestCase):
         self.assertEqual(h.sent, ['廚房燈'])   # logged as heard, and nothing switched
         self.assertEqual((a.reply, a.handled), ('你想開定熄廚房燈？', False))
 
+    def test_the_question_remembers_what_it_asked(self):
+        h = FakeHomeHub(response="Sorry, I didn't understand that.", handled=False)
+        self.assertEqual(answer(b'x', True, FakeListener(), h, FakeEars('yue', '廚房燈')).asked, '廚房燈')
+
+    def test_kai_alone_answers_the_question(self):
+        for said, sent, reply in [('開', 'turn on 廚房燈', '開咗廚房燈。'), ('熄啦。', 'turn off 廚房燈', '熄咗廚房燈。'),
+                                  ('唔該開', 'turn on 廚房燈', '開咗廚房燈。')]:
+            h = FakeHomeHub()
+            a = answer(b'x', True, FakeListener(), h, FakeEars('yue', said), asked='廚房燈')
+            self.assertEqual((h.sent, a.reply, a.handled, a.asked), ([sent], reply, True, None), said)
+
+    def test_a_whole_command_after_the_question_is_its_own(self):
+        h = FakeHomeHub()
+        answer(b'x', True, FakeListener(), h, FakeEars('yue', '開走廊燈'), asked='廚房燈')
+        self.assertEqual(h.sent, ['turn on 走廊燈'])
+
+    def test_kai_alone_without_a_question_is_not_understood(self):
+        h = FakeHomeHub(response="Sorry, I didn't understand that.", handled=False)
+        a = answer(b'x', True, FakeListener(), h, FakeEars('yue', '開'))
+        self.assertEqual((a.reply, a.handled), (yue.NOT_UNDERSTOOD, False))
+
+    def test_on_in_english_answers_the_question(self):
+        class Says:
+            def __init__(self, text): self.text = text
+            def transcribe(self, audio, names): return self.text
+        for said, sent in [('On.', 'turn on 廚房燈'), ('Turn it off, please.', 'turn off 廚房燈'), ('off', 'turn off 廚房燈')]:
+            h = FakeHomeHub()
+            answer(b'x', True, Says(said), h, FakeEars('en', ''), asked='廚房燈')
+            self.assertEqual(h.sent, [sent], said)
+        h = FakeHomeHub()
+        answer(b'x', True, Says('Turn on the hallway lamp.'), h, FakeEars('en', ''), asked='廚房燈')
+        self.assertEqual(h.sent, ['Turn on the hallway lamp.'])
+        h = FakeHomeHub()
+        answer(b'x', True, Says('On.'), h, FakeEars('en', ''))
+        self.assertEqual(h.sent, ['On.'], 'nothing was asked')
+
     def test_a_scene_named_alone_still_runs(self):
         h = FakeHomeHub(response='Done, Good night.')
         a = answer(b'x', True, FakeListener(), h, FakeEars('yue', '晚安'))

@@ -133,6 +133,18 @@ def read_verb(s: tuple[str, ...]) -> tuple[str | None, tuple[str, ...]]:
     return None, s
 
 
+def verb_alone(text: str) -> str | None:
+    """'on' or 'off' for 開 or 熄 said on its own (with 啦 or 呀 after it), else None."""
+    s = syllables(text)
+    while s and s[-1] in TRAILING:
+        s = s[:-1]
+    s, _ = _strip_start(s, POLITE)
+    for action, verbs in (('on', ON_VERBS), ('off', OFF_VERBS)):
+        if any(s == v for v in verbs):
+            return action
+    return None
+
+
 def best_name(heard: tuple[str, ...], names: list[str]) -> tuple[str | None, float, float]:
     """The closest name, its score, and the score of the closest that sounds different."""
     scored = sorted(((match(heard, syllables(n)), n) for n in names), reverse=True)

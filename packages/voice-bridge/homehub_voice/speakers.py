@@ -18,6 +18,8 @@ from .pipeline import Answer
 log = logging.getLogger('homehub-voice')
 
 ESPHOME_SERVICE = '_esphomelib._tcp.local.'
+# How long an "on or off?" question waits for its answer, from when it was asked.
+FOLLOW_UP_S = 15.0
 
 
 @dataclass
@@ -39,7 +41,7 @@ class SpeakerLink:
     def __init__(
         self,
         speaker: Speaker,
-        answer: Callable[[bytes, bool], Answer],
+        answer: Callable[[bytes, bool, str | None], Answer],
         speak: Callable[[str, str, str], str],
         listed: bool,
         on_change: Callable[[], None] = lambda: None,
@@ -55,6 +57,8 @@ class SpeakerLink:
         self.connected = False
         self.usable = True  # False once it turns out not to be a speaker
         self.on_change = on_change
+        # The device this speaker was just asked "on or off?" about, and when.
+        self.asked: tuple[str, float] | None = None
 
     def _set_connected(self, value: bool) -> None:
         if value != self.connected:
@@ -142,14 +146,22 @@ class SpeakerLink:
                 return
             t_end = time.monotonic()
             event(E.VOICE_ASSISTANT_STT_VAD_END)
+            # A question asked lately is answered by this command, or forgotten.
+            asked = self.asked[0] if self.asked and time.monotonic() - self.asked[1] <= FOLLOW_UP_S else None
+            self.asked = None
             try:
-                a = await loop.run_in_executor(None, self.answer, bytes(run.listen.audio), run.listen.spoke)
+                a = await loop.run_in_executor(None, self.answer, bytes(run.listen.audio), run.listen.spoke, asked)
+                follow_up = a.asked if isinstance(getattr(a, 'asked', None), str) else None
                 event(E.VOICE_ASSISTANT_STT_END, {'text': a.heard or ' '})
                 event(E.VOICE_ASSISTANT_INTENT_START)
-                event(E.VOICE_ASSISTANT_INTENT_END, {'conversation_id': run.conversation})
+                # A question: the speaker listens again after the reply, with no wake word.
+                event(E.VOICE_ASSISTANT_INTENT_END, {'conversation_id': run.conversation,
+                                                     **({'continue_conversation': '1'} if follow_up else {})})
                 event(E.VOICE_ASSISTANT_TTS_START, {'text': a.reply})
                 url = await loop.run_in_executor(None, self.speak, a.reply, self.speaker.host, a.lang)
                 event(E.VOICE_ASSISTANT_TTS_END, {'url': url})
+                if follow_up:
+                    self.asked = (follow_up, time.monotonic())
                 log.info(
                     '%s #%d heard %r -> %r (%s; speech %.1fs, recognise %.2fs, HomeHub %.2fs, reply ready %.2fs after speech ended)',
                     self.name, run.n, a.heard, a.reply, 'done' if a.handled else 'not handled',
