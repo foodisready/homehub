@@ -82,6 +82,19 @@ On a 2015 MacBook Pro (Core i7-4980HQ) with `base.en`, recognising a 2 to 4 seco
 - **Home Assistant Voice:** its firmware expects Home Assistant to set its encryption key, so whether the bridge can connect to one out of the box hasn't been tested.
 - Languages other than English and Cantonese.
 
+## Credits
+
+The bridge downloads these speech models when voice is turned on. They aren't part of HomeHub, and each has its own license.
+
+| Model | Used for | Source and license |
+|---|---|---|
+| Whisper `base.en`, as converted for faster-whisper | Hearing English | OpenAI; Systran (conversion). MIT |
+| Piper voice `en_US-ljspeech-medium` | Speaking English | Piper (Michael Hansen, Rhasspy), trained on the LJ Speech dataset by Keith Ito and Linda Johnson. Public domain dataset |
+| SenseVoice Small, as converted for sherpa-onnx (int8) | Telling the language apart, and hearing Cantonese | [SenseVoice](https://github.com/FunAudioLLM/SenseVoice) by Tongyi Lab, Alibaba Group; sherpa-onnx (conversion). [FunASR Model Open Source License](https://github.com/modelscope/FunASR/blob/main/MODEL_LICENSE) |
+| `vits-cantonese` | Speaking Cantonese | [xiaomaiiwn on Hugging Face](https://huggingface.co/xiaomaiiwn/vits-cantonese); sherpa-onnx (conversion). No license stated |
+
+Until v0.1.25 the English voice was Piper's `en_US-lessac-medium`, whose recordings are licensed for research only. Updating removes it.
+
 ## Tests
 
 ```bash

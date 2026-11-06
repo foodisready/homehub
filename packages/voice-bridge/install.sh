@@ -7,7 +7,9 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 DATA="$HOME/.local/share/homehub-voice"
 CONF="$HOME/.config/homehub-voice"
 UNIT="$HOME/.config/systemd/user/homehub-voice.service"
-VOICE_URL="https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/medium"
+# Public domain (LJ Speech). The earlier "lessac" voice was for research use only.
+VOICE=en_US-ljspeech-medium
+VOICE_URL="https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/ljspeech/medium"
 
 command -v python3 >/dev/null || { echo "Python 3 is missing: sudo apt install -y python3-venv"; exit 1; }
 python3 -m venv --help >/dev/null 2>&1 || { echo "Python venv is missing: sudo apt install -y python3-venv"; exit 1; }
@@ -25,17 +27,24 @@ rm -rf "$DATA/app"
 mkdir -p "$DATA/app"
 cp -R "$HERE/homehub_voice" "$DATA/app/"
 
-if [ ! -s "$DATA/en_US-lessac-medium.onnx" ]; then
+if [ ! -s "$DATA/$VOICE.onnx" ]; then
   echo "== Piper voice (about 60 MB)"
-  curl -fsSL -o "$DATA/en_US-lessac-medium.onnx.json" "$VOICE_URL/en_US-lessac-medium.onnx.json"
-  curl -fsSL -o "$DATA/en_US-lessac-medium.onnx.part" "$VOICE_URL/en_US-lessac-medium.onnx"
-  mv "$DATA/en_US-lessac-medium.onnx.part" "$DATA/en_US-lessac-medium.onnx"
+  curl -fsSL -o "$DATA/$VOICE.onnx.json" "$VOICE_URL/$VOICE.onnx.json"
+  curl -fsSL -o "$DATA/$VOICE.onnx.part" "$VOICE_URL/$VOICE.onnx"
+  mv "$DATA/$VOICE.onnx.part" "$DATA/$VOICE.onnx"
 fi
 
 if [ ! -f "$CONF/config.env" ]; then
   cp "$HERE/config.env.example" "$CONF/config.env"
   echo "== Settings written to $CONF/config.env"
 fi
+
+# The research-only "lessac" voice is replaced: point settings at the new one, then remove it.
+if grep -q "en_US-lessac-medium.onnx" "$CONF/config.env"; then
+  sed -i.bak "s#en_US-lessac-medium.onnx#$VOICE.onnx#" "$CONF/config.env"
+  echo "== English voice changed to $VOICE in $CONF/config.env"
+fi
+rm -f "$DATA/en_US-lessac-medium.onnx" "$DATA/en_US-lessac-medium.onnx.json"
 
 # Cantonese (LANGUAGES=en yue): SenseVoice to hear it, and a Cantonese voice to answer.
 MODELS="https://github.com/k2-fsa/sherpa-onnx/releases/download"

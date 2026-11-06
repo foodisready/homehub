@@ -84,7 +84,7 @@ def load(env: dict[str, str] | None = None) -> Config:
         raise ConfigError('Set HOMEHUB_INTERNAL_KEY_FILE to a file holding HomeHub\'s INTERNAL_API_KEY')
 
     data = Path(env.get('MODELS_DIR', '').strip() or '~/.local/share/homehub-voice').expanduser()
-    voice = Path(env.get('PIPER_VOICE', '').strip() or data / 'en_US-lessac-medium.onnx').expanduser()
+    voice = Path(env.get('PIPER_VOICE', '').strip() or data / 'en_US-ljspeech-medium.onnx').expanduser()
     managed = _flag(env.get('HOMEHUB_VOICE_MANAGED'), False)
     port = env.get('REPLY_PORT', '39500').strip()
     extra = {x.strip().lower() for x in env.get('LANGUAGES', '').replace(',', ' ').split()}

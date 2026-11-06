@@ -178,6 +178,24 @@ describe('checkHealth', () => {
       assert.equal(two?.level, 'warn');
       assert.match(two!.detail, /systemctl --user disable --now homehub-voice/);
     });
+
+    it('counts a bridge from before v0.1.23, which sends no id, as a second one', async () => {
+      const { bridgeForSettings } = await vb();
+      (await vb()).setVoiceSettings({ enabled: true, languages: ['en'] });
+      recordBridgeReport({ speakers: [], version: '0.1.0' }, NOW - 40_000);
+      recordBridgeReport({ speakers: [], kind: 'docker', id: 'new', state: 'running' }, NOW - 10_000);
+      assert.equal((await voiceItems()).find((i) => i.id === 'voice-bridges')?.level, 'warn');
+      // Settings tells the admin to stop the old one, though the new one spoke last.
+      assert.equal(bridgeForSettings(NOW, 90_000)?.kind, 'service');
+    });
+
+    it('shows the bridge that comes with HomeHub once the old one has stopped', async () => {
+      const { bridgeForSettings } = await vb();
+      recordBridgeReport({ speakers: [], version: '0.1.0' }, NOW - 10 * 60_000);
+      recordBridgeReport({ speakers: [], kind: 'docker', id: 'new', state: 'running' }, NOW - 10_000);
+      assert.equal(bridgeForSettings(NOW, 90_000)?.kind, 'docker');
+      assert.equal((await voiceItems()).find((i) => i.id === 'voice-bridges'), undefined);
+    });
   });
 
   it('notices a bridge that stopped checking in, even after a restart', async () => {

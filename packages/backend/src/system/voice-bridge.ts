@@ -31,10 +31,23 @@ let last: BridgeReport | null = null;
 // Bridges heard from lately, by id. Two checking in within this time are both running.
 const bridges = new Map<string, { at: number; kind: BridgeReport['kind'] }>();
 const TWO_BRIDGES_MS = 2.5 * 60_000;
+/** Stands in for the id a bridge from before v0.1.23 doesn't send. */
+const LEGACY_ID = 'legacy';
 
 /** Every bridge that checked in lately: more than one means two answer each command. */
 export function recentBridges(now = Date.now()): { id: string; kind: BridgeReport['kind'] }[] {
   return [...bridges].filter(([, b]) => now - b.at <= TWO_BRIDGES_MS).map(([id, b]) => ({ id, kind: b.kind }));
+}
+
+/**
+ * What Settings → Voice control shows as the bridge. While one installed with
+ * install.sh is still checking in, that's what it shows, even when the one that
+ * comes with HomeHub spoke last, so the admin is told to stop the old one.
+ */
+export function bridgeForSettings(now = Date.now(), lateMs: number): Pick<BridgeReport, 'state' | 'kind' | 'version'> | null {
+  if (!last || now - last.at > lateMs) return null;
+  const service = recentBridges(now).some((b) => b.kind === 'service');
+  return { state: last.state, kind: service ? 'service' : last.kind, version: last.version };
 }
 
 // ── Voice settings, chosen in Settings → Voice control ──────────
@@ -91,12 +104,12 @@ export function recordBridgeReport(body: unknown, now = Date.now()): BridgeRepor
     return [{ name: str(o['name']) || address, address, connected: o['connected'] === true }];
   });
   const state = b['state'] === 'off' || b['state'] === 'starting' ? b['state'] : 'running';
-  const kind = b['kind'] === 'docker' || b['kind'] === 'service' ? b['kind'] : null;
-  last = { at: now, version: str(b['version'], 40) || null, speakers, state, id: str(b['id'], 40) || null, kind };
-  if (last.id) {
-    bridges.set(last.id, { at: now, kind });
-    for (const [id, seen] of bridges) if (now - seen.at > TWO_BRIDGES_MS) bridges.delete(id);
-  }
+  const id = str(b['id'], 40) || null;
+  // Bridges from before v0.1.23 send neither: they were all installed with install.sh.
+  const kind = b['kind'] === 'docker' || b['kind'] === 'service' ? b['kind'] : id ? null : 'service';
+  last = { at: now, version: str(b['version'], 40) || null, speakers, state, id, kind };
+  bridges.set(id ?? LEGACY_ID, { at: now, kind });
+  for (const [k, seen] of bridges) if (now - seen.at > TWO_BRIDGES_MS) bridges.delete(k);
   // Remembered across restarts, so a bridge that stops checking in is noticed.
   const save = getDb().prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
   save.run(SEEN_KEY, new Date(now).toISOString());

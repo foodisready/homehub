@@ -329,3 +329,21 @@ class SpeakerLinkTest(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class EnglishVoiceTest(unittest.TestCase):
+    def test_the_research_only_voice_is_removed_and_the_new_one_kept(self):
+        from homehub_voice import models
+        with tempfile.TemporaryDirectory() as d:
+            folder = Path(d)
+            for name in ['en_US-ljspeech-medium.onnx', 'en_US-ljspeech-medium.onnx.json', *models.OLD_VOICES]:
+                (folder / name).write_text('x')
+            with mock.patch.object(models, '_fetch') as fetch:
+                models.piper_voice(folder / 'en_US-ljspeech-medium.onnx')
+            fetch.assert_not_called()   # already there: nothing downloaded
+            self.assertEqual(sorted(p.name for p in folder.iterdir()),
+                             ['en_US-ljspeech-medium.onnx', 'en_US-ljspeech-medium.onnx.json'])
+
+    def test_the_default_voice_is_public_domain(self):
+        from homehub_voice import models
+        self.assertIn('ljspeech', models.PIPER)

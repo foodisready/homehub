@@ -74,6 +74,21 @@ class ReplyTest(unittest.TestCase):
         self.assertEqual(yue.reply(None, False, '', []), yue.NOT_UNDERSTOOD)
 
 
+class VolumeTest(unittest.TestCase):
+    def test_a_quiet_reply_is_raised_to_full_volume(self):
+        import numpy as np
+        from homehub_voice.speech import PEAK, louder
+        out = louder(np.array([0.1, -0.35, 0.2], dtype=np.float32))
+        self.assertAlmostEqual(float(np.max(np.abs(out))), PEAK, places=5)
+
+    def test_silence_stays_silent(self):
+        import numpy as np
+        from homehub_voice.speech import louder
+        self.assertEqual(float(np.max(np.abs(louder(np.zeros(5, dtype=np.float32))))), 0.0)
+        self.assertLess(float(np.max(np.abs(louder(np.array([0.001], dtype=np.float32))))), 0.02)
+        self.assertEqual(louder(np.array([], dtype=np.float32)).size, 0)
+
+
 class FakeEars:
     def __init__(self, lang, text):
         self.lang, self.text = lang, text

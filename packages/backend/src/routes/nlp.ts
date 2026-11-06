@@ -6,7 +6,7 @@ import { requireAdmin } from '../middleware/auth';
 import { BUILT_IN, MAX_CUSTOM, MAX_LENGTH, MOMENTS, ReplyError, getReplyChoices, saveReplyChoices } from '../nlp/replies';
 import { logger } from '../logger';
 import { activityMiddleware } from '../activity/activity';
-import { VOICE_LANGUAGES, getVoiceSettings, lastBridgeReport, setVoiceSettings } from '../system/voice-bridge';
+import { VOICE_LANGUAGES, bridgeForSettings, getVoiceSettings, setVoiceSettings } from '../system/voice-bridge';
 import { BRIDGE_LATE_MS } from '../system/health';
 
 export const nlpRouter = Router();
@@ -21,12 +21,11 @@ nlpRouter.get('/stats', (_req: Request, res: Response) => {
 
 // GET /api/nlp/voice — Settings → Voice control: on or off, and languages. Admin only.
 nlpRouter.get('/voice', requireAdmin, (_req: Request, res: Response) => {
-  const report = lastBridgeReport();
   res.json({
     ...getVoiceSettings(),
     languagesOffered: VOICE_LANGUAGES,
     // What the bridge said last, so Settings can say whether it's there and what it's doing.
-    bridge: report && Date.now() - report.at <= BRIDGE_LATE_MS ? { state: report.state, kind: report.kind, version: report.version } : null,
+    bridge: bridgeForSettings(Date.now(), BRIDGE_LATE_MS),
   });
 });
 

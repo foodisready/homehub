@@ -7,6 +7,17 @@ from pathlib import Path
 
 import numpy as np
 
+PEAK = 0.95      # how loud the loudest moment of a reply is, as Piper makes it
+MAX_GAIN = 10.0  # so near-silence isn't turned into loud noise
+
+
+def louder(samples: np.ndarray) -> np.ndarray:
+    """Raises a reply to full volume, as Piper does for English; sherpa-onnx voices come out at about a third."""
+    peak = float(np.max(np.abs(samples))) if samples.size else 0.0
+    if peak <= 0:
+        return samples
+    return np.clip(samples * min(PEAK / peak, MAX_GAIN), -1, 1)
+
 
 class Listener:
     def __init__(self, model: str, language: str, folder: Path | None = None) -> None:
@@ -96,7 +107,7 @@ class CantoneseVoice:
     def say(self, text: str, path: Path) -> None:
         with self.lock:
             sound = self.tts.generate(self.simplify(text), sid=0, speed=1.0)
-        pcm = (np.clip(np.asarray(sound.samples, dtype=np.float32), -1, 1) * 32767).astype(np.int16)
+        pcm = (louder(np.asarray(sound.samples, dtype=np.float32)) * 32767).astype(np.int16)
         with wave.open(str(path), 'wb') as w:
             w.setnchannels(1)
             w.setsampwidth(2)

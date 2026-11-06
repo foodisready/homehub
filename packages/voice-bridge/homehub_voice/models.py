@@ -15,7 +15,9 @@ from pathlib import Path
 
 log = logging.getLogger('homehub-voice')
 
-PIPER = 'https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/medium/en_US-lessac-medium.onnx'
+# Public domain (LJ Speech). The earlier "lessac" voice was for research use only.
+PIPER = 'https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/ljspeech/medium/en_US-ljspeech-medium.onnx'
+OLD_VOICES = ['en_US-lessac-medium.onnx', 'en_US-lessac-medium.onnx.json']
 SHERPA = 'https://github.com/k2-fsa/sherpa-onnx/releases/download'
 SENSEVOICE = 'sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17'
 CANTONESE_VOICE = 'vits-cantonese-hf-xiaomaiiwn'
@@ -31,12 +33,15 @@ def _fetch(url: str, dest: Path) -> None:
 
 
 def piper_voice(path: Path) -> None:
-    if path.exists() and path.with_name(path.name + '.json').exists():
-        return
-    log.info('downloading the English voice (about 60 MB)')
-    path.parent.mkdir(parents=True, exist_ok=True)
-    _fetch(PIPER + '.json', path.with_name(path.name + '.json'))
-    _fetch(PIPER, path)
+    if not (path.exists() and path.with_name(path.name + '.json').exists()):
+        log.info('downloading the English voice (about 60 MB)')
+        path.parent.mkdir(parents=True, exist_ok=True)
+        _fetch(PIPER + '.json', path.with_name(path.name + '.json'))
+        _fetch(PIPER, path)
+    # The voice it replaced: no longer used, and not ours to keep.
+    for old in OLD_VOICES:
+        if old != path.name and old != path.name + '.json':
+            (path.parent / old).unlink(missing_ok=True)
 
 
 def _archive(url: str, inside: str, dest: Path, keep: list[str]) -> None:
