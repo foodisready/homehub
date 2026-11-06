@@ -17,6 +17,7 @@ import { AiConnectionComponent } from './ai-connection.component';
 import { CamerasToggleComponent } from './cameras-toggle.component';
 import { TeachCommandsComponent } from './teach-commands.component';
 import { VoiceRepliesComponent } from './voice-replies.component';
+import { VoiceControlComponent } from './voice-control.component';
 import { AutomationsService } from '../../core/services/automations.service';
 
 interface ChatStats {
@@ -70,7 +71,7 @@ const DRIVER_LABEL: Record<string, string> = {
 @Component({
   selector: 'app-settings',
   standalone: true,
-  imports: [FormsModule, RouterLink, InviteQrComponent, MatterPairComponent, DeviceFilterComponent, BackupsComponent, MerossLoginComponent, OtherNetworksComponent, HomeSettingsComponent, AiConnectionComponent, CamerasToggleComponent, TeachCommandsComponent, VoiceRepliesComponent],
+  imports: [FormsModule, RouterLink, InviteQrComponent, MatterPairComponent, DeviceFilterComponent, BackupsComponent, MerossLoginComponent, OtherNetworksComponent, HomeSettingsComponent, AiConnectionComponent, CamerasToggleComponent, TeachCommandsComponent, VoiceRepliesComponent, VoiceControlComponent],
   styles: [`
     .topbar { display:flex; align-items:center; justify-content:space-between; margin-bottom:1.5rem; }
     .topbar h1 { font-size:1.4rem; font-weight:700; }
@@ -771,6 +772,18 @@ const DRIVER_LABEL: Record<string, string> = {
       }
 
       <!-- ── Preferences ───────────────────────────────────────── -->
+      <!-- ── Voice control (admin only) ─────────────────────────── -->
+      @if (isAdmin()) {
+        <div class="section">
+          <button type="button" class="section-title section-toggle" (click)="toggleSection('voice')" [attr.aria-expanded]="isSectionOpen('voice')">
+            <span class="chev">{{ isSectionOpen('voice') ? '▾' : '▸' }}</span> Voice control
+          </button>
+          @if (isSectionOpen('voice')) {
+            <div class="card"><app-voice-control /></div>
+          }
+        </div>
+      }
+
       <!-- ── Teach HomeHub (admin only) ───────────────────────── -->
       @if (isAdmin()) {
         <div class="section">

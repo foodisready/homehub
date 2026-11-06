@@ -17,10 +17,64 @@ export interface BridgeReport {
   at: number;
   version: string | null;
   speakers: BridgeSpeaker[];
+  /** 'off': waiting for voice to be turned on; 'starting': loading or downloading its models. */
+  state: 'off' | 'starting' | 'running';
+  /** The bridge that sent it: two at once means an old one is still running. */
+  id: string | null;
+  /** 'docker' when it comes with HomeHub; 'service' when installed with install.sh. */
+  kind: 'docker' | 'service' | null;
 }
 
 const SEEN_KEY = 'voice_bridge_seen_at';
+const STATE_KEY = 'voice_bridge_state';
 let last: BridgeReport | null = null;
+// Bridges heard from lately, by id. Two checking in within this time are both running.
+const bridges = new Map<string, { at: number; kind: BridgeReport['kind'] }>();
+const TWO_BRIDGES_MS = 2.5 * 60_000;
+
+/** Every bridge that checked in lately: more than one means two answer each command. */
+export function recentBridges(now = Date.now()): { id: string; kind: BridgeReport['kind'] }[] {
+  return [...bridges].filter(([, b]) => now - b.at <= TWO_BRIDGES_MS).map(([id, b]) => ({ id, kind: b.kind }));
+}
+
+// ── Voice settings, chosen in Settings → Voice control ──────────
+
+export const VOICE_LANGUAGES = ['en', 'yue'] as const;
+export type VoiceLanguage = typeof VOICE_LANGUAGES[number];
+export interface VoiceSettings { enabled: boolean; languages: VoiceLanguage[] }
+
+const VOICE_KEY = 'voice_settings';
+
+export function getVoiceSettings(): VoiceSettings {
+  const row = getDb().prepare('SELECT value FROM settings WHERE key = ?').get(VOICE_KEY) as { value: string } | undefined;
+  try {
+    const v = row ? JSON.parse(row.value) : {};
+    const languages = Array.isArray(v.languages) ? VOICE_LANGUAGES.filter((l) => v.languages.includes(l)) : ['en' as const];
+    return { enabled: v.enabled === true, languages: languages.includes('en') ? languages : ['en', ...languages] };
+  } catch {
+    return { enabled: false, languages: ['en'] };
+  }
+}
+
+/** Validates and saves. English is always on: it's how HomeHub's own wording is spoken. */
+export function setVoiceSettings(input: unknown): VoiceSettings {
+  const v = (input ?? {}) as Record<string, unknown>;
+  if (typeof v.enabled !== 'boolean') throw new Error('enabled must be true or false');
+  if (!Array.isArray(v.languages) || v.languages.some((l) => !VOICE_LANGUAGES.includes(l as VoiceLanguage))) {
+    throw new Error(`languages must be a list of: ${VOICE_LANGUAGES.join(', ')}`);
+  }
+  const languages = VOICE_LANGUAGES.filter((l) => l === 'en' || (v.languages as unknown[]).includes(l));
+  const saved: VoiceSettings = { enabled: v.enabled, languages };
+  getDb().prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
+    .run(VOICE_KEY, JSON.stringify(saved));
+  return saved;
+}
+
+/** What the bridge runs with, and a version that changes when it does, so the bridge restarts to apply it. */
+export function voiceConfig(): VoiceSettings & { version: string } {
+  const s = getVoiceSettings();
+  return { ...s, version: createHash('sha1').update(JSON.stringify(s)).digest('hex').slice(0, 12) };
+}
 
 const str = (v: unknown, max = 100): string => (typeof v === 'string' ? v.slice(0, max) : '');
 
@@ -36,10 +90,17 @@ export function recordBridgeReport(body: unknown, now = Date.now()): BridgeRepor
     if (!address) return [];
     return [{ name: str(o['name']) || address, address, connected: o['connected'] === true }];
   });
-  last = { at: now, version: str(b['version'], 40) || null, speakers };
+  const state = b['state'] === 'off' || b['state'] === 'starting' ? b['state'] : 'running';
+  const kind = b['kind'] === 'docker' || b['kind'] === 'service' ? b['kind'] : null;
+  last = { at: now, version: str(b['version'], 40) || null, speakers, state, id: str(b['id'], 40) || null, kind };
+  if (last.id) {
+    bridges.set(last.id, { at: now, kind });
+    for (const [id, seen] of bridges) if (now - seen.at > TWO_BRIDGES_MS) bridges.delete(id);
+  }
   // Remembered across restarts, so a bridge that stops checking in is noticed.
-  getDb().prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
-    .run(SEEN_KEY, new Date(now).toISOString());
+  const save = getDb().prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
+  save.run(SEEN_KEY, new Date(now).toISOString());
+  save.run(STATE_KEY, state);
   return last;
 }
 
@@ -55,10 +116,17 @@ export function bridgeSeenAt(): number | null {
   return Number.isFinite(t) ? t : null;
 }
 
+/** What the bridge said it was doing last time, even before this backend started. */
+export function bridgeLastState(): BridgeReport['state'] | null {
+  if (last) return last.state;
+  const row = getDb().prepare('SELECT value FROM settings WHERE key = ?').get(STATE_KEY) as { value: string } | undefined;
+  return row?.value === 'off' || row?.value === 'starting' || row?.value === 'running' ? row.value : null;
+}
+
 /** Forgets the bridge, for when it has been removed on purpose. */
 export function forgetBridge(): void {
   last = null;
-  getDb().prepare('DELETE FROM settings WHERE key = ?').run(SEEN_KEY);
+  getDb().prepare('DELETE FROM settings WHERE key IN (?, ?)').run(SEEN_KEY, STATE_KEY);
 }
 
 /** Every device, nickname, room and scene name, for the bridge's speech recognition and Cantonese matching. */
@@ -79,7 +147,7 @@ export function requestBridgeRestart(now = Date.now()): void {
 }
 
 /** What HomeHub tells the bridge when it checks in: the names' version, and whether to restart. */
-export function bridgeInstructions(now = Date.now()): { namesVersion: string; restart: boolean } {
+export function bridgeInstructions(now = Date.now()): { namesVersion: string; configVersion: string; restart: boolean } {
   const restart = restartAskedAt !== null;
   if (restart) {
     restartAskedAt = null;
@@ -87,7 +155,7 @@ export function bridgeInstructions(now = Date.now()): { namesVersion: string; re
   } else if (restartingSince !== null && now - restartingSince > RESTART_SETTLE_MS) {
     restartingSince = null;   // checked in again: restarted
   }
-  return { namesVersion: voiceNames().version, restart };
+  return { namesVersion: voiceNames().version, configVersion: voiceConfig().version, restart };
 }
 
 /** 'asked' until the bridge checks in, then 'restarting' until it checks in again. */
@@ -98,6 +166,7 @@ export function bridgeRestartState(): 'asked' | 'restarting' | null {
 /** For tests. */
 export function resetBridgeReport(): void {
   last = null;
+  bridges.clear();
   restartAskedAt = null;
   restartingSince = null;
 }

@@ -33,7 +33,7 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        service: [backend, frontend, scheduler, mcp-server, updater, wyze-bridge]
+        service: [backend, frontend, scheduler, mcp-server, updater, wyze-bridge, voice-bridge]
         arch: [arm64, amd64]
         include:
           - arch: arm64
@@ -95,7 +95,7 @@ jobs:
     runs-on: ubuntu-24.04
     strategy:
       matrix:
-        service: [backend, frontend, scheduler, mcp-server, updater, wyze-bridge]
+        service: [backend, frontend, scheduler, mcp-server, updater, wyze-bridge, voice-bridge]
     steps:
       - uses: actions/download-artifact@v4
         with:

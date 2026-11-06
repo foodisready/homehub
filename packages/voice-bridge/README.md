@@ -10,20 +10,15 @@ It works with ESPHome voice speakers: [Ava](https://github.com/brownard/Ava) on 
 
 Commands go through HomeHub's rules only, never an AI model, so a misheard command can't switch a device the rules didn't match. Protected devices are never switched by voice.
 
-## What it needs
+## Turning it on
 
-- A computer running Ubuntu or Debian, on all the time. An old laptop is fine; a Raspberry Pi 4 is too slow (about 10 seconds to understand a command).
-- Python 3.11 or newer, with `python3-venv`, `curl` and `ffmpeg`:
+The bridge comes with HomeHub, and updates with it. Open **Settings → Voice control**, tick **Voice control**, and save. Within a minute the bridge downloads its speech models (about 200 MB for English; Cantonese adds about 350 MB) and starts listening. Until then it waits, using almost no memory. A change there, such as adding Cantonese, is applied within a minute.
 
-  ```bash
-  sudo apt install -y python3-venv curl ffmpeg
-  ```
+It needs a computer that's fast enough: an old laptop is fine, but a Raspberry Pi 4 takes about 10 seconds to understand a command. It uses about 1 GB of memory once on. To leave it out of HomeHub entirely, set `HOMEHUB_VOICE_BRIDGE=0` in `.env`.
 
-- About 1.5 GB of disk and 1 GB of memory.
+## On another computer
 
-## Install
-
-On the computer that will run it, from a copy of the HomeHub repository:
+To run the bridge on a different computer from HomeHub, install it there instead. It needs Ubuntu or Debian, Python 3.11 or newer with `python3-venv` and `curl` (`sudo apt install -y python3-venv curl`), and about 1.5 GB of disk. From a copy of the HomeHub repository:
 
 ```bash
 git clone https://github.com/foodisready/homehub.git
@@ -33,7 +28,9 @@ cd homehub/packages/voice-bridge
 
 When HomeHub runs on the same computer, the installer connects to it by itself and starts the bridge. Otherwise it explains how to copy HomeHub's internal key across and point `HOMEHUB_URL` at it.
 
-To update, run `git pull` in the repository, then `./install.sh` again.
+To update it, run `git pull` in the repository, then `./install.sh` again: a bridge installed this way doesn't update with HomeHub, and takes its settings from its own `config.env` rather than from Settings → Voice control.
+
+**Moving from an installed bridge to the one that comes with HomeHub:** stop the installed one with `systemctl --user disable --now homehub-voice`, then turn voice on in Settings. If both run at once, each command is answered twice, and **Health** says so.
 
 ## Using it
 
@@ -43,7 +40,7 @@ Commands HomeHub didn't understand are listed in **Settings**, from `GET /api/nl
 
 ## Settings
 
-Settings live in `~/.config/homehub-voice/config.env`; see [config.env.example](config.env.example). After changing them:
+For a bridge installed with install.sh, settings live in `~/.config/homehub-voice/config.env`; see [config.env.example](config.env.example). After changing them:
 
 ```bash
 systemctl --user restart homehub-voice
@@ -57,7 +54,7 @@ systemctl --user restart homehub-voice
 
 With Cantonese on, each command can be English or Cantonese, and is answered in the same language.
 
-1. In `config.env`, set `LANGUAGES=en yue`, then run `./install.sh` again. It downloads SenseVoice Small (about 1 GB, of which it keeps 230 MB) and a Cantonese voice (110 MB).
+1. In **Settings → Voice control**, tick **Cantonese** and save. The bridge downloads SenseVoice Small (about 1 GB, of which it keeps 230 MB) and a Cantonese voice (110 MB). For a bridge installed with install.sh, set `LANGUAGES=en yue` in its `config.env` and run `./install.sh` again instead.
 2. In HomeHub, give each device you want to use a Cantonese nickname, in **Settings → Devices**: for example 廚房燈 on the kitchen lights, or 寫字樓燈 and 書房燈 on the office lamp. Giving two devices the same nickname, such as 卓希房燈, switches both. You can also teach one from a missed command, in **Settings → Teach HomeHub**. The bridge picks up new nicknames within a minute.
 3. Say the verb, then the nickname: 開廚房燈, 着廚房燈, 關廚房燈, 熄廚房燈. 幫我 or 唔該 first, and 啦 or 呀 at the end, are fine. A scene with a Cantonese name runs by its name alone.
 

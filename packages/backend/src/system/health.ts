@@ -8,7 +8,7 @@ import { getSettings as cameraSettings } from '../cameras/snapshots';
 import { bridgeUrl, signInSavedAt } from '../cameras/bridge';
 import { pictureHealth } from '../cameras/picture-status';
 import { cameraDevices } from '../cameras/watch';
-import { bridgeRestartState, bridgeSeenAt, lastBridgeReport } from './voice-bridge';
+import { bridgeLastState, bridgeRestartState, bridgeSeenAt, getVoiceSettings, lastBridgeReport, recentBridges } from './voice-bridge';
 
 /**
  * One look at whether HomeHub is working: its services, devices, sensors,
@@ -182,17 +182,36 @@ function sensors(): HealthItem[] {
 }
 
 function voice(now: number): HealthItem[] {
+  const { enabled } = getVoiceSettings();
   const seen = bridgeSeenAt();
-  if (seen === null) return [];   // no bridge set up: nothing to report
   const report = lastBridgeReport();
-  if (!report || now - report.at > BRIDGE_LATE_MS) {
+  const fresh = report && now - report.at <= BRIDGE_LATE_MS ? report : null;
+  // Voice is off and the bridge that comes with HomeHub is waiting for it: nothing to report.
+  // A bridge installed with install.sh doesn't wait, so it's reported whatever the setting.
+  if (!enabled && (seen === null || bridgeLastState() === 'off')) return [];
+  if (!fresh) {
+    // Just started: the bridge hasn't had its minute to check in yet.
     if (!report && now - startedAt < BRIDGE_LATE_MS) {
       return [{ id: 'voice-bridge', group: 'Voice', label: 'Voice bridge', level: 'info', detail: 'Waiting for it to check in…' }];
     }
     return [{
       id: 'voice-bridge', group: 'Voice', label: 'Voice bridge', level: 'warn',
-      detail: `Last heard from ${ago(now - seen)}, so speakers won't answer. On the computer it runs on, run: systemctl --user restart homehub-voice`,
+      detail: seen === null
+        ? "Voice is on, but the voice bridge hasn't checked in. It comes with HomeHub: check that .env doesn't set HOMEHUB_VOICE_BRIDGE=0."
+        : `Last heard from ${ago(now - seen)}, so speakers won't answer. On the HomeHub computer, run: docker compose -f docker-compose.yml restart voice-bridge`,
     }];
+  }
+  const two = recentBridges(now).length > 1
+    ? [{
+      id: 'voice-bridges', group: 'Voice' as const, label: 'Two voice bridges', level: 'warn' as const,
+      detail: 'Two voice bridges are running, so each command may be answered twice. The one installed with install.sh is no longer needed. On the computer it runs on, run: systemctl --user disable --now homehub-voice',
+    }]
+    : [];
+  if (fresh.state === 'off') {
+    return [...two, { id: 'voice-bridge', group: 'Voice', label: 'Voice bridge', level: 'info', detail: 'Turning on…' }];
+  }
+  if (fresh.state === 'starting') {
+    return [...two, { id: 'voice-bridge', group: 'Voice', label: 'Voice bridge', level: 'info', detail: 'Starting. The first time, it downloads its speech models, which can take a few minutes.' }];
   }
   const restart = bridgeRestartState();
   if (restart) {
@@ -201,14 +220,14 @@ function voice(now: number): HealthItem[] {
       detail: restart === 'asked' ? 'Asked to restart. It restarts when it next checks in, within a minute.' : 'Restarting…',
     }];
   }
-  const items: HealthItem[] = [{
+  const items: HealthItem[] = [...two, {
     id: 'voice-bridge', group: 'Voice', label: 'Voice bridge', level: 'ok', action: 'restart-voice-bridge',
-    detail: report.version ? `Running (${report.version})` : 'Running',
+    detail: fresh.version ? `Running (${fresh.version})` : 'Running',
   }];
-  if (!report.speakers.length) {
+  if (!fresh.speakers.length) {
     items.push({ id: 'speakers', group: 'Voice', label: 'Speakers', level: 'warn', detail: 'No speakers found. Check the speaker or tablet is on, and the voice app is open.' });
   }
-  for (const s of report.speakers) {
+  for (const s of fresh.speakers) {
     items.push({
       id: `speaker:${s.address}`, group: 'Voice', label: s.name, level: s.connected ? 'ok' : 'warn',
       detail: s.connected ? 'Connected' : "Not connected. Check it's on, and on a tablet that the voice app is open and allowed to run in the background.",

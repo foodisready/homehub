@@ -9,10 +9,10 @@ import numpy as np
 
 
 class Listener:
-    def __init__(self, model: str, language: str) -> None:
+    def __init__(self, model: str, language: str, folder: Path | None = None) -> None:
         from faster_whisper import WhisperModel
 
-        self.model = WhisperModel(model, device='cpu', compute_type='int8')
+        self.model = WhisperModel(model, device='cpu', compute_type='int8', download_root=str(folder) if folder else None)
         self.language = language
         self.lock = threading.Lock()
 

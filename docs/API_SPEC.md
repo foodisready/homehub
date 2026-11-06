@@ -735,8 +735,10 @@ Names must match `^[A-Za-z0-9][A-Za-z0-9._-]*\.json$`. A restore removes history
 | `GET` | `/api/system/version` | any | Also returns `canSwitch` (the updater service answers) and `previous`, the older release that ran before this one, or `null`. |
 | `POST` | `/api/system/switch` | admin | Body: `{ version }`. Only `previous` or the latest release. Saves `backups/before-version-<from>-to-<to>.sqlite`, then asks the updater; **202** once it has started. `400` `VERSION_NOT_OFFERED` or `ALREADY_RUNNING`; `409` `BUSY`; `503` `UPDATER_OFFLINE`. |
 | `GET` | `/api/system/switch-status` | admin | The updater's last switch: `{ busy, current, last: { version, from, ok, step, finished } }`, where a failed `step` of `download` means nothing changed. `null` without the updater. |
+| `GET` `PUT` | `/api/nlp/voice` | admin | Settings → Voice control: `{ enabled, languages }`, where `languages` is `en` plus optionally `yue` (Cantonese). GET also returns `languagesOffered` and `bridge: { state: 'off' \| 'starting' \| 'running', kind: 'docker' \| 'service', version } \| null`. |
+| `GET` | `/internal/voice/config` | internal key | `{ enabled, languages, version }`, for the voice bridge that comes with HomeHub: it waits until `enabled`, and restarts when `version` changes. |
 | `POST` | `/api/system/voice-bridge/restart` | admin | Asks the voice bridge to restart at its next check-in, within a minute. **202**; **409** if it isn't checking in. |
-| `POST` | `/internal/voice/status` | internal key | The voice bridge checks in every minute: `{ version, speakers: [{ name, address, connected }] }`. Answers `{ ok, namesVersion, restart }`: the bridge fetches names again when `namesVersion` changes, and restarts when `restart` is true. |
+| `POST` | `/internal/voice/status` | internal key | The voice bridge checks in every minute: `{ version, speakers: [{ name, address, connected }], state, id, kind }`. Answers `{ ok, namesVersion, configVersion, restart }`: the bridge fetches names again when `namesVersion` changes, and restarts when `restart` is true. |
 | `GET` | `/internal/voice/device-names` | internal key | `{ names, version }`: every device name, nickname, room and scene name. |
 
 `POST /api/system/update` uses the updater when it answers, switching to the latest release, and Watchtower otherwise.

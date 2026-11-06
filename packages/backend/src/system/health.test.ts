@@ -2,7 +2,7 @@
  * The Health page's checks, against a temporary database, a fake probe for
  * services, and temporary folders for backups and temperatures.
  */
-import { describe, it, before, after, beforeEach } from 'node:test';
+import { describe, it, before, after, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import os from 'node:os';
@@ -143,6 +143,41 @@ describe('checkHealth', () => {
     vb.bridgeInstructions(NOW + 40_000);
     r = await checkHealth({ probe: up, now: NOW + 41_000, dataDir: TMP });
     assert.equal(item(r, 'voice-bridge')?.level, 'ok');
+  });
+
+  describe('the voice bridge that comes with HomeHub', () => {
+    const vb = () => import('./voice-bridge');
+    const voiceItems = async (now = NOW) => (await checkHealth({ probe: up, now, dataDir: TMP })).items.filter((i) => i.group === 'Voice');
+    afterEach(async () => { (await vb()).setVoiceSettings({ enabled: false, languages: ['en'] }); });
+
+    it('says nothing while voice is off and it waits', async () => {
+      recordBridgeReport({ speakers: [], state: 'off', kind: 'docker', id: 'a' }, NOW - 30_000);
+      assert.deepEqual(await voiceItems(), []);
+      resetBridgeReport();   // after a backend restart, the saved state still says it was waiting
+      assert.deepEqual(await voiceItems(NOW + 10 * 60_000), []);
+    });
+
+    it('says it is starting while it downloads its models', async () => {
+      (await vb()).setVoiceSettings({ enabled: true, languages: ['en', 'yue'] });
+      recordBridgeReport({ speakers: [], state: 'starting', kind: 'docker', id: 'a' }, NOW - 5_000);
+      assert.match((await voiceItems())[0].detail, /downloads its speech models/);
+    });
+
+    it('warns when voice is on but no bridge ever checked in', async () => {
+      (await vb()).setVoiceSettings({ enabled: true, languages: ['en'] });
+      const items = await voiceItems(Date.now() + 10 * 60_000);   // well after HomeHub started
+      assert.equal(items[0].level, 'warn');
+      assert.match(items[0].detail, /HOMEHUB_VOICE_BRIDGE/);
+    });
+
+    it('warns about two bridges answering', async () => {
+      (await vb()).setVoiceSettings({ enabled: true, languages: ['en'] });
+      recordBridgeReport({ speakers: [], kind: 'service', id: 'old' }, NOW - 40_000);
+      recordBridgeReport({ speakers: [], kind: 'docker', id: 'new', state: 'running' }, NOW - 10_000);
+      const two = (await voiceItems()).find((i) => i.id === 'voice-bridges');
+      assert.equal(two?.level, 'warn');
+      assert.match(two!.detail, /systemctl --user disable --now homehub-voice/);
+    });
   });
 
   it('notices a bridge that stopped checking in, even after a restart', async () => {

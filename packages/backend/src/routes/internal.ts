@@ -17,7 +17,7 @@ import { recordVoiceCommand } from '../nlp/command-log';
 import { withActivity } from '../activity/activity';
 import { issueTokens, serviceUser } from '../auth/auth.service';
 import { automationsPaused } from '../automation/pause';
-import { bridgeInstructions, recordBridgeReport, voiceNames } from '../system/voice-bridge';
+import { bridgeInstructions, recordBridgeReport, voiceConfig, voiceNames } from '../system/voice-bridge';
 import { cancelPowerTimer, setScheduleTimer } from '../devices/power';
 import { MAX_STAY_ON_MINUTES } from './schedules';
 
@@ -51,6 +51,13 @@ internalRouter.post('/service-token', (_req: Request, res: Response) => {
 // Lets the voice bridge tell speech recognition which names to expect.
 internalRouter.get('/voice/device-names', (_req: Request, res: Response) => {
   res.json(voiceNames());
+});
+
+// GET /internal/voice/config
+// Voice on or off, and its languages, as chosen in Settings → Voice control.
+// The bridge that comes with HomeHub waits until voice is on.
+internalRouter.get('/voice/config', (_req: Request, res: Response) => {
+  res.json(voiceConfig());
 });
 
 // POST /internal/voice/status  { version?, speakers: [{ name, address, connected }] }

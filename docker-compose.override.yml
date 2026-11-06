@@ -45,6 +45,9 @@ services:
   wyze-bridge:
     image: homehub-wyze-bridge-dev
 
+  voice-bridge:
+    image: homehub-voice-bridge-dev
+
   ollama:
     # Shorter healthcheck wait in dev
     healthcheck:

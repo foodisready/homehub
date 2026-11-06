@@ -186,7 +186,11 @@ class HomeHubClientTest(unittest.TestCase):
     def test_report(self):
         res = HomeHub(self.url, 'k').report('0.1.0', [{'name': 'Tablet', 'address': '10.0.0.20', 'connected': True}])
         self.assertEqual((res['namesVersion'], res['restart']), ('v2', False))
-        self.assertEqual(StubHomeHub.seen[-1], ('/internal/voice/status', 'k', {'version': '0.1.0', 'speakers': [{'name': 'Tablet', 'address': '10.0.0.20', 'connected': True}]}))
+        path, key, body = StubHomeHub.seen[-1]
+        self.assertEqual((path, key), ('/internal/voice/status', 'k'))
+        self.assertEqual(body['speakers'], [{'name': 'Tablet', 'address': '10.0.0.20', 'connected': True}])
+        self.assertEqual((body['version'], body['state'], body['kind']), ('0.1.0', 'running', 'service'))
+        self.assertEqual(len(body['id']), 12)
 
     def test_wrong_key_keeps_old_names(self):
         h = HomeHub(self.url, 'wrong')

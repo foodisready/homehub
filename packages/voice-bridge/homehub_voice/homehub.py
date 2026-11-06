@@ -5,6 +5,7 @@ import json
 import logging
 import urllib.error
 import urllib.request
+import uuid
 from dataclasses import dataclass, field
 
 log = logging.getLogger('homehub-voice')
@@ -57,9 +58,17 @@ class HomeHub:
             log.warning('%s; keeping %d known names', e, len(self.names))
         return self.names
 
-    def report(self, version: str, speakers: list[dict]) -> dict:
-        """Checks in for HomeHub's Health page. HomeHub answers with the names' version and whether to restart."""
-        return self._call('/status', {'version': version, 'speakers': speakers})
+    # Which bridge this is, so HomeHub notices two running at once.
+    bridge_id = uuid.uuid4().hex[:12]
+    kind = 'service'
+
+    def report(self, version: str, speakers: list[dict], state: str = 'running') -> dict:
+        """Checks in for HomeHub's Health page. HomeHub answers with the names' and settings' versions, and whether to restart."""
+        return self._call('/status', {'version': version, 'speakers': speakers, 'state': state, 'id': self.bridge_id, 'kind': self.kind})
+
+    def config(self) -> dict:
+        """Voice on or off, and its languages, from HomeHub's Settings."""
+        return self._call('/config')
 
     def command(self, text: str) -> CommandResult:
         res = self._call('/command', {'text': text})

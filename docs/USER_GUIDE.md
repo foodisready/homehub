@@ -391,9 +391,11 @@ If Health says to run the installer once more, your HomeHub was installed before
 
 ## Voice control
 
-Say a command to a speaker or tablet, and HomeHub does it and answers, with no cloud. It needs the [voice bridge](../packages/voice-bridge/README.md) running on an always-on computer, such as the one HomeHub runs on, and a voice speaker such as the Ava app on an Android tablet. Its speakers appear under **Health**. See the [voice control plan](./VOICE_CONTROL.md) for what's still to come.
+Say a command to a speaker or tablet, and HomeHub does it and answers, with no cloud. It needs a voice speaker on the same network, such as the Ava app on an Android tablet.
 
-Voice also understands Cantonese, and answers in it, once the bridge's Cantonese is turned on and your devices have Cantonese nicknames, such as 廚房燈. Say the verb, then the nickname: 開廚房燈, 熄廚房燈. See [Cantonese](../packages/voice-bridge/README.md#cantonese).
+To turn it on, an administrator opens **Settings → Voice control**, ticks **Voice control** and saves. The first time, HomeHub downloads its speech models, about 200 MB, which takes a few minutes; the card says when it's running. Speakers on the network are found by themselves, and appear under **Health**. The [voice bridge](../packages/voice-bridge/README.md) that does this comes with HomeHub and updates with it. See the [voice control plan](./VOICE_CONTROL.md) for what's still to come.
+
+Voice also understands Cantonese, and answers in it. Tick **Cantonese** in **Settings → Voice control**, which downloads about 350 MB more, and give your devices Cantonese nicknames in **Settings → Devices**, such as 廚房燈. Say the verb, then the nickname: 開廚房燈, 熄廚房燈. See [Cantonese](../packages/voice-bridge/README.md#cantonese).
 
 A Cantonese command HomeHub didn't understand is listed under **Settings → Teach HomeHub**, like an English one. **Teach** suggests the name without its verb, such as 主人房燈 from 開主人房燈. Choose its devices and save, and voice understands it within a minute.
 

@@ -251,6 +251,20 @@ describe('/internal/voice', () => {
     assert.deepEqual(lastBridgeReport()?.speakers, [{ name: 'Tablet', address: '10.9.0.20', connected: true }]);
   });
 
+  it('gives the bridge its settings, and a new version when they change', async () => {
+    const vb = await import('../system/voice-bridge');
+    const config = async () => (await fetch(`${baseUrl}/internal/voice/config`, { headers: key })).json() as Promise<{ enabled: boolean; languages: string[]; version: string }>;
+    const off = await config();
+    assert.deepEqual([off.enabled, off.languages], [false, ['en']], 'off, in English, until turned on');
+    vb.setVoiceSettings({ enabled: true, languages: ['yue'] });
+    const on = await config();
+    assert.deepEqual([on.enabled, on.languages], [true, ['en', 'yue']], 'English is always included');
+    assert.notEqual(on.version, off.version);
+    assert.throws(() => vb.setVoiceSettings({ enabled: true, languages: ['vi'] }), /languages/);
+    assert.throws(() => vb.setVoiceSettings({ enabled: 'yes', languages: [] }), /enabled/);
+    vb.setVoiceSettings({ enabled: false, languages: ['en'] });
+  });
+
   it('tells the bridge when the names change, and when to restart', async () => {
     const vb = await import('../system/voice-bridge');
     vb.resetBridgeReport();

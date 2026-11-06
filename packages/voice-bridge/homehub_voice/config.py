@@ -30,6 +30,11 @@ class Config:
     cantonese: bool = False
     sensevoice_dir: Path = Path()
     cantonese_voice_dir: Path = Path()
+    # Comes with HomeHub (Docker): waits until voice is turned on in HomeHub's
+    # Settings, takes its languages from there, and downloads its own models.
+    managed: bool = False
+    # Where Whisper keeps its model; None for its usual cache.
+    whisper_dir: Path | None = None
     reply_port: int = 39500
     # Look for speakers on the network as well as any listed in SPEAKERS.
     discover: bool = True
@@ -78,9 +83,10 @@ def load(env: dict[str, str] | None = None) -> Config:
     if not key:
         raise ConfigError('Set HOMEHUB_INTERNAL_KEY_FILE to a file holding HomeHub\'s INTERNAL_API_KEY')
 
-    voice = Path(env.get('PIPER_VOICE', '').strip() or '~/.local/share/homehub-voice/en_US-lessac-medium.onnx').expanduser()
+    data = Path(env.get('MODELS_DIR', '').strip() or '~/.local/share/homehub-voice').expanduser()
+    voice = Path(env.get('PIPER_VOICE', '').strip() or data / 'en_US-lessac-medium.onnx').expanduser()
+    managed = _flag(env.get('HOMEHUB_VOICE_MANAGED'), False)
     port = env.get('REPLY_PORT', '39500').strip()
-    data = Path('~/.local/share/homehub-voice').expanduser()
     extra = {x.strip().lower() for x in env.get('LANGUAGES', '').replace(',', ' ').split()}
     unknown = extra - {'en', 'yue'}
     if unknown:
@@ -98,6 +104,8 @@ def load(env: dict[str, str] | None = None) -> Config:
         reply_port=int(port),
         discover=_flag(env.get('DISCOVER'), True),
         cantonese='yue' in extra,
+        managed=managed,
+        whisper_dir=data / 'whisper' if managed else None,
         sensevoice_dir=Path(env.get('SENSEVOICE_DIR', '').strip() or data / 'sensevoice').expanduser(),
         cantonese_voice_dir=Path(env.get('CANTONESE_VOICE_DIR', '').strip() or data / 'cantonese-voice').expanduser(),
     )
