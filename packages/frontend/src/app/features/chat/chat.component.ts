@@ -1,4 +1,4 @@
-import { Component, signal, computed, ViewChild, ElementRef, AfterViewChecked, NgZone } from '@angular/core';
+import { Component, signal, computed, ViewChild, ElementRef, AfterViewChecked, NgZone, OnDestroy } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { AuthService } from '../../core/auth/auth.service';
 
@@ -13,6 +13,10 @@ interface ChatEntry {
   content: string;
   actions?: ActionTaken[];
   error?: boolean;
+  /** Who answered: HomeHub's own rules, or the AI model, and how long it took. */
+  by?: 'rules' | 'model';
+  model?: string;
+  seconds?: number;
 }
 
 // Human-readable labels for tool names
@@ -92,6 +96,7 @@ const TOOL_LABELS: Record<string, string> = {
     .bubble-assistant { background: var(--surface); color: var(--text); border-bottom-left-radius: 0.25rem; }
     .bubble-error     { background: #450a0a; color: var(--red); }
 
+    .answered { font-size:0.72rem; color:var(--text-muted); margin-top:0.3rem; }
     .actions-list {
       margin-top: 0.4rem;
       display: flex;
@@ -209,6 +214,9 @@ const TOOL_LABELS: Record<string, string> = {
                     }
                   </div>
                 }
+                @if (entry.role === 'assistant' && entry.seconds !== undefined) {
+                  <div class="answered">{{ answeredBy(entry) }} · {{ duration(entry.seconds) }}</div>
+                }
               </div>
             </div>
           }
@@ -226,6 +234,9 @@ const TOOL_LABELS: Record<string, string> = {
                     <div class="dot"></div>
                     <div class="dot"></div>
                   </div>
+                }
+                @if (waitingFor() === 'model' && elapsed() >= 2) {
+                  <div class="answered">AI model{{ waitingModel() ? ' (' + waitingModel() + ')' : '' }} thinking · {{ duration(elapsed()) }}</div>
                 }
               </div>
             </div>
@@ -249,12 +260,17 @@ const TOOL_LABELS: Record<string, string> = {
     </div>
   `,
 })
-export class ChatComponent implements AfterViewChecked {
+export class ChatComponent implements AfterViewChecked, OnDestroy {
   @ViewChild('messageList') private messageList!: ElementRef<HTMLDivElement>;
 
   private readonly _entries      = signal<ChatEntry[]>([]);
   private readonly _loading      = signal(false);
   private readonly _streamingText = signal('');
+  /** While waiting: who is answering, and for how many seconds so far. */
+  readonly waitingFor = signal<'rules' | 'model' | null>(null);
+  readonly waitingModel = signal('');
+  readonly elapsed = signal(0);
+  private ticker?: ReturnType<typeof setInterval>;
   private shouldScroll = false;
 
   readonly entries       = this._entries.asReadonly();
@@ -310,6 +326,15 @@ export class ChatComponent implements AfterViewChecked {
 
     const token   = this.auth.accessToken() ?? '';
     const actions: ActionTaken[] = [];
+    const started = Date.now();
+    const seconds = () => (Date.now() - started) / 1000;
+    let by: ChatEntry['by'];
+    let model: string | undefined;
+    this.waitingFor.set(null);
+    this.waitingModel.set('');
+    this.elapsed.set(0);
+    clearInterval(this.ticker);
+    this.ticker = setInterval(() => this.zone.run(() => this.elapsed.set(Math.floor(seconds()))), 1000);
 
     fetch('/api/nlp/stream', {
       method:  'POST',
@@ -335,7 +360,12 @@ export class ChatComponent implements AfterViewChecked {
           try {
             const event = JSON.parse(line.slice(6));
             this.zone.run(() => {
-              if (event.type === 'action') {
+              if (event.type === 'meta') {
+                by = event.by;
+                model = event.model;
+                this.waitingFor.set(event.by);
+                this.waitingModel.set(event.model ?? '');
+              } else if (event.type === 'action') {
                 actions.push(event.action);
               } else if (event.type === 'token') {
                 this._streamingText.update((t) => t + event.content);
@@ -343,8 +373,9 @@ export class ChatComponent implements AfterViewChecked {
               } else if (event.type === 'done') {
                 const finalText = this._streamingText();
                 this._entries.update((list) => [
-                  ...list, { role: 'assistant', content: finalText, actions: [...actions] }
+                  ...list, { role: 'assistant', content: finalText, actions: [...actions], by, model, seconds: seconds() }
                 ]);
+                this.stopTicker();
                 this._loading.set(false);
                 this._streamingText.set('');
                 this.shouldScroll = true;
@@ -352,6 +383,7 @@ export class ChatComponent implements AfterViewChecked {
                 this._entries.update((list) => [
                   ...list, { role: 'assistant', content: event.message, error: true }
                 ]);
+                this.stopTicker();
                 this._loading.set(false);
                 this._streamingText.set('');
               }
@@ -364,10 +396,33 @@ export class ChatComponent implements AfterViewChecked {
         this._entries.update((list) => [
           ...list, { role: 'assistant', content: 'Connection error. Please try again.', error: true }
         ]);
+        this.stopTicker();
         this._loading.set(false);
         this._streamingText.set('');
       });
     });
+  }
+
+  ngOnDestroy(): void {
+    clearInterval(this.ticker);
+  }
+
+  private stopTicker(): void {
+    clearInterval(this.ticker);
+    this.waitingFor.set(null);
+  }
+
+  answeredBy(entry: ChatEntry): string {
+    if (entry.by === 'rules') return 'Answered by HomeHub';
+    return `Answered by the AI model${entry.model ? ` (${entry.model})` : ''}`;
+  }
+
+  /** 0.2 s, 12 s, 1 min 5 s. */
+  duration(seconds: number): string {
+    if (seconds < 0.1) return 'under 0.1 s';
+    if (seconds < 10) return `${seconds.toFixed(1)} s`;
+    const s = Math.round(seconds);
+    return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${s % 60} s`;
   }
 
   actionLabel(action: ActionTaken): string {

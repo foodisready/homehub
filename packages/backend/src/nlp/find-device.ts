@@ -103,7 +103,7 @@ const roomKeys = (room: string) => {
 };
 
 /** Names that say a device isn't a light, so "<room> lights" leaves it alone. */
-const NOT_A_LIGHT = /\b(?:fans?|heaters?|tvs?|television|valves?|doors?|garage|pumps?|cameras?|cams?|speakers?|chargers?|ac|air|humidifiers?|dehumidifiers?|purifiers?|kettles?|coffee|printers?|routers?|plugs?)\b/i;
+export const NOT_A_LIGHT = /\b(?:fans?|heaters?|tvs?|television|valves?|doors?|garage|pumps?|cameras?|cams?|speakers?|chargers?|ac|air|humidifiers?|dehumidifiers?|purifiers?|kettles?|coffee|printers?|routers?|plugs?)\b/i;
 
 /**
  * "Brenden's lights", "kitchen lamps": the lights in a room, meaning every

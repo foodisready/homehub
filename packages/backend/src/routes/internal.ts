@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { reply } from '../nlp/replies';
+import { answerStatusQuestion } from '../nlp/status';
 import { requireInternalKey } from '../middleware/internal';
 import { getDb } from '../db';
 import { getDriver } from '../drivers/registry';
@@ -82,7 +83,7 @@ internalRouter.post('/voice/command', async (req: Request, res: Response) => {
   // The wake word can swallow the first word, leaving "off my office lamp" or "Off, kitchen light."
   const spoken = text.trim().replace(/^(on|off)(?:\s*,\s*|\s+)/i, 'turn $1 ');
 
-  const handled = await withActivity({ source: 'voice' }, () => runPowerCommand(spoken));
+  const handled = await withActivity({ source: 'voice' }, () => runPowerCommand(spoken)) ?? answerStatusQuestion(spoken);
   recordVoiceCommand(text.trim(), handled !== null);
   if (!handled) return res.json({ handled: false, response: reply('not_understood', {}), actions: [] });
 

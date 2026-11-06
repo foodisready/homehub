@@ -181,6 +181,8 @@ On a phone, the tabs at the bottom take you to Home, Scenes, Chat and Schedules.
 
 Set up a timer in Chat by adding a time, such as "turn on my office lamp for an hour".
 
+Ask what's on, such as "which devices are on?", "which lights are off?" or "is the kitchen light on?", in Chat or by voice. HomeHub answers these itself, straight away, from the states the dashboard shows. Cameras are left out of the lists. Anything HomeHub can't answer itself goes to the AI model, which runs on the HomeHub computer and can take a minute on an older one. Under each reply, Chat shows who answered, **HomeHub** or **the AI model**, and how long it took.
+
 When something will turn a device off by itself, its dashboard row says when and why, and the timer icon turns blue:
 
 - **"Off in 8 min · no motion":** a motion rule, counting down since the room emptied. Moving resets it.

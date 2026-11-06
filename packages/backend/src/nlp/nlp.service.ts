@@ -2,6 +2,7 @@ import SunCalc from 'suncalc';
 import { solarLocation } from '../home/home-settings';
 import { getDb } from '../db';
 import { getCachedState } from '../kasa/device.cache';
+import { answerStatusQuestion } from './status';
 import { getDriver } from '../drivers/registry';
 import { applyPower, assistantMaySwitch, type PowerDevice } from '../devices/power';
 import { logger } from '../logger';
@@ -148,7 +149,7 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
   switch (name) {
     case 'list_devices': {
       const rows = db.prepare('SELECT * FROM devices ORDER BY alias').all() as any[];
-      return rows.map((d) => {
+      const devices = rows.map((d) => {
         const cached = getCachedState(d.id);
         return {
           id:      d.id,
@@ -158,6 +159,13 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
           wattage: cached?.wattage ?? null,
         };
       });
+      // Small models misread long lists, so the answer to "what's on?" comes ready-made.
+      return {
+        on:      devices.filter((d) => d.online && d.state).map((d) => d.alias),
+        off:     devices.filter((d) => d.online && !d.state).map((d) => d.alias),
+        offline: devices.filter((d) => !d.online).map((d) => d.alias),
+        devices,
+      };
     }
 
     case 'set_power_state': {
@@ -280,7 +288,7 @@ function buildSystemPrompt(): string {
 
 Use the provided tools when the user wants to control devices or manage schedules. Be concise and friendly. After taking actions, briefly summarize what you did.
 
-IMPORTANT: When reporting device states, always use the exact data returned by the list_devices tool. Never guess or assume device states. Only report devices as "on" if their state field is true in the tool result.
+IMPORTANT: When reporting device states, always use the exact data returned by the list_devices tool. Never guess or assume device states. To say which devices are on, report exactly the names in the "on" list of the tool result, and no others.
 
 Do NOT output raw JSON or tool call syntax in your responses. Always respond in plain English.
 
@@ -346,7 +354,7 @@ export async function processMessage(
   userMessage: string,
   history: ChatMessage[],
 ): Promise<{ response: string; actions: ActionTaken[] }> {
-  const handled = await runPowerCommand(userMessage);
+  const handled = await runPowerCommand(userMessage) ?? answerStatusQuestion(userMessage);
   recordCommand(userMessage, handled ? 'rules' : 'model');
   if (handled) return handled;
 
@@ -365,6 +373,8 @@ export async function processMessage(
 // ── Streaming entry point ───────────────────────────────────────
 
 export type StreamEvent =
+  /** Who answers: HomeHub's own rules, or the AI model (named). Sent first. */
+  | { type: 'meta'; by: 'rules' | 'model'; model?: string }
   | { type: 'action'; action: ActionTaken }
   | { type: 'token';  content: string }
   | { type: 'done' }
@@ -374,9 +384,10 @@ export async function* processMessageStream(
   userMessage: string,
   history: ChatMessage[],
 ): AsyncGenerator<StreamEvent> {
-  const handled = await runPowerCommand(userMessage);
+  const handled = await runPowerCommand(userMessage) ?? answerStatusQuestion(userMessage);
   recordCommand(userMessage, handled ? 'rules' : 'model');
   if (handled) {
+    yield { type: 'meta', by: 'rules' };
     for (const action of handled.actions) yield { type: 'action', action };
     yield { type: 'token', content: handled.response };
     yield { type: 'done' };
@@ -385,6 +396,7 @@ export async function* processMessageStream(
 
   const ollamaUrl = process.env.OLLAMA_URL ?? 'http://localhost:11434';
   const model     = process.env.OLLAMA_MODEL ?? 'llama3.2:3b';
+  yield { type: 'meta', by: 'model', model };
 
   let messages: OllamaMessage[];
   let actions: ActionTaken[];
