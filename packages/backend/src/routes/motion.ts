@@ -8,6 +8,8 @@ import {
   SensorLoginError, SensorResponseError, connectSensor, createMotionRule, handleMotion, motionStatus,
   type RuleWithDevice,
 } from '../sensors/motion';
+import { MAX_LUX, MAX_SUN_OFFSET_MINUTES, TURN_ON_WHEN, isTime, sunTimes, type TurnOnWhen } from '../sensors/motion-when';
+import { getHomeSettings } from '../home/home-settings';
 
 const MAX_MINUTES = 24 * 60;
 
@@ -29,7 +31,41 @@ const toPublic = (rule: RuleWithDevice) => ({
   occupied:        rule.occupied === 1,
   lastMotionAt:    rule.last_motion_at,
   status:          motionStatus(rule, Date.now()),
+  turnOnWhen:      rule.turn_on_when,
+  darkBelowLux:    rule.dark_below_lux,
+  sunOffsetMinutes: rule.sun_offset_minutes,
+  hoursFrom:       rule.hours_from,
+  hoursTo:         rule.hours_to,
+  lastLux:         rule.last_lux,
+  lastLuxAt:       rule.last_lux_at,
+  // Why the last motion didn't turn the light on, if it didn't.
+  skipped:         rule.skipped_at ? { at: rule.skipped_at, reason: rule.skipped_reason } : null,
+  // Today's dark window, so "between sunset and sunrise" shows its times.
+  sunToday:        sunWindow(rule.sun_offset_minutes),
 });
+
+function sunWindow(offset: number): { darkFrom: string; darkUntil: string; located: boolean } | null {
+  const sun = sunTimes(new Date(), offset);
+  return sun ? { darkFrom: sun.darkFrom.toISOString(), darkUntil: sun.darkUntil.toISOString(), located: getHomeSettings().located } : null;
+}
+
+/** Validates the "when" fields of a PATCH. Returns an error message, or null. */
+function whenError(body: Record<string, unknown>, rule: RuleWithDevice): string | null {
+  const { turnOnWhen, darkBelowLux, sunOffsetMinutes, hoursFrom, hoursTo } = body;
+  if (turnOnWhen !== undefined && !TURN_ON_WHEN.includes(turnOnWhen as TurnOnWhen)) {
+    return `turnOnWhen must be one of: ${TURN_ON_WHEN.join(', ')}`;
+  }
+  if (turnOnWhen === 'dark' && !rule.sensor_ip) return 'Connect the sensor first: its light reading tells HomeHub when the room is dark.';
+  if (darkBelowLux !== undefined && !(Number.isInteger(darkBelowLux) && (darkBelowLux as number) >= 1 && (darkBelowLux as number) <= MAX_LUX)) {
+    return `Use 1 to ${MAX_LUX} lux`;
+  }
+  if (sunOffsetMinutes !== undefined && !(Number.isInteger(sunOffsetMinutes) && (sunOffsetMinutes as number) >= 0 && (sunOffsetMinutes as number) <= MAX_SUN_OFFSET_MINUTES)) {
+    return `Use 0 to ${MAX_SUN_OFFSET_MINUTES} minutes`;
+  }
+  if ((hoursFrom !== undefined && !isTime(hoursFrom)) || (hoursTo !== undefined && !isTime(hoursTo))) return 'Use times like 17:00';
+  if ((hoursFrom ?? rule.hours_from) === (hoursTo ?? rule.hours_to)) return 'The start and end times must differ';
+  return null;
+}
 
 const readRule = (id: unknown) =>
   getDb().prepare(`${RULE_SELECT} WHERE r.id = ?`).get(id) as RuleWithDevice | undefined;
@@ -43,8 +79,12 @@ export const motionEventsRouter = Router();
 motionEventsRouter.get('/:token/:event', async (req: Request, res: Response) => {
   const { token, event } = req.params;
   if (event !== 'on' && event !== 'off') return res.status(404).end();
-  if (!await handleMotion(String(token), event === 'on')) return res.status(404).end();
+  if (!getDb().prepare('SELECT 1 FROM motion_rules WHERE token = ?').get(String(token))) return res.status(404).end();
+  // Records the event at once. Answering before the light is switched lets the
+  // sensor, which may be asked for its light reading next, finish its request first.
+  const work = handleMotion(String(token), event === 'on');
   res.status(204).end();
+  await work.catch((err) => logger.warn({ err }, 'Motion event failed'));
 });
 
 export const motionRouter = Router();
@@ -108,16 +148,26 @@ motionRouter.patch('/:id', (req: Request, res: Response) => {
   const rule = readRule(req.params.id);
   if (!rule) return res.status(404).json({ error: 'Rule not found', code: 'NOT_FOUND' });
 
+  const body = req.body as Record<string, unknown>;
+  const invalid = whenError(body, rule);
+  if (invalid) return res.status(400).json({ error: invalid, code: 'VALIDATION_ERROR' });
+
   try {
     db.prepare(`
       UPDATE motion_rules
-         SET name = ?, device_id = ?, off_after_minutes = ?, turn_on_with_motion = ?
+         SET name = ?, device_id = ?, off_after_minutes = ?, turn_on_with_motion = ?,
+             turn_on_when = ?, dark_below_lux = ?, sun_offset_minutes = ?, hours_from = ?, hours_to = ?
        WHERE id = ?
     `).run(
       name === undefined ? rule.name : (name as string).trim(),
       deviceId ?? rule.device_id,
       offAfterMinutes ?? rule.off_after_minutes,
       turnOnWithMotion === undefined ? rule.turn_on_with_motion : (turnOnWithMotion ? 1 : 0),
+      body.turnOnWhen ?? rule.turn_on_when,
+      body.darkBelowLux ?? rule.dark_below_lux,
+      body.sunOffsetMinutes ?? rule.sun_offset_minutes,
+      body.hoursFrom ?? rule.hours_from,
+      body.hoursTo ?? rule.hours_to,
       rule.id,
     );
   } catch (err: any) {

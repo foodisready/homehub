@@ -33,6 +33,7 @@ describe('motion rules', () => {
   let sensorSaved: string[];
   let sensorForgets: boolean;
   let sensorFormat: string;
+  let sensorLux: number | 'silent';
 
   const at = (minutes: number) => START + minutes * MINUTE;
   const iso = (minutes: number) => new Date(at(minutes)).toISOString();
@@ -70,6 +71,11 @@ describe('motion rules', () => {
     sensor = http.createServer((req, res) => {
       sensorRequests.push({ url: req.url ?? '', auth: req.headers.authorization });
       res.statusCode = req.headers.authorization === `Basic ${Buffer.from('admin:right').toString('base64')}` ? 200 : 401;
+      // A Gen 1 Shelly Motion's light reading, as its /status reports it.
+      if (req.url === '/status') {
+        if (sensorLux === 'silent') return;   // never answers
+        return res.end(JSON.stringify({ lux: { value: sensorLux, illumination: 'twilight', is_valid: true } }));
+      }
       // Like the real sensor, this ignores a format it doesn't accept and still answers 200.
       const url = new RegExp(`[?&]${sensorFormat}=([^&]*)`).exec(req.url ?? '')?.[1];
       if (url && !sensorForgets) sensorSaved.push(decodeURIComponent(url));
@@ -93,6 +99,7 @@ describe('motion rules', () => {
     sensorSaved = [];
     sensorForgets = false;
     sensorFormat = 'urls\\[0\\]\\[url\\]';
+    sensorLux = 40;
     db.prepare('DELETE FROM motion_rules').run();
     setLight({ alias: 'Kitchen lights', turned_on_at: sqlite(0), override_until: null, override_state: null, timer_off_at: null, is_protected: 0 });
     cache.set(lightId, { state: true, wattage: null, online: true, lastPolled: new Date() });
@@ -156,6 +163,107 @@ describe('motion rules', () => {
 
     it('reports an unknown token', async () => {
       assert.equal(await motion.handleMotion('wrong', true), false);
+    });
+
+    describe('only when it is dark', () => {
+      const sensorAddress = () => `127.0.0.1:${(sensor.address() as { port: number }).port}`;
+      const rule = () => db.prepare('SELECT * FROM motion_rules').get() as any;
+      const useSensor = (password = 'right') => db.prepare(
+        "UPDATE motion_rules SET turn_on_when = 'dark', sensor_ip = ?, sensor_username = 'admin', sensor_password = ?",
+      ).run(sensorAddress(), password);
+
+      it('turns the light on when the sensor reads dark, and keeps the reading', async () => {
+        useSensor();
+        sensorLux = 40;
+        await motion.handleMotion(token, true);
+        assert.deepEqual(calls, [{ ip: '10.0.0.1', state: true }]);
+        assert.equal(rule().last_lux, 40);
+        assert.equal(rule().skipped_at, null);
+      });
+
+      it('leaves the light off when the room is bright, and says why', async () => {
+        useSensor();
+        sensorLux = 650;
+        await motion.handleMotion(token, true);
+        assert.deepEqual(calls, []);
+        assert.equal(rule().last_lux, 650);
+        assert.match(rule().skipped_reason, /bright enough \(650 lux; turns on below 100\)/);
+      });
+
+      it('uses the rule\'s own threshold', async () => {
+        useSensor();
+        db.prepare('UPDATE motion_rules SET dark_below_lux = 300').run();
+        sensorLux = 250;
+        await motion.handleMotion(token, true);
+        assert.equal(calls.length, 1);
+      });
+
+      it('turns the light on when the sensor can\'t be read', async () => {
+        useSensor('wrong');   // refused
+        await motion.handleMotion(token, true);
+        assert.equal(calls.length, 1);
+        useSensor();
+        sensorLux = 'silent';   // never answers
+        calls = [];
+        await motion.handleMotion(token, true);
+        assert.equal(calls.length, 1);
+      });
+
+      it('clears the reason once motion turns the light on again', async () => {
+        useSensor();
+        sensorLux = 650;
+        await motion.handleMotion(token, true);
+        sensorLux = 20;
+        await motion.handleMotion(token, true);
+        assert.equal(rule().skipped_at, null);
+      });
+    });
+
+    describe('only between sunset and sunrise', () => {
+      // .env.example's location (San Francisco) until the home's is set.
+      beforeEach(() => db.prepare("UPDATE motion_rules SET turn_on_when = 'sun', sun_offset_minutes = 0").run());
+
+      it('leaves the light off at midday', async () => {
+        await motion.handleMotion(token, true, new Date('2026-11-06T20:00:00Z'));   // noon there
+        assert.deepEqual(calls, []);
+        assert.match((db.prepare('SELECT skipped_reason FROM motion_rules').get() as any).skipped_reason, /^daylight/);
+      });
+
+      it('turns the light on at night', async () => {
+        await motion.handleMotion(token, true, new Date('2026-11-06T08:00:00Z'));   // midnight there
+        assert.equal(calls.length, 1);
+      });
+
+      it('starts earlier with an offset', async () => {
+        // Sunset there on 6 November 2026 is about 01:05 UTC (17:05 local); 00:30 UTC is before it.
+        await motion.handleMotion(token, true, new Date('2026-11-07T00:30:00Z'));
+        assert.deepEqual(calls, []);
+        db.prepare('UPDATE motion_rules SET sun_offset_minutes = 60').run();
+        await motion.handleMotion(token, true, new Date('2026-11-07T00:30:00Z'));
+        assert.equal(calls.length, 1);
+      });
+    });
+
+    describe('only between set hours', () => {
+      const local = (h: number, m = 0) => new Date(2026, 10, 6, h, m);
+      beforeEach(() => db.prepare("UPDATE motion_rules SET turn_on_when = 'hours', hours_from = '17:00', hours_to = '08:00'").run());
+
+      it('runs past midnight', async () => {
+        for (const [time, on] of [[local(12), false], [local(16, 59), false], [local(17), true], [local(23, 30), true], [local(7, 59), true], [local(8), false]] as const) {
+          calls = [];
+          await motion.handleMotion(token, true, time);
+          assert.equal(calls.length, on ? 1 : 0, `at ${time.toTimeString().slice(0, 5)}`);
+        }
+      });
+
+      it('handles a range within one day', async () => {
+        db.prepare("UPDATE motion_rules SET hours_from = '06:00', hours_to = '09:00'").run();
+        await motion.handleMotion(token, true, local(7));
+        assert.equal(calls.length, 1);
+        await motion.handleMotion(token, true, local(10));
+        assert.equal(calls.length, 1);
+        assert.match((db.prepare('SELECT skipped_reason FROM motion_rules').get() as any).skipped_reason, /outside 06:00–09:00/);
+      });
     });
   });
 
@@ -335,6 +443,32 @@ describe('motion rules', () => {
       const response = await send('POST', '/api/motion', { name: 'Water', deviceId: valve, offAfterMinutes: 5 });
       assert.equal(response.status, 400);
       db.prepare('DELETE FROM devices WHERE id = ?').run(valve);
+    });
+
+    it('saves when motion may turn the light on, and checks it', async () => {
+      const id = ruleId();
+      const patch = async (body: unknown) => send('PATCH', `/api/motion/${id}`, body);
+      const fresh = await (await send('GET', '/api/motion')).json() as any[];
+      assert.equal(fresh[0].turnOnWhen, 'always');   // as before, until someone chooses
+
+      const hours = await (await patch({ turnOnWhen: 'hours', hoursFrom: '18:30', hoursTo: '07:15' })).json() as any;
+      assert.deepEqual([hours.turnOnWhen, hours.hoursFrom, hours.hoursTo], ['hours', '18:30', '07:15']);
+      const sun = await (await patch({ turnOnWhen: 'sun', sunOffsetMinutes: 30 })).json() as any;
+      assert.equal(sun.sunOffsetMinutes, 30);
+      assert.ok(Date.parse(sun.sunToday.darkFrom) && Date.parse(sun.sunToday.darkUntil));
+      assert.equal(sun.sunToday.located, false);   // the Sensors page asks for the home's location
+
+      for (const bad of [
+        { turnOnWhen: 'sometimes' }, { turnOnWhen: 'dark' },   // no sensor connected yet
+        { darkBelowLux: 0 }, { darkBelowLux: 2.5 }, { sunOffsetMinutes: 181 },
+        { hoursFrom: '25:00' }, { hoursTo: '7:00' }, { hoursFrom: '07:15' },   // same as the end
+      ]) {
+        assert.equal((await patch(bad)).status, 400, JSON.stringify(bad));
+      }
+
+      db.prepare("UPDATE motion_rules SET sensor_ip = '10.0.0.9'").run();
+      const dark = await (await patch({ turnOnWhen: 'dark', darkBelowLux: 250 })).json() as any;
+      assert.deepEqual([dark.turnOnWhen, dark.darkBelowLux], ['dark', 250]);
     });
 
     it('validates the minutes and changes them', async () => {

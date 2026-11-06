@@ -121,6 +121,16 @@ function migrate(db: Database.Database): void {
   try { db.exec('ALTER TABLE motion_rules ADD COLUMN sensor_ip TEXT'); } catch {}
   try { db.exec('ALTER TABLE motion_rules ADD COLUMN sensor_username TEXT'); } catch {}
   try { db.exec('ALTER TABLE motion_rules ADD COLUMN sensor_password TEXT'); } catch {}
+  // When motion may turn the light on: 'always', 'dark' (sensor's light reading), 'sun' or 'hours'.
+  try { db.exec("ALTER TABLE motion_rules ADD COLUMN turn_on_when TEXT NOT NULL DEFAULT 'always'"); } catch {}
+  try { db.exec('ALTER TABLE motion_rules ADD COLUMN dark_below_lux INTEGER NOT NULL DEFAULT 100'); } catch {}
+  try { db.exec('ALTER TABLE motion_rules ADD COLUMN sun_offset_minutes INTEGER NOT NULL DEFAULT 0'); } catch {}
+  try { db.exec("ALTER TABLE motion_rules ADD COLUMN hours_from TEXT NOT NULL DEFAULT '17:00'"); } catch {}
+  try { db.exec("ALTER TABLE motion_rules ADD COLUMN hours_to TEXT NOT NULL DEFAULT '08:00'"); } catch {}
+  try { db.exec('ALTER TABLE motion_rules ADD COLUMN last_lux INTEGER'); } catch {}
+  try { db.exec('ALTER TABLE motion_rules ADD COLUMN last_lux_at TEXT'); } catch {}
+  try { db.exec('ALTER TABLE motion_rules ADD COLUMN skipped_at TEXT'); } catch {}
+  try { db.exec('ALTER TABLE motion_rules ADD COLUMN skipped_reason TEXT'); } catch {}
   try { db.exec('ALTER TABLE devices ADD COLUMN override_state INTEGER'); } catch {}
   try { db.exec('ALTER TABLE devices ADD COLUMN override_until TEXT'); } catch {}
   try { db.exec('ALTER TABLE devices ADD COLUMN timer_off_at TEXT'); } catch {}

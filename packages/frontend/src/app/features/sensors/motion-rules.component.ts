@@ -18,7 +18,26 @@ interface MotionRule {
   occupied:        boolean;
   lastMotionAt:    string | null;
   status:          { kind: string; offAt?: string };
+  turnOnWhen:      'always' | 'dark' | 'sun' | 'hours';
+  darkBelowLux:    number;
+  sunOffsetMinutes: number;
+  hoursFrom:       string;
+  hoursTo:         string;
+  lastLux:         number | null;
+  lastLuxAt:       string | null;
+  skipped:         { at: string; reason: string } | null;
+  sunToday:        { darkFrom: string; darkUntil: string; located: boolean } | null;
 }
+
+/** "Dark" and "dim" as a Shelly Motion's own light bands put them. */
+const LUX_CHOICES = [
+  { lux: 50, label: 'Very dark (below 50 lux)' },
+  { lux: 100, label: 'Dark (below 100 lux)' },
+  { lux: 300, label: 'Dim (below 300 lux)' },
+  { lux: 500, label: 'Not bright (below 500 lux)' },
+];
+// A motion that didn't switch the light on is mentioned for this long.
+const SKIPPED_SHOWN_MS = 60 * 60_000;
 
 const REFRESH_MS = 5000;
 
@@ -42,6 +61,8 @@ interface FoundSensor { ip: string; name: string; model: string; needsLogin: boo
     .fields { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
     .fields input, .fields select { flex: 1 1 10rem; min-width: 0; width: auto; }
     .fields input.minutes { flex: 0 1 6rem; }
+    .fields input.time { flex: 0 1 8rem; }
+    .when { display: flex; flex-direction: column; gap: 0.45rem; margin-left: 1.6rem; }
     select {
       font-family: inherit; font-size: 1rem; background: var(--bg); color: var(--text);
       border: 1px solid var(--border); border-radius: var(--radius); padding: 0.6rem 0.9rem;
@@ -80,6 +101,7 @@ interface FoundSensor { ip: string; name: string; model: string; needsLogin: boo
             @case ('offline') { The light is offline. }
             @default { Light is off. Last motion {{ rule.lastMotionAt | date:'short' }} }
           }
+          @if (skippedNote(rule); as note) { <div>{{ note }}</div> }
         </div>
         <div class="fields">
           <select [ngModel]="rule.deviceId" aria-label="Light" (ngModelChange)="save(rule, { deviceId: $event })">
@@ -103,6 +125,59 @@ interface FoundSensor { ip: string; name: string; model: string; needsLogin: boo
           <input type="checkbox" [checked]="rule.turnOnWithMotion" (change)="save(rule, { turnOnWithMotion: checked($event) })" />
           Turn on when motion starts
         </label>
+        @if (rule.turnOnWithMotion) {
+          <div class="when">
+            <div class="fields">
+              <label class="meta" [for]="'when-' + rule.id">Only</label>
+              <select [id]="'when-' + rule.id" [ngModel]="rule.turnOnWhen" (ngModelChange)="save(rule, { turnOnWhen: $event })">
+                <option value="always">Any time</option>
+                <option value="dark" [disabled]="!rule.sensorIp">When the room is dark{{ rule.sensorIp ? '' : ' (connect the sensor first)' }}</option>
+                <option value="sun">Between sunset and sunrise</option>
+                <option value="hours">Between set hours</option>
+              </select>
+            </div>
+            @switch (rule.turnOnWhen) {
+              @case ('dark') {
+                <div class="fields">
+                  <label class="meta" [for]="'lux-' + rule.id">Dark means</label>
+                  <select [id]="'lux-' + rule.id" [ngModel]="rule.darkBelowLux" (ngModelChange)="save(rule, { darkBelowLux: $event })">
+                    @for (c of luxChoices(rule); track c.lux) { <option [ngValue]="c.lux">{{ c.label }}</option> }
+                  </select>
+                </div>
+                <span class="meta">
+                  The sensor measures the light each time it sees motion.
+                  @if (rule.lastLux !== null) { Last reading: <strong>{{ rule.lastLux }} lux</strong> at {{ rule.lastLuxAt | date:'shortTime' }}. }
+                  @else { Its first reading shows here after the next motion. }
+                  If the light can't be read, the light turns on anyway.
+                </span>
+              }
+              @case ('sun') {
+                <div class="fields">
+                  <label class="meta" [for]="'offset-' + rule.id">Start before sunset and end after sunrise by (minutes)</label>
+                  <input class="minutes" type="number" min="0" max="180" [id]="'offset-' + rule.id"
+                         [ngModel]="rule.sunOffsetMinutes" (change)="save(rule, { sunOffsetMinutes: toNumber($event) })" />
+                </div>
+                @if (rule.sunToday; as sun) {
+                  <span class="meta">Today: from {{ sun.darkFrom | date:'shortTime' }} until {{ sun.darkUntil | date:'shortTime' }}.
+                    @if (!sun.located) { <span class="err">These are for an example location: set your home's location in Settings → Home.</span> }
+                  </span>
+                } @else {
+                  <span class="meta">There's no sunset here today, so motion turns the light on any time.</span>
+                }
+              }
+              @case ('hours') {
+                <div class="fields">
+                  <label class="meta" [for]="'from-' + rule.id">From</label>
+                  <input class="time" type="time" [id]="'from-' + rule.id" [ngModel]="rule.hoursFrom" (change)="save(rule, { hoursFrom: value($event) })" />
+                  <label class="meta" [for]="'to-' + rule.id">until</label>
+                  <input class="time" type="time" [id]="'to-' + rule.id" [ngModel]="rule.hoursTo" (change)="save(rule, { hoursTo: value($event) })" />
+                </div>
+                <span class="meta">A range like 17:00 until 08:00 runs overnight.</span>
+              }
+            }
+            <span class="meta">Only stops motion turning the light on. Turning it off after no motion, the switch, the app and voice work as usual.</span>
+          </div>
+        }
         @if (connecting() === rule.id) {
           <div class="fields">
             <button class="btn-remove" type="button" (click)="findSensors()" [disabled]="searching()">
@@ -213,6 +288,21 @@ export class MotionRulesComponent implements OnInit, OnDestroy {
   ngOnDestroy(): void {
     this.stopWatching?.();
     this.timers.forEach(clearInterval);
+  }
+
+  /** Why motion just now didn't switch the light on, while the light is still off. */
+  skippedNote(rule: MotionRule): string | null {
+    const s = rule.skipped;
+    if (!s || this.now() - Date.parse(s.at) > SKIPPED_SHOWN_MS || this.deviceFor(rule)?.state) return null;
+    const at = new Date(s.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    return `Motion at ${at} didn't turn the light on: ${s.reason}.`;
+  }
+
+  /** The usual choices, plus the rule's own if it's something else. */
+  luxChoices(rule: MotionRule): { lux: number; label: string }[] {
+    return LUX_CHOICES.some((c) => c.lux === rule.darkBelowLux)
+      ? LUX_CHOICES
+      : [...LUX_CHOICES, { lux: rule.darkBelowLux, label: `Below ${rule.darkBelowLux} lux` }].sort((a, b) => a.lux - b.lux);
   }
 
   countdown(rule: MotionRule): string {

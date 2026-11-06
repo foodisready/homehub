@@ -330,7 +330,9 @@ Motion rules turn a light off after a room has had no motion for `offAfterMinute
 
 - `GET /api/motion` lists rules.
 - `POST /api/motion` takes `{ name, deviceId, offAfterMinutes, turnOnWithMotion }`. Protected devices are refused.
-- `PATCH /api/motion/:id` takes any of `{ name, deviceId, offAfterMinutes, turnOnWithMotion }`. The sensor doesn't need reconnecting.
+- `PATCH /api/motion/:id` takes any of `{ name, deviceId, offAfterMinutes, turnOnWithMotion, turnOnWhen, darkBelowLux, sunOffsetMinutes, hoursFrom, hoursTo }`. The sensor doesn't need reconnecting.
+  - `turnOnWhen` is when motion may turn the light on: `always` (default), `dark` (the sensor's light reading is below `darkBelowLux`, 1–10000, default 100; needs a connected sensor), `sun` (from `sunOffsetMinutes`, 0–180, before sunset until that long after sunrise) or `hours` (from `hoursFrom` until `hoursTo`, `HH:MM`, running past midnight when the end is earlier).
+  - Each rule in `GET` also has `lastLux` and `lastLuxAt` (the sensor's last reading), `skipped` (`{ at, reason }` when the last motion left the light off), and `sunToday` (`{ darkFrom, darkUntil, located }`, or null where the sun doesn't set).
 - `DELETE /api/motion/:id` removes a rule.
 - `POST /api/motion/:id/connect` takes `{ sensorIp, username, password }` and sets a Gen 1 Shelly Motion's `motion_on` and `motion_off` actions. The login is saved unless the sensor rejects it, a blank password reuses the saved one, and the password is never returned.
 

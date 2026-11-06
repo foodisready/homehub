@@ -7,6 +7,7 @@ import { logger } from '../logger';
 import { withActivity } from '../activity/activity';
 import { emitMotion } from '../socket';
 import { automationsPaused } from '../automation/pause';
+import { decideTurnOn, type WhenRule } from './motion-when';
 
 const SWEEP_INTERVAL_MS = 15_000;
 // A lost "clear" event must not keep a room occupied forever.
@@ -26,6 +27,15 @@ export interface MotionRuleRow {
   sensor_ip:         string | null;
   sensor_username:   string | null;
   sensor_password:   string | null;
+  turn_on_when:      string;
+  dark_below_lux:    number;
+  sun_offset_minutes: number;
+  hours_from:        string;
+  hours_to:          string;
+  last_lux:          number | null;
+  last_lux_at:       string | null;
+  skipped_at:        string | null;
+  skipped_reason:    string | null;
 }
 
 export type RuleWithDevice = MotionRuleRow & PowerDevice & {
@@ -69,15 +79,29 @@ export async function handleMotion(token: string, occupied: boolean, now = new D
   if (!recordMotion(token, occupied, now)) return false;
   if (!occupied) return true;
 
-  const rule = getDb().prepare(`
-    SELECT d.*, r.device_id, r.turn_on_with_motion, r.name
+  const db = getDb();
+  const rule = db.prepare(`
+    SELECT d.*, r.device_id, r.turn_on_with_motion, r.name, r.turn_on_when, r.dark_below_lux, r.sun_offset_minutes,
+           r.hours_from, r.hours_to, r.sensor_ip, r.sensor_username, r.sensor_password
     FROM motion_rules r JOIN devices d ON d.id = r.device_id WHERE r.token = ?
-  `).get(token) as RuleWithDevice;
+  `).get(token) as RuleWithDevice & WhenRule;
   if (!rule.turn_on_with_motion || isProtectedDevice(rule)) return true;
   if (automationsPaused()) return true;
 
   // Someone chose to hold this light in its current state.
   if (rule.timer_off_at || toMs(rule.override_until) > now.getTime()) return true;
+
+  // Daylight, by the sensor's light reading, the sun or the clock, as the rule chose.
+  const decision = await decideTurnOn(rule, now);
+  if (decision.lux !== undefined) {
+    db.prepare('UPDATE motion_rules SET last_lux = ?, last_lux_at = ? WHERE token = ?').run(decision.lux, now.toISOString(), token);
+  }
+  db.prepare('UPDATE motion_rules SET skipped_at = ?, skipped_reason = ? WHERE token = ?')
+    .run(decision.on ? null : now.toISOString(), decision.on ? null : decision.reason, token);
+  if (!decision.on) {
+    logger.info({ rule: rule.name, reason: decision.reason }, 'Motion, light left off');
+    return true;
+  }
 
   // Don't rely on the cached state: it can be a minute old, so a light just
   // switched off at the wall would look on. Turning on a lit light is harmless.

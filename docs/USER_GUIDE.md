@@ -291,6 +291,17 @@ A sensor already used by another rule is marked. Picking it moves it to this rul
 
 A rule does nothing until its sensor first reports. Its card shows what it's doing, including a countdown to when the light turns off. The countdown clears when the light goes off, within about a minute if you use a wall switch. Clear **Turn on when motion starts** to only turn lights off. You can edit a rule's name, light and minutes on its card, and test the light with the button next to it.
 
+### Only when it's dark
+
+So motion doesn't light a room that's bright already, choose when motion may turn the light on, under **Turn on when motion starts → Only**:
+
+- **Any time:** the default.
+- **When the room is dark:** the Shelly Motion measures the light each time it sees motion, and HomeHub turns the light on only below the level you choose, such as **Dark (below 100 lux)** or **Dim (below 300 lux)**. This follows the room itself, so a cloudy afternoon or closed blinds count as dark. The card shows the last reading, which helps you pick a level: wave at the sensor at a time you'd want the light, and see what it reads.
+- **Between sunset and sunrise:** uses your home's location from **Settings → Home**, and follows the seasons. To start earlier and end later, add minutes, such as 30 for a room that gets dark before sunset. The card shows today's times.
+- **Between set hours:** for example **17:00 until 08:00**, which runs overnight.
+
+This only stops motion turning the light on. The light still turns off after no motion, and the wall switch, the app, scenes and voice work as usual. When motion leaves the light off, the card says why, for example "bright enough (650 lux)". If HomeHub can't read the sensor's light level, it turns the light on anyway. Motion that starts in daylight doesn't turn the light on later as the room darkens, while someone stays in it; the next motion after the sensor's one-minute rest does.
+
 After the sensor detects motion, it ignores new motion for about a minute. If you turn the light off in HomeHub during that time, HomeHub resets the sensor so your next movement counts, usually within about 5 seconds. A wall switch can't do this, so wait about a minute before motion will turn the light back on.
 
 A light on a keep-on timer stays on, and protected devices can't be used. If a sensor's battery runs out, HomeHub isn't told, so the light still turns off after the set time. If HomeHub moves to a new address, select **Connect sensor** again.
