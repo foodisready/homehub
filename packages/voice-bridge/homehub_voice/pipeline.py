@@ -72,16 +72,18 @@ def answer(audio: bytes, spoke: bool, listener: Transcriber, homehub: Commander,
 
 def answer_cantonese(audio: bytes, ears: CantoneseEars, homehub: Commander, t0: float) -> Answer:
     text = ears.transcribe(audio)
-    command = yue.parse(text, homehub.names, homehub.names)
+    command = yue.parse(text, homehub.names, getattr(homehub, 'scenes', homehub.names))
     t1 = time.monotonic()
     if not text.strip(' 。，.,!?！？'):
         return Answer('', yue.NOT_UNDERSTOOD, False, t1 - t0, lang='yue')
-    heard = f'{text} → {command.homehub_text}' if command else text
+    # A name alone switches nothing: HomeHub can't know whether on or off was meant.
+    act = command if command and command.action != 'ask' else None
+    heard = f'{text} → {act.homehub_text}' if act else text
     try:
-        # Unread commands go to HomeHub too, so they're listed with the commands it missed.
-        res = homehub.command(command.homehub_text if command else yue.traditional(text))
+        # Unread commands go to HomeHub too, as heard, so they're listed with the commands it missed.
+        res = homehub.command(act.homehub_text if act else yue.traditional(text))
     except HomeHubError as e:
         log.warning('%s', e)
         return Answer(heard, yue.NO_HOMEHUB, False, t1 - t0, time.monotonic() - t1, lang='yue')
     reply = yue.reply(command, res.handled, res.response, res.failed)
-    return Answer(heard, reply, bool(command) and res.handled, t1 - t0, time.monotonic() - t1, lang='yue')
+    return Answer(heard, reply, bool(act) and res.handled, t1 - t0, time.monotonic() - t1, lang='yue')

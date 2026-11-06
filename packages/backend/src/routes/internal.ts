@@ -79,8 +79,8 @@ internalRouter.post('/voice/command', async (req: Request, res: Response) => {
     return res.status(400).json({ error: '`text` is required', code: 'VALIDATION_ERROR' });
   }
 
-  // The wake word can swallow the first word, leaving "off my office lamp".
-  const spoken = text.trim().replace(/^(on|off)\s/i, 'turn $1 ');
+  // The wake word can swallow the first word, leaving "off my office lamp" or "Off, kitchen light."
+  const spoken = text.trim().replace(/^(on|off)(?:\s*,\s*|\s+)/i, 'turn $1 ');
 
   const handled = await withActivity({ source: 'voice' }, () => runPowerCommand(spoken));
   recordVoiceCommand(text.trim(), handled !== null);

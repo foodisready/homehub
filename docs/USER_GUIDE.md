@@ -406,7 +406,7 @@ Say a command to a speaker or tablet, and HomeHub does it and answers, with no c
 
 To turn it on, an administrator opens **Settings → Voice control**, ticks **Voice control** and saves. The first time, HomeHub downloads its speech models, about 200 MB, which takes a few minutes; the card says when it's running. Speakers on the network are found by themselves, and appear under **Health**. The [voice bridge](../packages/voice-bridge/README.md) that does this comes with HomeHub and updates with it. See the [voice control plan](./VOICE_CONTROL.md) for what's still to come.
 
-Voice also understands Cantonese, and answers in it. Tick **Cantonese** in **Settings → Voice control**, which downloads about 350 MB more, and give your devices Cantonese nicknames in **Settings → Devices**, such as 廚房燈. Say the verb, then the nickname: 開廚房燈, 熄廚房燈. See [Cantonese](../packages/voice-bridge/README.md#cantonese).
+Voice also understands Cantonese, and answers in it. Tick **Cantonese** in **Settings → Voice control**, which downloads about 350 MB more, and give your devices Cantonese nicknames in **Settings → Devices**, such as 廚房燈. Say the verb, then the nickname: 開廚房燈, 熄廚房燈. Leave a short pause after the wake word, so the verb isn't cut off: if HomeHub hears only a light's nickname, it asks 你想開定熄廚房燈？ and switches nothing. Say the whole command again. See [Cantonese](../packages/voice-bridge/README.md#cantonese).
 
 A Cantonese command HomeHub didn't understand is listed under **Settings → Teach HomeHub**, like an English one. **Teach** suggests the name without its verb, such as 主人房燈 from 開主人房燈. Choose its devices and save, and voice understands it within a minute.
 

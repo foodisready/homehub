@@ -150,6 +150,7 @@ const DRIVER_LABEL: Record<string, string> = {
       padding:0.3rem 0.75rem;
       font-size:0.8rem;
     }
+    .teach-link { margin-top:0.75rem; }
     .btn-ghost {
       background:transparent;
       border:1px solid var(--border);
@@ -786,7 +787,7 @@ const DRIVER_LABEL: Record<string, string> = {
 
       <!-- ── Teach HomeHub (admin only) ───────────────────────── -->
       @if (isAdmin()) {
-        <div class="section">
+        <div class="section" id="teach-homehub">
           <button type="button" class="section-title section-toggle" (click)="toggleSection('teach')" [attr.aria-expanded]="isSectionOpen('teach')">
             <span class="chev">{{ isSectionOpen('teach') ? '▾' : '▸' }}</span> Teach HomeHub
           </button>
@@ -824,6 +825,9 @@ const DRIVER_LABEL: Record<string, string> = {
                 @for (item of stats.recentModel.slice(0, 10); track $index) {
                   <div style="font-size:0.85rem;padding:0.15rem 0;overflow-wrap:anywhere">{{ item.text }}</div>
                 }
+                @if (isAdmin()) {
+                  <button type="button" class="btn-sm btn-primary teach-link" (click)="openTeach()">Teach these</button>
+                }
               }
             } @else {
               <p style="margin:0;color:var(--text-muted)">No stats available.</p>
@@ -848,6 +852,9 @@ const DRIVER_LABEL: Record<string, string> = {
                   <p style="font-size:0.75rem;color:var(--text-muted);margin:0.75rem 0 0.25rem">Latest misses, as speech recognition heard them:</p>
                   @for (item of voice.recentMissed.slice(0, 10); track $index) {
                     <div style="font-size:0.85rem;padding:0.15rem 0;overflow-wrap:anywhere">{{ item.text }}</div>
+                  }
+                  @if (isAdmin()) {
+                    <button type="button" class="btn-sm btn-primary teach-link" (click)="openTeach()">Teach these</button>
                   }
                 }
               </div>
@@ -1001,6 +1008,12 @@ export class SettingsComponent implements OnInit, OnDestroy {
 
   isSectionOpen(key: string): boolean {
     return this.openSections()[key] ?? key === 'devices';
+  }
+
+  /** From a list of misses: opens Teach HomeHub, where each one can be taught or ignored. */
+  openTeach(): void {
+    this.toggleSection('teach', true);
+    setTimeout(() => document.getElementById('teach-homehub')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
   }
 
   toggleSection(key: string, open = !this.isSectionOpen(key)): void {

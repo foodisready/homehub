@@ -143,9 +143,14 @@ export function forgetBridge(): void {
 }
 
 /** Every device, nickname, room and scene name, for the bridge's speech recognition and Cantonese matching. */
-export function voiceNames(): { names: string[]; version: string } {
-  const names = [...listDeviceNames(), ...listSceneNames()];
-  return { names, version: createHash('sha1').update(JSON.stringify(names)).digest('hex').slice(0, 12) };
+/**
+ * Every name, for speech recognition, and the scenes' among them, so the bridge
+ * never sends a light's name heard alone ("廚房燈") as a scene to run.
+ */
+export function voiceNames(): { names: string[]; scenes: string[]; version: string } {
+  const scenes = listSceneNames();
+  const names = [...listDeviceNames(), ...scenes];
+  return { names, scenes, version: createHash('sha1').update(JSON.stringify([names, scenes])).digest('hex').slice(0, 12) };
 }
 
 // An admin asked for a restart, which the bridge picks up at its next check-in.

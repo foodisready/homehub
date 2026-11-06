@@ -205,6 +205,12 @@ describe('/internal/voice', () => {
     assert.deepEqual(calls, [{ ip: '10.9.0.1', state: false }]);
   });
 
+  it('accepts a comma after a cut-off first word', async () => {
+    assert.equal((await say('Off, My office lamp.')).body.response, 'Turned off My office lamp.');
+    assert.equal((await say('On , my office lamp')).body.response, 'Turned on My office lamp.');
+    assert.equal((await say('Office lamp')).body.handled, false);   // a name starting with "off" stays a name
+  });
+
   it('accepts a spoken possessive', async () => {
     getDb().prepare('INSERT INTO devices (alias, ip) VALUES (?, ?)').run('Brenden bed lamp', '10.9.0.3');
     const { body } = await say("Turn on Brenden's bed lamp.");
@@ -237,9 +243,13 @@ describe('/internal/voice', () => {
   });
 
   it('lists names and nicknames', async () => {
+    getDb().prepare("INSERT OR IGNORE INTO scenes (name, nicknames) VALUES ('Good night', '[\"晚安\"]')").run();
     const res = await fetch(`${baseUrl}/internal/voice/device-names`, { headers: key });
-    const { names } = await res.json() as { names: string[] };
+    const { names, scenes } = await res.json() as { names: string[]; scenes: string[] };
     for (const name of ['My office lamp', 'desk light', 'Main Valve']) assert.ok(names.includes(name));
+    // Scenes are listed apart too, so a light's name heard alone is never run as a scene.
+    assert.deepEqual(scenes, ['Good night', '晚安']);
+    for (const scene of scenes) assert.ok(names.includes(scene));
   });
   it('keeps the bridge\'s check-in for the Health page', async () => {
     const post = (body: unknown, headers: Record<string, string> = key) =>

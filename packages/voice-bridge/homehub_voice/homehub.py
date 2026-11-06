@@ -29,6 +29,8 @@ class HomeHub:
         self.key = key
         self.timeout = timeout
         self.names: list[str] = []
+        # The scenes' names among them: only these may be run by saying a name alone.
+        self.scenes: list[str] = []
         # HomeHub's version of the names, so the bridge knows when they change.
         self.names_version: str | None = None
 
@@ -53,6 +55,8 @@ class HomeHub:
         try:
             res = self._call('/device-names')
             self.names = list(res.get('names', []))
+            # HomeHub before v0.1.27 didn't list scenes apart, so every name could be one.
+            self.scenes = list(res['scenes']) if isinstance(res.get('scenes'), list) else self.names
             self.names_version = res.get('version')
         except HomeHubError as e:
             log.warning('%s; keeping %d known names', e, len(self.names))

@@ -741,7 +741,7 @@ Names must match `^[A-Za-z0-9][A-Za-z0-9._-]*\.json$`. A restore removes history
 | `GET` | `/internal/voice/config` | internal key | `{ enabled, languages, version }`, for the voice bridge that comes with HomeHub: it waits until `enabled`, and restarts when `version` changes. |
 | `POST` | `/api/system/voice-bridge/restart` | admin | Asks the voice bridge to restart at its next check-in, within a minute. **202**; **409** if it isn't checking in. |
 | `POST` | `/internal/voice/status` | internal key | The voice bridge checks in every minute: `{ version, speakers: [{ name, address, connected }], state, id, kind }`. Answers `{ ok, namesVersion, configVersion, restart }`: the bridge fetches names again when `namesVersion` changes, and restarts when `restart` is true. |
-| `GET` | `/internal/voice/device-names` | internal key | `{ names, version }`: every device name, nickname, room and scene name. |
+| `GET` | `/internal/voice/device-names` | internal key | `{ names, scenes, version }`: every device name, nickname, room and scene name, and the scenes' names among them. |
 
 `POST /api/system/update` uses the updater when it answers, switching to the latest release, and Watchtower otherwise.
 

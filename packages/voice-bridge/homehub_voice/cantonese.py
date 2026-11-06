@@ -45,7 +45,7 @@ SCENE_MATCH = 0.85
 @dataclass(frozen=True)
 class Command:
     """What was said: switch a name on or off, or run a scene."""
-    action: str        # 'on', 'off' or 'scene'
+    action: str        # 'on', 'off', 'scene', or 'ask': a device's name alone, so ask on or off
     name: str          # as HomeHub knows it
     score: float
 
@@ -154,11 +154,16 @@ def parse(text: str, names: list[str], scenes: list[str] | None = None) -> Comma
         name, score, runner = best_name(rest, cantonese)
         if name and score >= MATCH and score - runner >= MARGIN:
             return Command(action, name, round(score, 2))
-        return None
+        # Not a verb after all, but the start of a name heard alone: 卓希房燈 starts like 着.
     scene_names = [n for n in (scenes or []) if has_chinese(n)]
     name, score, runner = best_name(s, scene_names)
     if name and score >= SCENE_MATCH and score - runner >= MARGIN:
         return Command('scene', name, round(score, 2))
+    # A device's name alone: its 開 or 熄 was lost, often cut off after the wake word.
+    devices = [n for n in cantonese if n not in scene_names]
+    name, score, runner = best_name(s, devices)
+    if name and score >= SCENE_MATCH and score - runner >= MARGIN:
+        return Command('ask', name, round(score, 2))
     return None
 
 
@@ -182,6 +187,8 @@ NO_HOMEHUB = '而家連唔到HomeHub。'
 
 def reply(command: Command | None, handled: bool, response: str, failed: list[str]) -> str:
     """A short Cantonese reply from HomeHub's answer. HomeHub's own wording is English."""
+    if command is not None and command.action == 'ask':
+        return f'你想開定熄{command.name}？'
     if command is None or not handled:
         return NOT_UNDERSTOOD
     if "can't pause cameras" in response:

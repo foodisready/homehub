@@ -13,10 +13,11 @@ from homehub_voice.pipeline import answer
 
 # The home's names, as HomeHub lists them: English aliases plus Cantonese nicknames.
 NAMES = ['Kitchen lights', 'My office lamp', '廚房燈', '寫字樓燈', '書房燈', '文房燈', '辦公室燈', '走廊燈', '卓希房燈', '車房門', '晚安']
+SCENES = ['晚安']
 
 
 def read(text):
-    c = yue.parse(text, NAMES, NAMES)
+    c = yue.parse(text, NAMES, SCENES)
     return (c.action, c.name) if c else None
 
 
@@ -48,9 +49,14 @@ class ReadingTest(unittest.TestCase):
     def test_unsure_is_none_never_a_guess(self):
         self.assertIsNone(read('開主人房燈'), 'no such light: not the nearest other one')
         self.assertIsNone(read('換卷黄灯。'))
-        # HomeHub lists device and scene names together, so a name alone is tried as a scene;
-        # HomeHub finds no scene by that name and switches nothing.
-        self.assertEqual(read('廚房燈'), ('scene', '廚房燈'))
+        # A light's name alone isn't a scene: it's asked about, and nothing is switched.
+        self.assertEqual(read('廚房燈'), ('ask', '廚房燈'))
+        self.assertEqual(read('卓希房燈啦'), ('ask', '卓希房燈'))
+        self.assertIsNone(read('房房燈'), 'too unsure to ask about')
+        # 卓希房燈 alone, as SenseVoice wrote it: 卓 sounds like 着 ("on"), but what follows isn't a name.
+        self.assertEqual(read('着起房燈'), ('ask', '卓希房燈'))
+        self.assertEqual(read('卓 k房灯。'), ('ask', '卓希房燈'))
+        self.assertIsNone(read('熄着氣燈'), 'a syllable missing: too far to guess')
         self.assertIsNone(read('開'))
         self.assertIsNone(yue.parse('開廚房燈', ['Kitchen lights']), 'no Cantonese names: nothing to match')
 
@@ -107,6 +113,7 @@ class FakeListener:
 
 class FakeHomeHub:
     names = NAMES
+    scenes = SCENES
 
     def __init__(self, response='Turned on Kitchen lights.', handled=True, fail=False):
         self.response, self.handled, self.fail = response, handled, fail
@@ -147,6 +154,19 @@ class PipelineTest(unittest.TestCase):
         h = FakeHomeHub(response="Sorry, I didn't understand that.", handled=False)
         answer(b'x', True, FakeListener(), h, FakeEars('yue', '开主人房灯。'))
         self.assertEqual(h.sent, ['開主人房燈'])
+
+    def test_a_light_named_alone_is_asked_about_not_run_as_a_scene(self):
+        # What the logs showed as "run 廚房燈": 開 was cut off after the wake word.
+        h = FakeHomeHub(response="Sorry, I didn't understand that.", handled=False)
+        a = answer(b'x', True, FakeListener(), h, FakeEars('yue', '廚房燈。'))
+        self.assertEqual(h.sent, ['廚房燈'])   # logged as heard, and nothing switched
+        self.assertEqual((a.reply, a.handled), ('你想開定熄廚房燈？', False))
+
+    def test_a_scene_named_alone_still_runs(self):
+        h = FakeHomeHub(response='Done, Good night.')
+        a = answer(b'x', True, FakeListener(), h, FakeEars('yue', '晚安'))
+        self.assertEqual(h.sent, ['run 晚安'])
+        self.assertTrue(a.handled)
 
     def test_homehub_down(self):
         a = answer(b'x', True, FakeListener(), FakeHomeHub(fail=True), FakeEars('yue', '開廚房燈'))
