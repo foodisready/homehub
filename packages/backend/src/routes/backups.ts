@@ -13,7 +13,7 @@ export const backupsRouter = Router();
 
 function fail(res: Response, err: unknown): void {
   if (err instanceof BackupError) {
-    res.status(err.status).json({ error: err.message, code: err.code });
+    res.status(err.status).json({ ...err.extra, error: err.message, code: err.code });
     return;
   }
   logger.error({ err }, 'Backup request failed');
@@ -54,13 +54,14 @@ backupsRouter.get('/email', (_req: Request, res: Response) => {
   try { res.json(backupEmailStatus()); } catch (err) { fail(res, err); }
 });
 
-/** { passphrase?: string, auto?: boolean } — either or both. */
+/** { passphrase?: string, hint?: string, auto?: boolean }. The hint goes with a new passphrase. */
 backupsRouter.put('/email', async (req: Request, res: Response) => {
   try {
-    const { passphrase, auto } = req.body ?? {};
+    const { passphrase, hint, auto } = req.body ?? {};
     if (passphrase !== undefined) {
       if (typeof passphrase !== 'string') throw new BackupError('"passphrase" must be text');
-      await setBackupPassphrase(passphrase);
+      if (hint !== undefined && typeof hint !== 'string') throw new BackupError('"hint" must be text');
+      await setBackupPassphrase(passphrase, hint);
     }
     if (auto !== undefined) {
       if (typeof auto !== 'boolean') throw new BackupError('"auto" must be true or false');

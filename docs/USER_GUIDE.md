@@ -351,7 +351,7 @@ HomeHub also makes a full copy of its database once a day and keeps the last 7. 
 Backups are kept on the same computer as HomeHub, so they're lost if its disk fails. Emailing one keeps a copy in your inbox.
 
 1. Set up email under **Settings → Integrations → Email alerts (SMTP)**, if you haven't already. Enter your email address first: for Gmail, Yahoo, iCloud and AOL, HomeHub fills in the server and says where to create an app password, which you use instead of your normal password. Outlook.com, Hotmail and Proton Mail addresses can't send from HomeHub, because those services don't accept passwords from apps; use one of the others to send, and your Outlook or Proton address as a recipient.
-2. In **Settings → Backups**, under **Email backups**, choose a backup passphrase of at least 10 characters and type it twice.
+2. In **Settings → Backups**, under **Email backups**, choose a backup passphrase of at least 10 characters and type it twice. The eye button shows what you've typed. You can add a hint to help you remember it: the hint goes in each backup email, unencrypted, and shows when you restore, so HomeHub won't accept one that contains the passphrase.
 3. Select **⋯ → Email** on any backup, or turn on **Email a backup every week, and after each HomeHub update**. Turning it on sends the first one straight away, so you can check it arrives.
 
 Every emailed backup is encrypted with your passphrase, because a backup holds your device logins. HomeHub keeps only a key made from the passphrase, not the passphrase itself, and can't show it or recover it. Write it down somewhere other than HomeHub's computer: without it, an emailed backup can't be opened.

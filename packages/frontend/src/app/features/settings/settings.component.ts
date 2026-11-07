@@ -892,7 +892,7 @@ const DRIVER_LABEL: Record<string, string> = {
           </button>
           @if (isSectionOpen('backups')) {
             <div class="card">
-              <app-backups (restored)="reloadAfterRestore()" />
+              <app-backups [emailChanged]="emailSettingsChanged()" (restored)="reloadAfterRestore()" />
             </div>
           }
         </div>
@@ -1285,6 +1285,9 @@ export class SettingsComponent implements OnInit, OnDestroy {
     });
   }
 
+  /** Counts saves of the email settings, so Backups → Email backups notices straight away. */
+  readonly emailSettingsChanged = signal(0);
+
   saveSmtp(): void {
     this.emailMsg.set(''); this.emailErr.set(false);
     const body: Record<string, string> = {
@@ -1303,6 +1306,7 @@ export class SettingsComponent implements OnInit, OnDestroy {
         this.emailMsg.set('Saved');
         this.smtpPass = '';
         this.loadNotificationSettings();
+        this.emailSettingsChanged.update((n) => n + 1);   // Backups → Email backups checks again
       },
       error: () => { this.emailMsg.set('Save failed'); this.emailErr.set(true); },
     });

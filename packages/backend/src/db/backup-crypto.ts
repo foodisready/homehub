@@ -23,6 +23,22 @@ const CIPHER = 'aes-256-gcm';
 /** 64 MB of memory per guess: about half a second on a Raspberry Pi 4, slow for anyone guessing. */
 const KDF = { N: 2 ** 16, r: 8, p: 1 };
 export const MIN_PASSPHRASE = 10;
+export const HINT_MAX = 100;
+
+/**
+ * Check a passphrase hint, which is stored and emailed unencrypted. Returns it
+ * tidied, or '' for none. Refuses a hint that gives the passphrase away.
+ */
+export function checkHint(hint: string | undefined, passphrase: string): string {
+  const h = (hint ?? '').normalize('NFC').trim().replace(/\s+/g, ' ');
+  if (!h) return '';
+  if (h.length > HINT_MAX) throw new BackupError(`Keep the hint under ${HINT_MAX} characters`, 400, 'HINT_INVALID');
+  const squash = (s: string) => s.toLowerCase().replace(/[\s\W_]+/g, '');
+  if (squash(h).includes(squash(normalise(passphrase)))) {
+    throw new BackupError("The hint can't contain the passphrase: anyone who sees the email can read the hint", 400, 'HINT_INVALID');
+  }
+  return h;
+}
 
 /** What HomeHub stores to encrypt without the passphrase. */
 export interface BackupKey {
@@ -44,6 +60,12 @@ interface Header {
 
 export interface EncryptedBackup extends Header {
   about?: string;
+  /**
+   * The owner's reminder for the passphrase, readable without it so a new
+   * HomeHub can show it when asking. Not covered by the tag: changing it
+   * can't open the file, only change what's shown.
+   */
+  hint?: string;
   tag: string;
   data: string;
 }
@@ -79,7 +101,7 @@ function aad(h: Header): Buffer {
   return Buffer.from([h.format, h.version, h.created_at, h.kdf.name, h.kdf.N, h.kdf.r, h.kdf.p, h.kdf.salt, h.cipher, h.iv].join('|'));
 }
 
-export function encryptBackup(plaintext: string, k: BackupKey, createdAt: string): string {
+export function encryptBackup(plaintext: string, k: BackupKey, createdAt: string, hint?: string): string {
   const iv = crypto.randomBytes(12);
   const header: Header = {
     format: ENCRYPTED_FORMAT,
@@ -95,6 +117,7 @@ export function encryptBackup(plaintext: string, k: BackupKey, createdAt: string
   const file: EncryptedBackup = {
     ...header,
     about: 'An encrypted HomeHub backup. To restore it, open Settings → Backups in HomeHub, select Upload a backup, and enter your backup passphrase.',
+    ...(hint ? { hint } : {}),
     tag: cipher.getAuthTag().toString('base64'),
     data: data.toString('base64'),
   };
@@ -136,8 +159,9 @@ export async function decryptBackup(file: EncryptedBackup, passphrase: string | 
   const data = b64(file.data);
   if (salt.length < 16) throw new BackupError('This encrypted backup is damaged');
 
+  const hint = typeof file.hint === 'string' && file.hint.trim() ? { hint: file.hint.trim().slice(0, HINT_MAX) } : {};
   if (!passphrase || !normalise(passphrase)) {
-    throw new BackupError('This backup is encrypted. Enter the backup passphrase to open it.', 400, 'PASSPHRASE_REQUIRED');
+    throw new BackupError('This backup is encrypted. Enter the backup passphrase to open it.', 400, 'PASSPHRASE_REQUIRED', hint);
   }
   const key = await stretch(passphrase, salt, kdf.N, kdf.r, kdf.p);
   try {
@@ -146,6 +170,6 @@ export async function decryptBackup(file: EncryptedBackup, passphrase: string | 
     decipher.setAuthTag(tag);
     return Buffer.concat([decipher.update(data), decipher.final()]).toString('utf8');
   } catch {
-    throw new BackupError("That passphrase doesn't open this backup (or the file was changed)", 400, 'PASSPHRASE_WRONG');
+    throw new BackupError("That passphrase doesn't open this backup (or the file was changed)", 400, 'PASSPHRASE_WRONG', hint);
   }
 }

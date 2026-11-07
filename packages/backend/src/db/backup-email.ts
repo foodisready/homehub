@@ -1,7 +1,7 @@
 import os from 'os';
 import { getDb } from './index';
 import { BackupError } from './backup-error';
-import { BackupKey, encryptBackup, makeBackupKey } from './backup-crypto';
+import { BackupKey, checkHint, encryptBackup, makeBackupKey } from './backup-crypto';
 import { HIDDEN, parseBackup, readFull, snapshot } from './json-backup';
 import { automationsPaused } from '../automation/pause';
 import { EmailMessage, emailConfigured, emailRecipients, sendEmail } from '../notifications/providers/email';
@@ -22,6 +22,8 @@ import { logger } from '../logger';
  */
 
 const KEY = 'backup_email_key';
+/** A reminder for the passphrase, emailed with each backup. Never the passphrase itself. */
+const HINT = 'backup_email_hint';
 const AUTO = 'backup_email_auto';
 /** The last attempt, by hand or automatic. */
 const LAST = 'backup_email_last';
@@ -50,6 +52,8 @@ export interface BackupEmailStatus {
   emailReady: boolean;
   recipients: string[];
   passphraseSet: boolean;
+  /** The passphrase hint, or '' for none. */
+  hint: string;
   auto: boolean;
   /** Automations are paused here, so automatic emails wait. */
   paused: boolean;
@@ -80,6 +84,7 @@ export function backupEmailStatus(): BackupEmailStatus {
     emailReady: emailConfigured(),
     recipients: emailRecipients(),
     passphraseSet: !!storedKey(),
+    hint: get(HINT) ?? '',
     auto: get(AUTO) === '1',
     paused: automationsPaused(),
     last: getJson<LastAttempt>(LAST),
@@ -90,8 +95,10 @@ export function backupEmailStatus(): BackupEmailStatus {
  * Choose a new passphrase. Backups already emailed keep the passphrase they
  * were sent with.
  */
-export async function setBackupPassphrase(passphrase: string): Promise<void> {
+export async function setBackupPassphrase(passphrase: string, hint?: string): Promise<void> {
+  const tidyHint = checkHint(hint, passphrase);   // before the slow part, so a bad hint fails fast
   set(KEY, JSON.stringify(await makeBackupKey(passphrase)));
+  set(HINT, tidyHint);
   logger.info('Backup email passphrase set');
 }
 
@@ -115,7 +122,7 @@ function stamp(d = new Date()): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
 }
 
-function messageFor(createdAt: string, reason: EmailReason, version: string): string {
+function messageFor(createdAt: string, reason: EmailReason, version: string, hint: string): string {
   const when = new Date(createdAt).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' });
   const why = {
     manual: 'You asked HomeHub to email it.',
@@ -130,7 +137,7 @@ function messageFor(createdAt: string, reason: EmailReason, version: string): st
     'To restore it, for example on a new computer:',
     '1. Install HomeHub and open it in a browser.',
     '2. Open Settings → Backups and select Upload a backup.',
-    '3. Choose the attached file and enter your backup passphrase.',
+    `3. Choose the attached file and enter your backup passphrase.${hint ? ` Your hint: "${hint}"` : ''}`,
     '4. Select Restore on it.',
     '',
     "Without the passphrase this file can't be opened, and HomeHub can't recover it. Keep the passphrase somewhere other than HomeHub's computer.",
@@ -171,8 +178,8 @@ export async function emailBackup(opts: { name?: string; reason: EmailReason }):
   try {
     await send({
       subject: `HomeHub backup from ${os.hostname()}, ${day}`,
-      text: messageFor(createdAt, opts.reason, version),
-      attachments: [{ filename: file, content: encryptBackup(plaintext, key, createdAt), contentType: 'application/json' }],
+      text: messageFor(createdAt, opts.reason, version, get(HINT) ?? ''),
+      attachments: [{ filename: file, content: encryptBackup(plaintext, key, createdAt, get(HINT) || undefined), contentType: 'application/json' }],
     });
   } catch (err) {
     const error = (err as Error).message || String(err);

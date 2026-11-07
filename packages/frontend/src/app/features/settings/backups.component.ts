@@ -1,4 +1,4 @@
-import { Component, HostListener, OnInit, inject, output, signal } from '@angular/core';
+import { Component, HostListener, OnInit, effect, inject, input, output, signal, untracked } from '@angular/core';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
 
@@ -6,6 +6,7 @@ interface EmailStatus {
   emailReady: boolean;
   recipients: string[];
   passphraseSet: boolean;
+  hint?: string;
   auto: boolean;
   paused: boolean;
   last: { at: string; ok: boolean; reason: 'manual' | 'weekly' | 'update'; file: string; error?: string } | null;
@@ -22,6 +23,8 @@ const ICONS = {
   email:    'M3 6h18v12H3zM3 7l9 6 9-6',
   restore:  'M3 12a9 9 0 1 0 2.6-6.4L3 8M3 3v5h5',
   delete:   'M4 7h16M10 11v6M14 11v6M5 7l1 13h12l1-13M9 7V4h6v3',
+  eye:      'M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
+  eyeOff:   'M17.9 17.9A10 10 0 0 1 12 20c-7 0-11-8-11-8a18.5 18.5 0 0 1 5.1-5.9M9.9 4.2A9 9 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.2 3.2M1 1l22 22',
 };
 
 interface BackupEntry {
@@ -92,6 +95,13 @@ const COUNT_LABELS: [string, string, string][] = [
     .email-box p:not(.msg) { color:var(--text-muted); }
     .pass-form { display:flex; gap:0.5rem; flex-wrap:wrap; margin-top:0.5rem; }
     .pass-form input { flex:1; min-width:10rem; font-size:0.85rem; padding:0.4rem 0.7rem; }
+    .pw { position:relative; flex:1; min-width:10rem; display:flex; }
+    .pw input { width:100%; padding-right:2.4rem; }
+    .eye {
+      position:absolute; right:0.25rem; top:50%; transform:translateY(-50%);
+      background:transparent; border:none; color:var(--text-muted); cursor:pointer; padding:0.3rem; display:flex;
+    }
+    .eye:hover { color:var(--text); }
     .check { display:flex; align-items:flex-start; gap:0.5rem; font-size:0.85rem; margin-top:0.55rem; cursor:pointer; }
     .check input { flex:none; width:auto; margin:0.2rem 0 0; }
     .check span { flex:1; }
@@ -151,10 +161,25 @@ const COUNT_LABELS: [string, string, string][] = [
             @if (e.passphraseSet) { Backups already emailed still open with the old passphrase. }
           </p>
           <div class="pass-form">
-            <input type="password" [(ngModel)]="pass1" placeholder="Backup passphrase (10+ characters)"
-                   autocomplete="new-password" aria-label="Backup passphrase" />
-            <input type="password" [(ngModel)]="pass2" placeholder="Type it again"
-                   autocomplete="new-password" aria-label="Type the backup passphrase again" (keydown.enter)="savePassphrase()" />
+            <div class="pw">
+              <input [type]="showPass() ? 'text' : 'password'" [(ngModel)]="pass1" placeholder="Backup passphrase (10+ characters)"
+                     autocomplete="new-password" aria-label="Backup passphrase" spellcheck="false" autocapitalize="off" />
+              <button type="button" class="eye" (click)="showPass.set(!showPass())"
+                    [attr.aria-label]="showPass() ? 'Hide passphrase' : 'Show passphrase'" [title]="showPass() ? 'Hide' : 'Show'">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path [attr.d]="showPass() ? icons.eyeOff : icons.eye" /></svg>
+            </button>
+            </div>
+            <div class="pw">
+              <input [type]="showPass() ? 'text' : 'password'" [(ngModel)]="pass2" placeholder="Type it again"
+                     autocomplete="new-password" aria-label="Type the backup passphrase again" spellcheck="false" autocapitalize="off" />
+            </div>
+          </div>
+          <div class="pass-form">
+            <input type="text" [(ngModel)]="hint" maxlength="100" placeholder="Hint to help you remember it (optional)"
+                   aria-label="Passphrase hint" (keydown.enter)="savePassphrase()" />
+          </div>
+          <p>The hint goes in each backup email and shows when you restore, so make it something only you understand, never the passphrase itself.</p>
+          <div class="pass-form">
             <button class="btn-sm btn-primary" (click)="savePassphrase()" [disabled]="busy() || !pass1 || !pass2">Save</button>
             @if (e.passphraseSet) { <button class="btn-sm btn-ghost" (click)="cancelPassphrase()">Cancel</button> }
           </div>
@@ -169,6 +194,7 @@ const COUNT_LABELS: [string, string, string][] = [
             You can also email any backup from its <b>⋯</b> menu.
             <button class="linkish" (click)="changingPass.set(true)">Change passphrase</button>
           </p>
+          @if (e.hint) { <p>Passphrase hint: <i>{{ e.hint }}</i></p> }
           @if (e.auto && e.paused) {
             <p>Automations are paused on this HomeHub, so automatic emails wait until they're resumed.</p>
           }
@@ -192,10 +218,19 @@ const COUNT_LABELS: [string, string, string][] = [
     </div>
     @if (pendingUpload(); as p) {
       <div class="confirm">
-        <span>{{ p.fileName }} is an encrypted backup. Enter the backup passphrase it was emailed with.</span>
+        <span>
+          {{ p.fileName }} is an encrypted backup. Enter the backup passphrase it was emailed with.
+          @if (p.hint) { <br />Your hint: <i>{{ p.hint }}</i> }
+        </span>
         <div class="pass-form" style="margin-top:0;flex:1 1 100%">
-          <input type="password" [(ngModel)]="uploadPass" placeholder="Backup passphrase" autocomplete="off"
-                 aria-label="Backup passphrase for the uploaded file" (keydown.enter)="sendUpload()" />
+          <div class="pw">
+            <input [type]="showPass() ? 'text' : 'password'" [(ngModel)]="uploadPass" placeholder="Backup passphrase" autocomplete="off"
+                   aria-label="Backup passphrase for the uploaded file" (keydown.enter)="sendUpload()" spellcheck="false" autocapitalize="off" />
+            <button type="button" class="eye" (click)="showPass.set(!showPass())"
+                    [attr.aria-label]="showPass() ? 'Hide passphrase' : 'Show passphrase'" [title]="showPass() ? 'Hide' : 'Show'">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path [attr.d]="showPass() ? icons.eyeOff : icons.eye" /></svg>
+            </button>
+          </div>
           <button class="btn-sm btn-primary" (click)="sendUpload()" [disabled]="busy() || !uploadPass">Open</button>
           <button class="btn-sm btn-ghost" (click)="pendingUpload.set(null)">Cancel</button>
         </div>
@@ -310,6 +345,8 @@ export class BackupsComponent implements OnInit {
 
   /** Fired after a restore, so the page can reload devices and users. */
   readonly restored = output<void>();
+  /** Changes when the email settings are saved, so Email backups checks again. */
+  readonly emailChanged = input(0);
 
   readonly backups = signal<BackupEntry[]>([]);
   readonly busy = signal(false);
@@ -324,13 +361,16 @@ export class BackupsComponent implements OnInit {
   readonly changingPass = signal(false);
   readonly passError = signal('');
   /** An encrypted file waiting for its passphrase. */
-  readonly pendingUpload = signal<{ fileName: string; content: string } | null>(null);
+  readonly pendingUpload = signal<{ fileName: string; content: string; hint?: string } | null>(null);
+  /** Shows what's typed in the passphrase boxes. */
+  readonly showPass = signal(false);
   readonly icons = ICONS;
 
   note = '';
   draft = '';
   pass1 = '';
   pass2 = '';
+  hint = '';
   uploadPass = '';
   private saved = '';
 
@@ -338,9 +378,19 @@ export class BackupsComponent implements OnInit {
     return this.draft !== this.saved;
   }
 
+  constructor() {
+    // Runs once at the start, then whenever the email settings are saved on this page.
+    effect(() => { this.emailChanged(); untracked(() => this.loadEmail()); });
+  }
+
   ngOnInit(): void {
     this.load();
-    this.loadEmail();
+  }
+
+  /** Coming back to the page, for example after setting up email on another device, checks again. */
+  @HostListener('document:visibilitychange')
+  onVisible(): void {
+    if (document.visibilityState === 'visible') this.loadEmail();
   }
 
   @HostListener('document:click')
@@ -380,11 +430,12 @@ export class BackupsComponent implements OnInit {
     this.passError.set('');
     if (this.pass1 !== this.pass2) { this.passError.set("The two passphrases don't match"); return; }
     this.busy.set(true);
-    this.http.put<EmailStatus>('/api/backups/email', { passphrase: this.pass1 }).subscribe({
+    this.http.put<EmailStatus>('/api/backups/email', { passphrase: this.pass1, hint: this.hint }).subscribe({
       next: (s) => {
         this.busy.set(false);
         this.email.set(s);
-        this.pass1 = this.pass2 = '';
+        this.pass1 = this.pass2 = this.hint = '';
+        this.showPass.set(false);
         this.changingPass.set(false);
         this.show('Backup passphrase saved. Keep it somewhere safe: you need it to restore an emailed backup.');
       },
@@ -393,7 +444,8 @@ export class BackupsComponent implements OnInit {
   }
 
   cancelPassphrase(): void {
-    this.pass1 = this.pass2 = '';
+    this.pass1 = this.pass2 = this.hint = '';
+    this.showPass.set(false);
     this.passError.set('');
     this.changingPass.set(false);
   }
@@ -497,11 +549,12 @@ export class BackupsComponent implements OnInit {
       error: (err) => {
         this.busy.set(false);
         const code = err instanceof HttpErrorResponse ? err.error?.code : undefined;
+        const hint = err instanceof HttpErrorResponse && typeof err.error?.hint === 'string' ? err.error.hint : undefined;
         if (code === 'PASSPHRASE_REQUIRED') {
-          this.pendingUpload.set({ fileName, content });
+          this.pendingUpload.set({ fileName, content, hint });
           return;
         }
-        if (code === 'PASSPHRASE_WRONG') this.uploadPass = '';
+        if (code === 'PASSPHRASE_WRONG') { this.uploadPass = ''; this.pendingUpload.update((p) => (p ? { ...p, hint: hint ?? p.hint } : p)); }
         else this.pendingUpload.set(null);
         this.show(this.errorText(err), true);
       },

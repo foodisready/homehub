@@ -187,6 +187,39 @@ describe('backup emails', () => {
     });
   });
 
+  describe('passphrase hint', () => {
+    it('goes in the email and the file, and is shown when the passphrase is asked for', async () => {
+      setUpEmail();
+      await be.setBackupPassphrase(PASS, 'the horse and the battery');
+      assert.equal(be.backupEmailStatus().hint, 'the horse and the battery');
+      await be.emailBackup({ reason: 'manual' });
+      assert.match(outbox[0].text, /Your hint: "the horse and the battery"/);
+      const enc = bc.asEncrypted(outbox[0].attachments![0].content)!;
+      assert.equal(enc.hint, 'the horse and the battery');
+      await assert.rejects(bc.decryptBackup(enc, undefined), (err: { code?: string; extra?: { hint?: string } }) =>
+        err.code === 'PASSPHRASE_REQUIRED' && err.extra?.hint === 'the horse and the battery');
+      await assert.rejects(bc.decryptBackup(enc, 'not it at all'), (err: { code?: string; extra?: { hint?: string } }) =>
+        err.code === 'PASSPHRASE_WRONG' && err.extra?.hint === 'the horse and the battery');
+      assert.ok(await bc.decryptBackup(enc, PASS), 'the hint does not stop the file opening');
+    });
+
+    it('refuses a hint that gives the passphrase away, even with different spacing or case', async () => {
+      await rejectsWithCode(be.setBackupPassphrase(PASS, `it is ${PASS}`), 'HINT_INVALID');
+      await rejectsWithCode(be.setBackupPassphrase(PASS, 'CorrectHorse-Battery!'), 'HINT_INVALID');
+      await rejectsWithCode(be.setBackupPassphrase(PASS, 'x'.repeat(101)), 'HINT_INVALID');
+      assert.equal(be.backupEmailStatus().passphraseSet, false, 'nothing is saved when the hint is refused');
+    });
+
+    it('a new passphrase without a hint clears the old hint, and the hint stays out of backups', async () => {
+      await be.setBackupPassphrase(PASS, 'old reminder');
+      const { name } = jb.createBackup();
+      const keys = JSON.parse(jb.readFull(name)).tables.settings.map((r: { key: string }) => r.key);
+      assert.ok(!keys.includes('backup_email_hint'));
+      await be.setBackupPassphrase('a different passphrase');
+      assert.equal(be.backupEmailStatus().hint, '');
+    });
+  });
+
   describe('automatic emails', () => {
     const base = {
       auto: true, passphraseSet: true, emailReady: true, paused: false, last: null, sent: null, version: 'v0.1.30',
