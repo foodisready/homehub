@@ -9,6 +9,7 @@ import { DeviceFilterComponent, matchesDevice, type DeviceFilter } from '../../s
 import { Device } from '../../shared/models/device.model';
 import { BackupsComponent } from './backups.component';
 import { ServerRoleComponent } from './server-role.component';
+import { MailProvider, providerForAddress, providerForHost } from './email-providers';
 import { InviteQrComponent } from '../welcome/invite-qr.component';
 import { MatterPairComponent } from './matter-pair.component';
 import { MerossLoginComponent } from './meross-login.component';
@@ -215,6 +216,8 @@ const DRIVER_LABEL: Record<string, string> = {
       display:grid; grid-template-columns:1fr 1fr; gap:0.5rem; margin-top:0.75rem;
     }
     .tuya-cloud-form input, .tuya-cloud-form select { font-size:0.85rem; padding:0.4rem 0.7rem; }
+    /* The email form reads top to bottom: address first, then what it fills in. */
+    .email-form { grid-template-columns:1fr; max-width:34rem; }
     .tuya-synced { font-size:0.72rem; color:#4ade80; margin-left:0.4rem; }
 
     .discover-list { margin-top:0.75rem; border:1px solid var(--border); border-radius:var(--radius); overflow:hidden; }
@@ -602,15 +605,25 @@ const DRIVER_LABEL: Record<string, string> = {
                 <span style="color:var(--text-muted);font-size:0.85rem">{{ emailExpanded() ? '▲' : '▼' }}</span>
               </div>
               @if (emailExpanded()) {
-                <div class="tuya-cloud-form">
-                  <input type="text" [(ngModel)]="smtpHost" placeholder="Host (e.g. smtp.resend.com)" autocomplete="off" />
-                  <div style="display:flex;gap:0.5rem">
-                    <input type="number" [(ngModel)]="smtpPort" placeholder="Port" style="width:6rem" />
-                    <label style="display:flex;align-items:center;gap:0.4rem;font-size:0.85rem;color:var(--text-muted)">
-                      <input type="checkbox" [(ngModel)]="smtpSecure" /> TLS (port 465)
-                    </label>
-                  </div>
-                  <input type="text" [(ngModel)]="smtpUser" placeholder="Username" autocomplete="off" />
+                <div class="tuya-cloud-form email-form">
+                  <input type="email" [(ngModel)]="smtpUser" placeholder="Your email address (or SMTP username)" autocomplete="email"
+                         (blur)="fillFromAddress()" aria-label="Email address or SMTP username" />
+                  @if (mailProvider(); as mp) {
+                    @if (mp.unsupported) {
+                      <div class="msg err" style="font-size:0.8rem;line-height:1.45">{{ mp.unsupported }}</div>
+                    } @else {
+                      <div style="font-size:0.8rem;color:var(--text-muted);line-height:1.45">
+                        {{ mp.name }}: for the password, use an <b>app password</b>, not your normal one. Create it at
+                        <a [href]="mp.passwordUrl" target="_blank" rel="noopener">{{ mp.passwordUrl?.replace('https://', '') }}</a>.
+                        {{ mp.passwordNote }}
+                      </div>
+                    }
+                  } @else if (!smtpHost.trim()) {
+                    <div style="font-size:0.8rem;color:var(--text-muted);line-height:1.45">
+                      Enter your address and HomeHub fills in the server for Gmail, Yahoo, iCloud and AOL. For anything else, such as
+                      Resend or your internet provider, enter its server below.
+                    </div>
+                  }
                   <div class="pass-wrap">
                     <input [type]="showSmtpPass ? 'text' : 'password'" [(ngModel)]="smtpPass"
                            [placeholder]="hasSmtpPass() ? 'Password (leave blank to keep current)' : 'Password / API key'"
@@ -630,7 +643,14 @@ const DRIVER_LABEL: Record<string, string> = {
                       }
                     </button>
                   </div>
-                  <input type="text" [(ngModel)]="smtpFrom" placeholder='From — "AuraFlow" <alerts@example.com>' autocomplete="off" />
+                  <input type="text" [(ngModel)]="smtpHost" placeholder="Server (e.g. smtp.resend.com)" autocomplete="off" aria-label="SMTP server" />
+                  <div style="display:flex;gap:0.5rem">
+                    <input type="number" [(ngModel)]="smtpPort" placeholder="Port" style="width:6rem" aria-label="SMTP port" />
+                    <label style="display:flex;align-items:center;gap:0.4rem;font-size:0.85rem;color:var(--text-muted);white-space:nowrap">
+                      <input type="checkbox" [(ngModel)]="smtpSecure" /> TLS (port 465)
+                    </label>
+                  </div>
+                  <input type="text" [(ngModel)]="smtpFrom" placeholder='From (optional), e.g. HomeHub or "HomeHub" <alerts@example.com>' autocomplete="off" />
                   <input type="text" [(ngModel)]="emailRecipients" placeholder="Recipients (comma-separated)" autocomplete="off" />
                   <div style="display:flex;align-items:center;gap:0.5rem">
                     <button class="btn-sm btn-primary" (click)="saveSmtp()"
@@ -1136,6 +1156,27 @@ export class SettingsComponent implements OnInit, OnDestroy {
   smtpUser      = '';
   smtpPass      = '';   // write-only; GET returns has_smtp_pass instead
   smtpFrom      = '';
+
+  /**
+   * The address typed in fills in its service's server, when the server is
+   * empty or belongs to another known service, and becomes the first
+   * recipient if there's none yet. A server someone typed themselves is kept.
+   */
+  fillFromAddress(): void {
+    const address = this.smtpUser.trim();
+    const p = providerForAddress(address);
+    if (p?.host && (!this.smtpHost.trim() || providerForHost(this.smtpHost))) {
+      this.smtpHost = p.host;
+      this.smtpPort = String(p.port);
+      this.smtpSecure = !!p.secure;
+    }
+    if (address.includes('@') && !this.emailRecipients.trim()) this.emailRecipients = address;
+  }
+
+  /** The known service for the address typed in, or else for the server. */
+  mailProvider(): MailProvider | null {
+    return providerForAddress(this.smtpUser) ?? providerForHost(this.smtpHost);
+  }
   emailRecipients = '';
   showSmtpPass    = false;
   hasSmtpPass     = signal(false);

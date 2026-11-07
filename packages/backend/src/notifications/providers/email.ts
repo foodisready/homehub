@@ -51,7 +51,7 @@ export class EmailNotifier implements Notifier {
     const transporter = buildTransporter(cfg);
     try {
       await transporter.sendMail({
-        from:    cfg.from || cfg.user,
+        from:    fromHeader(cfg.from, cfg.user),
         to:      cfg.recipients.join(','),
         subject: payload.title,
         text:    `${payload.body}\n\nEvent ID: ${payload.eventId}\nLevel: ${payload.level}`,
@@ -90,7 +90,7 @@ export async function sendEmail(msg: EmailMessage): Promise<void> {
   const transporter = buildTransporter(cfg);
   try {
     await transporter.sendMail({
-      from:        cfg.from || cfg.user,
+      from:        fromHeader(cfg.from, cfg.user),
       to:          cfg.recipients.join(','),
       subject:     msg.subject,
       text:        msg.text,
@@ -99,6 +99,17 @@ export async function sendEmail(msg: EmailMessage): Promise<void> {
   } finally {
     transporter.close();
   }
+}
+
+/**
+ * The From header. A name without an address, such as "HomeHub", is sent as
+ * that name with the account's address, which servers like Gmail require.
+ */
+export function fromHeader(from: string, user: string): string {
+  const f = from.trim();
+  if (!f) return user;
+  if (f.includes('@') || !user.includes('@')) return f;
+  return `"${f.replace(/"/g, '')}" <${user}>`;
 }
 
 function readSmtpConfig(): SmtpConfig {
