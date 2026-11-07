@@ -164,35 +164,116 @@ export function respond(
   return { message, to, via: address };
 }
 
+/** The IPv4 addresses (A records) a response gives, from every section. Goodbyes (TTL 0) are left out. */
+export function parseResponse(buf: Buffer): { name: string; address: string }[] {
+  if (buf.length < 12 || !(buf.readUInt16BE(2) & 0x8000)) return [];
+  const qd = buf.readUInt16BE(4);
+  const records = buf.readUInt16BE(6) + buf.readUInt16BE(8) + buf.readUInt16BE(10);
+  const out: { name: string; address: string }[] = [];
+  let pos = 12;
+  try {
+    for (let i = 0; i < qd; i++) pos = readName(buf, pos).end + 4;
+    for (let i = 0; i < records; i++) {
+      const { name, end } = readName(buf, pos);
+      if (end + 10 > buf.length) break;
+      const type = buf.readUInt16BE(end);
+      const ttl = buf.readUInt32BE(end + 4);
+      const len = buf.readUInt16BE(end + 8);
+      const data = end + 10;
+      if (data + len > buf.length) break;
+      if (type === TYPE_A && len === 4 && ttl > 0) out.push({ name: name.toLowerCase(), address: [...buf.subarray(data, data + 4)].join('.') });
+      pos = data + len;
+    }
+  } catch { /* keep what was read */ }
+  return out;
+}
+
+/** A plain mDNS question for `name`'s IPv4 address. */
+export function buildQuery(name: string): Buffer {
+  const header = Buffer.alloc(12);
+  header.writeUInt16BE(1, 4);                 // one question
+  return Buffer.concat([header, encodeName(name), Buffer.from([0, TYPE_A, 0, 1])]);
+}
+
 // ── Responder ──────────────────────────────────────────────────────
 
+/** HOMEHUB_LOCAL_NAME, the name the active HomeHub answers to. */
 export function localName(): string | null {
   const configured = (process.env.HOMEHUB_LOCAL_NAME ?? '').trim().toLowerCase().replace(/\.local$/, '');
   if (!configured || configured === 'off') return null;
-  if (/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/.test(configured)) return configured;
+  if (/^[a-z0-9]([a-z0-9-]{0,52}[a-z0-9])?$/.test(configured)) return configured;
   logger.warn(`HOMEHUB_LOCAL_NAME "${configured}" isn't a valid name; not answering for a .local name`);
   return null;
+}
+
+/**
+ * The name this HomeHub answers to: the configured one when it's the active
+ * server, and `<name>-backup` or `<name>-dev` otherwise, so only one computer
+ * ever answers for homehub.local.
+ */
+export function nameForRole(base: string, role: string): string {
+  return role === 'active' ? base : `${base}-${role}`;
+}
+
+let role = 'active';
+let reannounce: (() => void) | null = null;
+/** Another computer answering for the main name: the active HomeHub, or a second one. */
+let other: { address: string; at: number } | null = null;
+const OTHER_FRESH_MS = 3 * 60 * 1000;
+
+/** Called when this server's role changes: answer to the new name straight away. */
+export function setLocalNameRole(r: string): void {
+  if (r === role) return;
+  role = r;
+  other = null;
+  reannounce?.();
+}
+
+/**
+ * Another computer seen answering for the main .local name in the last few
+ * minutes. On a backup server that's the active HomeHub; on the active one it
+ * means a second HomeHub thinks it's active too.
+ */
+export function otherAnswering(now = Date.now()): { address: string; at: number } | null {
+  return other && now - other.at < OTHER_FRESH_MS ? other : null;
+}
+
+/** Note answers for the main name from addresses that aren't this computer's. For tests too. */
+export function noticeOthers(buf: Buffer, mainHostname: string, ours: LocalAddress[], now = Date.now()): void {
+  for (const r of parseResponse(buf)) {
+    if (r.name !== mainHostname || ours.some((a) => a.address === r.address)) continue;
+    if (other?.address !== r.address) logger.info({ address: r.address, role }, `Another computer answers for ${mainHostname}`);
+    other = { address: r.address, at: now };
+  }
 }
 
 export function startLocalName(): void {
   const name = localName();
   if (!name) return;
-  const hostname = `${name}.local`;
+  const main = `${name}.local`;
+  const hostname = () => `${nameForRole(name, role)}.local`;
   const socket = dgram.createSocket({ type: 'udp4', reuseAddr: true });
 
   socket.on('error', (err) => {
-    logger.warn({ err }, `Can't answer for ${hostname}; open HomeHub by its IP address instead`);
+    logger.warn({ err }, `Can't answer for ${hostname()}; open HomeHub by its IP address instead`);
     socket.close();
   });
 
   socket.on('message', (buf, rinfo) => {
-    const reply = respond(buf, rinfo, hostname, homeAddresses());
+    const addrs = homeAddresses();
+    noticeOthers(buf, main, addrs);
+    const reply = respond(buf, rinfo, hostname(), addrs);
     if (!reply) return;
     try { socket.setMulticastInterface(reply.via); } catch { /* use the default */ }
     socket.send(reply.message, reply.to.port, reply.to.address);
   });
 
   const joined = new Set<string>();
+  /** Say which name this computer answers to, so devices that looked earlier find it now. */
+  const announce = (address: string): void => {
+    socket.setMulticastInterface(address);
+    socket.send(buildAnswer(hostname(), address), MDNS_PORT, MDNS_ADDR);
+  };
   /** Listen on each home network, including ones that appear later (Wi-Fi reconnecting). */
   const join = (): void => {
     for (const a of homeAddresses()) {
@@ -200,19 +281,33 @@ export function startLocalName(): void {
       try {
         socket.addMembership(MDNS_ADDR, a.address);
         joined.add(a.address);
-        // Announce, so devices that looked before HomeHub started find it now.
-        socket.setMulticastInterface(a.address);
-        socket.send(buildAnswer(hostname, a.address), MDNS_PORT, MDNS_ADDR);
-        logger.info({ address: a.address }, `Answering for ${hostname}`);
+        announce(a.address);
+        logger.info({ address: a.address }, `Answering for ${hostname()}`);
       } catch (err) {
         logger.debug({ err, address: a.address }, 'mDNS: could not join on this interface');
       }
     }
   };
+  /** Ask who answers for the main name; answers arrive as messages above. */
+  const ask = (): void => {
+    for (const address of joined) {
+      try {
+        socket.setMulticastInterface(address);
+        socket.send(buildQuery(main), MDNS_PORT, MDNS_ADDR);
+      } catch { /* try again next time */ }
+    }
+  };
+  reannounce = () => {
+    for (const address of joined) {
+      try { announce(address); } catch { /* next time */ }
+    }
+    logger.info(`Answering for ${hostname()}`);
+  };
 
   socket.bind(MDNS_PORT, () => {
     socket.setMulticastTTL(255);
     join();
-    setInterval(join, 60_000).unref();
+    ask();
+    setInterval(() => { join(); ask(); }, 60_000).unref();
   });
 }

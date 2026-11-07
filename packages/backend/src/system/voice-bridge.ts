@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { getDb } from '../db';
 import { listDeviceNames, listSceneNames } from '../nlp/find-device';
+import { isActiveServer } from './role';
 
 /**
  * What the voice bridge last reported: it runs outside HomeHub, on this
@@ -85,7 +86,9 @@ export function setVoiceSettings(input: unknown): VoiceSettings {
 
 /** What the bridge runs with, and a version that changes when it does, so the bridge restarts to apply it. */
 export function voiceConfig(): VoiceSettings & { version: string } {
-  const s = getVoiceSettings();
+  // Only the active server listens: a speaker such as Ava talks to one bridge at a time.
+  // The saved settings stay as they are, for when this server is active again.
+  const s = isActiveServer() ? getVoiceSettings() : { ...getVoiceSettings(), enabled: false };
   return { ...s, version: createHash('sha1').update(JSON.stringify(s)).digest('hex').slice(0, 12) };
 }
 

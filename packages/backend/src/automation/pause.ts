@@ -14,10 +14,26 @@ import { logger } from '../logger';
 
 export const PAUSE_KEY = 'automations_paused';
 
-export function automationsPaused(): boolean {
+/** Paused by hand with the switch in Settings → Preferences. */
+export function pausedByHand(): boolean {
   try {
     const row = getDb().prepare('SELECT value FROM settings WHERE key = ?').get(PAUSE_KEY) as { value: string } | undefined;
     return row?.value === '1';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Whether HomeHub should act on its own right now: not when paused by hand,
+ * and not when this server is a backup or development copy (system/role.ts;
+ * read directly here so this module stays free of its imports).
+ */
+export function automationsPaused(): boolean {
+  if (pausedByHand()) return true;
+  try {
+    const row = getDb().prepare("SELECT value FROM settings WHERE key = 'server_role'").get() as { value: string } | undefined;
+    return row?.value === 'backup' || row?.value === 'dev';
   } catch {
     return false;
   }

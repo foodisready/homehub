@@ -2,10 +2,11 @@ import fs from 'fs';
 import path from 'path';
 import { getDb } from '../db';
 import { getAllCachedStates } from '../kasa/device.cache';
-import { automationsPaused } from '../automation/pause';
+import { pausedByHand } from '../automation/pause';
 import { cameraBridgeInstalled } from '../secrets';
 import { getSettings as cameraSettings } from '../cameras/snapshots';
-import { bridgeUrl, signInSavedAt } from '../cameras/bridge';
+import { bridgeStandby, bridgeUrl, signInSavedAt } from '../cameras/bridge';
+import { roleStatus } from './role';
 import { pictureHealth } from '../cameras/picture-status';
 import { cameraDevices } from '../cameras/watch';
 import { bridgeLastState, bridgeRestartState, bridgeSeenAt, getVoiceSettings, lastBridgeReport, recentBridges } from './voice-bridge';
@@ -94,7 +95,7 @@ async function services(probe: Probe): Promise<HealthItem[]> {
       url: `${bridgeUrl()}/api/health`,
       down: "The camera service isn't answering, so cameras won't show.",
       // It waits, not listening, until someone signs in to Wyze on the Cameras page.
-      when: cameraBridgeInstalled() && cameraSettings().enabled && signInSavedAt() !== null,
+      when: cameraBridgeInstalled() && cameraSettings().enabled && signInSavedAt() !== null && !bridgeStandby(),
     },
   ];
   const results = await Promise.all(checks.map((c) => (c.when === false ? Promise.resolve(null) : probe(c.url))));
@@ -150,7 +151,7 @@ function devices(): HealthItem[] {
 const NO_PICTURE_MS = 10 * 60_000;
 
 function cameraPictures(now: number): HealthItem[] {
-  if (!cameraBridgeInstalled() || !cameraSettings().enabled || signInSavedAt() === null) return [];
+  if (!cameraBridgeInstalled() || !cameraSettings().enabled || signInSavedAt() === null || bridgeStandby()) return [];
   const cams = cameraDevices();
   if (!cams.length) return [];
   const states = getAllCachedStates();
@@ -182,7 +183,8 @@ function sensors(): HealthItem[] {
 }
 
 function voice(now: number): HealthItem[] {
-  const { enabled } = getVoiceSettings();
+  // Only the active server runs voice; a backup's bridge waits by design.
+  const enabled = getVoiceSettings().enabled && roleStatus().role === 'active';
   const seen = bridgeSeenAt();
   const report = lastBridgeReport();
   const fresh = report && now - report.at <= BRIDGE_LATE_MS ? report : null;
@@ -291,7 +293,14 @@ export function temperature(root = '/sys/class/thermal'): HealthItem[] {
 
 function settingsChecks(): HealthItem[] {
   const items: HealthItem[] = [];
-  if (automationsPaused()) {
+  const role = roleStatus();
+  if (role.role !== 'active') {
+    const active = role.other ? ` (the one at ${role.other.address})` : '';
+    items.push({ id: 'role', group: 'Settings', label: 'This server', level: 'info', link: '/settings', detail: `A ${role.role === 'dev' ? 'development' : 'backup'} server. Schedules, motion lights, timers, water shutoff, voice and cameras run on the active HomeHub${active}.` });
+  } else if (role.other) {
+    items.push({ id: 'role', group: 'Settings', label: 'Another active HomeHub', level: 'error', link: '/settings', detail: `The HomeHub at ${role.other.address} also answers to this HomeHub's .local name, so both may be running your schedules. Set one of them to Backup in Settings → This server.` });
+  }
+  if (pausedByHand()) {
     items.push({ id: 'paused', group: 'Settings', label: 'Automations', level: 'warn', link: '/settings', detail: 'Paused: schedules, motion lights, timers and water shutoff won\'t run until you resume them.' });
   }
   const solar = (getDb().prepare("SELECT COUNT(*) AS n FROM schedules WHERE trigger_type = 'solar' AND enabled = 1").get() as { n: number }).n;

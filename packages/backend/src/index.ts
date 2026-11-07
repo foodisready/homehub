@@ -45,6 +45,7 @@ import { activityMiddleware, startActivityPruning } from './activity/activity';
 import { activityRouter } from './routes/activity';
 import { runBackup } from './db/backup';
 import { startBackupEmails } from './db/backup-email';
+import { applyRole } from './system/role';
 import { checkAllSensors } from './sensors/stale-check';
 import { authenticate, requireAdmin } from './middleware/auth';
 import { getDb } from './db';
@@ -140,7 +141,8 @@ httpServer.listen(PORT, async () => {
   startMotionRules();        // turn lights off when a room has been empty long enough
   startCameraWatch();        // save snapshots when Wyze cameras see motion
   startActivityPruning();    // delete activity older than the keep setting
-  startLocalName();          // answer for homehub.local on the home network
+  applyRole();               // a backup or dev server holds the voice and camera bridges back
+  startLocalName();          // answer for homehub.local (or <name>-backup.local) on the home network
   noteRunningVersion();   // remember the version before this one, to go back to
   startMatter().catch(() => undefined);   // connect to Matter devices, if there are any
 

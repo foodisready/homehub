@@ -1,5 +1,5 @@
 import { Component, computed, inject, signal } from '@angular/core';
-import { RouterOutlet } from '@angular/router';
+import { RouterLink, RouterOutlet } from '@angular/router';
 import { AppNavComponent } from './core/nav/app-nav.component';
 import { AuthService } from './core/auth/auth.service';
 import { AutomationsService } from './core/services/automations.service';
@@ -8,7 +8,7 @@ import { AppUpdateService } from './core/services/app-update.service';
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [RouterOutlet, AppNavComponent],
+  imports: [RouterOutlet, RouterLink, AppNavComponent],
   styles: [`
     /* Room for the phone tab bar, so it never covers the end of a page. */
     @media (max-width: 899px) {
@@ -24,10 +24,31 @@ import { AppUpdateService } from './core/services/app-update.service';
       padding: 0.25rem 0.7rem; font-size: 0.8rem; font-weight: 600; cursor: pointer;
     }
     .paused button:disabled { opacity: 0.6; cursor: default; }
+    .paused a { color: inherit; font-weight: 600; }
+    .standby { background: #1e3a5f; color: #dbeafe; border-bottom-color: #2563eb; }
+    .conflict { background: #7f1d1d; color: #fee2e2; border-bottom-color: #dc2626; }
   `],
   template: `
     <app-nav />
-    @if (auth.isLoggedIn() && automations.paused()) {
+    @if (auth.isLoggedIn() && automations.role(); as r) {
+      @if (r.role !== 'active') {
+        <div class="paused standby" role="status">
+          <span>
+            <strong>This HomeHub is a {{ r.role === 'dev' ? 'development' : 'backup' }} server.</strong>
+            Schedules, motion lights, timers, water shutoff, voice and cameras run on the active HomeHub{{ r.other ? ', at ' + r.other.address : '' }}.
+          </span>
+          @if (isAdmin()) { <a routerLink="/settings" [queryParams]="{ section: 'preferences' }">Change</a> }
+        </div>
+      } @else if (r.other) {
+        <div class="paused conflict" role="alert">
+          <span>
+            <strong>Another HomeHub, at {{ r.other.address }}, is also acting as the active one.</strong>
+            Both may be running your schedules. Set one of them to Backup in Settings → Preferences → This server.
+          </span>
+        </div>
+      }
+    }
+    @if (auth.isLoggedIn() && automations.paused() && automations.role()?.role !== 'dev' && automations.role()?.role !== 'backup') {
       <div class="paused" role="status">
         <span><strong>Automations are paused on this HomeHub.</strong> Schedules, motion rules and timers won't run.</span>
         @if (isAdmin()) {

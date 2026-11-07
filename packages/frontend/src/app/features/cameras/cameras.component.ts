@@ -11,7 +11,7 @@ import { MAX_SHARE, canShareFiles, shareOrSave, snapshotFileName } from './snaps
 type BridgeState =
   | { state: 'not-configured' } | { state: 'off' } | { state: 'unreachable'; detail: string } | { state: 'signed-out' }
   | { state: 'starting' } | { state: 'sign-in-failed'; detail: string }
-  | { state: 'unauthorized' } | { state: 'ready'; cameras: number };
+  | { state: 'unauthorized' } | { state: 'standby' } | { state: 'ready'; cameras: number };
 
 interface Snapshot { id: number; deviceId: number | null; camera: string; cameraName: string; trigger: 'motion' | 'manual'; sizeBytes: number; takenAt: string }
 interface Camera {
@@ -162,6 +162,13 @@ const PAGE = 48;
               }
               @case ('signed-out') {
                 <strong>Sign in to Wyze</strong>
+              }
+              @case ('standby') {
+                <strong>Cameras run on the active HomeHub</strong>
+                <p class="muted" style="margin-top:0.4rem">
+                  This HomeHub is a backup or development server, so its camera bridge waits and leaves the cameras to the active one.
+                  It keeps your Wyze sign-in, and starts the cameras if it's made the active server in Settings → Preferences.
+                </p>
               }
             }
             @if (b.state === 'signed-out' || b.state === 'sign-in-failed') {

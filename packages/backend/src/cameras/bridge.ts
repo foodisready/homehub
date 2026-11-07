@@ -56,6 +56,8 @@ export type BridgeState =
   | { state: 'signed-out' }                // no Wyze sign-in saved
   | { state: 'starting' }                  // signed in moments ago; the bridge is restarting
   | { state: 'sign-in-failed'; detail: string }
+  | { state: 'standby' }                   // signed in, but this isn't the active server
+
   | { state: 'unauthorized' }              // the API key doesn't match the bridge's
   | { state: 'ready'; cameras: number };
 
@@ -86,15 +88,38 @@ export function signInDir(): string {
 }
 
 const versionFile = () => path.join(signInDir(), 'version');
+/**
+ * Where `version` waits while this HomeHub isn't the active server. The
+ * bridge only runs while `version` exists (docker-compose.yml), so moving it
+ * here stops the bridge and frees the cameras for the active HomeHub, without
+ * losing the sign-in.
+ */
+const parkedFile = () => path.join(signInDir(), 'version.standby');
+
+let standby = false;
+
+/** Whether the bridge is held back because this isn't the active server. */
+export const bridgeStandby = (): boolean => standby;
+
+/** Hold the bridge back (true) or let it run (false). Called by system/role.ts. */
+export function setBridgeStandby(on: boolean): void {
+  standby = on;
+  const [from, to] = on ? [versionFile(), parkedFile()] : [parkedFile(), versionFile()];
+  if (!fs.existsSync(from)) return;
+  if (fs.existsSync(to)) fs.rmSync(to, { force: true });   // the newer one is `from`
+  fs.renameSync(from, to);
+  logger.info(on ? 'Camera bridge held back: this HomeHub is not the active server' : 'Camera bridge allowed to run');
+}
 
 /** When the saved sign-in was last changed, or null if there isn't one. */
 export function signInSavedAt(): number | null {
-  try {
-    const at = Number(fs.readFileSync(versionFile(), 'utf8').trim());
-    return Number.isFinite(at) && at > 0 ? at : null;
-  } catch {
-    return null;
+  for (const file of [versionFile(), parkedFile()]) {
+    try {
+      const at = Number(fs.readFileSync(file, 'utf8').trim());
+      if (Number.isFinite(at) && at > 0) return at;
+    } catch { /* try the other */ }
   }
+  return null;
 }
 
 /**
@@ -112,13 +137,16 @@ export function saveSignIn(login: WyzeLogin, now = Date.now()): void {
   }
   // Never the same as the last one, even within a millisecond.
   const at = Math.max(now, (signInSavedAt() ?? 0) + 1);
-  fs.writeFileSync(`${versionFile()}.tmp`, String(at), { mode: 0o600 });
-  fs.renameSync(`${versionFile()}.tmp`, versionFile());
+  // On a server that isn't active, the sign-in is kept for when it is, but the bridge stays stopped.
+  const dest = standby ? parkedFile() : versionFile();
+  fs.writeFileSync(`${dest}.tmp`, String(at), { mode: 0o600 });
+  fs.renameSync(`${dest}.tmp`, dest);
 }
 
 /** Signs HomeHub and the bridge out of Wyze: the bridge stops and waits for a new sign-in. */
 export function clearSignIn(): void {
   fs.rmSync(versionFile(), { force: true });
+  fs.rmSync(parkedFile(), { force: true });
   for (const file of [...Object.values(FILES), 'homehub-auth.json']) fs.rmSync(path.join(signInDir(), file), { force: true });
 }
 
@@ -182,6 +210,7 @@ export async function getState(now = Date.now()): Promise<BridgeState> {
   if (!apiKey()) return { state: 'not-configured' };
   const savedAt = signInSavedAt();
   if (savedAt === null) return { state: 'signed-out' };
+  if (standby) return { state: 'standby' };
   let h: Health;
   try {
     h = await health();

@@ -8,6 +8,7 @@ import { SocketService } from '../../core/socket/socket.service';
 import { DeviceFilterComponent, matchesDevice, type DeviceFilter } from '../../shared/device-filter/device-filter.component';
 import { Device } from '../../shared/models/device.model';
 import { BackupsComponent } from './backups.component';
+import { ServerRoleComponent } from './server-role.component';
 import { InviteQrComponent } from '../welcome/invite-qr.component';
 import { MatterPairComponent } from './matter-pair.component';
 import { MerossLoginComponent } from './meross-login.component';
@@ -71,7 +72,7 @@ const DRIVER_LABEL: Record<string, string> = {
 @Component({
   selector: 'app-settings',
   standalone: true,
-  imports: [FormsModule, RouterLink, InviteQrComponent, MatterPairComponent, DeviceFilterComponent, BackupsComponent, MerossLoginComponent, OtherNetworksComponent, HomeSettingsComponent, AiConnectionComponent, CamerasToggleComponent, TeachCommandsComponent, VoiceRepliesComponent, VoiceControlComponent],
+  imports: [FormsModule, RouterLink, InviteQrComponent, MatterPairComponent, DeviceFilterComponent, BackupsComponent, ServerRoleComponent, MerossLoginComponent, OtherNetworksComponent, HomeSettingsComponent, AiConnectionComponent, CamerasToggleComponent, TeachCommandsComponent, VoiceRepliesComponent, VoiceControlComponent],
   styles: [`
     .topbar { display:flex; align-items:center; justify-content:space-between; margin-bottom:1.5rem; }
     .topbar h1 { font-size:1.4rem; font-weight:700; }
@@ -898,6 +899,8 @@ const DRIVER_LABEL: Record<string, string> = {
                 placeholder="0.15" />
               <span style="font-size:0.85rem;color:var(--text-muted)">$/kWh</span>
             </div>
+
+            @if (isAdmin()) { <app-server-role /> }
 
             <!-- For developers: shown on a development copy, or to resume one that's paused. -->
             @if (isAdmin() && (appVersion() === 'dev' || automations.paused())) {

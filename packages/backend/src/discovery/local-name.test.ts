@@ -4,7 +4,10 @@
 
 import { describe, it, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { addressFor, buildAnswer, homeAddresses, localName, parseQuery, respond } from './local-name';
+import {
+  addressFor, buildAnswer, buildQuery, homeAddresses, localName, nameForRole, noticeOthers, otherAnswering, parseQuery,
+  parseResponse, respond, setLocalNameRole,
+} from './local-name';
 
 /** A question as an mDNS client sends it. */
 function query(name: string, type = 1, opts: { unicast?: boolean; id?: number } = {}): Buffer {
@@ -130,5 +133,35 @@ describe('homehub.local', () => {
     assert.equal(localName(), null);
     process.env.HOMEHUB_LOCAL_NAME = 'not valid!';
     assert.equal(localName(), null);
+  });
+
+  it('answers to <name>-backup or <name>-dev when this server is not the active one', () => {
+    assert.equal(nameForRole('homehub', 'active'), 'homehub');
+    assert.equal(nameForRole('homehub', 'backup'), 'homehub-backup');
+    assert.equal(nameForRole('cabin', 'dev'), 'cabin-dev');
+  });
+
+  it('reads the addresses in an answer, and asks a plain question', () => {
+    assert.deepEqual(parseResponse(buildAnswer('homehub.local', '10.1.2.88')), [{ name: 'homehub.local', address: '10.1.2.88' }]);
+    assert.deepEqual(parseResponse(buildAnswer('homehub.local', '10.1.2.88', { type: 28 })), [{ name: 'homehub.local', address: '10.1.2.88' }],
+      'the address in the additional section of an "IPv4 only" answer counts too');
+    const q = parseQuery(buildQuery('homehub.local'));
+    assert.deepEqual(q?.questions.map((x) => [x.name, x.type]), [['homehub.local', 1]]);
+    assert.deepEqual(parseResponse(buildQuery('homehub.local')), [], 'a question is not an answer');
+    assert.deepEqual(parseResponse(Buffer.from([1, 2, 3])), []);
+  });
+
+  it('notices another computer answering for the main name, but not itself or other names', () => {
+    const ours = [{ address: '10.1.2.88', netmask: '255.255.255.0' }];
+    const now = Date.parse('2026-11-07T12:00:00Z');
+    setLocalNameRole('backup');   // also forgets anything seen before
+    noticeOthers(buildAnswer('homehub.local', '10.1.2.88'), 'homehub.local', ours, now);
+    noticeOthers(buildAnswer('printer.local', '10.1.2.50'), 'homehub.local', ours, now);
+    assert.equal(otherAnswering(now), null);
+
+    noticeOthers(buildAnswer('homehub.local', '10.1.2.23'), 'homehub.local', ours, now);
+    assert.deepEqual(otherAnswering(now + 1000), { address: '10.1.2.23', at: now });
+    assert.equal(otherAnswering(now + 4 * 60 * 1000), null, 'forgotten after a few minutes without an answer');
+    setLocalNameRole('active');
   });
 });

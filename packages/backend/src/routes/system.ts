@@ -1,7 +1,8 @@
 import { Router, Request, Response } from 'express';
 import { requireAdmin } from '../middleware/auth';
 import { logger } from '../logger';
-import { automationsPaused, setAutomationsPaused } from '../automation/pause';
+import { automationsPaused, pausedByHand, setAutomationsPaused } from '../automation/pause';
+import { roleStatus, setServerRole } from '../system/role';
 import { BRIDGE_LATE_MS, checkHealth } from '../system/health';
 import { lastBridgeReport, requestBridgeRestart } from '../system/voice-bridge';
 import { UpdaterError, VERSION_RE, previousVersion, requestSwitch, switchStatus, updaterAvailable } from '../system/updater';
@@ -166,7 +167,24 @@ systemRouter.post('/voice-bridge/restart', requireAdmin, (req: Request, res: Res
  * PUT (admin) { paused } pauses or resumes schedules, motion rules, timers,
  * camera motion snapshots and automatic water shutoff on this HomeHub. */
 systemRouter.get('/automations', (_req: Request, res: Response) => {
-  res.json({ paused: automationsPaused() });
+  res.json({ paused: automationsPaused(), byHand: pausedByHand() });
+});
+
+/* GET /api/system/role — this server's role (active, backup or dev), and any
+ * other computer answering to homehub.local, for the banner every page shows.
+ * PUT (admin) { role } changes it. */
+systemRouter.get('/role', (_req: Request, res: Response) => {
+  res.json(roleStatus());
+});
+
+systemRouter.put('/role', requireAdmin, (req: Request, res: Response) => {
+  try {
+    const status = setServerRole((req.body ?? {}).role);
+    logger.info({ by: req.user?.name, role: status.role }, 'Server role changed');
+    res.json(status);
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message, code: 'VALIDATION_ERROR' });
+  }
 });
 
 systemRouter.put('/automations', requireAdmin, (req: Request, res: Response) => {
@@ -175,7 +193,7 @@ systemRouter.put('/automations', requireAdmin, (req: Request, res: Response) => 
     return res.status(400).json({ error: 'paused must be true or false', code: 'VALIDATION_ERROR' });
   }
   setAutomationsPaused(paused);
-  res.json({ paused: automationsPaused() });
+  res.json({ paused: automationsPaused(), byHand: pausedByHand() });
 });
 
 /* GET /api/system/remote-url

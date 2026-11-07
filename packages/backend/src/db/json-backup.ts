@@ -314,7 +314,7 @@ const PER_USER_TABLES = new Set<string>(['push_subscriptions', 'notification_pre
  * never travel inside a backup, encrypted or not.
  */
 export const THIS_HOMEHUB_ONLY = [
-  'automations_paused',
+  'automations_paused', 'server_role', 'server_active_since',
   'backup_email_key', 'backup_email_auto', 'backup_email_last', 'backup_email_sent',
 ];
 

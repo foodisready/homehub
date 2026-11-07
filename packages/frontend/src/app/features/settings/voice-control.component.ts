@@ -1,6 +1,7 @@
 import { Component, OnDestroy, OnInit, computed, inject, signal } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
+import { AutomationsService } from '../../core/services/automations.service';
 
 interface BridgeStatus { state: 'off' | 'starting' | 'running'; kind: 'docker' | 'service' | null; version: string | null }
 interface VoiceSettings { enabled: boolean; languages: string[]; bridge: BridgeStatus | null }
@@ -39,6 +40,10 @@ const POLL_MS = 5_000;
       Control HomeHub by talking to a speaker or tablet, with no cloud. It needs a voice speaker, such as the Ava app on an
       Android tablet, on the same network.
     </p>
+    @if (standby()) {
+      <p class="intro"><b>Voice runs on the active HomeHub.</b> This one is a backup or development server, so its voice bridge waits.
+        Your choices here are kept for when it's the active server.</p>
+    }
     @if (loaded()) {
       <label class="check">
         <input type="checkbox" [(ngModel)]="enabled" (ngModelChange)="dirty.set(true)" />
@@ -75,6 +80,8 @@ const POLL_MS = 5_000;
 })
 export class VoiceControlComponent implements OnInit, OnDestroy {
   private readonly http = inject(HttpClient);
+  private readonly automations = inject(AutomationsService);
+  readonly standby = computed(() => { const r = this.automations.role()?.role; return r === 'backup' || r === 'dev'; });
   readonly loaded = signal(false);
   readonly loadError = signal('');
   readonly saving = signal(false);

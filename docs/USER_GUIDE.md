@@ -366,9 +366,27 @@ An emailed backup has your devices, rooms, schedules, scenes, motion rules, user
 
 Changing the passphrase doesn't change backups already emailed: they still open with the passphrase they were sent with. The passphrase and the email settings belong to this HomeHub: they aren't part of any backup, so restoring a backup never turns automatic emails on or off. Automatic emails don't send while automations are paused, so a development copy of HomeHub doesn't send its own. If an email fails, the reason shows under **Email backups**, and HomeHub tries again in 6 hours.
 
+## More than one HomeHub
+
+You can keep a second HomeHub, such as an old laptop, as a backup ready to take over if the main one fails. Only one HomeHub should be in charge at a time, or both run your schedules and compete for the cameras and voice speakers.
+
+Choose each HomeHub's part in **Settings → Preferences → This server** (administrators only):
+
+- **Active** runs everything. This is the default, so a single HomeHub needs no change.
+- **Backup** is a standby copy. It runs no schedules, motion lights, timers or automatic water shutoff. Its voice and camera bridges wait, so the voice speaker and cameras stay with the active HomeHub. It answers to `homehub-backup.local` instead of `homehub.local`. You can still open it and switch devices by hand.
+- **Development** is the same as Backup, for a development copy. It answers to `homehub-dev.local`.
+
+A banner on every page of a backup says so, with the active HomeHub's address when it can see it on your network. Your voice and camera choices, and your Wyze sign-in, are kept on a backup, ready for when it becomes active.
+
+**To switch which HomeHub is in charge:** first make the active one a **Backup**, then make the other one **Active**. Then reconnect motion sensors on the new active HomeHub's **Sensors** page, and if the voice speaker doesn't connect within a minute, close and reopen its app. Timers that ran out while a HomeHub was a backup end without switching anything.
+
+If two HomeHubs are active on the same network, both show a red banner with the other's address. Make one of them a backup.
+
+The role isn't part of backups, so restoring a backup never changes which HomeHub is in charge.
+
 ## Pause automations
 
-This is for developers. If you run a development copy of HomeHub against the same devices as your main one, pause automations on it so the two don't undo each other. On the development copy, open **Settings → Preferences** and select **Pause automations** (administrators only). The option doesn't appear on HomeHubs installed from a release, unless one is already paused.
+This is for developers. To keep a development copy out of the way for good, make it a **Development** server under [More than one HomeHub](#more-than-one-homehub) instead. If you run a development copy of HomeHub against the same devices as your main one, pause automations on it so the two don't undo each other. On the development copy, open **Settings → Preferences** and select **Pause automations** (administrators only). The option doesn't appear on HomeHubs installed from a release, unless one is already paused.
 
 While paused, that HomeHub runs no schedules, motion rules, "Turn off after" timers or automatic water shutoff. You can still switch devices by hand, use Chat and run scenes. A banner on every page says it's paused, with a **Resume** button. Timers that ran out while paused end without switching anything.
 
