@@ -1,6 +1,7 @@
 import SunCalc from 'suncalc';
 import { solarLocation } from '../home/home-settings';
 import { getDb } from '../db';
+import os from 'node:os';
 import { getCachedState } from '../kasa/device.cache';
 import { answerStatusQuestion } from './status';
 import { getDriver } from '../drivers/registry';
@@ -45,12 +46,12 @@ interface OllamaTool {
 
 // ── Tool definitions ───────────────────────────────────────────
 
-const TOOLS: OllamaTool[] = [
+export const TOOLS: OllamaTool[] = [
   {
     type: 'function',
     function: {
       name: 'list_devices',
-      description: 'List all smart plugs with their current on/off state, online status, and wattage',
+      description: 'List every device by name, sorted into on, off and offline',
       parameters: { type: 'object', properties: {} },
     },
   },
@@ -149,22 +150,13 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
   switch (name) {
     case 'list_devices': {
       const rows = db.prepare('SELECT * FROM devices ORDER BY alias').all() as any[];
-      const devices = rows.map((d) => {
-        const cached = getCachedState(d.id);
-        return {
-          id:      d.id,
-          alias:   d.alias,
-          state:   cached?.state  ?? false,
-          online:  cached?.online ?? false,
-          wattage: cached?.wattage ?? null,
-        };
-      });
-      // Small models misread long lists, so the answer to "what's on?" comes ready-made.
+      // Just the names, sorted by state: a small model misreads long lists, and on an
+      // older computer every word it reads adds time. Energy has its own tool.
+      const states = rows.map((d) => ({ alias: d.alias as string, cached: getCachedState(d.id) }));
       return {
-        on:      devices.filter((d) => d.online && d.state).map((d) => d.alias),
-        off:     devices.filter((d) => d.online && !d.state).map((d) => d.alias),
-        offline: devices.filter((d) => !d.online).map((d) => d.alias),
-        devices,
+        on:      states.filter((d) => d.cached?.online && d.cached.state).map((d) => d.alias),
+        off:     states.filter((d) => d.cached?.online && !d.cached.state).map((d) => d.alias),
+        offline: states.filter((d) => !d.cached?.online).map((d) => d.alias),
       };
     }
 
@@ -283,7 +275,19 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
 
 // ── Shared helpers ─────────────────────────────────────────────
 
-function buildSystemPrompt(): string {
+/**
+ * How long Ollama keeps the model in memory after a reply. Loading it takes
+ * seconds, so a computer with memory to spare keeps it for a day; a small one,
+ * such as a 4 GB Pi, lets it go after 5 minutes. OLLAMA_KEEP_ALIVE overrides.
+ * The line is 7 GiB because an "8 GB" computer reports less: a Pi 4 shows 7.6.
+ */
+export function keepAlive(totalBytes = os.totalmem()): string {
+  const set = process.env.OLLAMA_KEEP_ALIVE?.trim();
+  if (set) return set;
+  return totalBytes >= 7 * 1024 ** 3 ? '24h' : '5m';
+}
+
+export function buildSystemPrompt(): string {
   return `You are HomeHub, a helpful smart home assistant. You control smart plugs and switches (TP-Link Kasa, Shelly, and others) and manage automation schedules.
 
 Use the provided tools when the user wants to control devices or manage schedules. Be concise and friendly. After taking actions, briefly summarize what you did.
@@ -319,7 +323,7 @@ export async function resolveTools(
     const res = await fetch(`${ollamaUrl}/api/chat`, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ model, messages, tools: TOOLS, stream: false }),
+      body:    JSON.stringify({ model, messages, tools: TOOLS, stream: false, keep_alive: keepAlive() }),
     });
 
     if (!res.ok) throw new Error(`Ollama error ${res.status}: ${await res.text()}`);
@@ -427,7 +431,7 @@ export async function* processMessageStream(
     streamRes = await fetch(`${ollamaUrl}/api/chat`, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ model, messages, stream: true }),
+      body:    JSON.stringify({ model, messages, stream: true, keep_alive: keepAlive() }),
     });
     if (!streamRes.ok) throw new Error(`Ollama error ${streamRes.status}`);
   } catch (err: any) {
