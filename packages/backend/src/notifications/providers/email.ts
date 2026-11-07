@@ -63,6 +63,44 @@ export class EmailNotifier implements Notifier {
   }
 }
 
+/** Whether email is set up enough to send: a server and at least one recipient. */
+export function emailConfigured(): boolean {
+  const cfg = readSmtpConfig();
+  return !!cfg.host && cfg.recipients.length > 0;
+}
+
+/** The addresses alerts and backups go to. */
+export function emailRecipients(): string[] {
+  return readSmtpConfig().recipients;
+}
+
+export interface EmailMessage {
+  subject: string;
+  text: string;
+  attachments?: { filename: string; content: string; contentType?: string }[];
+}
+
+/**
+ * Send one email to the alert recipients. Unlike alerts, this throws when
+ * email isn't set up or the server refuses, so the caller can say so.
+ */
+export async function sendEmail(msg: EmailMessage): Promise<void> {
+  const cfg = readSmtpConfig();
+  if (!cfg.host || cfg.recipients.length === 0) throw new Error('Email is not set up');
+  const transporter = buildTransporter(cfg);
+  try {
+    await transporter.sendMail({
+      from:        cfg.from || cfg.user,
+      to:          cfg.recipients.join(','),
+      subject:     msg.subject,
+      text:        msg.text,
+      attachments: msg.attachments,
+    });
+  } finally {
+    transporter.close();
+  }
+}
+
 function readSmtpConfig(): SmtpConfig {
   const get = (key: string): string => {
     const row = getDb().prepare('SELECT value FROM settings WHERE key = ?').get(key) as

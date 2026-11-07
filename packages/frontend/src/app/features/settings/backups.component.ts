@@ -1,6 +1,28 @@
-import { Component, OnInit, inject, output, signal } from '@angular/core';
+import { Component, HostListener, OnInit, inject, output, signal } from '@angular/core';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
+
+interface EmailStatus {
+  emailReady: boolean;
+  recipients: string[];
+  passphraseSet: boolean;
+  auto: boolean;
+  paused: boolean;
+  last: { at: string; ok: boolean; reason: 'manual' | 'weekly' | 'update'; file: string; error?: string } | null;
+}
+
+type Action = 'restore' | 'delete' | 'email';
+
+/** 24×24 stroked paths, like the navigation icons. */
+const ICONS = {
+  edit:     'M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z',
+  close:    'M6 6l12 12M18 6 6 18',
+  download: 'M12 3v12M7 10l5 5 5-5M5 21h14',
+  more:     'M5 12h.01M12 12h.01M19 12h.01',
+  email:    'M3 6h18v12H3zM3 7l9 6 9-6',
+  restore:  'M3 12a9 9 0 1 0 2.6-6.4L3 8M3 3v5h5',
+  delete:   'M4 7h16M10 11v6M14 11v6M5 7l1 13h12l1-13M9 7V4h6v3',
+};
 
 interface BackupEntry {
   name: string;
@@ -42,7 +64,38 @@ const COUNT_LABELS: [string, string, string][] = [
     .item-date { font-size:0.9rem; }
     .item-note { font-size:0.82rem; color:var(--text); margin-top:0.1rem; overflow-wrap:anywhere; }
     .item-meta { font-size:0.75rem; color:var(--text-muted); margin-top:0.15rem; overflow-wrap:anywhere; }
-    .actions { display:flex; gap:0.4rem; flex-wrap:wrap; }
+    .actions { display:flex; gap:0.25rem; align-items:center; position:relative; }
+    .icon-btn {
+      width:2.1rem; height:2.1rem; display:inline-flex; align-items:center; justify-content:center;
+      background:transparent; border:1px solid transparent; border-radius:var(--radius);
+      color:var(--text-muted); cursor:pointer; padding:0;
+    }
+    .icon-btn:hover:not(:disabled), .icon-btn[aria-expanded="true"] { background:var(--surface); border-color:var(--border); color:var(--text); }
+    .icon-btn:disabled { opacity:0.45; cursor:default; }
+    svg { width:18px; height:18px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; flex-shrink:0; }
+    .menu {
+      position:absolute; top:calc(100% + 0.25rem); right:0; z-index:20; min-width:11rem;
+      background:var(--bg); border:1px solid var(--border); border-radius:var(--radius);
+      box-shadow:0 6px 20px rgba(0,0,0,0.18); padding:0.25rem; display:flex; flex-direction:column;
+    }
+    .menu button {
+      display:flex; align-items:center; gap:0.6rem; width:100%; text-align:left;
+      background:transparent; border:none; border-radius:calc(var(--radius) - 2px);
+      color:var(--text); font-size:0.85rem; padding:0.5rem 0.6rem; cursor:pointer;
+    }
+    .menu button:hover, .menu button:focus-visible { background:var(--surface); }
+    .menu button.danger { color:var(--red); }
+    .email-box { border:1px solid var(--border); border-radius:var(--radius); padding:0.65rem 0.75rem; margin:0 0 0.85rem; }
+    .email-head { display:flex; align-items:center; gap:0.5rem; font-size:0.9rem; }
+    .email-head svg { color:var(--text-muted); }
+    .email-box p { font-size:0.8rem; margin:0.35rem 0 0; line-height:1.45; }
+    .email-box p:not(.msg) { color:var(--text-muted); }
+    .pass-form { display:flex; gap:0.5rem; flex-wrap:wrap; margin-top:0.5rem; }
+    .pass-form input { flex:1; min-width:10rem; font-size:0.85rem; padding:0.4rem 0.7rem; }
+    .check { display:flex; align-items:flex-start; gap:0.5rem; font-size:0.85rem; margin-top:0.55rem; cursor:pointer; }
+    .check input { flex:none; width:auto; margin:0.2rem 0 0; }
+    .check span { flex:1; }
+    .linkish { background:none; border:none; padding:0; color:var(--accent, var(--text)); text-decoration:underline; cursor:pointer; font-size:inherit; }
     .confirm {
       margin-top:0.5rem; padding:0.6rem 0.75rem; border:1px solid var(--border);
       border-radius:var(--radius); font-size:0.85rem; display:flex; gap:0.5rem;
@@ -80,6 +133,56 @@ const COUNT_LABELS: [string, string, string][] = [
       on the other one and press Restore. A downloaded file includes passwords and device logins, so keep it private.
     </p>
 
+    @if (email(); as e) {
+      <div class="email-box">
+        <div class="email-head">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path [attr.d]="icons.email" /></svg>
+          <b>Email backups</b>
+        </div>
+        @if (!e.emailReady) {
+          <p>
+            Email an encrypted copy of a backup, so it survives if this computer fails. First set up email under
+            <b>Settings → Integrations → Email alerts</b>.
+          </p>
+        } @else if (!e.passphraseSet || changingPass()) {
+          <p>
+            Emailed backups are encrypted with a passphrase you choose. You'll need it to restore one, and HomeHub
+            can't recover it, so write it down somewhere other than this computer.
+            @if (e.passphraseSet) { Backups already emailed still open with the old passphrase. }
+          </p>
+          <div class="pass-form">
+            <input type="password" [(ngModel)]="pass1" placeholder="Backup passphrase (10+ characters)"
+                   autocomplete="new-password" aria-label="Backup passphrase" />
+            <input type="password" [(ngModel)]="pass2" placeholder="Type it again"
+                   autocomplete="new-password" aria-label="Type the backup passphrase again" (keydown.enter)="savePassphrase()" />
+            <button class="btn-sm btn-primary" (click)="savePassphrase()" [disabled]="busy() || !pass1 || !pass2">Save</button>
+            @if (e.passphraseSet) { <button class="btn-sm btn-ghost" (click)="cancelPassphrase()">Cancel</button> }
+          </div>
+          @if (passError()) { <p class="msg err">{{ passError() }}</p> }
+        } @else {
+          <label class="check">
+            <input type="checkbox" [checked]="e.auto" (change)="setAuto($any($event.target).checked)" [disabled]="busy()" />
+            <span>Email a backup every week, and after each HomeHub update</span>
+          </label>
+          <p>
+            Sent to {{ e.recipients.join(', ') }}, encrypted with your backup passphrase.
+            You can also email any backup from its <b>⋯</b> menu.
+            <button class="linkish" (click)="changingPass.set(true)">Change passphrase</button>
+          </p>
+          @if (e.auto && e.paused) {
+            <p>Automations are paused on this HomeHub, so automatic emails wait until they're resumed.</p>
+          }
+          @if (e.last; as last) {
+            @if (last.ok) {
+              <p>Last emailed {{ when(last.at) }}{{ reasonText(last.reason) }}.</p>
+            } @else {
+              <p class="msg err">Last email failed {{ when(last.at) }}: {{ last.error }}</p>
+            }
+          }
+        }
+      </div>
+    }
+
     <div class="create">
       <input type="text" [(ngModel)]="note" placeholder="Note (optional), e.g. before moving to the Pi"
              maxlength="200" (keydown.enter)="create()" />
@@ -87,6 +190,17 @@ const COUNT_LABELS: [string, string, string][] = [
       <button class="btn-sm btn-ghost" (click)="fileInput.click()" [disabled]="busy()">Upload a backup</button>
       <input #fileInput type="file" accept=".json,application/json" hidden (change)="upload(fileInput)" />
     </div>
+    @if (pendingUpload(); as p) {
+      <div class="confirm">
+        <span>{{ p.fileName }} is an encrypted backup. Enter the backup passphrase it was emailed with.</span>
+        <div class="pass-form" style="margin-top:0;flex:1 1 100%">
+          <input type="password" [(ngModel)]="uploadPass" placeholder="Backup passphrase" autocomplete="off"
+                 aria-label="Backup passphrase for the uploaded file" (keydown.enter)="sendUpload()" />
+          <button class="btn-sm btn-primary" (click)="sendUpload()" [disabled]="busy() || !uploadPass">Open</button>
+          <button class="btn-sm btn-ghost" (click)="pendingUpload.set(null)">Cancel</button>
+        </div>
+      </div>
+    }
     @if (message()) { <p class="msg" [class.ok]="!isError()" [class.err]="isError()">{{ message() }}</p> }
 
     <div class="list">
@@ -99,17 +213,52 @@ const COUNT_LABELS: [string, string, string][] = [
               <div class="item-meta">{{ summary(b) }} · {{ b.name }}</div>
             </div>
             <div class="actions">
-              <button class="btn-sm btn-ghost" (click)="toggleEditor(b.name)">
-                {{ editing() === b.name ? 'Close' : 'View / Edit' }}
+              <button class="icon-btn" (click)="toggleEditor(b.name)"
+                      [attr.aria-label]="editing() === b.name ? 'Close' : 'View or edit'"
+                      [title]="editing() === b.name ? 'Close' : 'View / Edit'">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path [attr.d]="editing() === b.name ? icons.close : icons.edit" /></svg>
               </button>
-              <button class="btn-sm btn-ghost" (click)="download(b.name)" [disabled]="busy()">Download</button>
-              <button class="btn-sm btn-ghost" (click)="ask(b.name, 'restore')" [disabled]="busy()">Restore</button>
-              <button class="btn-sm btn-ghost" (click)="ask(b.name, 'delete')" [disabled]="busy()" aria-label="Delete backup">✕</button>
+              <button class="icon-btn" (click)="download(b.name)" [disabled]="busy()" aria-label="Download" title="Download">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path [attr.d]="icons.download" /></svg>
+              </button>
+              <button class="icon-btn" (click)="toggleMenu(b.name, $event)" aria-label="More" title="More"
+                      aria-haspopup="menu" [attr.aria-expanded]="menuFor() === b.name">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path [attr.d]="icons.more" style="stroke-width:3.2" /></svg>
+              </button>
+              @if (menuFor() === b.name) {
+                <div class="menu" role="menu" (click)="$event.stopPropagation()">
+                  <button role="menuitem" (click)="pick(b.name, 'email')" [disabled]="busy()">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path [attr.d]="icons.email" /></svg> Email
+                  </button>
+                  <button role="menuitem" (click)="pick(b.name, 'restore')" [disabled]="busy()">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path [attr.d]="icons.restore" /></svg> Restore
+                  </button>
+                  <button role="menuitem" class="danger" (click)="pick(b.name, 'delete')" [disabled]="busy()">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path [attr.d]="icons.delete" /></svg> Delete
+                  </button>
+                </div>
+              }
             </div>
           </div>
 
           @if (confirming()?.name === b.name) {
-            @if (confirming()?.action === 'restore') {
+            @if (confirming()?.action === 'email') {
+              @if (emailBlocker(); as why) {
+                <div class="confirm">
+                  <span>{{ why }}</span>
+                  <button class="btn-sm btn-ghost" (click)="confirming.set(null)">OK</button>
+                </div>
+              } @else {
+                <div class="confirm">
+                  <span>
+                    Email this backup to {{ email()?.recipients?.join(', ') }}? It's encrypted with your backup
+                    passphrase, which you'll need to restore it.
+                  </span>
+                  <button class="btn-sm btn-primary" (click)="emailIt(b.name)" [disabled]="busy()">Send</button>
+                  <button class="btn-sm btn-ghost" (click)="confirming.set(null)">Cancel</button>
+                </div>
+              }
+            } @else if (confirming()?.action === 'restore') {
               <div class="confirm danger">
                 <span>
                   Replace your devices, rooms, schedules and settings with this backup? Accounts here keep
@@ -166,13 +315,23 @@ export class BackupsComponent implements OnInit {
   readonly busy = signal(false);
   readonly message = signal('');
   readonly isError = signal(false);
-  readonly confirming = signal<{ name: string; action: 'restore' | 'delete' } | null>(null);
+  readonly confirming = signal<{ name: string; action: Action } | null>(null);
   readonly editing = signal<string | null>(null);
   readonly loadingEditor = signal(false);
   readonly editorError = signal('');
+  readonly menuFor = signal<string | null>(null);
+  readonly email = signal<EmailStatus | null>(null);
+  readonly changingPass = signal(false);
+  readonly passError = signal('');
+  /** An encrypted file waiting for its passphrase. */
+  readonly pendingUpload = signal<{ fileName: string; content: string } | null>(null);
+  readonly icons = ICONS;
 
   note = '';
   draft = '';
+  pass1 = '';
+  pass2 = '';
+  uploadPass = '';
   private saved = '';
 
   dirty(): boolean {
@@ -181,6 +340,92 @@ export class BackupsComponent implements OnInit {
 
   ngOnInit(): void {
     this.load();
+    this.loadEmail();
+  }
+
+  @HostListener('document:click')
+  @HostListener('document:keydown.escape')
+  closeMenu(): void {
+    this.menuFor.set(null);
+  }
+
+  toggleMenu(name: string, event: Event): void {
+    event.stopPropagation();
+    this.menuFor.set(this.menuFor() === name ? null : name);
+  }
+
+  pick(name: string, action: Action): void {
+    this.menuFor.set(null);
+    this.ask(name, action);
+  }
+
+  // ── Email ──────────────────────────────────────────────────────
+
+  private loadEmail(): void {
+    this.http.get<EmailStatus>('/api/backups/email').subscribe({
+      next: (s) => this.email.set(s),
+      error: () => this.email.set(null),
+    });
+  }
+
+  /** Why a backup can't be emailed yet, or '' when it can. */
+  emailBlocker(): string {
+    const e = this.email();
+    if (!e || !e.emailReady) return 'Set up email first, under Settings → Integrations → Email alerts.';
+    if (!e.passphraseSet) return 'Choose a backup passphrase first, under Email backups above, so the email is encrypted.';
+    return '';
+  }
+
+  savePassphrase(): void {
+    this.passError.set('');
+    if (this.pass1 !== this.pass2) { this.passError.set("The two passphrases don't match"); return; }
+    this.busy.set(true);
+    this.http.put<EmailStatus>('/api/backups/email', { passphrase: this.pass1 }).subscribe({
+      next: (s) => {
+        this.busy.set(false);
+        this.email.set(s);
+        this.pass1 = this.pass2 = '';
+        this.changingPass.set(false);
+        this.show('Backup passphrase saved. Keep it somewhere safe: you need it to restore an emailed backup.');
+      },
+      error: (err) => { this.busy.set(false); this.passError.set(this.errorText(err)); },
+    });
+  }
+
+  cancelPassphrase(): void {
+    this.pass1 = this.pass2 = '';
+    this.passError.set('');
+    this.changingPass.set(false);
+  }
+
+  setAuto(on: boolean): void {
+    this.busy.set(true);
+    this.http.put<EmailStatus>('/api/backups/email', { auto: on }).subscribe({
+      next: (s) => {
+        this.busy.set(false);
+        this.email.set(s);
+        if (on && s.last?.ok && Date.now() - Date.parse(s.last.at) < 60_000) this.show(`Sent the first backup email to ${s.recipients.join(', ')}.`);
+        else if (!on) this.show('Automatic backup emails are off.');
+      },
+      error: (err) => { this.busy.set(false); this.show(this.errorText(err), true); this.loadEmail(); },
+    });
+  }
+
+  emailIt(name: string): void {
+    this.busy.set(true);
+    this.http.post<{ file: string; recipients: string[] }>(`/api/backups/${encodeURIComponent(name)}/email`, {}).subscribe({
+      next: (r) => {
+        this.busy.set(false);
+        this.confirming.set(null);
+        this.show(`Emailed ${name} to ${r.recipients.join(', ')}, encrypted.`);
+        this.loadEmail();
+      },
+      error: (err) => { this.busy.set(false); this.show(this.errorText(err), true); this.loadEmail(); },
+    });
+  }
+
+  reasonText(reason: 'manual' | 'weekly' | 'update'): string {
+    return reason === 'weekly' ? ' (weekly)' : reason === 'update' ? ' (after an update)' : '';
   }
 
   private load(): void {
@@ -224,21 +469,46 @@ export class BackupsComponent implements OnInit {
     input.value = '';
     if (!file) return;
     if (file.size > 4 * 1024 * 1024) { this.show('That file is too big to be a HomeHub backup', true); return; }
-    this.busy.set(true);
-    file.text().then((content) => {
-      this.http.post<BackupEntry>('/api/backups/upload', { content }).subscribe({
-        next: (entry) => {
-          this.busy.set(false);
-          this.show(`Uploaded ${file.name}. It's in the list as ${entry.name}. Press Restore on it to use it.`);
-          this.load();
-          this.confirming.set({ name: entry.name, action: 'restore' });
-        },
-        error: (err) => { this.busy.set(false); this.show(this.errorText(err), true); },
-      });
-    }, () => { this.busy.set(false); this.show('Could not read that file', true); });
+    this.pendingUpload.set(null);
+    file.text().then(
+      (content) => this.postUpload(file.name, content),
+      () => this.show('Could not read that file', true),
+    );
   }
 
-  ask(name: string, action: 'restore' | 'delete'): void {
+  /** Try the waiting encrypted file again, with the passphrase typed in. */
+  sendUpload(): void {
+    const p = this.pendingUpload();
+    if (p && this.uploadPass) this.postUpload(p.fileName, p.content, this.uploadPass);
+  }
+
+  private postUpload(fileName: string, content: string, passphrase?: string): void {
+    this.busy.set(true);
+    this.message.set('');
+    this.http.post<BackupEntry>('/api/backups/upload', passphrase ? { content, passphrase } : { content }).subscribe({
+      next: (entry) => {
+        this.busy.set(false);
+        this.pendingUpload.set(null);
+        this.uploadPass = '';
+        this.show(`Uploaded ${fileName}. It's in the list as ${entry.name}. Press Restore on it to use it.`);
+        this.load();
+        this.confirming.set({ name: entry.name, action: 'restore' });
+      },
+      error: (err) => {
+        this.busy.set(false);
+        const code = err instanceof HttpErrorResponse ? err.error?.code : undefined;
+        if (code === 'PASSPHRASE_REQUIRED') {
+          this.pendingUpload.set({ fileName, content });
+          return;
+        }
+        if (code === 'PASSPHRASE_WRONG') this.uploadPass = '';
+        else this.pendingUpload.set(null);
+        this.show(this.errorText(err), true);
+      },
+    });
+  }
+
+  ask(name: string, action: Action): void {
     const current = this.confirming();
     this.confirming.set(current?.name === name && current.action === action ? null : { name, action });
   }

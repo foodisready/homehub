@@ -318,7 +318,10 @@ Garage doors, devices with "valve" in their name, and devices used for automatic
 
 Open **Settings → Backups** and select **Back up now**, with an optional note such as "before moving to the Pi". HomeHub saves your devices, rooms, schedules, scenes, motion rules, users and logins as a JSON file in its `data/backups` folder. Energy history isn't included.
 
+Each backup has three buttons: the pencil (**View / Edit**), the arrow (**Download**), and **⋯**, which holds **Email**, **Restore** and **Delete**.
+
 - **View / Edit** opens the file. Passwords and keys show as `<hidden>`, and HomeHub keeps the real values when you save. Saving checks your changes against the current database first, so a mistake, such as two devices with the same name, is caught before you restore.
+- **Email** sends the backup, encrypted, to the addresses your alerts go to. See [Email backups](#email-backups).
 - **Restore** replaces your devices, rooms, schedules, scenes, motion rules and logins with the backup's. HomeHub saves your current settings as a `before-restore` backup first, so you can undo it. To leave something alone, remove its whole table from the file before restoring.
 
 A restore never changes the accounts already on this HomeHub, so you can still sign in afterwards:
@@ -342,6 +345,26 @@ To move your setup, for example from a computer to a Raspberry Pi:
 Keep signing in with the account you made on the new HomeHub. Other people's accounts come across with their old passwords. A downloaded file includes passwords and device logins, so keep it private and delete it once you've moved. Motion sensors still report to the old HomeHub's address until you reconnect them on the **Sensors** page.
 
 HomeHub also makes a full copy of its database once a day and keeps the last 7. Those include history, and you restore them from the command line.
+
+### Email backups
+
+Backups are kept on the same computer as HomeHub, so they're lost if its disk fails. Emailing one keeps a copy in your inbox.
+
+1. Set up email under **Settings → Integrations → Email alerts (SMTP)**, if you haven't already.
+2. In **Settings → Backups**, under **Email backups**, choose a backup passphrase of at least 10 characters and type it twice.
+3. Select **⋯ → Email** on any backup, or turn on **Email a backup every week, and after each HomeHub update**. Turning it on sends the first one straight away, so you can check it arrives.
+
+Every emailed backup is encrypted with your passphrase, because a backup holds your device logins. HomeHub keeps only a key made from the passphrase, not the passphrase itself, and can't show it or recover it. Write it down somewhere other than HomeHub's computer: without it, an emailed backup can't be opened.
+
+To restore an emailed backup, for example on a new computer after the old one failed:
+
+1. Install HomeHub and open it.
+2. Open **Settings → Backups**, select **Upload a backup** and choose the attached file.
+3. Enter your backup passphrase, then select **Restore**.
+
+An emailed backup has your devices, rooms, schedules, scenes, motion rules, users and device logins. It doesn't include energy history, the Wyze camera sign-in or Matter pairings, which you set up again after restoring.
+
+Changing the passphrase doesn't change backups already emailed: they still open with the passphrase they were sent with. The passphrase and the email settings belong to this HomeHub: they aren't part of any backup, so restoring a backup never turns automatic emails on or off. Automatic emails don't send while automations are paused, so a development copy of HomeHub doesn't send its own. If an email fails, the reason shows under **Email backups**, and HomeHub tries again in 6 hours.
 
 ## Pause automations
 

@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import type Database from 'better-sqlite3';
 import { getDb } from './index';
+import { BackupError } from './backup-error';
 
 /**
  * JSON backups of HomeHub's settings: devices, rooms, schedules, scenes,
@@ -59,9 +60,7 @@ export interface BackupEntry {
   counts: Record<string, number>;
 }
 
-export class BackupError extends Error {
-  constructor(message: string, readonly status = 400) { super(message); }
-}
+export { BackupError };
 
 function backupDir(): string {
   const dbPath = process.env.DB_PATH || path.join(process.cwd(), 'data', 'db.sqlite');
@@ -309,8 +308,15 @@ export interface RestoreResult {
 /** Tables whose rows belong to one account: they follow that account in or stay out. */
 const PER_USER_TABLES = new Set<string>(['push_subscriptions', 'notification_preferences']);
 
-/** Settings that describe this HomeHub, not the home: never backed up, and a restore leaves them as they are. */
-const THIS_HOMEHUB_ONLY = ['automations_paused'];
+/**
+ * Settings that describe this HomeHub, not the home: never backed up, and a
+ * restore leaves them as they are. The backup email key in particular must
+ * never travel inside a backup, encrypted or not.
+ */
+export const THIS_HOMEHUB_ONLY = [
+  'automations_paused',
+  'backup_email_key', 'backup_email_auto', 'backup_email_last', 'backup_email_sent',
+];
 
 /** Settings this HomeHub keeps when it already has them: the backup fills them in only if unset. */
 const LOCAL_SETTINGS = [['home_latitude', 'home_longitude'], ['home_timezone']];

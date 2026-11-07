@@ -3,6 +3,8 @@ import { logger } from '../logger';
 import {
   BackupError, createBackup, deleteBackup, importBackup, listBackups, readFull, readMasked, restoreBackup, saveEdited,
 } from '../db/json-backup';
+import { asEncrypted, decryptBackup } from '../db/backup-crypto';
+import { backupEmailStatus, checkBackupEmail, emailBackup, setAutoEmail, setBackupPassphrase } from '../db/backup-email';
 import { refreshDevices } from '../kasa/device.cache';
 import { notifyScheduler } from './schedules';
 
@@ -11,7 +13,7 @@ export const backupsRouter = Router();
 
 function fail(res: Response, err: unknown): void {
   if (err instanceof BackupError) {
-    res.status(err.status).json({ error: err.message, code: 'BACKUP_ERROR' });
+    res.status(err.status).json({ error: err.message, code: err.code });
     return;
   }
   logger.error({ err }, 'Backup request failed');
@@ -32,13 +34,46 @@ backupsRouter.post('/', (req: Request, res: Response) => {
 });
 
 // A backup file from another HomeHub, sent as text. Saved to the list; restoring is a separate step.
-backupsRouter.post('/upload', (req: Request, res: Response) => {
+// An encrypted file (from a backup email) needs "passphrase"; it's saved decrypted, like any other backup.
+backupsRouter.post('/upload', async (req: Request, res: Response) => {
   try {
     if (typeof req.body?.content !== 'string') throw new BackupError('"content" must be the backup file as text');
-    const entry = importBackup(req.body.content);
-    logger.info({ name: entry.name }, 'JSON backup uploaded');
+    const encrypted = asEncrypted(req.body.content);
+    const passphrase = typeof req.body.passphrase === 'string' ? req.body.passphrase : undefined;
+    const text = encrypted ? await decryptBackup(encrypted, passphrase) : req.body.content;
+    const entry = importBackup(text);
+    logger.info({ name: entry.name, encrypted: !!encrypted }, 'JSON backup uploaded');
     res.status(201).json(entry);
   } catch (err) { fail(res, err); }
+});
+
+// ── Emailing backups ────────────────────────────────────────────────
+// Before the /:name routes, so "email" is never taken for a backup name.
+
+backupsRouter.get('/email', (_req: Request, res: Response) => {
+  try { res.json(backupEmailStatus()); } catch (err) { fail(res, err); }
+});
+
+/** { passphrase?: string, auto?: boolean } — either or both. */
+backupsRouter.put('/email', async (req: Request, res: Response) => {
+  try {
+    const { passphrase, auto } = req.body ?? {};
+    if (passphrase !== undefined) {
+      if (typeof passphrase !== 'string') throw new BackupError('"passphrase" must be text');
+      await setBackupPassphrase(passphrase);
+    }
+    if (auto !== undefined) {
+      if (typeof auto !== 'boolean') throw new BackupError('"auto" must be true or false');
+      setAutoEmail(auto);
+      // Turning it on sends the first one straight away, so a mistake in the email settings shows now.
+      if (auto) await checkBackupEmail();
+    }
+    res.json(backupEmailStatus());
+  } catch (err) { fail(res, err); }
+});
+
+backupsRouter.post('/:name/email', async (req: Request, res: Response) => {
+  try { res.json(await emailBackup({ name: String(req.params.name), reason: 'manual' })); } catch (err) { fail(res, err); }
 });
 
 // The whole file, passwords and keys included, to move to another HomeHub.

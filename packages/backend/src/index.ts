@@ -44,6 +44,7 @@ import { startCameraWatch } from './cameras/watch';
 import { activityMiddleware, startActivityPruning } from './activity/activity';
 import { activityRouter } from './routes/activity';
 import { runBackup } from './db/backup';
+import { startBackupEmails } from './db/backup-email';
 import { checkAllSensors } from './sensors/stale-check';
 import { authenticate, requireAdmin } from './middleware/auth';
 import { getDb } from './db';
@@ -146,6 +147,7 @@ httpServer.listen(PORT, async () => {
   // Daily DB backup: run once at startup, then every 24 hours
   runBackup();
   setInterval(runBackup, 24 * 60 * 60 * 1000);
+  startBackupEmails();       // weekly and after-update backup emails, when turned on
 
   // Hourly prune of flow_readings older than 7 days. flow_events are kept indefinitely.
   pruneFlowReadings();
