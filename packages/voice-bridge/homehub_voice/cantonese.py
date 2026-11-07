@@ -7,7 +7,8 @@ pronunciation, tones ignored, rather than by their characters.
 
 A command is a verb, then a name: 開廚房燈, 熄卓希房燈. Only the first word is
 read as the verb, so a name that starts with a verb's sound (卓 sounds like 着)
-is still a name. A scene is its name alone: 晚安.
+is still a name. A scene is its name alone: 晚安. A light can be turned on for a
+while: 開文房燈十分鐘, 開文房燈半個鐘, 開文房燈，十分鐘後熄.
 
 The result is passed to HomeHub as "turn on <name>" or "run <name>", where the
 name is exactly as HomeHub knows it, so HomeHub's own rules (protected devices,
@@ -48,10 +49,94 @@ class Command:
     action: str        # 'on', 'off', 'scene', or 'ask': a device's name alone, so ask on or off
     name: str          # as HomeHub knows it
     score: float
+    minutes: int | None = None   # with 'on': turn it off again after this long
 
     @property
     def homehub_text(self) -> str:
-        return f'run {self.name}' if self.action == 'scene' else f'turn {self.action} {self.name}'
+        if self.action == 'scene':
+            return f'run {self.name}'
+        if self.action == 'on' and self.minutes:
+            return f'turn on {self.name} for {self.minutes} minutes'
+        return f'turn {self.action} {self.name}'
+
+
+# ── How long: 開文房燈十分鐘, 開文房燈半個鐘, 開文房燈，十分鐘後熄 ─────────────
+# Read from the characters, not the sound: speech recognition writes numbers as
+# digits or characters, and these words in simplified or traditional script.
+
+_DIGIT = {'零': 0, '〇': 0, '一': 1, '二': 2, '兩': 2, '两': 2, '三': 3, '四': 4, '五': 5,
+          '六': 6, '七': 7, '八': 8, '九': 9}
+_NUM = r'(?:[0-9０-９]+|[零〇一二兩两三四五六七八九十廿]+)'
+_HOUR = r'(?:鐘頭|钟头|鐘|钟|中|小時|小时)'     # 中 "zung": how 鐘 is sometimes written
+_GE = r'(?:個|个)'
+# Longest forms first, so 一個半鐘 isn't read as 一個鐘.
+_DURATIONS = [
+    (re.compile(rf'(?P<n>{_NUM})?{_GE}半{_HOUR}'), lambda n: (n or 1) * 60 + 30),   # 個半鐘 = 1½ hours
+    (re.compile(rf'半{_GE}?{_HOUR}'), lambda n: 30),                                 # 半個鐘
+    (re.compile(rf'(?P<n>{_NUM}){_GE}?{_HOUR}'), lambda n: n * 60),                  # 一個鐘, 兩個鐘頭, 一小時
+    (re.compile(rf'(?P<n>{_NUM})分(?:鐘|钟|中|終|终)'), lambda n: n),                 # 十分鐘
+    (re.compile(rf'(?P<n>{_NUM}){_GE}?字'), lambda n: n * 5),                         # 三個字: a 字 is 5 minutes
+]
+# "...then off" after the duration: 十分鐘後熄, 十分鐘之後關燈.
+_THEN_OFF = re.compile(r'^(?:之後|之后|後|后|就)?(?:熄|關|关|閂|闩)?(?:返)?(?:燈|灯)?')
+
+
+def _number(s: str) -> int | None:
+    s = s.translate(str.maketrans('０１２３４５６７８９', '0123456789'))
+    if s.isdigit():
+        return int(s)
+    if s.startswith('廿'):                              # 廿 = 20, 廿五 = 25
+        rest = _number(s[1:]) if s[1:] else 0
+        return None if rest is None or rest > 9 else 20 + rest
+    if '十' in s:
+        tens, _, units = s.partition('十')
+        t = _DIGIT.get(tens) if tens else 1
+        u = _DIGIT.get(units) if units else 0
+        return None if t is None or u is None else t * 10 + u
+    return _DIGIT.get(s) if len(s) == 1 else None
+
+
+def take_duration(text: str) -> tuple[str, int | None]:
+    """The text without its duration, and the duration in minutes (None if there isn't one)."""
+    for pattern, minutes in _DURATIONS:
+        m = pattern.search(text)
+        if not m:
+            continue
+        n = _number(m.group('n')) if 'n' in pattern.groupindex and m.group('n') else None
+        if 'n' in pattern.groupindex and m.group('n') and not n:
+            continue
+        total = minutes(n)
+        if not total:
+            continue
+        start, end = m.span()
+        end += _THEN_OFF.match(text[end:]).end()
+        # A second 開 before the duration ("開文房燈開十分鐘") goes too, but never the first word.
+        before = text[:start].rstrip(' ，,')
+        if before[-1:] in ('開', '开') and before[:-1].strip(' ，,'):
+            before = before[:-1]
+        return (before + ' ' + text[end:]).strip(' ，,'), total
+    return text, None
+
+
+def say_minutes(minutes: int) -> str:
+    """A duration as said in Cantonese: 十分鐘, 半個鐘, 個半鐘, 兩個鐘."""
+    def num(n: int) -> str:
+        if n == 2:
+            return '兩'
+        if n < 10:
+            return '零一二三四五六七八九'[n]
+        if n < 100:
+            tens, units = divmod(n, 10)
+            return ('' if tens == 1 else '零一二三四五六七八九'[tens]) + '十' + ('零一二三四五六七八九'[units] if units else '')
+        return str(n)
+    if minutes == 30:
+        return '半個鐘'
+    hours, rest = divmod(minutes, 60)
+    if not hours:
+        return f'{num(minutes)}分鐘'
+    if rest == 30:
+        return f'{num(hours)}個半鐘'
+    return f'{num(hours)}個鐘' + (f'{num(rest)}分鐘' if rest else '')
 
 
 def has_chinese(text: str) -> bool:
@@ -158,6 +243,7 @@ def best_name(heard: tuple[str, ...], names: list[str]) -> tuple[str | None, flo
 def parse(text: str, names: list[str], scenes: list[str] | None = None) -> Command | None:
     """Reads a Cantonese command against the home's Cantonese names. None when unsure."""
     cantonese = [n for n in names if has_chinese(n)]
+    text, minutes = take_duration(text)
     s = syllables(text)
     while s and s[-1] in TRAILING:
         s = s[:-1]
@@ -165,7 +251,9 @@ def parse(text: str, names: list[str], scenes: list[str] | None = None) -> Comma
     if action and rest:
         name, score, runner = best_name(rest, cantonese)
         if name and score >= MATCH and score - runner >= MARGIN:
-            return Command(action, name, round(score, 2))
+            if minutes and action == 'off':
+                return None   # "off for ten minutes" isn't something HomeHub does: don't guess
+            return Command(action, name, round(score, 2), minutes if action == 'on' else None)
         # Not a verb after all, but the start of a name heard alone: 卓希房燈 starts like 着.
     scene_names = [n for n in (scenes or []) if has_chinese(n)]
     name, score, runner = best_name(s, scene_names)
@@ -213,4 +301,6 @@ def reply(command: Command | None, handled: bool, response: str, failed: list[st
         return f'有幾個都叫{command.name}，請改個名。'
     if command.action == 'scene':
         return f'搞掂，{command.name}。'
+    if command.action == 'on' and command.minutes:
+        return f'開咗{command.name}，{say_minutes(command.minutes)}後熄。'
     return f'開咗{command.name}。' if command.action == 'on' else f'熄咗{command.name}。'

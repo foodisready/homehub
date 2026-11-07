@@ -57,12 +57,13 @@ With Cantonese on, each command can be English or Cantonese, and is answered in 
 1. In **Settings → Voice control**, tick **Cantonese** and save. The bridge downloads SenseVoice Small (about 1 GB, of which it keeps 230 MB) and a Cantonese voice (110 MB). For a bridge installed with install.sh, set `LANGUAGES=en yue` in its `config.env` and run `./install.sh` again instead.
 2. In HomeHub, give each device you want to use a Cantonese nickname, in **Settings → Devices**: for example 廚房燈 on the kitchen lights, or 寫字樓燈 and 書房燈 on the office lamp. Giving two devices the same nickname, such as 卓希房燈, switches both. You can also teach one from a missed command, in **Settings → Teach HomeHub**. The bridge picks up new nicknames within a minute.
 3. Say the verb, then the nickname: 開廚房燈, 着廚房燈, 關廚房燈, 熄廚房燈. 幫我 or 唔該 first, and 啦 or 呀 at the end, are fine. A scene with a Cantonese name runs by its name alone.
+4. To turn something on for a while, add how long: 開廚房燈十分鐘, 開廚房燈半個鐘, 開廚房燈個半鐘, 開廚房燈兩個鐘, 開廚房燈三個字 (fifteen minutes), or 開廚房燈，十分鐘後熄. Numbers can be spoken or digits. The bridge sends HomeHub "turn on 廚房燈 for 10 minutes", and answers 開咗廚房燈，十分鐘後熄。 A duration with 熄 isn't guessed at, since HomeHub has no "off for a while".
 
 How it works: SenseVoice hears each command first and says which language it's in, in about 0.1 seconds. English then goes to Whisper as before. Cantonese is matched to your Cantonese nicknames by how it sounds, using Jyutping with tones ignored, because speech recognition often writes a word with a different character that sounds the same (民房 for 文房). Only the first word is read as the verb, so a name that starts with a verb's sound, such as 卓 and 着, still works. A command that doesn't clearly match one nickname isn't guessed: the speaker says 唔好意思，我聽唔明, and HomeHub lists it with the commands it missed. HomeHub's rules still decide what happens, so protected devices and cameras are as safe as in English.
 
 On the household's 37 test recordings, it read all 33 commands for devices that exist correctly, and refused the 4 for a room with no light. Its matching was tuned on those same recordings, so expect some misses on new ones.
 
-Not yet in Cantonese: timers ("for an hour"), pausing or resuming cameras by name, and the replies HomeHub's settings let you choose.
+Not yet in Cantonese: pausing or resuming cameras by name, and the replies HomeHub's settings let you choose.
 
 ## Checking on it
 

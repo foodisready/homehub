@@ -65,6 +65,60 @@ class ReadingTest(unittest.TestCase):
         self.assertEqual(yue.parse('晚安', [], ['晚安']).homehub_text, 'run 晚安')
 
 
+class DurationTest(unittest.TestCase):
+    """開文房燈十分鐘: on, then off again after a while, as "turn on ... for 10 minutes"."""
+
+    def timed(self, text):
+        c = yue.parse(text, NAMES, SCENES)
+        return (c.action, c.name, c.minutes) if c else None
+
+    def test_minutes(self):
+        self.assertEqual(self.timed('開文房燈十分鐘'), ('on', '文房燈', 10))
+        self.assertEqual(self.timed('开文房灯十分钟。'), ('on', '文房燈', 10), 'simplified characters')
+        self.assertEqual(self.timed('開文房燈十五分鐘啦'), ('on', '文房燈', 15))
+        self.assertEqual(self.timed('開文房燈二十五分鐘'), ('on', '文房燈', 25))
+        self.assertEqual(self.timed('開文房燈廿分鐘'), ('on', '文房燈', 20), '廿 is twenty')
+        self.assertEqual(self.timed('開文房燈10分鐘'), ('on', '文房燈', 10), 'digits')
+        self.assertEqual(self.timed('开民房灯 10 分中'), None, 'a space inside the duration is too loose to trust')
+        self.assertEqual(self.timed('开民房灯10分中'), ('on', '文房燈', 10), '分中 sounds like 分鐘, 民 like 文')
+        self.assertEqual(self.timed('開文房燈三個字'), ('on', '文房燈', 15), 'a 字 is five minutes')
+
+    def test_hours(self):
+        self.assertEqual(self.timed('開文房燈半個鐘'), ('on', '文房燈', 30))
+        self.assertEqual(self.timed('開文房燈一個鐘'), ('on', '文房燈', 60))
+        self.assertEqual(self.timed('開文房燈個半鐘'), ('on', '文房燈', 90))
+        self.assertEqual(self.timed('開文房燈一個半鐘'), ('on', '文房燈', 90))
+        self.assertEqual(self.timed('開文房燈兩個鐘頭'), ('on', '文房燈', 120))
+        self.assertEqual(self.timed('开文房灯两个小时'), ('on', '文房燈', 120))
+
+    def test_word_orders(self):
+        self.assertEqual(self.timed('開文房燈，十分鐘後熄'), ('on', '文房燈', 10))
+        self.assertEqual(self.timed('開文房燈十分鐘之後關燈'), ('on', '文房燈', 10))
+        self.assertEqual(self.timed('開文房燈開十分鐘'), ('on', '文房燈', 10))
+        self.assertEqual(self.timed('開十分鐘文房燈'), ('on', '文房燈', 10))
+        self.assertEqual(self.timed('唔該開走廊燈半個鐘啦'), ('on', '走廊燈', 30))
+
+    def test_not_a_duration(self):
+        self.assertEqual(self.timed('開寫字樓燈'), ('on', '寫字樓燈', None), '字 in a name is not five minutes')
+        self.assertEqual(self.timed('開文房燈'), ('on', '文房燈', None))
+        self.assertIsNone(self.timed('熄文房燈十分鐘'), 'off for a while is not something HomeHub does: no guess')
+
+    def test_what_homehub_is_sent(self):
+        self.assertEqual(yue.parse('開文房燈十分鐘', NAMES).homehub_text, 'turn on 文房燈 for 10 minutes')
+        self.assertEqual(yue.parse('開文房燈個半鐘', NAMES).homehub_text, 'turn on 文房燈 for 90 minutes')
+
+    def test_the_reply_says_when_it_goes_off(self):
+        on = lambda m: yue.Command('on', '文房燈', 1.0, m)
+        self.assertEqual(yue.reply(on(10), True, 'x', []), '開咗文房燈，十分鐘後熄。')
+        self.assertEqual(yue.reply(on(2), True, 'x', []), '開咗文房燈，兩分鐘後熄。')
+        self.assertEqual(yue.reply(on(25), True, 'x', []), '開咗文房燈，二十五分鐘後熄。')
+        self.assertEqual(yue.reply(on(30), True, 'x', []), '開咗文房燈，半個鐘後熄。')
+        self.assertEqual(yue.reply(on(60), True, 'x', []), '開咗文房燈，一個鐘後熄。')
+        self.assertEqual(yue.reply(on(90), True, 'x', []), '開咗文房燈，一個半鐘後熄。')
+        self.assertEqual(yue.reply(on(120), True, 'x', []), '開咗文房燈，兩個鐘後熄。')
+        self.assertEqual(yue.reply(on(75), True, 'x', []), '開咗文房燈，一個鐘十五分鐘後熄。')
+
+
 class ReplyTest(unittest.TestCase):
     on = yue.Command('on', '廚房燈', 1.0)
 
