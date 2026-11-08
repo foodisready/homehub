@@ -245,12 +245,12 @@ Ask what's on, such as "which devices are on?", "which lights are off?" or "is t
 
 When something will turn a device off by itself, its dashboard row says when and why, and the timer icon turns blue:
 
-- **"Off in 8 min · no motion":** a motion rule, counting down since the room emptied. Moving resets it.
+- **"Off at 9:12 PM · in 8 min · no motion":** a motion rule, counting down since the room emptied. Moving resets it.
 - **"On · off 10 min after motion stops":** a motion rule waiting for the room to empty.
-- **"Off in 45 min · timer":** a timer you set. In the last minute it counts seconds.
-- **"Off at 9:30 PM · schedule":** a "turn off after" schedule. More than an hour away, it shows the time instead of a countdown.
+- **"Off at 10:15 PM · in 45 min · timer":** a timer you set. In the last minute it counts seconds.
+- **"Off at 9:04 AM · in 17 min · schedule":** a "turn off after" schedule, such as on at sunrise for 2 hours. The countdown is from now, so it can be less than the schedule's length. More than an hour away, only the time shows.
 
-If more than one applies, it shows whichever comes first. Garage doors say "Closes in".
+If more than one applies, it shows whichever comes first. Garage doors say "Closes at".
 
 ## Activity
 

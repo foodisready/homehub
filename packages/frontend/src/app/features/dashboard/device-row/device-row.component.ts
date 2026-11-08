@@ -165,8 +165,10 @@ export class DeviceRowComponent implements OnDestroy {
   }
 
   /**
-   * "Off in 8 min · no motion", "Off at 9:30 PM · timer", or for a motion rule
-   * still waiting for the room to empty, "On · off 10 min after motion stops".
+   * "Off at 9:04 AM · in 17 min · schedule" within the hour, "Off at 9:30 PM
+   * · timer" further off, or for a motion rule still waiting for the room to
+   * empty, "On · off 10 min after motion stops". The time comes first: a
+   * countdown alone hides that a 2-hour schedule started at sunrise, not now.
    */
   readonly autoOffText = computed(() => {
     const d = this.device(), a = d.autoOff;
@@ -176,9 +178,10 @@ export class DeviceRowComponent implements OnDestroy {
     if (a.at === null) return `On · off ${a.afterMinutes ?? ''} min after motion stops`.replace('  ', ' ');
     const left = Date.parse(a.at) - this.now();
     if (left <= 0) return this.isDoor() ? 'Closing…' : this.isCamera() ? 'Pausing…' : 'Turning off…';
-    if (left < 60_000) return `${verb} in ${Math.ceil(left / 1000)} s · ${cause}`;
-    if (left <= 60 * 60_000) return `${verb} in ${Math.ceil(left / 60_000)} min · ${cause}`;
-    return `${verb} at ${clock(a.at)} · ${cause}`;
+    const at = `${verb} at ${clock(a.at)}`;
+    if (left < 60_000) return `${at} · in ${Math.ceil(left / 1000)} s · ${cause}`;
+    if (left <= 60 * 60_000) return `${at} · in ${Math.ceil(left / 60_000)} min · ${cause}`;
+    return `${at} · ${cause}`;
   });
 
   readonly detail = computed(() => {
