@@ -9,6 +9,7 @@ import { AuthImgComponent } from './auth-img.component';
 import { LiveViewComponent } from './live-view.component';
 import { RingCamerasComponent, type RingCamera } from './ring-cameras.component';
 import { IpCamerasComponent, type IpCamera } from './ip-cameras.component';
+import { SnapshotSwiperComponent } from './snapshot-swiper.component';
 import { MAX_SHARE, canShareFiles, shareOrSave, snapshotFileName } from './snapshot-share';
 
 type BridgeState =
@@ -50,7 +51,7 @@ const SEEN_KEY = 'homehub.cameras.seenSnapshot';
 @Component({
   selector: 'app-cameras',
   standalone: true,
-  imports: [FormsModule, AuthImgComponent, LiveViewComponent, RingCamerasComponent, IpCamerasComponent],
+  imports: [FormsModule, AuthImgComponent, LiveViewComponent, RingCamerasComponent, IpCamerasComponent, SnapshotSwiperComponent],
   styleUrls: ['./camera-layout.css', './snapshot-viewer.css'],
   styles: [`
     h1 { font-size: 1.4rem; font-weight: 700; margin-bottom: 1rem; }
@@ -463,13 +464,8 @@ const SEEN_KEY = 'homehub.cameras.seenSnapshot';
             </span>
           </div>
           <!-- Swipe left for an older picture, right for a newer one. -->
-          <div class="swipe" (touchstart)="swipeStart($event)" (touchmove)="swipeMove($event)" (touchend)="swipeEnd()" (touchcancel)="swipeEnd(true)">
-            @if (shotUrls()[s.id]; as url) {
-              <img [src]="url" [alt]="s.cameraName" [class.dragging]="dragging()" [style.transform]="'translateX(' + dragX() + 'px)'" draggable="false" />
-            } @else {
-              <div class="loading">Loading…</div>
-            }
-          </div>
+          <app-snapshot-swiper [current]="urlOf(s)" [prev]="urlOf(neighbor(-1))" [next]="urlOf(neighbor(1))"
+                               [canPrev]="canStep(-1)" [canNext]="canStep(1)" [alt]="s.cameraName" (step)="step($event)" />
           @if (position(); as pos) { <p class="swipe-hint">{{ pos }}</p> }
           @if (shareMsg()) { <p class="share-msg" role="status">{{ shareMsg() }}</p> }
         </div>
@@ -802,7 +798,6 @@ export class CamerasComponent implements OnInit, OnDestroy {
   closeShot(): void {
     this.shot.set(null);
     this.shareMsg.set('');
-    this.swipeEnd(true);
   }
 
   /** Shows a snapshot, and loads the ones either side so a swipe shows them at once. */
@@ -810,45 +805,16 @@ export class CamerasComponent implements OnInit, OnDestroy {
     this.shot.set(s);
     if (!s) return;
     this.prepare(s);
-    for (const dir of [-1, 1] as const) {
-      const n = this.neighbor(dir);
-      if (n) this.prepare(n);
-    }
+    // Two each way, so quick swipes don't wait.
+    const list = this.snapshots();
+    const i = list.findIndex((x) => x.id === s.id);
+    if (i < 0) return;
+    for (const j of [i - 1, i + 1, i - 2, i + 2]) if (list[j]) this.prepare(list[j]);
   }
 
-  // ── Swiping between snapshots ─────────────────────────────────
-
-  /** How far the picture follows the finger, px. */
-  readonly dragX = signal(0);
-  readonly dragging = signal(false);
-  private touch: { x: number; y: number; horizontal: boolean | null } | null = null;
-  /** A swipe this far, px, moves to the next picture. */
-  private static readonly SWIPE_PX = 50;
-
-  swipeStart(e: TouchEvent): void {
-    if (e.touches.length !== 1) { this.touch = null; return; }   // two fingers: pinch-zoom
-    this.touch = { x: e.touches[0].clientX, y: e.touches[0].clientY, horizontal: null };
-  }
-
-  swipeMove(e: TouchEvent): void {
-    const t = this.touch;
-    if (!t || e.touches.length !== 1) return;
-    const dx = e.touches[0].clientX - t.x;
-    const dy = e.touches[0].clientY - t.y;
-    // Decide once, after a little movement, whether this is a sideways swipe.
-    if (t.horizontal === null && Math.abs(dx) + Math.abs(dy) > 10) t.horizontal = Math.abs(dx) > Math.abs(dy);
-    if (!t.horizontal) return;
-    this.dragging.set(true);
-    // Resist at either end, where there's no picture to move to.
-    this.dragX.set(this.canStep(dx < 0 ? 1 : -1) ? dx : dx / 3);
-  }
-
-  swipeEnd(cancel = false): void {
-    const dx = this.dragX();
-    this.touch = null;
-    this.dragging.set(false);
-    this.dragX.set(0);
-    if (!cancel && Math.abs(dx) >= CamerasComponent.SWIPE_PX) this.step(dx < 0 ? 1 : -1);
+  /** A loaded picture's URL, for the viewer. */
+  urlOf(s: Snapshot | null): string | null {
+    return s ? this.shotUrls()[s.id] ?? null : null;
   }
 
   /** On a computer: ← and → move between pictures, Esc closes. */
