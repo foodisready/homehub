@@ -100,3 +100,23 @@ ringRouter.put('/settings', requireAdmin, (req: Request, res: Response) => {
   ring.setNotifyDoorbell(notifyDoorbell);
   res.json({ notifyDoorbell: ring.notifyDoorbell() });
 });
+
+// POST /api/ring/cameras/:id/live { offer } — start live video. The answer
+// connects the browser straight to Ring; the video doesn't pass through HomeHub.
+ringRouter.post('/cameras/:id/live', async (req: Request, res: Response) => {
+  const id = idParam(req);
+  const offer = (req.body as Record<string, unknown>).offer;
+  if (id === null) return res.status(404).json({ error: 'Camera not found', code: 'NOT_FOUND' });
+  if (typeof offer !== 'string' || !offer.startsWith('v=0') || offer.length > 30_000) {
+    return res.status(400).json({ error: 'offer must be a WebRTC offer', code: 'VALIDATION_ERROR' });
+  }
+  try {
+    res.json(await ring.startLive(id, offer));
+  } catch (err) { fail(res, err, 'Live video didn\'t start'); }
+});
+
+// DELETE /api/ring/live/:sessionId — stop live video
+ringRouter.delete('/live/:sessionId', async (req: Request, res: Response) => {
+  const ended = await ring.endLive(String(req.params.sessionId));
+  res.status(ended ? 204 : 404).end();
+});

@@ -14,7 +14,7 @@ HomeHub controls devices directly over your home network. All of them are switch
 | **Tuya** | Wi-Fi smart plugs | Needs a Device ID and Local Key |
 | **Meross** | MSG100 and MSG200 garage door openers | Needs a one-time Meross sign-in |
 | **Wyze** | Cameras, such as Cam v2, v3 and Pan v3 | Needs the camera bridge and a Wyze API key. See [Cameras](#cameras) |
-| **Ring** | Doorbells and cameras: doorbell presses, motion and snapshots | Through your Ring account. No live view yet. See [Ring doorbells and cameras](#ring-doorbells-and-cameras) |
+| **Ring** | Doorbells and cameras: doorbell presses, motion, snapshots and live view | Through your Ring account. See [Ring doorbells and cameras](#ring-doorbells-and-cameras) |
 | **Any Matter brand** | Plugs, lights, switches and power strips (on and off) | Shared from Google Home, Apple Home, Alexa or SmartThings. See [Matter devices](#matter-devices) |
 
 Zigbee devices aren't supported. "Works with Google or Alexa" on a box doesn't mean it works with HomeHub, but the **Matter** logo does.
@@ -173,7 +173,7 @@ The camera bridge is unofficial, and a Wyze firmware update can stop it working 
 
 ### Ring doorbells and cameras
 
-HomeHub can save a picture when someone rings a Ring doorbell, notify your phone, and turn on a light when a Ring camera sees motion. It works through your Ring account, so it needs the internet. There's no live view in HomeHub yet; use the Ring app for that.
+HomeHub can save a picture when someone rings a Ring doorbell, notify your phone, show a Ring camera live, and turn on a light when a Ring camera sees motion. It works through your Ring account, so it needs the internet.
 
 1. Open **Cameras** and select **Sign in to Ring**. Only an administrator can.
 2. Enter your Ring email and password. Ring sends a code by text message, email or your authenticator app; enter it.
@@ -186,6 +186,7 @@ What happens:
 - **The doorbell rings:** HomeHub saves Ring's picture of the moment, marked **doorbell**, and notifies phones that have HomeHub notifications on. Turn off **Notify my phone when the doorbell rings** in the Ring section to keep the pictures without notifications. Presses less than 15 seconds apart count once.
 - **A camera sees motion:** HomeHub follows the same settings as Wyze motion: **Save a snapshot on motion**, **Notify my phone** and **Wait between snapshots**. Ring reports motion within a few seconds.
 - **Snapshot** on a Ring camera saves a picture now.
+- **Live** shows the camera live, with sound off until you turn it on. The video comes straight from Ring to your phone or computer, not through the HomeHub computer, so it works the same on a Raspberry Pi. It's a few seconds behind, and stops after 10 minutes, as in the Ring app; select **Try again** to keep watching. A mode in the Ring app that turns off live view turns it off here too. Watching a battery camera live drains its battery faster.
 
 Ring's own settings still decide what counts as motion, such as its motion zones and modes. If **End-to-end encryption** is on for a camera in the Ring app, Ring shares no pictures with HomeHub; doorbell notifications still work.
 

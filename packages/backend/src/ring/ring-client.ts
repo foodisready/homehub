@@ -38,6 +38,17 @@ export interface RingCam {
   snapshot(uuid?: string): Promise<Buffer>;
   /** Calls `listener` for each doorbell press and motion. Returns a function that stops it. */
   onEvent(listener: (event: RingEvent) => void): () => void;
+  /**
+   * Starts live video to a browser: `offer` is the browser's WebRTC offer,
+   * and the answer connects it straight to Ring, so the video doesn't pass
+   * through HomeHub.
+   */
+  startLive(offer: string): Promise<LiveSession>;
+}
+
+export interface LiveSession {
+  answer: string;
+  end(): Promise<void>;
 }
 
 export interface RingSession {
@@ -153,6 +164,12 @@ function toCam(camera: Lib, home: string | null = null): RingCam {
         });
       });
       return () => sub.unsubscribe();
+    },
+    async startLive(offer: string): Promise<LiveSession> {
+      const session = camera.createSimpleWebRtcSession();
+      const answer = await session.start(offer);
+      if (typeof answer !== 'string' || !answer) throw new Error('Ring sent no answer');
+      return { answer, end: async () => { await session.end(); } };
     },
   };
 }

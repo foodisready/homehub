@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import type http from 'node:http';
 import express from 'express';
 import type Database from 'better-sqlite3';
-import type { RingCam, RingConnector, RingEvent, SignInResult } from './ring-client';
+import type { LiveSession, RingCam, RingConnector, RingEvent, SignInResult } from './ring-client';
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'homehub-ring-test-'));
 const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 0xff, 0xd9]);
@@ -38,6 +38,14 @@ class FakeCam implements RingCam {
     return () => { this.listeners = this.listeners.filter((l) => l !== listener); };
   }
   emit(e: RingEvent): void { for (const l of this.listeners) l(e); }
+  offers: string[] = [];
+  ended = 0;
+  liveError: Error | null = null;
+  async startLive(offer: string): Promise<LiveSession> {
+    if (this.liveError) throw this.liveError;
+    this.offers.push(offer);
+    return { answer: 'v=0\r\nanswer', end: async () => { this.ended++; } };
+  }
 }
 
 const fake = {
@@ -110,6 +118,7 @@ describe('Ring cameras', () => {
   before(async () => {
     process.env.DB_PATH = path.join(TMP, 'db.sqlite');
     process.env.RING_MOTION_CLEAR_MS = '40';
+    process.env.RING_LIVE_MAX_MS = '60';
     db = (await import('../db')).getDb();
     AuthError = (await import('./ring-client')).RingAuthError;
     ring = await import('./ring');
@@ -386,6 +395,48 @@ describe('Ring cameras', () => {
       await signInAndAdd();
       assert.equal(await ring.handleEvent(fake.cams[1], event()), null);
       assert.equal(pushes.length, 0);
+    });
+  });
+
+  describe('live video', () => {
+    it('passes the browser\'s offer to Ring and Ring\'s answer back, and ends it', async () => {
+      await signInAndAdd();
+      const res = await api('POST', '/api/ring/cameras/1/live', { offer: 'v=0\r\noffer' }, 'user');
+      assert.equal(res.status, 200);
+      assert.equal(res.body.answer, 'v=0\r\nanswer');
+      assert.equal(typeof res.body.sessionId, 'string');
+      assert.deepEqual(door().offers, ['v=0\r\noffer']);
+      assert.equal(ring.liveCount(), 1);
+      assert.equal((await api('DELETE', `/api/ring/live/${res.body.sessionId}`)).status, 204);
+      assert.equal(door().ended, 1);
+      assert.equal((await api('DELETE', `/api/ring/live/${res.body.sessionId}`)).status, 404);
+    });
+
+    it('ends by itself after the time limit, and when HomeHub disconnects', async () => {
+      await signInAndAdd();
+      await api('POST', '/api/ring/cameras/1/live', { offer: 'v=0' });
+      await new Promise((r) => setTimeout(r, 120));
+      assert.equal(ring.liveCount(), 0);
+      assert.equal(door().ended, 1);
+      await api('POST', '/api/ring/cameras/1/live', { offer: 'v=0' });
+      await api('DELETE', '/api/ring/login');
+      assert.equal(ring.liveCount(), 0);
+      assert.equal(door().ended, 2);
+    });
+
+    it('says why it can\'t start', async () => {
+      await signInAndAdd();
+      assert.equal((await api('POST', '/api/ring/cameras/1/live', { offer: 'hello' })).status, 400);
+      assert.equal((await api('POST', '/api/ring/cameras/2/live', { offer: 'v=0' })).status, 404);   // not added
+      door().liveError = new Error('Live view is currently disabled for Front Door. This camera has been disabled via mode settings in the Ring app.');
+      const off = await api('POST', '/api/ring/cameras/1/live', { offer: 'v=0' });
+      assert.equal(off.status, 409);
+      assert.match(off.body.error, /turned off for Front Door by a mode/);
+      door().liveError = new Error('500');
+      assert.equal((await api('POST', '/api/ring/cameras/1/live', { offer: 'v=0' })).status, 502);
+      door().liveError = null;
+      door().offline = true;
+      assert.match((await api('POST', '/api/ring/cameras/1/live', { offer: 'v=0' })).body.error, /offline/);
     });
   });
 

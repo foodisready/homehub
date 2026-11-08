@@ -54,6 +54,10 @@ describe('Ring library layer', () => {
         subscribe(fn: (n: unknown) => void) { subscribers.push(fn); return { unsubscribe: () => subscribers.splice(subscribers.indexOf(fn), 1) }; },
       },
       async getSnapshot(opts?: { uuid: string }) { return new Uint8Array([0xff, 0xd8, opts ? 1 : 0]); },
+      ended: 0,
+      createSimpleWebRtcSession() {
+        return { start: async (sdp: string) => `answer to ${sdp}`, end: async () => { camera.ended++; } };
+      },
     };
     const cam = lib.toCam(camera, 'Lake house');
     assert.deepEqual([cam.id, cam.name, cam.home, cam.model, cam.isDoorbell, cam.hasBattery, cam.offline], [42, 'Front Door', 'Lake house', 'Wired Doorbell Plus', true, false, false]);
@@ -80,5 +84,10 @@ describe('Ring library layer', () => {
     assert.ok(Math.abs(events[1].at - Date.now()) < 5000);   // a bad time becomes now
     stop();
     assert.equal(subscribers.length, 0);
+
+    const live = await cam.startLive('v=0 offer');
+    assert.equal(live.answer, 'answer to v=0 offer');
+    await live.end();
+    assert.equal(camera.ended, 1);
   });
 });

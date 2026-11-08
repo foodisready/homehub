@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { getDb } from '../db';
 import { logger } from '../logger';
 import { sendPushToAll } from '../push/push.service';
@@ -7,7 +8,7 @@ import { capture, getSettings as cameraSettings, latestForCamera, type Snapshot 
 import { handleMotion } from '../sensors/motion';
 import {
   RingAuthError, ringLibrary,
-  type PendingSignIn, type RingCam, type RingConnector, type RingEvent, type RingSession,
+  type LiveSession, type PendingSignIn, type RingCam, type RingConnector, type RingEvent, type RingSession,
 } from './ring-client';
 
 /**
@@ -42,6 +43,8 @@ const DOORBELL_REPEAT_MS = 15_000;
 const MOTION_CLEAR_MS = Number(process.env.RING_MOTION_CLEAR_MS) || 60_000;
 /** A code sign-in waits this long for the code. */
 const PENDING_MS = 10 * 60_000;
+/** Live video ends by itself after this long, as in the Ring app, so a forgotten tab doesn't keep a camera streaming. */
+const LIVE_MAX_MS = Number(process.env.RING_LIVE_MAX_MS) || 10 * 60_000;
 const DETECTIONS: Record<string, string> = { human: 'a person', vehicle: 'a vehicle', package_delivery: 'a package', package: 'a package', animal: 'an animal' };
 
 export interface AddedCamera { id: number; name: string; home?: string | null }
@@ -122,6 +125,7 @@ export function ringState(): RingState {
 }
 
 function disconnect(): void {
+  for (const id of [...lives.keys()]) void endLive(id);
   for (const stop of stops) stop();
   stops = [];
   session?.disconnect();
@@ -359,6 +363,59 @@ export async function takeSnapshot(id: number): Promise<Snapshot> {
   }
   return capture({ id: null, alias: labelFor(added), cam: cameraKey(id) }, 'manual', new Date(), jpeg);
 }
+
+// ── Live video ───────────────────────────────────────────────────────
+
+interface Live { cameraId: number; session: LiveSession; timer: NodeJS.Timeout }
+const lives = new Map<string, Live>();
+
+export interface LiveStart { sessionId: string; answer: string; maxSeconds: number }
+
+/**
+ * Starts live video from a Ring camera to the browser that sent `offer`, its
+ * WebRTC offer. HomeHub only passes the offer and answer between them: the
+ * video goes from Ring to the browser, not through HomeHub.
+ */
+export async function startLive(id: number, offer: string): Promise<LiveStart> {
+  const added = addedCameras().find((c) => c.id === id);
+  if (!added) throw new RingError('Camera not found', 404);
+  const cam = (await liveCameras()).find((c) => c.id === id);
+  if (!cam) throw new RingError(`${added.name} is no longer on your Ring account`, 404);
+  if (cam.offline) throw new RingError(`Ring says ${added.name} is offline`, 409);
+  let session: LiveSession;
+  try {
+    session = await cam.startLive(offer);
+  } catch (err) {
+    const text = (err as Error).message ?? '';
+    logger.warn({ camera: added.name, reason: text }, 'Ring live video didn\'t start');
+    if (/live view is currently disabled/i.test(text)) {
+      throw new RingError(`Live view is turned off for ${added.name} by a mode in the Ring app. Turn it on there to watch here.`, 409);
+    }
+    throw new RingError(`Ring didn't start live video from ${added.name}. Try again in a moment.`, 502);
+  }
+  const sessionId = crypto.randomUUID();
+  const timer = setTimeout(() => { void endLive(sessionId); }, LIVE_MAX_MS);
+  timer.unref();
+  lives.set(sessionId, { cameraId: id, session, timer });
+  logger.info({ camera: added.name }, 'Ring live video started');
+  return { sessionId, answer: session.answer, maxSeconds: Math.round(LIVE_MAX_MS / 1000) };
+}
+
+/** Ends live video. Returns false for a session that already ended. */
+export async function endLive(sessionId: string): Promise<boolean> {
+  const live = lives.get(sessionId);
+  if (!live) return false;
+  lives.delete(sessionId);
+  clearTimeout(live.timer);
+  try {
+    await live.session.end();
+  } catch (err) {
+    logger.debug({ reason: (err as Error).message }, 'Ring live video end failed');
+  }
+  return true;
+}
+
+export const liveCount = (): number => lives.size;
 
 // ── Events ───────────────────────────────────────────────────────────
 

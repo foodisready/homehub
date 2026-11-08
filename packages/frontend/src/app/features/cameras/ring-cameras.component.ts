@@ -5,6 +5,7 @@ import { AuthService } from '../../core/auth/auth.service';
 import { SocketService } from '../../core/socket/socket.service';
 import { CamerasStateService } from '../../core/services/cameras-state.service';
 import { AuthImgComponent } from './auth-img.component';
+import { RingLiveComponent } from './ring-live.component';
 
 export interface RingSnapshot { id: number; deviceId: number | null; camera: string; cameraName: string; trigger: 'motion' | 'manual' | 'doorbell'; sizeBytes: number; takenAt: string }
 export interface RingCamera {
@@ -24,12 +25,12 @@ interface AccountCamera { id: number; name: string; home: string | null; model: 
 /**
  * Ring doorbells and cameras on the Cameras page: sign in with the code Ring
  * sends, add cameras, and see the pictures saved when the doorbell rings or a
- * camera sees motion. There's no live view yet.
+ * camera sees motion, and watch live.
  */
 @Component({
   selector: 'app-ring-cameras',
   standalone: true,
-  imports: [FormsModule, AuthImgComponent],
+  imports: [FormsModule, AuthImgComponent, RingLiveComponent],
   styles: [`
     h2 { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); margin: 1.75rem 0 0.75rem; }
     .card { padding: 1rem; }
@@ -191,6 +192,7 @@ interface AccountCamera { id: number; name: string; home: string | null; model: 
                   <p class="hint">End-to-end encryption is on for this camera in the Ring app, so HomeHub gets no pictures. Doorbell notifications still work.</p>
                 }
                 <div class="cam-actions">
+                  <button class="btn-sm btn-primary" type="button" (click)="live.set(c)" [disabled]="r.state !== 'ready' || !!c.offline || c.encrypted">Live</button>
                   <button class="btn-sm ghost" type="button" (click)="snapshot(c)" [disabled]="r.state !== 'ready' || busyId() === c.id || c.encrypted">
                     {{ busyId() === c.id ? 'Saving…' : 'Snapshot' }}
                   </button>
@@ -233,6 +235,10 @@ interface AccountCamera { id: number; name: string; home: string | null; model: 
         </div>
       }
     }
+
+    @if (live(); as c) {
+      <app-ring-live [cameraId]="c.id" [name]="c.label" (closed)="live.set(null)" />
+    }
   `,
 })
 export class RingCamerasComponent implements OnInit, OnDestroy {
@@ -255,6 +261,8 @@ export class RingCamerasComponent implements OnInit, OnDestroy {
   readonly busy = signal(false);
   readonly busyId = signal<number | null>(null);
   readonly confirmRemove = signal<number | null>(null);
+  /** The camera being watched live. */
+  readonly live = signal<RingCamera | null>(null);
   readonly confirmSignOut = signal(false);
   readonly message = signal('');
   readonly isError = signal(false);
