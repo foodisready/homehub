@@ -1,0 +1,23 @@
+/*
+ * Shared by the Cameras page and its Ring and IP camera sections, which put
+ * their cards into the page's grid and their accounts onto its Setup tab.
+ */
+
+/* A full-width line in the camera grid. */
+.span { grid-column: 1 / -1; }
+
+/* Something that needs attention, above every camera in the grid. */
+.note {
+  grid-column: 1 / -1; order: -1; display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;
+  padding: 0.55rem 0.8rem; border-radius: var(--radius); border: 1px solid #f59e0b; color: #fbbf24; font-size: 0.85rem;
+}
+.note.info { border-color: var(--border); color: var(--text); background: var(--surface); }
+.note span { flex: 1; min-width: 12rem; }
+
+/* One kind of camera's account, on the Setup tab. */
+.source .muted { margin-top: 0.4rem; }
+.source-head { display: flex; align-items: center; gap: 0.6rem; }
+.source-head strong { flex: 1; font-size: 1rem; }
+.pill.ok { border-color: var(--green); color: #4ade80; }
+.pill.warn { border-color: #f59e0b; color: #fbbf24; }
+.settings { margin-top: 0.75rem; border-top: 1px solid var(--border); }

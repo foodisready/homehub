@@ -1,4 +1,4 @@
-import { Component, OnDestroy, OnInit, computed, inject, output, signal } from '@angular/core';
+import { Component, OnDestroy, OnInit, computed, inject, input, output, signal } from '@angular/core';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
 import { AuthService } from '../../core/auth/auth.service';
@@ -28,6 +28,7 @@ interface IpInfo { relay: { state: 'ready' } | { state: 'unreachable'; detail: s
   selector: 'app-ip-cameras',
   standalone: true,
   imports: [FormsModule, AuthImgComponent, LiveViewComponent],
+  styleUrls: ['./camera-layout.css'],
   styles: [`
     h2 { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); margin: 1.75rem 0 0.75rem; }
     .card { padding: 1rem; }
@@ -69,35 +70,88 @@ interface IpInfo { relay: { state: 'ready' } | { state: 'unreachable'; detail: s
     .cam-actions { display: flex; gap: 0.4rem; flex-wrap: wrap; }
     .confirm { margin-top: 0.6rem; display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; font-size: 0.82rem; }
     .confirm span { flex: 1; min-width: 10rem; }
+
+    /* The cards join the Cameras page's grid (camera-layout.css). */
+    :host { display: contents; }
   `],
   template: `
     @if (info(); as r) {
-      @if (r.cameras.length || isAdmin()) {
-        <h2>IP cameras</h2>
-      }
-
-      @if (r.relay?.state === 'unreachable') {
-        <div class="card" style="margin-bottom:1rem">
-          <strong>Live video needs the camera relay</strong>
-          <p class="msg err">{{ $any(r.relay).detail }}</p>
-        </div>
-      }
-
-      @if (isAdmin()) {
-        @if (!formOpen()) {
-          @if (!r.cameras.length) {
-            <div class="card" style="margin-bottom:1rem">
-              <strong>Reolink, Amcrest or another IP camera?</strong>
-              <p class="muted" style="margin-top:0.4rem">
-                HomeHub talks to it directly on your home network, with no cloud or subscription:
-                live video, pictures when it sees motion, and turning, if it turns.
-              </p>
-              <button class="btn-sm btn-primary" type="button" style="margin-top:0.6rem" (click)="openForm()">Add an IP camera</button>
+      @if (view() === 'cameras') {
+        <!-- On the Cameras tab: what needs attention, and the cameras themselves. -->
+        @if (r.relay?.state === 'unreachable') {
+          <div class="note"><span>Live video from IP cameras needs the camera relay. {{ $any(r.relay).detail }}</span></div>
+        }
+        @for (c of r.cameras; track c.id) {
+          <div class="card cam">
+            <app-auth-img [src]="'/api/ip-cameras/' + c.id + '/live.jpg'" [refreshSeconds]="20" [alt]="c.name"
+                          failedText="No picture right now" (click)="live.set(c)" role="button" [attr.aria-label]="'Watch ' + c.name + ' live'" />
+            <div class="cam-body">
+              <div class="cam-title">
+                <strong>{{ c.name }}</strong>
+                <span class="pill" [class.watching]="c.motionState === 'watching'" [class.error]="c.motionState === 'error'">{{ motionLabel(c) }}</span>
+              </div>
+              <div class="cam-sub">
+                {{ c.maker ? c.maker + ' ' : '' }}{{ c.model ?? (c.onvif ? 'ONVIF camera' : 'RTSP camera') }} · {{ c.host }}
+                @if (c.lastMotionAt) { · motion {{ ago(c.lastMotionAt) }} }
+              </div>
+              @if (c.motionState === 'error') {
+                <p class="hint">HomeHub can't get motion from this camera and keeps trying: {{ c.motionDetail }}. If it has no motion detection, or it's off in the camera's app, turn motion off under Edit.</p>
+              }
+              <div class="cam-actions">
+                <button class="btn-sm btn-primary" type="button" (click)="live.set(c)">Live</button>
+                <button class="btn-sm ghost" type="button" (click)="snapshot(c)" [disabled]="busyId() === c.id">{{ busyId() === c.id ? 'Saving…' : 'Snapshot' }}</button>
+                @if (isAdmin()) {
+                  <button class="btn-sm ghost" type="button" (click)="startEdit(c)" [disabled]="busyId() === c.id">Edit</button>
+                  <button class="btn-sm ghost" type="button" (click)="confirmRemove.set(c.id)" [disabled]="busyId() === c.id">Remove</button>
+                }
+              </div>
+              @if (editing() === c.id) {
+                <div class="form">
+                  <input type="text" [(ngModel)]="editName" placeholder="Name" aria-label="Name" maxlength="80" style="grid-column:1/-1" />
+                  <input type="text" [(ngModel)]="editUser" placeholder="Camera username" aria-label="Camera username" autocomplete="off" />
+                  <input type="password" [(ngModel)]="editPass" placeholder="New password (blank keeps it)" aria-label="Camera password" autocomplete="new-password" />
+                  @if (c.hasSubStream) {
+                    <select [(ngModel)]="editQuality" aria-label="Live video quality" style="grid-column:1/-1">
+                      <option value="main">Live video: full quality</option>
+                      <option value="sub">Live video: smaller, for slow Wi-Fi or phones that can't play the full stream</option>
+                    </select>
+                  }
+                  @if (c.onvif) {
+                    <label class="check" style="grid-column:1/-1"><input type="checkbox" [(ngModel)]="editMotion" /> Save a picture when it sees motion</label>
+                  }
+                  <div class="wide">
+                    <button class="btn-sm btn-primary" type="button" (click)="saveEdit(c)" [disabled]="busyId() === c.id || !editName.trim()">{{ busyId() === c.id ? 'Saving…' : 'Save' }}</button>
+                    <button class="btn-sm ghost" type="button" (click)="editing.set(null)" [disabled]="busyId() === c.id">Cancel</button>
+                  </div>
+                </div>
+              }
+              @if (confirmRemove() === c.id) {
+                <div class="confirm">
+                  <span>Take {{ c.name }} out of HomeHub? The camera isn't changed, and its snapshots stay here until they're old enough to delete.</span>
+                  <button class="btn-sm danger" type="button" (click)="remove(c)">Remove</button>
+                  <button class="btn-sm ghost" type="button" (click)="confirmRemove.set(null)">Cancel</button>
+                </div>
+              }
             </div>
-          }
-        } @else {
-          <div class="card" style="margin-bottom:1rem">
-            <strong>Add an IP camera</strong>
+          </div>
+        }
+        @if (cameraMsg()) { <p class="msg err span">{{ cameraMsg() }}</p> }
+      } @else if (view() === 'setup' && isAdmin()) {
+        <!-- On the Setup tab: adding IP cameras. -->
+        <section class="card source">
+          <div class="source-head">
+            <strong>IP cameras</strong>
+            <span class="pill" [class.ok]="r.cameras.length > 0">{{ r.cameras.length ? (r.cameras.length === 1 ? '1 camera' : r.cameras.length + ' cameras') : 'Not set up' }}</span>
+          </div>
+          @if (r.relay?.state === 'unreachable') { <p class="msg err">{{ $any(r.relay).detail }}</p> }
+          @if (!formOpen()) {
+            <p class="muted">
+              Reolink, Amcrest or another IP camera? HomeHub talks to it directly on your home network, with no cloud or subscription:
+              live video, pictures when it sees motion, and turning, if it turns.
+            </p>
+            <button class="btn-sm btn-primary" type="button" style="margin-top:0.6rem" (click)="openForm()">{{ r.cameras.length ? 'Add another IP camera' : 'Add an IP camera' }}</button>
+            @if (message()) { <p class="msg" [class.err]="isError()" [class.ok]="!isError()">{{ message() }}</p> }
+          } @else {
             <p class="muted" style="margin-top:0.4rem">
               Use the username and password set on the camera itself, not a cloud account. The camera needs ONVIF on
               (in Reolink: Settings → Network → Advanced → Server Settings), and to be on the same Wi-Fi as HomeHub.
@@ -140,71 +194,8 @@ interface IpInfo { relay: { state: 'ready' } | { state: 'unreachable'; detail: s
               </div>
             </div>
             @if (message()) { <p class="msg" [class.err]="isError()" [class.ok]="!isError()">{{ message() }}</p> }
-          </div>
-        }
-      }
-
-      @if (r.cameras.length) {
-        <div class="grid">
-          @for (c of r.cameras; track c.id) {
-            <div class="card cam">
-              <app-auth-img [src]="'/api/ip-cameras/' + c.id + '/live.jpg'" [refreshSeconds]="20" [alt]="c.name"
-                            failedText="No picture right now" (click)="live.set(c)" role="button" [attr.aria-label]="'Watch ' + c.name + ' live'" />
-              <div class="cam-body">
-                <div class="cam-title">
-                  <strong>{{ c.name }}</strong>
-                  <span class="pill" [class.watching]="c.motionState === 'watching'" [class.error]="c.motionState === 'error'">{{ motionLabel(c) }}</span>
-                </div>
-                <div class="cam-sub">
-                  {{ c.maker ? c.maker + ' ' : '' }}{{ c.model ?? (c.onvif ? 'ONVIF camera' : 'RTSP camera') }} · {{ c.host }}
-                  @if (c.lastMotionAt) { · motion {{ ago(c.lastMotionAt) }} }
-                </div>
-                @if (c.motionState === 'error') {
-                  <p class="hint">HomeHub can't get motion from this camera and keeps trying: {{ c.motionDetail }}. If it has no motion detection, or it's off in the camera's app, turn motion off under Edit.</p>
-                }
-                <div class="cam-actions">
-                  <button class="btn-sm btn-primary" type="button" (click)="live.set(c)">Live</button>
-                  <button class="btn-sm ghost" type="button" (click)="snapshot(c)" [disabled]="busyId() === c.id">{{ busyId() === c.id ? 'Saving…' : 'Snapshot' }}</button>
-                  @if (isAdmin()) {
-                    <button class="btn-sm ghost" type="button" (click)="startEdit(c)" [disabled]="busyId() === c.id">Edit</button>
-                    <button class="btn-sm ghost" type="button" (click)="confirmRemove.set(c.id)" [disabled]="busyId() === c.id">Remove</button>
-                  }
-                </div>
-                @if (editing() === c.id) {
-                  <div class="form">
-                    <input type="text" [(ngModel)]="editName" placeholder="Name" aria-label="Name" maxlength="80" style="grid-column:1/-1" />
-                    <input type="text" [(ngModel)]="editUser" placeholder="Camera username" aria-label="Camera username" autocomplete="off" />
-                    <input type="password" [(ngModel)]="editPass" placeholder="New password (blank keeps it)" aria-label="Camera password" autocomplete="new-password" />
-                    @if (c.hasSubStream) {
-                      <select [(ngModel)]="editQuality" aria-label="Live video quality" style="grid-column:1/-1">
-                        <option value="main">Live video: full quality</option>
-                        <option value="sub">Live video: smaller, for slow Wi-Fi or phones that can't play the full stream</option>
-                      </select>
-                    }
-                    @if (c.onvif) {
-                      <label class="check" style="grid-column:1/-1"><input type="checkbox" [(ngModel)]="editMotion" /> Save a picture when it sees motion</label>
-                    }
-                    <div class="wide">
-                      <button class="btn-sm btn-primary" type="button" (click)="saveEdit(c)" [disabled]="busyId() === c.id || !editName.trim()">{{ busyId() === c.id ? 'Saving…' : 'Save' }}</button>
-                      <button class="btn-sm ghost" type="button" (click)="editing.set(null)" [disabled]="busyId() === c.id">Cancel</button>
-                    </div>
-                  </div>
-                }
-                @if (confirmRemove() === c.id) {
-                  <div class="confirm">
-                    <span>Take {{ c.name }} out of HomeHub? The camera isn't changed, and its snapshots stay here until they're old enough to delete.</span>
-                    <button class="btn-sm danger" type="button" (click)="remove(c)">Remove</button>
-                    <button class="btn-sm ghost" type="button" (click)="confirmRemove.set(null)">Cancel</button>
-                  </div>
-                }
-              </div>
-            </div>
           }
-        </div>
-        @if (cameraMsg()) { <p class="msg err">{{ cameraMsg() }}</p> }
-        @if (isAdmin() && !formOpen()) {
-          <button class="btn-sm ghost" type="button" style="margin-top:0.75rem" (click)="openForm()">Add another IP camera</button>
-        }
+        </section>
       }
     }
 
@@ -221,6 +212,8 @@ export class IpCamerasComponent implements OnInit, OnDestroy {
 
   /** The IP cameras in HomeHub, each time they're loaded, for the snapshot filter. */
   readonly camerasChange = output<IpCamera[]>();
+  /** Which part to show: the cameras (Cameras tab), adding them (Setup tab), or nothing (Snapshots tab). */
+  readonly view = input<'cameras' | 'setup' | 'none'>('cameras');
 
   readonly isAdmin = computed(() => this.auth.user()?.role === 'admin');
   readonly info = signal<IpInfo | null>(null);
@@ -285,6 +278,7 @@ export class IpCamerasComponent implements OnInit, OnDestroy {
 
   closeForm(): void {
     this.formOpen.set(false);
+    this.show('');
     this.found.set([]);
     this.searched.set(false);
     this.byRtsp.set(false);
@@ -317,10 +311,10 @@ export class IpCamerasComponent implements OnInit, OnDestroy {
     this.busy.set(true);
     this.show(this.byRtsp() ? '' : 'Connecting to the camera…');
     this.http.post<IpCamera>('/api/ip-cameras', body).subscribe({
-      next: () => {
+      next: (cam) => {
         this.busy.set(false);
         this.closeForm();
-        this.show('');
+        this.show(`Added ${cam.name}. It's on the Cameras tab.`);
         this.cameraMsg.set('');
         this.cams.load();   // Cameras stays in the menu even without the Wyze bridge
         this.load();

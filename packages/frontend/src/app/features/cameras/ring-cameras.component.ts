@@ -1,4 +1,4 @@
-import { Component, OnDestroy, OnInit, computed, inject, output, signal } from '@angular/core';
+import { Component, OnDestroy, OnInit, computed, inject, input, output, signal } from '@angular/core';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
 import { AuthService } from '../../core/auth/auth.service';
@@ -31,6 +31,7 @@ interface AccountCamera { id: number; name: string; home: string | null; model: 
   selector: 'app-ring-cameras',
   standalone: true,
   imports: [FormsModule, AuthImgComponent, RingLiveComponent],
+  styleUrls: ['./camera-layout.css'],
   styles: [`
     h2 { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); margin: 1.75rem 0 0.75rem; }
     .card { padding: 1rem; }
@@ -77,162 +78,170 @@ interface AccountCamera { id: number; name: string; home: string | null; model: 
     .settings-row .label { flex: 1; min-width: 12rem; font-size: 0.9rem; }
     .settings-row .label small { display: block; color: var(--text-muted); font-size: 0.75rem; }
     .settings-row input[type=checkbox] { width: 1.15rem; height: 1.15rem; accent-color: var(--accent); flex: none; }
+
+    /* The cards join the Cameras page's grid (camera-layout.css). */
+    :host { display: contents; }
   `],
   template: `
     @if (info(); as r) {
-      @if (r.state !== 'signed-out' || isAdmin()) {
-        <h2>Ring</h2>
-      }
+      @if (view() === 'cameras') {
+        <!-- On the Cameras tab: only what needs attention, and the cameras themselves. -->
+        @if (r.state === 'expired') {
+          <div class="note">
+            <span>Ring signed HomeHub out, so doorbell presses aren't arriving.</span>
+            @if (isAdmin()) { <button class="btn-sm ghost" type="button" (click)="openSetup.emit()">Sign in again</button> }
+            @else { <span>An administrator can sign in again.</span> }
+          </div>
+        } @else if (r.state === 'error' && r.cameras.length) {
+          <div class="note"><span>HomeHub can't reach Ring right now. It keeps trying; doorbell presses arrive once it connects.</span></div>
+        }
+        @if (r.state === 'ready' && isAdmin() && notAdded().length) {
+          <div class="note info">
+            <span>{{ notAdded().length === 1 ? 'A camera on your Ring account isn\\'t in HomeHub.' : notAdded().length + ' cameras on your Ring account aren\\'t in HomeHub.' }}</span>
+            <button class="btn-sm ghost" type="button" (click)="openSetup.emit()">Add</button>
+          </div>
+        }
 
-      @if (needsSignIn(r.state) && isAdmin()) {
-        <div class="card" style="margin-bottom:1rem">
+        @for (c of r.cameras; track c.id) {
+          <div class="card cam">
+            @if (c.latestSnapshot; as s) {
+              <app-auth-img [src]="'/api/cameras/snapshots/' + s.id + '/image'" [alt]="c.name" (click)="openSnapshot.emit(s)"
+                            role="button" [attr.aria-label]="'Latest picture from ' + c.name" />
+            } @else {
+              <div class="no-pic">{{ c.encrypted ? 'End-to-end encryption is on, so Ring shares no pictures' : 'No picture yet' }}</div>
+            }
+            <div class="cam-body">
+              <div class="cam-title">
+                <strong>{{ c.name }}</strong>
+                @if (c.offline) { <span class="pill offline">Offline</span> }
+                @else { <span class="pill">{{ c.isDoorbell ? 'Doorbell' : 'Ring' }}</span> }
+              </div>
+              <div class="cam-sub">
+                {{ c.home ? c.home + ' · ' : '' }}{{ c.model ?? 'Ring' }}
+                @if (c.lastDingAt) { · rang {{ ago(c.lastDingAt) }} }
+                @if (c.lastMotionAt) { · motion {{ ago(c.lastMotionAt) }} }
+                @if (c.latestSnapshot; as s) { · picture {{ ago(s.takenAt) }} }
+              </div>
+              @if (c.encrypted) {
+                <p class="hint">End-to-end encryption is on for this camera in the Ring app, so HomeHub gets no pictures. Doorbell notifications still work.</p>
+              }
+              <div class="cam-actions">
+                <button class="btn-sm btn-primary" type="button" (click)="live.set(c)" [disabled]="r.state !== 'ready' || !!c.offline || c.encrypted">Live</button>
+                <button class="btn-sm ghost" type="button" (click)="snapshot(c)" [disabled]="r.state !== 'ready' || busyId() === c.id || c.encrypted">
+                  {{ busyId() === c.id ? 'Saving…' : 'Snapshot' }}
+                </button>
+                @if (isAdmin()) {
+                  <button class="btn-sm ghost" type="button" (click)="confirmRemove.set(c.id)" [disabled]="busyId() === c.id">Remove</button>
+                }
+              </div>
+              @if (confirmRemove() === c.id) {
+                <div class="confirm">
+                  <span>Take {{ c.name }} out of HomeHub? It stays in your Ring account, and its snapshots stay here until they're old enough to delete.</span>
+                  <button class="btn-sm danger" type="button" (click)="remove(c)">Remove</button>
+                  <button class="btn-sm ghost" type="button" (click)="confirmRemove.set(null)">Cancel</button>
+                </div>
+              }
+            </div>
+          </div>
+        }
+        @if (cameraMsg()) { <p class="msg err span">{{ cameraMsg() }}</p> }
+      } @else if (view() === 'setup' && isAdmin()) {
+        <!-- On the Setup tab: the Ring account. -->
+        <section class="card source">
+          <div class="source-head">
+            <strong>Ring</strong>
+            <span class="pill" [class.ok]="r.state === 'ready'" [class.warn]="r.state === 'expired' || r.state === 'error'">{{ stateLabel(r.state, r.cameras.length) }}</span>
+          </div>
+
           @if (r.state === 'expired') {
-            <strong>Sign in to Ring again</strong>
             <p class="msg err">{{ r.detail }}</p>
-          } @else if (!formOpen() && !codeSentTo()) {
-            <strong>Ring doorbell or cameras?</strong>
-            <p class="muted" style="margin-top:0.4rem">
-              Sign in to Ring and HomeHub saves a picture when someone rings the doorbell, notifies your phone,
+          } @else if (r.state === 'signed-out' && !formOpen() && !codeSentTo()) {
+            <p class="muted">
+              Ring doorbell or cameras? Sign in and HomeHub saves a picture when someone rings the doorbell, notifies your phone,
               and can turn on a light when a Ring camera sees motion.
             </p>
             <button class="btn-sm btn-primary" type="button" style="margin-top:0.6rem" (click)="formOpen.set(true)">Sign in to Ring</button>
           }
 
-          @if (codeSentTo(); as to) {
-            <strong>Enter the code from Ring</strong>
-            <p class="muted" style="margin-top:0.4rem">Enter the code {{ to }}. It may take a minute to arrive.</p>
-            <div class="form">
-              <input class="code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="8"
-                     [(ngModel)]="code" placeholder="Code" aria-label="Code from Ring" (keyup.enter)="submitCode()" />
-              <div class="wide">
-                <button class="btn-sm btn-primary" type="button" (click)="submitCode()" [disabled]="busy() || code.replace(' ', '').length < 4">
-                  {{ busy() ? 'Signing in…' : 'Sign in' }}
-                </button>
-                <button class="btn-sm ghost" type="button" (click)="startOver()" [disabled]="busy()">Start over</button>
+          @if (needsSignIn(r.state)) {
+            @if (codeSentTo(); as to) {
+              <p class="muted">Enter the code {{ to }}. It may take a minute to arrive.</p>
+              <div class="form">
+                <input class="code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="8"
+                       [(ngModel)]="code" placeholder="Code" aria-label="Code from Ring" (keyup.enter)="submitCode()" />
+                <div class="wide">
+                  <button class="btn-sm btn-primary" type="button" (click)="submitCode()" [disabled]="busy() || code.replace(' ', '').length < 4">
+                    {{ busy() ? 'Signing in…' : 'Sign in' }}
+                  </button>
+                  <button class="btn-sm ghost" type="button" (click)="startOver()" [disabled]="busy()">Start over</button>
+                </div>
               </div>
-            </div>
-          } @else if (formOpen() || r.state === 'expired') {
-            @if (r.state !== 'expired') { <strong>Sign in to Ring</strong> }
-            <p class="muted" style="margin-top:0.4rem">
-              HomeHub keeps the sign-in Ring gives it, not your password, on this computer only.
-              It appears in the Ring app as “HomeHub” under Control Center → Authorized Client Devices, where you can remove it.
-            </p>
-            <div class="form">
-              <input type="email" [(ngModel)]="email" placeholder="Ring email" aria-label="Ring email" autocomplete="off" />
-              <input type="password" [(ngModel)]="password" placeholder="Ring password" aria-label="Ring password" autocomplete="new-password" (keyup.enter)="signIn()" />
-              <div class="wide">
-                <button class="btn-sm btn-primary" type="button" (click)="signIn()" [disabled]="busy() || !email.trim() || !password">
-                  {{ busy() ? 'Signing in…' : 'Sign in' }}
-                </button>
-                @if (r.state !== 'expired') {
-                  <button class="btn-sm ghost" type="button" (click)="formOpen.set(false)" [disabled]="busy()">Cancel</button>
+            } @else if (formOpen() || r.state === 'expired') {
+              <p class="muted">
+                HomeHub keeps the sign-in Ring gives it, not your password, on this computer only.
+                It appears in the Ring app as “HomeHub” under Control Center → Authorized Client Devices, where you can remove it.
+              </p>
+              <div class="form">
+                <input type="email" [(ngModel)]="email" placeholder="Ring email" aria-label="Ring email" autocomplete="off" />
+                <input type="password" [(ngModel)]="password" placeholder="Ring password" aria-label="Ring password" autocomplete="new-password" (keyup.enter)="signIn()" />
+                <div class="wide">
+                  <button class="btn-sm btn-primary" type="button" (click)="signIn()" [disabled]="busy() || !email.trim() || !password">
+                    {{ busy() ? 'Signing in…' : 'Sign in' }}
+                  </button>
+                  @if (r.state !== 'expired') {
+                    <button class="btn-sm ghost" type="button" (click)="formOpen.set(false)" [disabled]="busy()">Cancel</button>
+                  }
+                </div>
+              </div>
+            }
+          }
+
+          @switch (r.state) {
+            @case ('standby') {
+              <p class="muted">This HomeHub is a backup or development server, so it doesn't connect to Ring. It keeps your Ring sign-in for when it's made the active server.</p>
+            }
+            @case ('connecting') { <p class="muted">Connecting to Ring…</p> }
+            @case ('error') {
+              <p class="muted">HomeHub can't reach Ring right now. It keeps trying; doorbell presses won't arrive until it connects.</p>
+              <p class="msg err">{{ r.detail }}</p>
+            }
+          }
+
+          @if (r.state === 'ready') {
+            @if (notAdded().length) {
+              <div class="add-list">
+                @for (c of notAdded(); track c.id) {
+                  <div class="add-row">
+                    <span class="name">{{ c.name }}<span class="sub">{{ c.home ? c.home + ' · ' : '' }}{{ c.model }}{{ c.hasBattery ? ' · battery' : '' }}{{ c.offline ? ' · offline' : '' }}</span></span>
+                    <button class="btn-sm btn-primary" type="button" (click)="add(c)" [disabled]="busy()">Add</button>
+                  </div>
+                }
+              </div>
+            } @else if (!r.cameras.length) {
+              <p class="muted">No cameras on your Ring account.</p>
+            }
+          }
+
+          @if (r.state !== 'signed-out') {
+            <div class="settings">
+              <div class="settings-row">
+                <span class="label">Notify my phone when the doorbell rings<small>With the picture, when Ring has one. Motion follows the motion settings below</small></span>
+                <input type="checkbox" [checked]="r.notifyDoorbell" (change)="saveNotify($any($event.target).checked)" aria-label="Notify when the doorbell rings" />
+              </div>
+              <div class="settings-row">
+                <span class="label">Ring account<small>Signing out deletes HomeHub's Ring sign-in. Added cameras stay listed for when you sign in again</small></span>
+                @if (confirmSignOut()) {
+                  <button class="btn-sm danger" type="button" (click)="signOut()" [disabled]="busy()">Sign out</button>
+                  <button class="btn-sm ghost" type="button" (click)="confirmSignOut.set(false)">Cancel</button>
+                } @else {
+                  <button class="btn-sm ghost" type="button" (click)="confirmSignOut.set(true)" [disabled]="busy()">Sign out of Ring</button>
                 }
               </div>
             </div>
           }
           @if (message()) { <p class="msg" [class.err]="isError()" [class.ok]="!isError()">{{ message() }}</p> }
-        </div>
-      }
-
-      @switch (r.state) {
-        @case ('standby') {
-          <div class="card" style="margin-bottom:1rem">
-            <strong>Ring runs on the active HomeHub</strong>
-            <p class="muted" style="margin-top:0.4rem">This HomeHub is a backup or development server, so it doesn't connect to Ring. It keeps your Ring sign-in for when it's made the active server.</p>
-          </div>
-        }
-        @case ('connecting') { <p class="muted" style="margin-bottom:1rem">Connecting to Ring…</p> }
-        @case ('error') {
-          <div class="card" style="margin-bottom:1rem">
-            <strong>HomeHub can't reach Ring right now</strong>
-            <p class="muted" style="margin-top:0.4rem">It keeps trying. Doorbell presses won't arrive until it connects.</p>
-            <p class="msg err">{{ r.detail }}</p>
-          </div>
-        }
-      }
-
-      @if (r.state === 'ready' && isAdmin() && notAdded().length) {
-        <div class="card" style="margin-bottom:1rem">
-          <strong>{{ notAdded().length === 1 ? 'A camera on your Ring account isn\\'t in HomeHub' : notAdded().length + ' cameras on your Ring account aren\\'t in HomeHub' }}</strong>
-          <div class="add-list">
-            @for (c of notAdded(); track c.id) {
-              <div class="add-row">
-                <span class="name">{{ c.name }}<span class="sub">{{ c.home ? c.home + ' · ' : '' }}{{ c.model }}{{ c.hasBattery ? ' · battery' : '' }}{{ c.offline ? ' · offline' : '' }}</span></span>
-                <button class="btn-sm btn-primary" type="button" (click)="add(c)" [disabled]="busy()">Add</button>
-              </div>
-            }
-          </div>
-          @if (message() && !needsSignIn(r.state)) { <p class="msg" [class.err]="isError()" [class.ok]="!isError()">{{ message() }}</p> }
-        </div>
-      }
-
-      @if (r.cameras.length) {
-        <div class="grid">
-          @for (c of r.cameras; track c.id) {
-            <div class="card cam">
-              @if (c.latestSnapshot; as s) {
-                <app-auth-img [src]="'/api/cameras/snapshots/' + s.id + '/image'" [alt]="c.name" (click)="openSnapshot.emit(s)"
-                              role="button" [attr.aria-label]="'Latest picture from ' + c.name" />
-              } @else {
-                <div class="no-pic">{{ c.encrypted ? 'End-to-end encryption is on, so Ring shares no pictures' : 'No picture yet' }}</div>
-              }
-              <div class="cam-body">
-                <div class="cam-title">
-                  <strong>{{ c.name }}</strong>
-                  @if (c.offline) { <span class="pill offline">Offline</span> }
-                  @else { <span class="pill">{{ c.isDoorbell ? 'Doorbell' : 'Camera' }}</span> }
-                </div>
-                <div class="cam-sub">
-                  {{ c.home ? c.home + ' · ' : '' }}{{ c.model ?? 'Ring' }}
-                  @if (c.lastDingAt) { · rang {{ ago(c.lastDingAt) }} }
-                  @if (c.lastMotionAt) { · motion {{ ago(c.lastMotionAt) }} }
-                  @if (c.latestSnapshot; as s) { · picture {{ ago(s.takenAt) }} }
-                </div>
-                @if (c.encrypted) {
-                  <p class="hint">End-to-end encryption is on for this camera in the Ring app, so HomeHub gets no pictures. Doorbell notifications still work.</p>
-                }
-                <div class="cam-actions">
-                  <button class="btn-sm btn-primary" type="button" (click)="live.set(c)" [disabled]="r.state !== 'ready' || !!c.offline || c.encrypted">Live</button>
-                  <button class="btn-sm ghost" type="button" (click)="snapshot(c)" [disabled]="r.state !== 'ready' || busyId() === c.id || c.encrypted">
-                    {{ busyId() === c.id ? 'Saving…' : 'Snapshot' }}
-                  </button>
-                  @if (isAdmin()) {
-                    <button class="btn-sm ghost" type="button" (click)="confirmRemove.set(c.id)" [disabled]="busyId() === c.id">Remove</button>
-                  }
-                </div>
-                @if (confirmRemove() === c.id) {
-                  <div class="confirm">
-                    <span>Take {{ c.name }} out of HomeHub? It stays in your Ring account, and its snapshots stay here until they're old enough to delete.</span>
-                    <button class="btn-sm danger" type="button" (click)="remove(c)">Remove</button>
-                    <button class="btn-sm ghost" type="button" (click)="confirmRemove.set(null)">Cancel</button>
-                  </div>
-                }
-              </div>
-            </div>
-          }
-        </div>
-        @if (cameraMsg()) { <p class="msg err">{{ cameraMsg() }}</p> }
-      } @else if (r.state === 'ready' && !notAdded().length && isAdmin()) {
-        <p class="muted">No cameras on your Ring account.</p>
-      }
-
-      @if (isAdmin() && r.state !== 'signed-out') {
-        <div class="card" style="margin-top:0.85rem">
-          <div class="settings-row">
-            <span class="label">Notify my phone when the doorbell rings<small>With the picture, when Ring has one. Motion follows the camera settings below</small></span>
-            <input type="checkbox" [checked]="r.notifyDoorbell" (change)="saveNotify($any($event.target).checked)" aria-label="Notify when the doorbell rings" />
-          </div>
-          <div class="settings-row">
-            <span class="label">Ring account<small>Signing out deletes HomeHub's Ring sign-in. Added cameras stay listed for when you sign in again</small></span>
-            @if (confirmSignOut()) {
-              <button class="btn-sm danger" type="button" (click)="signOut()" [disabled]="busy()">Sign out</button>
-              <button class="btn-sm ghost" type="button" (click)="confirmSignOut.set(false)">Cancel</button>
-            } @else {
-              <button class="btn-sm ghost" type="button" (click)="confirmSignOut.set(true)" [disabled]="busy()">Sign out of Ring</button>
-            }
-          </div>
           @if (settingsMsg()) { <p class="msg" [class.err]="settingsErr()" [class.ok]="!settingsErr()">{{ settingsMsg() }}</p> }
-        </div>
+        </section>
       }
     }
 
@@ -251,6 +260,10 @@ export class RingCamerasComponent implements OnInit, OnDestroy {
   readonly openSnapshot = output<RingSnapshot>();
   /** The Ring cameras in HomeHub, each time they're loaded, for the snapshot filter. */
   readonly camerasChange = output<RingCamera[]>();
+  /** Which part to show: the cameras (Cameras tab), the Ring account (Setup tab), or nothing (Snapshots tab). */
+  readonly view = input<'cameras' | 'setup' | 'none'>('cameras');
+  /** Something needs doing on the Setup tab, such as signing in again. */
+  readonly openSetup = output<void>();
 
   readonly isAdmin = computed(() => this.auth.user()?.role === 'admin');
   readonly info = signal<RingInfo | null>(null);
@@ -276,6 +289,17 @@ export class RingCamerasComponent implements OnInit, OnDestroy {
 
   private timer?: ReturnType<typeof setInterval>;
   private stopSnapshots?: () => void;
+
+  stateLabel(state: RingStatus['state'], cameras: number): string {
+    switch (state) {
+      case 'ready': return cameras === 1 ? 'Signed in · 1 camera' : `Signed in · ${cameras} cameras`;
+      case 'expired': return 'Sign in again';
+      case 'error': return 'Can\'t reach Ring';
+      case 'connecting': return 'Connecting…';
+      case 'standby': return 'Standby';
+      default: return 'Not set up';
+    }
+  }
 
   needsSignIn(state: RingStatus['state']): boolean {
     return state === 'signed-out' || state === 'expired';

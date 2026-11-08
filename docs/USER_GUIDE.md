@@ -112,15 +112,21 @@ HomeHub keeps its Matter pairings in its database, so backups include them and a
 
 ## Cameras
 
-HomeHub can show Wyze cameras live, pause them while you're home, and save snapshots from them. It works through the camera bridge, a service that comes with HomeHub, and needs a free Wyze developer API key.
+HomeHub can show Wyze cameras live, pause them while you're home, and save snapshots from them. It works through the camera bridge, a service that comes with HomeHub, and needs a free Wyze developer API key. Ring and IP cameras are below.
+
+The Cameras page has three tabs:
+
+- **Cameras**: every camera, Wyze, Ring and IP, together. When something needs attention, such as Ring wanting you to sign in again or a camera on your account that isn't in HomeHub yet, a note above the cameras says so.
+- **Snapshots**: saved pictures, newest first. The tab shows how many are new since you last looked.
+- **Setup** (administrators): signing in to Wyze and Ring, adding cameras, and the motion and snapshot settings shared by every camera.
 
 ### Add your cameras
 
 1. Create an API key at the [Wyze developer console](https://developer-api-console.wyze.com/), signed in with your Wyze account. Keep the key and its ID handy.
-2. Open **Cameras** (under **More** on a phone), and sign in with your Wyze email, password, API key ID and API key. The camera bridge restarts with your account, which takes up to a minute.
+2. Open **Cameras** (under **More** on a phone), then **Setup**, select **Sign in to Wyze**, and sign in with your Wyze email, password, API key ID and API key. The camera bridge restarts with your account, which takes up to a minute.
 3. Select **Add** next to each camera, or **Add all**. Then give each one a room in **Settings → Devices**.
 
-HomeHub keeps your Wyze sign-in on the HomeHub computer, in its data folder, where only the camera bridge reads it. It's needed again whenever the bridge restarts. **Sign out of Wyze**, at the bottom of the Cameras page, deletes it and stops the bridge.
+HomeHub keeps your Wyze sign-in on the HomeHub computer, in its data folder, where only the camera bridge reads it. It's needed again whenever the bridge restarts. **Sign out of Wyze**, on the Cameras page's **Setup** tab, deletes it and stops the bridge.
 
 If your Wyze account uses two-step verification, the bridge can't sign in yet; turn it off in the Wyze app first.
 
@@ -128,7 +134,7 @@ The cameras need to be on the same network as the HomeHub computer. A camera on 
 
 ### Turn cameras off
 
-No Wyze cameras? Select **Turn cameras off** on the Cameras page, or clear **Wyze cameras** under **Settings → Integrations**. Cameras disappears from the menu. Turn it back on in the same place.
+No cameras at all? Select **Turn off** on the Cameras page's **Setup** tab, or clear **Wyze cameras** under **Settings → Integrations**. Cameras disappears from the menu. Turn it back on in the same place.
 
 Until someone signs in to Wyze, the camera bridge waits and uses almost no memory. To leave it out of HomeHub entirely, set `HOMEHUB_CAMERA_BRIDGE=0` in `.env` and run `docker compose -f docker-compose.yml up -d`. Remove the line and run the command again to bring it back.
 
@@ -150,7 +156,7 @@ HomeHub switches cameras through your Wyze account, using the sign-in you saved,
 
 ### Snapshots
 
-Select **Snapshot** to save a picture yourself. Snapshots appear on the **Cameras** page, newest first, and you can filter them by camera. They're saved as JPG files in HomeHub's data folder, under `snapshots/<camera>/<date>/`, and deleted after 30 days, which administrators can change at the bottom of the page.
+Select **Snapshot** to save a picture yourself. Snapshots appear on the Cameras page's **Snapshots** tab, newest first, and you can filter them by camera. Tap one to see it full size, then swipe left for older pictures and right for newer ones; on a computer, use the arrow keys. They're saved as JPG files in HomeHub's data folder, under `snapshots/<camera>/<date>/`, and deleted after 30 days, which administrators can change on the **Setup** tab.
 
 To send pictures to someone, open one and select **Share**, or select **Select** above the snapshots, tap the pictures you want (up to 20) and select **Share**. Your phone's own share menu opens, for Messages, email, Photos and so on. The pictures go only where you send them.
 
@@ -162,7 +168,7 @@ Snapshots are history, so JSON backups leave them out. The install guide's full 
 
 When a camera sees motion, Wyze reports it to your account, and HomeHub saves a picture from the camera, usually 5 to 15 seconds later. Snapshots from motion are marked **motion**. HomeHub checks for motion every 10 seconds, which uses a small part of what Wyze allows your account; the Wyze app shares the same allowance.
 
-Administrators can change these settings at the bottom of the Cameras page:
+Administrators can change these settings on the Cameras page's **Setup** tab:
 
 - **Save a snapshot on motion:** on by default.
 - **Notify my phone:** sends a notification with each motion snapshot, saying what Wyze saw, such as "a person" or "a pet".
@@ -176,7 +182,7 @@ The camera bridge is unofficial, and a Wyze firmware update can stop it working 
 
 HomeHub can save a picture when someone rings a Ring doorbell, notify your phone, show a Ring camera live, and turn on a light when a Ring camera sees motion. It works through your Ring account, so it needs the internet.
 
-1. Open **Cameras** and select **Sign in to Ring**. Only an administrator can.
+1. Open **Cameras**, then **Setup**, and select **Sign in to Ring**. Only an administrator can.
 2. Enter your Ring email and password. Ring sends a code by text message, email or your authenticator app; enter it.
 3. Select **Add** next to each doorbell or camera you want in HomeHub.
 
@@ -207,7 +213,7 @@ Before you start, in the camera's own app or web page:
 
 Then, as an administrator:
 
-1. Open **Cameras** and select **Add an IP camera**.
+1. Open **Cameras**, then **Setup**, and select **Add an IP camera**.
 2. Select **Search the network** and **Use** next to your camera, or type its address, as shown in the camera's app.
 3. Enter the camera's username and password, and a name if you like, then select **Add camera**.
 

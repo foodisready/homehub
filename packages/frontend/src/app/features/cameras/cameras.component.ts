@@ -1,6 +1,7 @@
-import { Component, OnDestroy, OnInit, computed, inject, signal } from '@angular/core';
+import { Component, HostListener, OnDestroy, OnInit, computed, inject, signal } from '@angular/core';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
+import { ActivatedRoute, Router } from '@angular/router';
 import { AuthService } from '../../core/auth/auth.service';
 import { SocketService } from '../../core/socket/socket.service';
 import { CamerasStateService } from '../../core/services/cameras-state.service';
@@ -31,22 +32,30 @@ interface AccountCamera { cam: string; name: string; model: string | null; ip: s
 interface Settings { enabled: boolean; motionSnapshots: boolean; notify: boolean; keepDays: number; cooldownSeconds: number }
 
 const PAGE = 48;
+type Tab = 'cameras' | 'snapshots' | 'setup';
+const TABS: Tab[] = ['cameras', 'snapshots', 'setup'];
+/** The newest snapshot this browser has seen on the Snapshots tab. */
+const SEEN_KEY = 'homehub.cameras.seenSnapshot';
 
 /**
- * Wyze cameras: sign in to Wyze, watch live, pause and resume, take snapshots
- * and look through them. Ring cameras have their own section, and share the
- * snapshots and camera settings.
+ * The Cameras page, in three tabs:
+ *  - Cameras: every camera, Wyze, Ring and IP, in one grid, with notes above
+ *    when something needs attention.
+ *  - Snapshots: the saved pictures, by day.
+ *  - Setup (admin): each kind's account and adding cameras, then the motion
+ *    and snapshot settings shared by all.
+ * Wyze is handled here; Ring and IP cameras have their own components, told
+ * which tab is showing.
  */
 @Component({
   selector: 'app-cameras',
   standalone: true,
   imports: [FormsModule, AuthImgComponent, LiveViewComponent, RingCamerasComponent, IpCamerasComponent],
+  styleUrls: ['./camera-layout.css', './snapshot-viewer.css'],
   styles: [`
     h1 { font-size: 1.4rem; font-weight: 700; margin-bottom: 1rem; }
-    h2 { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); margin: 1.75rem 0 0.75rem; }
     .card { padding: 1rem; }
     .muted { color: var(--text-muted); font-size: 0.85rem; line-height: 1.5; }
-    .link { background:none; border:none; padding:0; color:var(--accent, #60a5fa); font:inherit; cursor:pointer; text-decoration:underline; }
     .cmd {
       margin:0.6rem 0; padding:0.6rem 0.75rem; overflow-x:auto; white-space:pre;
       font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:0.8rem;
@@ -78,10 +87,10 @@ const PAGE = 48;
     .cam-title { display: flex; align-items: center; gap: 0.5rem; }
     .cam-title strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .pill { font-size: 0.7rem; font-weight: 700; padding: 0.12rem 0.55rem; border-radius: 999px; border: 1px solid var(--border); color: var(--text-muted); white-space: nowrap; }
-    .pill.watching { border-color: var(--green); color: #4ade80; }
+    .pill.watching, .pill.ok { border-color: var(--green); color: #4ade80; }
     .pill.paused { border-color: #f59e0b; color: #fbbf24; }
     .pill.offline { border-color: var(--red); color: #f87171; }
-    .pill.nopicture, .pill.othernet { border-color: #f59e0b; color: #fbbf24; }
+    .pill.nopicture, .pill.othernet, .pill.warn { border-color: #f59e0b; color: #fbbf24; }
     .hint { font-size: 0.78rem; color: #fbbf24; margin: -0.3rem 0 0.6rem; line-height: 1.45; }
     .cam-sub { font-size: 0.75rem; color: var(--text-muted); margin: 0.2rem 0 0.6rem; }
     .cam-actions { display: flex; gap: 0.4rem; flex-wrap: wrap; }
@@ -111,77 +120,190 @@ const PAGE = 48;
     }
     .shot.selected .tick { background: var(--accent); border-color: var(--accent); }
     .share-msg { font-size: 0.82rem; color: var(--text-muted); margin: 0 0 0.6rem; }
-    .lightbox .share-msg { color: #cbd5e1; margin: 0.5rem 0 0; }
 
-    .lightbox { position: fixed; inset: 0; z-index: 60; background: rgba(0, 0, 0, 0.9); display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 1rem; }
-    .lightbox-frame { width: min(100%, 1100px); }
-    .lightbox app-auth-img { aspect-ratio: 16 / 9; border-radius: 8px; }
-    .lightbox-bar { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; color: #fff; margin-bottom: 0.5rem; flex-wrap: wrap; font-size: 0.9rem; }
-    .lightbox-nav { display: flex; gap: 0.4rem; }
-    .lightbox button.ghost { color: #fff; border-color: rgba(255, 255, 255, 0.35); }
 
-    .settings-row { display: flex; align-items: center; gap: 1rem; padding: 0.6rem 0; border-top: 1px solid var(--border); }
+    .settings-row { display: flex; align-items: center; gap: 1rem; padding: 0.6rem 0; border-top: 1px solid var(--border); flex-wrap: wrap; }
     .settings-row:first-child { border-top: none; }
-    .settings-row .label { flex: 1; font-size: 0.9rem; }
+    .settings-row .label { flex: 1; min-width: 12rem; font-size: 0.9rem; }
     .settings-row .label small { display: block; color: var(--text-muted); font-size: 0.75rem; }
     .settings-row input[type=number] { width: 5.5rem; text-align: right; font-size: 0.9rem; padding: 0.35rem 0.5rem; }
     .settings-row input[type=checkbox] { width: 1.15rem; height: 1.15rem; accent-color: var(--accent); }
+
+    .tabs { display: flex; gap: 0.25rem; border-bottom: 1px solid var(--border); margin-bottom: 1rem; overflow-x: auto; }
+    .tab {
+      background: none; border: none; border-bottom: 2px solid transparent; border-radius: 0; margin-bottom: -1px;
+      padding: 0.55rem 0.9rem; color: var(--text-muted); font-size: 0.92rem; font-weight: 600; white-space: nowrap;
+      display: inline-flex; align-items: center; gap: 0.4rem;
+    }
+    .tab:hover { color: var(--text); background: none; }
+    .tab.active { color: var(--text); border-bottom-color: var(--accent); }
+    .tab .count { font-size: 0.7rem; font-weight: 700; padding: 0.05rem 0.45rem; border-radius: 999px; background: var(--surface); border: 1px solid var(--border); color: var(--text-muted); }
+    .tab .count.new { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+    .empty { padding: 2rem 1rem; text-align: center; border: 1px dashed var(--border); border-radius: var(--radius); }
+    .empty .muted { margin: 0.4rem 0 0.8rem; }
+
+    .stack { display: flex; flex-direction: column; gap: 0.85rem; }
   `],
   template: `
     <div class="page">
       <h1>Cameras</h1>
 
       @if (bridge(); as b) {
-        @if (b.state !== 'ready') {
+        @if (b.state === 'off') {
           <div class="card">
-            @switch (b.state) {
-              @case ('off') {
-                <strong>Cameras are off</strong>
-                <p class="muted" style="margin-top:0.4rem">They're hidden from the menu, and HomeHub isn't watching for motion.</p>
-                @if (isAdmin()) {
-                  <button class="btn-sm btn-primary" type="button" style="margin-top:0.6rem" (click)="turnOn()" [disabled]="busy()">Turn on cameras</button>
-                } @else {
-                  <p class="muted">An administrator can turn them on in Settings → Integrations.</p>
+            <strong>Cameras are off</strong>
+            <p class="muted" style="margin-top:0.4rem">They're hidden from the menu, and HomeHub isn't watching for motion.</p>
+            @if (isAdmin()) {
+              <button class="btn-sm btn-primary" type="button" style="margin-top:0.6rem" (click)="turnOn()" [disabled]="busy()">Turn on cameras</button>
+            } @else {
+              <p class="muted">An administrator can turn them on in Settings → Integrations.</p>
+            }
+            @if (message()) { <p class="msg" [class.err]="isError()" [class.ok]="!isError()">{{ message() }}</p> }
+          </div>
+        } @else {
+          <div class="tabs" role="tablist" aria-label="Cameras">
+            <button class="tab" type="button" role="tab" [class.active]="tab() === 'cameras'" [attr.aria-selected]="tab() === 'cameras'" (click)="setTab('cameras')">
+              Cameras @if (total()) { <span class="count">{{ total() }}</span> }
+            </button>
+            <button class="tab" type="button" role="tab" [class.active]="tab() === 'snapshots'" [attr.aria-selected]="tab() === 'snapshots'" (click)="setTab('snapshots')">
+              Snapshots @if (newShots(); as n) { <span class="count new">{{ n }} new</span> }
+            </button>
+            @if (isAdmin()) {
+              <button class="tab" type="button" role="tab" [class.active]="tab() === 'setup'" [attr.aria-selected]="tab() === 'setup'" (click)="setTab('setup')">Setup</button>
+            }
+          </div>
+
+          <!-- Every camera, Wyze, Ring and IP, in one grid; on Setup, each kind's account and adding. -->
+          <div [class]="tab() === 'setup' ? 'stack' : 'grid'">
+            @if (tab() === 'cameras') {
+              @switch (b.state) {
+                @case ('standby') {
+                  <div class="note info"><span>This HomeHub is a backup or development server, so it leaves Wyze cameras and Ring to the active one.</span></div>
+                }
+                @case ('starting') {
+                  <div class="note info"><span>Signing in to Wyze. The camera bridge takes up to a minute to start.</span></div>
+                }
+                @case ('unreachable') {
+                  @if (cameras().length) { <div class="note"><span>HomeHub can't reach the Wyze camera bridge. It can take a minute to start.</span></div> }
+                }
+                @case ('unauthorized') {
+                  @if (cameras().length) {
+                    <div class="note"><span>The Wyze camera bridge rejected HomeHub's key.</span>
+                      @if (isAdmin()) { <button class="btn-sm ghost" type="button" (click)="setTab('setup')">Fix</button> }
+                    </div>
+                  }
+                }
+                @case ('sign-in-failed') {
+                  <div class="note"><span>Wyze sign-in didn't work, so Wyze cameras aren't connected.</span>
+                    @if (isAdmin()) { <button class="btn-sm ghost" type="button" (click)="setTab('setup')">Sign in</button> }
+                  </div>
                 }
               }
-              @case ('not-configured') {
-                <strong>Wyze cameras need the camera bridge, which is left out of this HomeHub</strong>
-                <p class="muted" style="margin-top:0.4rem">
-                  HomeHub talks to Wyze cameras through the camera bridge. To add it, remove
-                  <code>HOMEHUB_CAMERA_BRIDGE=0</code> from HomeHub's <code>.env</code>, then run this in the <code>homehub</code> folder:
-                </p>
-                <pre class="cmd">docker compose -f docker-compose.yml up -d</pre>
+              @if (bridgeError()) { <div class="note"><span>{{ bridgeError() }}</span></div> }
+              @if (b.state === 'ready' && isAdmin() && notAdded().length) {
+                <div class="note info">
+                  <span>{{ notAdded().length === 1 ? 'A camera on your Wyze account isn\\'t in HomeHub.' : notAdded().length + ' cameras on your Wyze account aren\\'t in HomeHub.' }}</span>
+                  <button class="btn-sm ghost" type="button" (click)="setTab('setup')">Add</button>
+                </div>
               }
-              @case ('unreachable') {
-                <strong>HomeHub can't reach the camera bridge</strong>
-                <p class="muted" style="margin-top:0.4rem">Check that the <code>wyze-bridge</code> service is running. It can take a minute to start.</p>
+
+              @for (c of cameras(); track c.deviceId) {
+                <div class="card cam">
+                  <app-auth-img [src]="'/api/cameras/' + c.deviceId + '/live.jpg?cached=1'" (result)="thumbResult(c, $event)" [refreshSeconds]="c.watching === false ? 0 : 20"
+                                [alt]="c.name" [failedText]="c.watching === false ? 'Paused' : c.otherNetwork ? 'On another network' : c.streaming ? 'No picture right now' : 'Not connected to this camera yet'"
+                                (click)="openLive(c)" role="button" [attr.aria-label]="'Watch ' + c.name + ' live'" />
+                  <div class="cam-body">
+                    <div class="cam-title">
+                      <strong>{{ c.name }}</strong>
+                      <span class="pill" [class]="'pill ' + statusOf(c)">{{ statusLabel(c) }}</span>
+                    </div>
+                    <div class="cam-sub">
+                      {{ c.room ?? 'No room' }}{{ c.model ? ' · ' + c.model : '' }}
+                      @if (c.lastMotionAt) { · motion {{ ago(c.lastMotionAt) }} }
+                    </div>
+                    @if (statusOf(c) === 'othernet') {
+                      <p class="hint">{{ c.noPictureHint }}</p>
+                    } @else if (statusOf(c) === 'nopicture') {
+                      <p class="hint">
+                        {{ c.lastPictureAt ? 'Last picture ' + ago(c.lastPictureAt) + '.' : 'No picture yet.' }}
+                        {{ c.noPictureHint }}
+                      </p>
+                    }
+                    <div class="cam-actions">
+                      <button class="btn-sm btn-primary" type="button" (click)="openLive(c)" [disabled]="c.watching === false">Live</button>
+                      <button class="btn-sm ghost" type="button" (click)="takeSnapshot(c)" [disabled]="c.watching === false || busyId() === c.deviceId">
+                        {{ busyId() === c.deviceId ? 'Saving…' : 'Snapshot' }}
+                      </button>
+                      @if (c.watching === false) {
+                        <button class="btn-sm ghost" type="button" (click)="setWatching(c, true)" [disabled]="busyId() === c.deviceId">Resume</button>
+                      } @else {
+                        <button class="btn-sm ghost" type="button" (click)="confirmPause.set(c.deviceId)" [disabled]="busyId() === c.deviceId">Pause</button>
+                      }
+                    </div>
+                    @if (confirmPause() === c.deviceId) {
+                      <div class="confirm">
+                        <span>Pause {{ c.name }}? It stops watching, recording and detecting motion until you resume it.</span>
+                        <button class="btn-sm danger" type="button" (click)="setWatching(c, false)">Pause</button>
+                        <button class="btn-sm ghost" type="button" (click)="confirmPause.set(null)">Cancel</button>
+                      </div>
+                    }
+                  </div>
+                </div>
               }
-              @case ('unauthorized') {
-                <strong>The camera bridge rejected HomeHub's key</strong>
-                <p class="muted" style="margin-top:0.4rem">HomeHub and the bridge normally share a key HomeHub makes itself. If you set <code>WYZE_BRIDGE_API_KEY</code> in <code>.env</code>, remove it or make sure both use the same value, then run <code>docker compose -f docker-compose.yml up -d</code>.</p>
+              @if (cameraMsg()) { <p class="msg err span">{{ cameraMsg() }}</p> }
+              @if (loaded() && !total()) {
+                <div class="empty span">
+                  <strong>No cameras yet</strong>
+                  @if (isAdmin()) {
+                    <p class="muted">Add Wyze, Ring, Reolink, Amcrest and other cameras on the Setup tab.</p>
+                    <button class="btn-sm btn-primary" type="button" (click)="setTab('setup')">Set up cameras</button>
+                  } @else {
+                    <p class="muted">An administrator can add cameras.</p>
+                  }
+                </div>
               }
-              @case ('starting') {
-                <strong>Signing in to Wyze…</strong>
-                <p class="muted" style="margin-top:0.4rem">The camera bridge is starting with your Wyze account. This takes up to a minute.</p>
-              }
-              @case ('sign-in-failed') {
-                <strong>Wyze sign-in didn't work</strong>
-                <p class="msg err">{{ $any(b).detail }}</p>
-              }
-              @case ('signed-out') {
-                <strong>Sign in to Wyze</strong>
-              }
-              @case ('standby') {
-                <strong>Cameras run on the active HomeHub</strong>
-                <p class="muted" style="margin-top:0.4rem">
-                  This HomeHub is a backup or development server, so its camera bridge waits and leaves the cameras to the active one.
-                  It keeps your Wyze sign-in, and starts the cameras if it's made the active server in Settings → Preferences.
-                </p>
-              }
-            }
-            @if (b.state === 'signed-out' || b.state === 'sign-in-failed') {
-                @if (isAdmin()) {
-                  <p class="muted" style="margin-top:0.4rem">
+            } @else if (tab() === 'setup') {
+              <section class="card source">
+                <div class="source-head">
+                  <strong>Wyze</strong>
+                  <span class="pill" [class.ok]="b.state === 'ready'" [class.warn]="b.state === 'sign-in-failed' || b.state === 'unreachable' || b.state === 'unauthorized'">{{ wyzeLabel(b.state) }}</span>
+                </div>
+                @switch (b.state) {
+                  @case ('not-configured') {
+                    <p class="muted">
+                      Wyze cameras need the camera bridge, which is left out of this HomeHub. To add it, remove
+                      <code>HOMEHUB_CAMERA_BRIDGE=0</code> from HomeHub's <code>.env</code>, then run this in the <code>homehub</code> folder:
+                    </p>
+                    <pre class="cmd">docker compose -f docker-compose.yml up -d</pre>
+                  }
+                  @case ('unreachable') {
+                    <p class="muted">HomeHub can't reach the camera bridge. Check that the <code>wyze-bridge</code> service is running. It can take a minute to start.</p>
+                  }
+                  @case ('unauthorized') {
+                    <p class="muted">The camera bridge rejected HomeHub's key. HomeHub and the bridge normally share a key HomeHub makes itself. If you set <code>WYZE_BRIDGE_API_KEY</code> in <code>.env</code>, remove it or make sure both use the same value, then run <code>docker compose -f docker-compose.yml up -d</code>.</p>
+                  }
+                  @case ('starting') {
+                    <p class="muted">The camera bridge is starting with your Wyze account. This takes up to a minute.</p>
+                  }
+                  @case ('sign-in-failed') {
+                    <p class="msg err">{{ $any(b).detail }}</p>
+                  }
+                  @case ('standby') {
+                    <p class="muted">
+                      This HomeHub is a backup or development server, so its camera bridge waits and leaves the cameras to the active one.
+                      It keeps your Wyze sign-in, and starts the cameras if it's made the active server in Settings → Preferences.
+                    </p>
+                  }
+                  @case ('signed-out') {
+                    @if (!wyzeFormOpen()) {
+                      <p class="muted">Wyze cameras? Sign in and HomeHub shows them live, saves pictures when they see motion, and can pause them.</p>
+                      <button class="btn-sm btn-primary" type="button" style="margin-top:0.6rem" (click)="wyzeFormOpen.set(true)">Sign in to Wyze</button>
+                    }
+                  }
+                }
+                @if (b.state === 'sign-in-failed' || (b.state === 'signed-out' && wyzeFormOpen())) {
+                  <p class="muted">
                     Wyze needs your account and a free developer API key. Create the key at
                     <a href="https://developer-api-console.wyze.com/" target="_blank" rel="noopener">developer-api-console.wyze.com</a>.
                     HomeHub keeps these on this computer, for the camera bridge only, until you sign out.
@@ -196,184 +318,130 @@ const PAGE = 48;
                               [disabled]="busy() || !email.trim() || !password || !keyId.trim() || !apiKey.trim()">
                         {{ busy() ? 'Signing in…' : 'Sign in' }}
                       </button>
+                      @if (b.state === 'signed-out') {
+                        <button class="btn-sm ghost" type="button" (click)="wyzeFormOpen.set(false)" [disabled]="busy()">Cancel</button>
+                      }
                     </div>
                   </div>
-                  <p class="muted" style="margin-top:0.75rem">
-                    No Wyze cameras? Leave this empty. With no Ring cameras either,
-                    <button class="link" type="button" (click)="turnOff()" [disabled]="busy()">turn cameras off</button>
-                    to hide this page from the menu. You can turn them back on in Settings → Integrations.
-                  </p>
-                } @else {
-                  <p class="muted" style="margin-top:0.4rem">Ask an administrator to sign in to Wyze.</p>
                 }
+                @if (b.state === 'ready') {
+                  @if (notAdded().length) {
+                    <div class="add-list">
+                      @for (c of notAdded(); track c.cam) {
+                        <div class="add-row">
+                          <span class="name">{{ c.name }}<span class="sub">{{ c.model ?? 'Wyze camera' }}{{ c.ip ? ' · ' + c.ip : '' }}{{ c.streaming ? '' : ' · not connected yet' }}</span></span>
+                          <button class="btn-sm btn-primary" type="button" (click)="addCamera(c)" [disabled]="busy()">Add</button>
+                        </div>
+                      }
+                    </div>
+                    @if (notAdded().length > 1) {
+                      <button class="btn-sm ghost" type="button" style="margin-top:0.6rem" (click)="addAll()" [disabled]="busy()">Add all</button>
+                    }
+                  } @else if (!cameras().length) {
+                    <p class="muted">No cameras on your Wyze account.</p>
+                  }
+                  <div class="settings">
+                    <div class="settings-row">
+                      <span class="label">Wyze account<small>Signing out deletes your Wyze sign-in from HomeHub and stops the camera bridge</small></span>
+                      @if (confirmSignOut()) {
+                        <button class="btn-sm danger" type="button" (click)="signOut()" [disabled]="busy()">Sign out</button>
+                        <button class="btn-sm ghost" type="button" (click)="confirmSignOut.set(false)">Cancel</button>
+                      } @else {
+                        <button class="btn-sm ghost" type="button" (click)="confirmSignOut.set(true)" [disabled]="busy()">Sign out of Wyze</button>
+                      }
+                    </div>
+                  </div>
+                }
+                @if (message()) { <p class="msg" [class.err]="isError()" [class.ok]="!isError()">{{ message() }}</p> }
+              </section>
             }
-            @if (message()) { <p class="msg" [class.err]="isError()" [class.ok]="!isError()">{{ message() }}</p> }
+
+            <app-ring-cameras [view]="childView()" (openSetup)="setTab('setup')"
+                              (openSnapshot)="openShot($any($event))" (camerasChange)="ringCams.set($event); ringLoaded.set(true)" />
+            <app-ip-cameras [view]="childView()" (camerasChange)="ipCams.set($event); ipLoaded.set(true)" />
+
+            @if (tab() === 'setup' && settings(); as st) {
+              <section class="card source">
+                <div class="source-head"><strong>Motion and snapshots</strong></div>
+                <p class="muted">For every camera.</p>
+                <div class="settings">
+                  <div class="settings-row">
+                    <span class="label">Save a snapshot on motion<small>When a camera reports motion. Wyze takes up to half a minute; Ring and IP cameras a few seconds</small></span>
+                    <input type="checkbox" [checked]="st.motionSnapshots" (change)="saveSettings({ motionSnapshots: $any($event.target).checked })" aria-label="Save a snapshot on motion" />
+                  </div>
+                  <div class="settings-row">
+                    <span class="label">Notify my phone<small>Sends a notification with each motion snapshot</small></span>
+                    <input type="checkbox" [checked]="st.notify" (change)="saveSettings({ notify: $any($event.target).checked })" aria-label="Notify on motion" />
+                  </div>
+                  <div class="settings-row">
+                    <span class="label">Wait between snapshots<small>From the same camera, so one visit doesn't fill the folder</small></span>
+                    <span><input type="number" min="5" max="3600" [value]="st.cooldownSeconds" (change)="saveSettings({ cooldownSeconds: +$any($event.target).value })" aria-label="Seconds between snapshots" /> sec</span>
+                  </div>
+                  <div class="settings-row">
+                    <span class="label">Keep snapshots for<small>Older ones are deleted automatically</small></span>
+                    <span><input type="number" min="1" max="365" [value]="st.keepDays" (change)="saveSettings({ keepDays: +$any($event.target).value })" aria-label="Days to keep snapshots" /> days</span>
+                  </div>
+                  <div class="settings-row">
+                    <span class="label">Cameras in HomeHub<small>Turn off to hide Cameras from the menu and stop watching for motion and doorbell presses</small></span>
+                    <button class="btn-sm ghost" type="button" (click)="turnOff()" [disabled]="busy()">Turn off</button>
+                  </div>
+                </div>
+                @if (settingsMsg()) { <p class="msg" [class.err]="settingsErr()" [class.ok]="!settingsErr()">{{ settingsMsg() }}</p> }
+              </section>
+            }
           </div>
+
+          @if (tab() === 'snapshots') {
+            @if (total() > 1) {
+              <div class="chips" role="group" aria-label="Filter snapshots by camera">
+                <button class="chip" type="button" [class.active]="filterId() === null && filterCamera() === null" (click)="setFilter(null)">All</button>
+                @for (c of cameras(); track c.deviceId) {
+                  <button class="chip" type="button" [class.active]="filterId() === c.deviceId" (click)="setFilter(c.deviceId)">{{ c.name }}</button>
+                }
+                @for (c of ringCams(); track c.id) {
+                  <button class="chip" type="button" [class.active]="filterCamera() === c.key" (click)="setCameraFilter(c.key)">{{ c.label }}</button>
+                }
+                @for (c of ipCams(); track c.id) {
+                  <button class="chip" type="button" [class.active]="filterCamera() === c.key" (click)="setCameraFilter(c.key)">{{ c.name }}</button>
+                }
+              </div>
+            }
+            @if (snapshots().length) {
+              <div class="select-bar">
+                @if (selecting()) {
+                  <span class="count" aria-live="polite">{{ selected().size ? selected().size + ' selected' : 'Tap pictures to select them' }}</span>
+                  <button class="btn-sm" type="button" (click)="shareSelected()" [disabled]="!selectedReady()">{{ shareWord }}</button>
+                  <button class="btn-sm ghost" type="button" (click)="stopSelecting()">Cancel</button>
+                } @else {
+                  <span class="count"></span>
+                  <button class="btn-sm ghost" type="button" (click)="selecting.set(true)">Select</button>
+                }
+              </div>
+              @if (shareMsg() && !shot()) { <p class="share-msg" role="status">{{ shareMsg() }}</p> }
+            } @else {
+              <p class="muted">No snapshots yet. When a camera sees motion or the doorbell rings, a picture is saved here. Press Snapshot on a camera to save one yourself.</p>
+            }
+            @for (day of days(); track day.label) {
+              <div class="day">{{ day.label }}</div>
+              <div class="shots">
+                @for (s of day.items; track s.id) {
+                  <button class="shot" type="button" (click)="selecting() ? toggleSelect(s) : openShot(s)"
+                          [class.selected]="selected().has(s.id)" [attr.aria-pressed]="selecting() ? selected().has(s.id) : null"
+                          [attr.aria-label]="s.cameraName + ', ' + time(s.takenAt)">
+                    <app-auth-img [src]="'/api/cameras/snapshots/' + s.id + '/image'" [alt]="s.cameraName" />
+                    @if (selecting()) { <span class="tick" aria-hidden="true">{{ selected().has(s.id) ? '✓' : '' }}</span> }
+                    <span class="shot-meta"><span>{{ s.cameraName }}</span><span>{{ time(s.takenAt) }}{{ triggerText(s) }}</span></span>
+                  </button>
+                }
+              </div>
+            }
+            @if (hasMore()) {
+              <div class="more"><button class="btn-sm ghost" type="button" (click)="loadMore()">Show older</button></div>
+            }
+          }
         }
       } @else {
         <p class="muted">Loading…</p>
-      }
-
-      @if (bridge()?.state === 'ready' && isAdmin() && notAdded().length) {
-        <div class="card" style="margin-bottom:1rem">
-          <strong>{{ notAdded().length === 1 ? 'A camera on your Wyze account isn\\'t in HomeHub' : notAdded().length + ' cameras on your Wyze account aren\\'t in HomeHub' }}</strong>
-          <div class="add-list">
-            @for (c of notAdded(); track c.cam) {
-              <div class="add-row">
-                <span class="name">{{ c.name }}<span class="sub">{{ c.model ?? 'Wyze camera' }}{{ c.ip ? ' · ' + c.ip : '' }}{{ c.streaming ? '' : ' · not connected yet' }}</span></span>
-                <button class="btn-sm btn-primary" type="button" (click)="addCamera(c)" [disabled]="busy()">Add</button>
-              </div>
-            }
-          </div>
-          @if (notAdded().length > 1) {
-            <button class="btn-sm ghost" type="button" style="margin-top:0.6rem" (click)="addAll()" [disabled]="busy()">Add all</button>
-          }
-          @if (message()) { <p class="msg" [class.err]="isError()" [class.ok]="!isError()">{{ message() }}</p> }
-        </div>
-      }
-
-      @if (cameras().length) {
-        @if (bridgeError()) { <p class="msg err" style="margin-bottom:0.75rem">{{ bridgeError() }}</p> }
-        <div class="grid">
-          @for (c of cameras(); track c.deviceId) {
-            <div class="card cam">
-              <app-auth-img [src]="'/api/cameras/' + c.deviceId + '/live.jpg?cached=1'" (result)="thumbResult(c, $event)" [refreshSeconds]="c.watching === false ? 0 : 20"
-                            [alt]="c.name" [failedText]="c.watching === false ? 'Paused' : c.otherNetwork ? 'On another network' : c.streaming ? 'No picture right now' : 'Not connected to this camera yet'"
-                            (click)="openLive(c)" role="button" [attr.aria-label]="'Watch ' + c.name + ' live'" />
-              <div class="cam-body">
-                <div class="cam-title">
-                  <strong>{{ c.name }}</strong>
-                  <span class="pill" [class]="'pill ' + statusOf(c)">{{ statusLabel(c) }}</span>
-                </div>
-                <div class="cam-sub">
-                  {{ c.room ?? 'No room' }}{{ c.model ? ' · ' + c.model : '' }}
-                  @if (c.lastMotionAt) { · motion {{ ago(c.lastMotionAt) }} }
-                </div>
-                @if (statusOf(c) === 'othernet') {
-                  <p class="hint">{{ c.noPictureHint }}</p>
-                } @else if (statusOf(c) === 'nopicture') {
-                  <p class="hint">
-                    {{ c.lastPictureAt ? 'Last picture ' + ago(c.lastPictureAt) + '.' : 'No picture yet.' }}
-                    {{ c.noPictureHint }}
-                  </p>
-                }
-                <div class="cam-actions">
-                  <button class="btn-sm btn-primary" type="button" (click)="openLive(c)" [disabled]="c.watching === false">Live</button>
-                  <button class="btn-sm ghost" type="button" (click)="takeSnapshot(c)" [disabled]="c.watching === false || busyId() === c.deviceId">
-                    {{ busyId() === c.deviceId ? 'Saving…' : 'Snapshot' }}
-                  </button>
-                  @if (c.watching === false) {
-                    <button class="btn-sm ghost" type="button" (click)="setWatching(c, true)" [disabled]="busyId() === c.deviceId">Resume</button>
-                  } @else {
-                    <button class="btn-sm ghost" type="button" (click)="confirmPause.set(c.deviceId)" [disabled]="busyId() === c.deviceId">Pause</button>
-                  }
-                </div>
-                @if (confirmPause() === c.deviceId) {
-                  <div class="confirm">
-                    <span>Pause {{ c.name }}? It stops watching, recording and detecting motion until you resume it.</span>
-                    <button class="btn-sm danger" type="button" (click)="setWatching(c, false)">Pause</button>
-                    <button class="btn-sm ghost" type="button" (click)="confirmPause.set(null)">Cancel</button>
-                  </div>
-                }
-              </div>
-            </div>
-          }
-        </div>
-        @if (cameraMsg()) { <p class="msg err">{{ cameraMsg() }}</p> }
-      } @else if (bridge()?.state === 'ready' && !notAdded().length) {
-        <p class="muted">No cameras yet. Cameras on your Wyze account appear here to add.</p>
-      }
-
-      @if (bridge() && bridge()!.state !== 'off') {
-        <app-ring-cameras (openSnapshot)="openShot($any($event))" (camerasChange)="ringCams.set($event)" />
-        <app-ip-cameras (camerasChange)="ipCams.set($event)" />
-      }
-
-      @if (cameras().length || ringCams().length || ipCams().length || snapshots().length) {
-        <h2>Snapshots</h2>
-        <div class="chips" role="group" aria-label="Filter snapshots by camera">
-          <button class="chip" type="button" [class.active]="filterId() === null && filterCamera() === null" (click)="setFilter(null)">All</button>
-          @for (c of cameras(); track c.deviceId) {
-            <button class="chip" type="button" [class.active]="filterId() === c.deviceId" (click)="setFilter(c.deviceId)">{{ c.name }}</button>
-          }
-          @for (c of ringCams(); track c.id) {
-            <button class="chip" type="button" [class.active]="filterCamera() === c.key" (click)="setCameraFilter(c.key)">{{ c.label }}</button>
-          }
-          @for (c of ipCams(); track c.id) {
-            <button class="chip" type="button" [class.active]="filterCamera() === c.key" (click)="setCameraFilter(c.key)">{{ c.name }}</button>
-          }
-        </div>
-        @if (snapshots().length) {
-          <div class="select-bar">
-            @if (selecting()) {
-              <span class="count" aria-live="polite">{{ selected().size ? selected().size + ' selected' : 'Tap pictures to select them' }}</span>
-              <button class="btn-sm" type="button" (click)="shareSelected()" [disabled]="!selectedReady()">{{ shareWord }}</button>
-              <button class="btn-sm ghost" type="button" (click)="stopSelecting()">Cancel</button>
-            } @else {
-              <span class="count"></span>
-              <button class="btn-sm ghost" type="button" (click)="selecting.set(true)">Select</button>
-            }
-          </div>
-          @if (shareMsg() && !shot()) { <p class="share-msg" role="status">{{ shareMsg() }}</p> }
-        }
-        @if (!snapshots().length) {
-          <p class="muted">No snapshots yet. When a camera sees motion or the doorbell rings, a picture is saved here. Press Snapshot on a camera to save one yourself.</p>
-        }
-        @for (day of days(); track day.label) {
-          <div class="day">{{ day.label }}</div>
-          <div class="shots">
-            @for (s of day.items; track s.id) {
-              <button class="shot" type="button" (click)="selecting() ? toggleSelect(s) : openShot(s)"
-                      [class.selected]="selected().has(s.id)" [attr.aria-pressed]="selecting() ? selected().has(s.id) : null"
-                      [attr.aria-label]="s.cameraName + ', ' + time(s.takenAt)">
-                <app-auth-img [src]="'/api/cameras/snapshots/' + s.id + '/image'" [alt]="s.cameraName" />
-                @if (selecting()) { <span class="tick" aria-hidden="true">{{ selected().has(s.id) ? '✓' : '' }}</span> }
-                <span class="shot-meta"><span>{{ s.cameraName }}</span><span>{{ time(s.takenAt) }}{{ triggerText(s) }}</span></span>
-              </button>
-            }
-          </div>
-        }
-        @if (hasMore()) {
-          <div class="more"><button class="btn-sm ghost" type="button" (click)="loadMore()">Show older</button></div>
-        }
-      }
-
-      @if (isAdmin() && (bridge()?.state === 'ready' || ringCams().length || ipCams().length) && settings(); as st) {
-        <h2>Camera settings</h2>
-        <div class="card">
-          <div class="settings-row">
-            <span class="label">Save a snapshot on motion<small>When a camera reports motion. Wyze takes up to half a minute; Ring and IP cameras a few seconds</small></span>
-            <input type="checkbox" [checked]="st.motionSnapshots" (change)="saveSettings({ motionSnapshots: $any($event.target).checked })" aria-label="Save a snapshot on motion" />
-          </div>
-          <div class="settings-row">
-            <span class="label">Notify my phone<small>Sends a notification with each motion snapshot</small></span>
-            <input type="checkbox" [checked]="st.notify" (change)="saveSettings({ notify: $any($event.target).checked })" aria-label="Notify on motion" />
-          </div>
-          <div class="settings-row">
-            <span class="label">Wait between snapshots<small>From the same camera, so one visit doesn't fill the folder</small></span>
-            <input type="number" min="5" max="3600" [value]="st.cooldownSeconds" (change)="saveSettings({ cooldownSeconds: +$any($event.target).value })" aria-label="Seconds between snapshots" /> sec
-          </div>
-          <div class="settings-row">
-            <span class="label">Keep snapshots for<small>Older ones are deleted automatically</small></span>
-            <input type="number" min="1" max="365" [value]="st.keepDays" (change)="saveSettings({ keepDays: +$any($event.target).value })" aria-label="Days to keep snapshots" /> days
-          </div>
-          @if (bridge()?.state === 'ready') {
-            <div class="settings-row">
-              <span class="label">Wyze account<small>Signing out deletes your Wyze sign-in from HomeHub and stops the camera bridge</small></span>
-              @if (confirmSignOut()) {
-                <button class="btn-sm danger" type="button" (click)="signOut()" [disabled]="busy()">Sign out</button>
-                <button class="btn-sm ghost" type="button" (click)="confirmSignOut.set(false)">Cancel</button>
-              } @else {
-                <button class="btn-sm ghost" type="button" (click)="confirmSignOut.set(true)" [disabled]="busy()">Sign out of Wyze</button>
-              }
-            </div>
-          }
-          <div class="settings-row">
-            <span class="label">Cameras in HomeHub<small>Turn off to hide Cameras from the menu and stop watching for motion and doorbell presses</small></span>
-            <button class="btn-sm ghost" type="button" (click)="turnOff()" [disabled]="busy()">Turn off</button>
-          </div>
-          @if (settingsMsg()) { <p class="msg" [class.err]="settingsErr()" [class.ok]="!settingsErr()">{{ settingsMsg() }}</p> }
-        </div>
       }
     </div>
 
@@ -387,14 +455,22 @@ const PAGE = 48;
           <div class="lightbox-bar">
             <span><strong>{{ s.cameraName }}</strong> · {{ dateTime(s.takenAt) }}{{ triggerText(s) }}</span>
             <span class="lightbox-nav">
-              <button class="btn-sm ghost" type="button" (click)="step(-1)" [disabled]="!neighbor(-1)" aria-label="Newer">‹</button>
-              <button class="btn-sm ghost" type="button" (click)="step(1)" [disabled]="!neighbor(1)" aria-label="Older">›</button>
+              <button class="btn-sm ghost" type="button" (click)="step(-1)" [disabled]="!canStep(-1)" aria-label="Newer">‹</button>
+              <button class="btn-sm ghost" type="button" (click)="step(1)" [disabled]="!canStep(1)" aria-label="Older">›</button>
               <button class="btn-sm ghost" type="button" (click)="shareOne(s)" [disabled]="!ready()[s.id]">{{ shareWord }}</button>
               @if (isAdmin()) { <button class="btn-sm ghost" type="button" (click)="deleteShot(s)">Delete</button> }
               <button class="btn-sm ghost" type="button" (click)="closeShot()">Close</button>
             </span>
           </div>
-          <app-auth-img [src]="'/api/cameras/snapshots/' + s.id + '/image'" [alt]="s.cameraName" />
+          <!-- Swipe left for an older picture, right for a newer one. -->
+          <div class="swipe" (touchstart)="swipeStart($event)" (touchmove)="swipeMove($event)" (touchend)="swipeEnd()" (touchcancel)="swipeEnd(true)">
+            @if (shotUrls()[s.id]; as url) {
+              <img [src]="url" [alt]="s.cameraName" [class.dragging]="dragging()" [style.transform]="'translateX(' + dragX() + 'px)'" draggable="false" />
+            } @else {
+              <div class="loading">Loading…</div>
+            }
+          </div>
+          @if (position(); as pos) { <p class="swipe-hint">{{ pos }}</p> }
           @if (shareMsg()) { <p class="share-msg" role="status">{{ shareMsg() }}</p> }
         </div>
       </div>
@@ -406,6 +482,29 @@ export class CamerasComponent implements OnInit, OnDestroy {
   private readonly auth = inject(AuthService);
   private readonly socket = inject(SocketService);
   private readonly cams = inject(CamerasStateService);
+  private readonly route = inject(ActivatedRoute);
+  private readonly router = inject(Router);
+
+  private readonly requestedTab = signal<Tab>('cameras');
+  /** The tab showing. Setup is for admins only. */
+  readonly tab = computed<Tab>(() => (this.requestedTab() === 'setup' && !this.isAdmin() ? 'cameras' : this.requestedTab()));
+  /** What the Ring and IP camera components show: they stay loaded on Snapshots, for its camera filter. */
+  readonly childView = computed(() => (this.tab() === 'snapshots' ? 'none' : this.tab()) as 'cameras' | 'setup' | 'none');
+  readonly wyzeFormOpen = signal(false);
+  readonly total = computed(() => this.cameras().length + this.ringCams().length + this.ipCams().length);
+  private readonly wyzeLoaded = signal(false);
+  readonly ringLoaded = signal(false);
+  readonly ipLoaded = signal(false);
+  /** Every kind of camera has loaded, so "No cameras yet" is true. */
+  readonly loaded = computed(() => this.wyzeLoaded() && this.ringLoaded() && this.ipLoaded());
+  private readonly seenId = signal<number | null>(null);
+  /** Snapshots saved since this browser last looked at the Snapshots tab. */
+  readonly newShots = computed(() => {
+    const seen = this.seenId();
+    if (seen === null || this.tab() === 'snapshots' || this.filterId() !== null || this.filterCamera() !== null) return '';
+    const n = this.snapshots().filter((s) => s.id > seen).length;
+    return n === 0 ? '' : n >= PAGE ? `${PAGE}+` : String(n);
+  });
 
   readonly isAdmin = computed(() => this.auth.user()?.role === 'admin');
   readonly bridge = signal<BridgeState | null>(null);
@@ -453,7 +552,45 @@ export class CamerasComponent implements OnInit, OnDestroy {
   private stopSnapshots?: () => void;
   private stopState?: () => void;
 
+  setTab(tab: Tab): void {
+    this.requestedTab.set(tab);
+    this.confirmPause.set(null);
+    if (tab !== 'snapshots') this.stopSelecting();
+    this.markSeen();
+    // In the address, so Back and a reload keep the tab.
+    this.router.navigate([], { relativeTo: this.route, queryParams: { tab: tab === 'cameras' ? null : tab }, replaceUrl: true });
+  }
+
+  wyzeLabel(state: BridgeState['state']): string {
+    switch (state) {
+      case 'ready': return this.cameras().length === 1 ? 'Signed in · 1 camera' : `Signed in · ${this.cameras().length} cameras`;
+      case 'signed-out': return 'Not set up';
+      case 'sign-in-failed': return 'Sign-in failed';
+      case 'starting': return 'Signing in…';
+      case 'unreachable': return 'Bridge not running';
+      case 'unauthorized': return 'Bridge key mismatch';
+      case 'not-configured': return 'Not installed';
+      case 'standby': return 'Standby';
+      default: return '';
+    }
+  }
+
+  /** On the Snapshots tab, everything loaded counts as seen. */
+  private markSeen(): void {
+    if (this.tab() !== 'snapshots' || this.filterId() !== null || this.filterCamera() !== null) return;
+    const newest = this.snapshots()[0]?.id;
+    if (newest === undefined || (this.seenId() ?? 0) >= newest) return;
+    this.seenId.set(newest);
+    try { localStorage.setItem(SEEN_KEY, String(newest)); } catch { /* private window: forgets next time */ }
+  }
+
   ngOnInit(): void {
+    const asked = this.route.snapshot.queryParamMap.get('tab') as Tab | null;
+    if (asked && TABS.includes(asked)) this.requestedTab.set(asked);
+    try {
+      const seen = Number(localStorage.getItem(SEEN_KEY));
+      if (seen > 0) this.seenId.set(seen);
+    } catch { /* no storage: nothing counts as new until the first look */ }
     this.refresh();
     this.loadSnapshots();
     let tick = 0;
@@ -471,6 +608,7 @@ export class CamerasComponent implements OnInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    for (const url of Object.values(this.shotUrls())) URL.revokeObjectURL(url);
     if (this.timer) clearInterval(this.timer);
     this.stopSnapshots?.();
     this.stopState?.();
@@ -495,8 +633,8 @@ export class CamerasComponent implements OnInit, OnDestroy {
 
   private loadCameras(): void {
     this.http.get<{ bridgeError: string | null; cameras: Camera[] }>('/api/cameras').subscribe({
-      next: (r) => { this.cameras.set(r.cameras); this.bridgeError.set(r.cameras.length ? r.bridgeError : null); },
-      error: () => undefined,
+      next: (r) => { this.cameras.set(r.cameras); this.bridgeError.set(r.cameras.length ? r.bridgeError : null); this.wyzeLoaded.set(true); },
+      error: () => this.wyzeLoaded.set(true),
     });
   }
 
@@ -512,16 +650,27 @@ export class CamerasComponent implements OnInit, OnDestroy {
     this.http.get<Snapshot[]>(`/api/cameras/snapshots?${q}`).subscribe((list) => {
       this.snapshots.set(list);
       this.hasMore.set(list.length === PAGE);
+      // The first time, what's already here isn't news.
+      if (this.seenId() === null && !this.filterQuery()) this.seenId.set(list[0]?.id ?? 0);
+      this.markSeen();
     });
   }
 
-  loadMore(): void {
+  private loadingMore = false;
+
+  loadMore(then?: () => void): void {
     const list = this.snapshots();
-    if (!list.length) return;
+    if (!list.length || this.loadingMore) return;
+    this.loadingMore = true;
     const q = `limit=${PAGE}&before=${list[list.length - 1].id}${this.filterQuery()}`;
-    this.http.get<Snapshot[]>(`/api/cameras/snapshots?${q}`).subscribe((more) => {
-      this.snapshots.update((l) => [...l, ...more]);
-      this.hasMore.set(more.length === PAGE);
+    this.http.get<Snapshot[]>(`/api/cameras/snapshots?${q}`).subscribe({
+      next: (more) => {
+        this.loadingMore = false;
+        this.snapshots.update((l) => [...l, ...more]);
+        this.hasMore.set(more.length === PAGE);
+        then?.();
+      },
+      error: () => { this.loadingMore = false; },
     });
   }
 
@@ -552,7 +701,7 @@ export class CamerasComponent implements OnInit, OnDestroy {
         this.busy.set(false);
         this.password = '';
         this.apiKey = '';
-        this.show('Signed in. Your cameras are below.');
+        this.show('Signed in.');
         this.refresh();
       },
       error: (err: HttpErrorResponse) => { this.busy.set(false); this.show(err.error?.error ?? 'Wyze sign-in failed.', true); },
@@ -647,14 +796,77 @@ export class CamerasComponent implements OnInit, OnDestroy {
 
   openShot(s: Snapshot): void {
     this.shareMsg.set('');
-    this.shot.set(s);
-    this.prepare(s);
+    this.showShot(s);
   }
 
   closeShot(): void {
     this.shot.set(null);
     this.shareMsg.set('');
+    this.swipeEnd(true);
   }
+
+  /** Shows a snapshot, and loads the ones either side so a swipe shows them at once. */
+  private showShot(s: Snapshot | null): void {
+    this.shot.set(s);
+    if (!s) return;
+    this.prepare(s);
+    for (const dir of [-1, 1] as const) {
+      const n = this.neighbor(dir);
+      if (n) this.prepare(n);
+    }
+  }
+
+  // ── Swiping between snapshots ─────────────────────────────────
+
+  /** How far the picture follows the finger, px. */
+  readonly dragX = signal(0);
+  readonly dragging = signal(false);
+  private touch: { x: number; y: number; horizontal: boolean | null } | null = null;
+  /** A swipe this far, px, moves to the next picture. */
+  private static readonly SWIPE_PX = 50;
+
+  swipeStart(e: TouchEvent): void {
+    if (e.touches.length !== 1) { this.touch = null; return; }   // two fingers: pinch-zoom
+    this.touch = { x: e.touches[0].clientX, y: e.touches[0].clientY, horizontal: null };
+  }
+
+  swipeMove(e: TouchEvent): void {
+    const t = this.touch;
+    if (!t || e.touches.length !== 1) return;
+    const dx = e.touches[0].clientX - t.x;
+    const dy = e.touches[0].clientY - t.y;
+    // Decide once, after a little movement, whether this is a sideways swipe.
+    if (t.horizontal === null && Math.abs(dx) + Math.abs(dy) > 10) t.horizontal = Math.abs(dx) > Math.abs(dy);
+    if (!t.horizontal) return;
+    this.dragging.set(true);
+    // Resist at either end, where there's no picture to move to.
+    this.dragX.set(this.canStep(dx < 0 ? 1 : -1) ? dx : dx / 3);
+  }
+
+  swipeEnd(cancel = false): void {
+    const dx = this.dragX();
+    this.touch = null;
+    this.dragging.set(false);
+    this.dragX.set(0);
+    if (!cancel && Math.abs(dx) >= CamerasComponent.SWIPE_PX) this.step(dx < 0 ? 1 : -1);
+  }
+
+  /** On a computer: ← and → move between pictures, Esc closes. */
+  @HostListener('document:keydown', ['$event'])
+  onKey(e: KeyboardEvent): void {
+    if (!this.shot() || e.altKey || e.ctrlKey || e.metaKey) return;
+    if (e.key === 'ArrowLeft') { e.preventDefault(); this.step(-1); }
+    else if (e.key === 'ArrowRight') { e.preventDefault(); this.step(1); }
+    else if (e.key === 'Escape') this.closeShot();
+  }
+
+  /** "3 of 48", or "3 of 48+" while older ones are still to load. */
+  readonly position = computed(() => {
+    const s = this.shot();
+    const list = this.snapshots();
+    const i = s ? list.findIndex((x) => x.id === s.id) : -1;
+    return i < 0 || list.length < 2 ? '' : `${i + 1} of ${list.length}${this.hasMore() ? '+' : ''}`;
+  });
 
   // ── Sharing ───────────────────────────────────────────────────
 
@@ -666,6 +878,8 @@ export class CamerasComponent implements OnInit, OnDestroy {
   /** Pictures loaded and ready to share, by snapshot id. */
   readonly ready = signal<Record<number, File>>({});
   private readonly loading = new Set<number>();
+  /** The loaded pictures, to show in the viewer without loading them again. */
+  readonly shotUrls = signal<Record<number, string>>({});
   readonly selectedReady = computed(() => {
     const ids = [...this.selected()];
     return ids.length > 0 && ids.every((id) => !!this.ready()[id]);
@@ -680,6 +894,7 @@ export class CamerasComponent implements OnInit, OnDestroy {
         this.loading.delete(s.id);
         const file = new File([blob], snapshotFileName(s.cameraName, s.takenAt), { type: 'image/jpeg', lastModified: Date.parse(s.takenAt) });
         this.ready.update((m) => ({ ...m, [s.id]: file }));
+        this.shotUrls.update((m) => ({ ...m, [s.id]: URL.createObjectURL(file) }));
       },
       error: () => { this.loading.delete(s.id); this.shareMsg.set('That picture couldn\'t be loaded.'); },
     });
@@ -736,17 +951,24 @@ export class CamerasComponent implements OnInit, OnDestroy {
     return i < 0 ? null : list[i + dir] ?? null;
   }
 
+  /** Whether there's a picture that way: older ones may still be on the server. */
+  canStep(dir: -1 | 1): boolean {
+    if (this.neighbor(dir)) return true;
+    return dir === 1 && this.hasMore() && this.snapshots().some((x) => x.id === this.shot()?.id);
+  }
+
   step(dir: -1 | 1): void {
     const next = this.neighbor(dir);
-    if (next) { this.shot.set(next); this.prepare(next); this.shareMsg.set(''); }
+    if (next) { this.shareMsg.set(''); this.showShot(next); return; }
+    // Past the oldest loaded picture: load older ones, then move on.
+    if (dir === 1 && this.canStep(1) && !this.loadingMore) this.loadMore(() => { if (this.neighbor(1)) this.step(1); });
   }
 
   deleteShot(s: Snapshot): void {
     const next = this.neighbor(1) ?? this.neighbor(-1);
     this.http.delete(`/api/cameras/snapshots/${s.id}`).subscribe(() => {
       this.snapshots.update((l) => l.filter((x) => x.id !== s.id));
-      this.shot.set(next);
-      if (next) this.prepare(next);
+      this.showShot(next);
     });
   }
 
