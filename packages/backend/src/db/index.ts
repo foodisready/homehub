@@ -131,6 +131,8 @@ function migrate(db: Database.Database): void {
   try { db.exec('ALTER TABLE motion_rules ADD COLUMN last_lux_at TEXT'); } catch {}
   try { db.exec('ALTER TABLE motion_rules ADD COLUMN skipped_at TEXT'); } catch {}
   try { db.exec('ALTER TABLE motion_rules ADD COLUMN skipped_reason TEXT'); } catch {}
+  // A Ring camera whose motion and doorbell presses count as motion for the rule. Ring's own id: Ring cameras aren't devices.
+  try { db.exec('ALTER TABLE motion_rules ADD COLUMN ring_camera_id INTEGER'); } catch {}
   try { db.exec('ALTER TABLE devices ADD COLUMN override_state INTEGER'); } catch {}
   try { db.exec('ALTER TABLE devices ADD COLUMN override_until TEXT'); } catch {}
   try { db.exec('ALTER TABLE devices ADD COLUMN timer_off_at TEXT'); } catch {}
@@ -326,6 +328,9 @@ function migrate(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_camera_snapshots_taken ON camera_snapshots(taken_at);
     CREATE INDEX IF NOT EXISTS idx_camera_snapshots_device ON camera_snapshots(device_id, taken_at);
   `);
+  // 'doorbell' for a snapshot taken when a Ring doorbell was pressed (its trigger is 'motion').
+  try { db.exec('ALTER TABLE camera_snapshots ADD COLUMN detail TEXT'); } catch {}
+  db.exec('CREATE INDEX IF NOT EXISTS idx_camera_snapshots_camera ON camera_snapshots(camera, id)');
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS firmware_releases (

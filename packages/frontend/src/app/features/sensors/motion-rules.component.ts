@@ -27,7 +27,12 @@ interface MotionRule {
   lastLuxAt:       string | null;
   skipped:         { at: string; reason: string } | null;
   sunToday:        { darkFrom: string; darkUntil: string; located: boolean } | null;
+  /** A Ring camera whose motion and doorbell presses also count as motion. */
+  ringCameraId:    number | null;
+  ringCameraName:  string | null;
 }
+
+interface RingCameraChoice { id: number; name: string; isDoorbell: boolean }
 
 /** "Dark" and "dim" as a Shelly Motion's own light bands put them. */
 const LUX_CHOICES = [
@@ -213,6 +218,18 @@ interface FoundSensor { ip: string; name: string; model: string; needsLogin: boo
         } @else {
           <div><button class="btn-remove" (click)="startConnect(rule)">Connect sensor</button></div>
         }
+        @if (ringCameras().length || rule.ringCameraId !== null) {
+          <div class="fields">
+            <label class="meta" [for]="'ring-' + rule.id">Ring camera</label>
+            <select [id]="'ring-' + rule.id" [ngModel]="rule.ringCameraId" (ngModelChange)="save(rule, { ringCameraId: $event })">
+              <option [ngValue]="null">None</option>
+              @for (c of ringCameras(); track c.id) { <option [ngValue]="c.id">{{ c.name }}</option> }
+            </select>
+          </div>
+          @if (rule.ringCameraId !== null) {
+            <span class="meta">Motion it sees{{ ringIsDoorbell(rule) ? ', and the doorbell ringing,' : '' }} counts as motion for this light, a few seconds after it happens.</span>
+          }
+        }
         @if (messageFor() === rule.id && message()) {
           <span [class]="failed() ? 'err' : 'ok'">{{ message() }}</span>
         }
@@ -248,6 +265,8 @@ export class MotionRulesComponent implements OnInit, OnDestroy {
 
   readonly rules   = signal<MotionRule[]>([]);
   private devices  = signal<Device[]>([]);
+  /** Ring cameras added on the Cameras page, which a rule can use as its sensor. */
+  readonly ringCameras = signal<RingCameraChoice[]>([]);
   readonly lights  = computed(() =>
     this.devices().filter((d) => !d.isProtected).sort((a, b) => a.alias.localeCompare(b.alias)));
 
@@ -273,6 +292,7 @@ export class MotionRulesComponent implements OnInit, OnDestroy {
   ngOnInit(): void {
     this.load();
     this.loadDevices();
+    this.http.get<{ cameras: RingCameraChoice[] }>('/api/ring').subscribe({ next: (r) => this.ringCameras.set(r.cameras), error: () => undefined });
     // Sensor reports arrive at the backend, so check back for a new status.
     this.timers = [
       setInterval(() => this.now.set(Date.now()), 1000),
@@ -312,6 +332,10 @@ export class MotionRulesComponent implements OnInit, OnDestroy {
 
   private loadDevices(): void {
     this.http.get<Device[]>('/api/devices').subscribe((devices) => this.devices.set(devices));
+  }
+
+  ringIsDoorbell(rule: MotionRule): boolean {
+    return this.ringCameras().find((c) => c.id === rule.ringCameraId)?.isDoorbell ?? false;
   }
 
   deviceFor(rule: MotionRule): Device | undefined {

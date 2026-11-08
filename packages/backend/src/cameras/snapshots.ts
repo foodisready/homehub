@@ -74,22 +74,32 @@ export function saveSettings(patch: Partial<CameraSettings>): CameraSettings {
 
 export interface Snapshot {
   id: number;
+  /** The HomeHub device, for a Wyze camera; null for a Ring camera, which isn't a device. */
   deviceId: number | null;
+  /** The camera's key: the bridge name of a Wyze camera, or ring-<id>. */
   camera: string;
   cameraName: string;
-  trigger: 'motion' | 'manual';
+  /** What took it: motion, someone (manual) or a doorbell press. */
+  trigger: SnapshotTrigger;
   sizeBytes: number;
   takenAt: string;   // ISO, UTC
 }
 
+export type SnapshotTrigger = 'motion' | 'manual' | 'doorbell';
+
+/**
+ * The table's trigger column allows only 'motion' and 'manual', and changing
+ * that means rebuilding the table, so a doorbell press is saved as 'motion'
+ * with detail 'doorbell'.
+ */
 interface SnapshotRow {
   id: number; device_id: number | null; camera: string; camera_name: string;
-  file: string; trigger: 'motion' | 'manual'; size_bytes: number; taken_at: string;
+  file: string; trigger: 'motion' | 'manual'; detail: string | null; size_bytes: number; taken_at: string;
 }
 
 const toSnapshot = (r: SnapshotRow): Snapshot => ({
   id: r.id, deviceId: r.device_id, camera: r.camera, cameraName: r.camera_name,
-  trigger: r.trigger, sizeBytes: r.size_bytes, takenAt: r.taken_at.replace(' ', 'T') + 'Z',
+  trigger: r.detail === 'doorbell' ? 'doorbell' : r.trigger, sizeBytes: r.size_bytes, takenAt: r.taken_at.replace(' ', 'T') + 'Z',
 });
 
 /** Safe as one path segment: the bridge's names are already URI-safe, but don't trust that. */
@@ -103,10 +113,13 @@ function localStamp(d: Date): { day: string; time: string } {
   };
 }
 
-/** Saves a picture: `picture` if given (Wyze's own of a motion event), or one from the camera now. */
+/**
+ * Saves a picture: `picture` if given (Wyze's own of a motion event, or one
+ * from Ring), or one from the camera bridge now.
+ */
 export async function capture(
   device: { id: number | null; alias: string; cam: string },
-  trigger: 'motion' | 'manual',
+  trigger: SnapshotTrigger,
   now = new Date(),
   picture?: Buffer,
 ): Promise<Snapshot> {
@@ -121,8 +134,8 @@ export async function capture(
 
   const taken = now.toISOString().slice(0, 19).replace('T', ' ');
   const { lastInsertRowid } = getDb().prepare(
-    'INSERT INTO camera_snapshots (device_id, camera, camera_name, file, trigger, size_bytes, taken_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-  ).run(device.id, device.cam, device.alias, file, trigger, jpeg.length, taken);
+    'INSERT INTO camera_snapshots (device_id, camera, camera_name, file, trigger, detail, size_bytes, taken_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+  ).run(device.id, device.cam, device.alias, file, trigger === 'doorbell' ? 'motion' : trigger, trigger === 'doorbell' ? 'doorbell' : null, jpeg.length, taken);
   const snap = getSnapshot(Number(lastInsertRowid))!;
   emitCameraSnapshot({ id: snap.id, deviceId: snap.deviceId, cameraName: snap.cameraName, trigger, takenAt: snap.takenAt });
   return snap;
@@ -144,11 +157,12 @@ export function snapshotFile(id: number): string | null {
   return full.startsWith(root + path.sep) && fs.existsSync(full) ? full : null;
 }
 
-/** Newest first. `before` is a snapshot id, for paging. */
-export function listSnapshots(opts: { deviceId?: number; before?: number; limit?: number } = {}): Snapshot[] {
+/** Newest first. `before` is a snapshot id, for paging. `camera` is a camera's key, such as ring-123. */
+export function listSnapshots(opts: { deviceId?: number; camera?: string; before?: number; limit?: number } = {}): Snapshot[] {
   const where: string[] = [];
   const args: unknown[] = [];
   if (opts.deviceId !== undefined) { where.push('device_id = ?'); args.push(opts.deviceId); }
+  if (opts.camera !== undefined) { where.push('camera = ?'); args.push(opts.camera); }
   if (opts.before !== undefined) { where.push('id < ?'); args.push(opts.before); }
   const limit = Math.min(Math.max(opts.limit ?? 60, 1), 200);
   const rows = getDb().prepare(
@@ -159,6 +173,12 @@ export function listSnapshots(opts: { deviceId?: number; before?: number; limit?
 
 export function latestFor(deviceId: number): Snapshot | null {
   const row = getDb().prepare('SELECT * FROM camera_snapshots WHERE device_id = ? ORDER BY id DESC LIMIT 1').get(deviceId) as SnapshotRow | undefined;
+  return row ? toSnapshot(row) : null;
+}
+
+/** The newest snapshot from a camera, by its key, such as ring-123. */
+export function latestForCamera(camera: string): Snapshot | null {
+  const row = getDb().prepare('SELECT * FROM camera_snapshots WHERE camera = ? ORDER BY id DESC LIMIT 1').get(camera) as SnapshotRow | undefined;
   return row ? toSnapshot(row) : null;
 }
 
@@ -178,6 +198,18 @@ export function pruneSnapshots(now = Date.now()): number {
   removeEmptyDirs(snapshotDir());
   if (old.length) logger.info({ deleted: old.length, keepDays }, 'Pruned old camera snapshots');
   return old.length;
+}
+
+/**
+ * Prunes now and every 6 hours. Separate from the Wyze motion watch, which
+ * doesn't start without the camera bridge: Ring snapshots need pruning too.
+ */
+export function startSnapshotPruning(): void {
+  const prune = () => {
+    try { pruneSnapshots(); } catch (err) { logger.error({ err }, 'Snapshot prune failed'); }
+  };
+  prune();
+  setInterval(prune, 6 * 60 * 60 * 1000).unref();
 }
 
 function removeEmptyDirs(dir: string, isRoot = true): void {

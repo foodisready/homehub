@@ -6,6 +6,7 @@ import { SocketService } from '../../core/socket/socket.service';
 import { CamerasStateService } from '../../core/services/cameras-state.service';
 import { AuthImgComponent } from './auth-img.component';
 import { LiveViewComponent } from './live-view.component';
+import { RingCamerasComponent, type RingCamera } from './ring-cameras.component';
 import { MAX_SHARE, canShareFiles, shareOrSave, snapshotFileName } from './snapshot-share';
 
 type BridgeState =
@@ -13,7 +14,7 @@ type BridgeState =
   | { state: 'starting' } | { state: 'sign-in-failed'; detail: string }
   | { state: 'unauthorized' } | { state: 'standby' } | { state: 'ready'; cameras: number };
 
-interface Snapshot { id: number; deviceId: number | null; camera: string; cameraName: string; trigger: 'motion' | 'manual'; sizeBytes: number; takenAt: string }
+interface Snapshot { id: number; deviceId: number | null; camera: string; cameraName: string; trigger: 'motion' | 'manual' | 'doorbell'; sizeBytes: number; takenAt: string }
 interface Camera {
   deviceId: number; name: string; room: string | null; cam: string; model: string | null;
   /** A Pan camera, which live view can turn. */
@@ -28,11 +29,15 @@ interface Settings { enabled: boolean; motionSnapshots: boolean; notify: boolean
 
 const PAGE = 48;
 
-/** Wyze cameras: sign in to Wyze, watch live, pause and resume, take snapshots and look through them. */
+/**
+ * Wyze cameras: sign in to Wyze, watch live, pause and resume, take snapshots
+ * and look through them. Ring cameras have their own section, and share the
+ * snapshots and camera settings.
+ */
 @Component({
   selector: 'app-cameras',
   standalone: true,
-  imports: [FormsModule, AuthImgComponent, LiveViewComponent],
+  imports: [FormsModule, AuthImgComponent, LiveViewComponent, RingCamerasComponent],
   styles: [`
     h1 { font-size: 1.4rem; font-weight: 700; margin-bottom: 1rem; }
     h2 { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); margin: 1.75rem 0 0.75rem; }
@@ -137,7 +142,7 @@ const PAGE = 48;
                 }
               }
               @case ('not-configured') {
-                <strong>The camera bridge is left out of this HomeHub</strong>
+                <strong>Wyze cameras need the camera bridge, which is left out of this HomeHub</strong>
                 <p class="muted" style="margin-top:0.4rem">
                   HomeHub talks to Wyze cameras through the camera bridge. To add it, remove
                   <code>HOMEHUB_CAMERA_BRIDGE=0</code> from HomeHub's <code>.env</code>, then run this in the <code>homehub</code> folder:
@@ -191,7 +196,8 @@ const PAGE = 48;
                     </div>
                   </div>
                   <p class="muted" style="margin-top:0.75rem">
-                    No Wyze cameras? <button class="link" type="button" (click)="turnOff()" [disabled]="busy()">Turn cameras off</button>
+                    No Wyze cameras? Leave this empty. With no Ring cameras either,
+                    <button class="link" type="button" (click)="turnOff()" [disabled]="busy()">turn cameras off</button>
                     to hide this page from the menu. You can turn them back on in Settings → Integrations.
                   </p>
                 } @else {
@@ -273,12 +279,19 @@ const PAGE = 48;
         <p class="muted">No cameras yet. Cameras on your Wyze account appear here to add.</p>
       }
 
-      @if (cameras().length || snapshots().length) {
+      @if (bridge() && bridge()!.state !== 'off') {
+        <app-ring-cameras (openSnapshot)="openShot($any($event))" (camerasChange)="ringCams.set($event)" />
+      }
+
+      @if (cameras().length || ringCams().length || snapshots().length) {
         <h2>Snapshots</h2>
         <div class="chips" role="group" aria-label="Filter snapshots by camera">
-          <button class="chip" type="button" [class.active]="filterId() === null" (click)="setFilter(null)">All</button>
+          <button class="chip" type="button" [class.active]="filterId() === null && filterCamera() === null" (click)="setFilter(null)">All</button>
           @for (c of cameras(); track c.deviceId) {
             <button class="chip" type="button" [class.active]="filterId() === c.deviceId" (click)="setFilter(c.deviceId)">{{ c.name }}</button>
+          }
+          @for (c of ringCams(); track c.id) {
+            <button class="chip" type="button" [class.active]="filterCamera() === c.key" (click)="setCameraFilter(c.key)">{{ c.name }}</button>
           }
         </div>
         @if (snapshots().length) {
@@ -295,7 +308,7 @@ const PAGE = 48;
           @if (shareMsg() && !shot()) { <p class="share-msg" role="status">{{ shareMsg() }}</p> }
         }
         @if (!snapshots().length) {
-          <p class="muted">No snapshots yet. When a camera sees motion, a picture is saved here. Press Snapshot on a camera to save one yourself.</p>
+          <p class="muted">No snapshots yet. When a camera sees motion or the doorbell rings, a picture is saved here. Press Snapshot on a camera to save one yourself.</p>
         }
         @for (day of days(); track day.label) {
           <div class="day">{{ day.label }}</div>
@@ -306,7 +319,7 @@ const PAGE = 48;
                       [attr.aria-label]="s.cameraName + ', ' + time(s.takenAt)">
                 <app-auth-img [src]="'/api/cameras/snapshots/' + s.id + '/image'" [alt]="s.cameraName" />
                 @if (selecting()) { <span class="tick" aria-hidden="true">{{ selected().has(s.id) ? '✓' : '' }}</span> }
-                <span class="shot-meta"><span>{{ s.cameraName }}</span><span>{{ time(s.takenAt) }}{{ s.trigger === 'motion' ? ' · motion' : '' }}</span></span>
+                <span class="shot-meta"><span>{{ s.cameraName }}</span><span>{{ time(s.takenAt) }}{{ triggerText(s) }}</span></span>
               </button>
             }
           </div>
@@ -316,11 +329,11 @@ const PAGE = 48;
         }
       }
 
-      @if (isAdmin() && bridge()?.state === 'ready' && settings(); as st) {
+      @if (isAdmin() && (bridge()?.state === 'ready' || ringCams().length) && settings(); as st) {
         <h2>Camera settings</h2>
         <div class="card">
           <div class="settings-row">
-            <span class="label">Save a snapshot on motion<small>When Wyze reports motion from a camera, usually within half a minute</small></span>
+            <span class="label">Save a snapshot on motion<small>When Wyze or Ring reports motion from a camera. Wyze takes up to half a minute, Ring a few seconds</small></span>
             <input type="checkbox" [checked]="st.motionSnapshots" (change)="saveSettings({ motionSnapshots: $any($event.target).checked })" aria-label="Save a snapshot on motion" />
           </div>
           <div class="settings-row">
@@ -335,17 +348,19 @@ const PAGE = 48;
             <span class="label">Keep snapshots for<small>Older ones are deleted automatically</small></span>
             <input type="number" min="1" max="365" [value]="st.keepDays" (change)="saveSettings({ keepDays: +$any($event.target).value })" aria-label="Days to keep snapshots" /> days
           </div>
+          @if (bridge()?.state === 'ready') {
+            <div class="settings-row">
+              <span class="label">Wyze account<small>Signing out deletes your Wyze sign-in from HomeHub and stops the camera bridge</small></span>
+              @if (confirmSignOut()) {
+                <button class="btn-sm danger" type="button" (click)="signOut()" [disabled]="busy()">Sign out</button>
+                <button class="btn-sm ghost" type="button" (click)="confirmSignOut.set(false)">Cancel</button>
+              } @else {
+                <button class="btn-sm ghost" type="button" (click)="confirmSignOut.set(true)" [disabled]="busy()">Sign out of Wyze</button>
+              }
+            </div>
+          }
           <div class="settings-row">
-            <span class="label">Wyze account<small>Signing out deletes your Wyze sign-in from HomeHub and stops the camera bridge</small></span>
-            @if (confirmSignOut()) {
-              <button class="btn-sm danger" type="button" (click)="signOut()" [disabled]="busy()">Sign out</button>
-              <button class="btn-sm ghost" type="button" (click)="confirmSignOut.set(false)">Cancel</button>
-            } @else {
-              <button class="btn-sm ghost" type="button" (click)="confirmSignOut.set(true)" [disabled]="busy()">Sign out of Wyze</button>
-            }
-          </div>
-          <div class="settings-row">
-            <span class="label">Cameras in HomeHub<small>Turn off to hide Cameras from the menu and stop watching for motion</small></span>
+            <span class="label">Cameras in HomeHub<small>Turn off to hide Cameras from the menu and stop watching for motion and doorbell presses</small></span>
             <button class="btn-sm ghost" type="button" (click)="turnOff()" [disabled]="busy()">Turn off</button>
           </div>
           @if (settingsMsg()) { <p class="msg" [class.err]="settingsErr()" [class.ok]="!settingsErr()">{{ settingsMsg() }}</p> }
@@ -361,7 +376,7 @@ const PAGE = 48;
       <div class="lightbox" (click)="closeShot()">
         <div class="lightbox-frame" (click)="$event.stopPropagation()" role="dialog" [attr.aria-label]="'Snapshot from ' + s.cameraName">
           <div class="lightbox-bar">
-            <span><strong>{{ s.cameraName }}</strong> · {{ dateTime(s.takenAt) }}{{ s.trigger === 'motion' ? ' · motion' : '' }}</span>
+            <span><strong>{{ s.cameraName }}</strong> · {{ dateTime(s.takenAt) }}{{ triggerText(s) }}</span>
             <span class="lightbox-nav">
               <button class="btn-sm ghost" type="button" (click)="step(-1)" [disabled]="!neighbor(-1)" aria-label="Newer">‹</button>
               <button class="btn-sm ghost" type="button" (click)="step(1)" [disabled]="!neighbor(1)" aria-label="Older">›</button>
@@ -392,6 +407,9 @@ export class CamerasComponent implements OnInit, OnDestroy {
   readonly snapshots = signal<Snapshot[]>([]);
   readonly hasMore = signal(false);
   readonly filterId = signal<number | null>(null);
+  /** A filter by camera key, for Ring cameras, which aren't devices. */
+  readonly filterCamera = signal<string | null>(null);
+  readonly ringCams = signal<RingCamera[]>([]);
   readonly settings = signal<Settings | null>(null);
 
   readonly busy = signal(false);
@@ -452,10 +470,11 @@ export class CamerasComponent implements OnInit, OnDestroy {
     this.http.get<BridgeState>('/api/cameras/bridge').subscribe({
       next: (b) => {
         this.bridge.set(b);
-        if (b.state === 'ready') {
-          if (this.isAdmin()) {
+        if (this.isAdmin()) {
+          // Ring cameras use these settings too, with or without the Wyze bridge.
+          this.http.get<Settings>('/api/cameras/settings').subscribe((s) => this.settings.set(s));
+          if (b.state === 'ready') {
             this.http.get<AccountCamera[]>('/api/cameras/bridge/cameras').subscribe({ next: (a) => this.account.set(a), error: () => undefined });
-            this.http.get<Settings>('/api/cameras/settings').subscribe((s) => this.settings.set(s));
           }
         }
       },
@@ -471,9 +490,15 @@ export class CamerasComponent implements OnInit, OnDestroy {
     });
   }
 
-  private loadSnapshots(): void {
+  /** The snapshot filter, as query parameters. */
+  private filterQuery(): string {
     const id = this.filterId();
-    const q = `limit=${PAGE}${id !== null ? `&deviceId=${id}` : ''}`;
+    const cam = this.filterCamera();
+    return id !== null ? `&deviceId=${id}` : cam !== null ? `&camera=${encodeURIComponent(cam)}` : '';
+  }
+
+  private loadSnapshots(): void {
+    const q = `limit=${PAGE}${this.filterQuery()}`;
     this.http.get<Snapshot[]>(`/api/cameras/snapshots?${q}`).subscribe((list) => {
       this.snapshots.set(list);
       this.hasMore.set(list.length === PAGE);
@@ -483,8 +508,7 @@ export class CamerasComponent implements OnInit, OnDestroy {
   loadMore(): void {
     const list = this.snapshots();
     if (!list.length) return;
-    const id = this.filterId();
-    const q = `limit=${PAGE}&before=${list[list.length - 1].id}${id !== null ? `&deviceId=${id}` : ''}`;
+    const q = `limit=${PAGE}&before=${list[list.length - 1].id}${this.filterQuery()}`;
     this.http.get<Snapshot[]>(`/api/cameras/snapshots?${q}`).subscribe((more) => {
       this.snapshots.update((l) => [...l, ...more]);
       this.hasMore.set(more.length === PAGE);
@@ -493,8 +517,20 @@ export class CamerasComponent implements OnInit, OnDestroy {
 
   setFilter(id: number | null): void {
     this.filterId.set(id);
+    this.filterCamera.set(null);
     this.stopSelecting();
     this.loadSnapshots();
+  }
+
+  setCameraFilter(key: string): void {
+    this.filterId.set(null);
+    this.filterCamera.set(key);
+    this.stopSelecting();
+    this.loadSnapshots();
+  }
+
+  triggerText(s: Snapshot): string {
+    return s.trigger === 'motion' ? ' · motion' : s.trigger === 'doorbell' ? ' · doorbell' : '';
   }
 
   signIn(): void {

@@ -9,6 +9,7 @@ import { bridgeStandby, bridgeUrl, signInSavedAt } from '../cameras/bridge';
 import { roleStatus } from './role';
 import { pictureHealth } from '../cameras/picture-status';
 import { cameraDevices } from '../cameras/watch';
+import { addedCameras as ringCameras, ringState } from '../ring/ring';
 import { bridgeLastState, bridgeRestartState, bridgeSeenAt, getVoiceSettings, lastBridgeReport, recentBridges } from './voice-bridge';
 
 /**
@@ -173,6 +174,21 @@ function cameraPictures(now: number): HealthItem[] {
   return [{ ...base, level: 'ok', detail: watching.length ? `All ${watching.length} sending pictures` : 'All paused' }];
 }
 
+function ring(): HealthItem[] {
+  const s = ringState();
+  if (s.state === 'signed-out' || s.state === 'standby') return [];
+  const base: Pick<HealthItem, 'id' | 'group' | 'label' | 'link'> = { id: 'ring', group: 'Devices', label: 'Ring', link: '/cameras' };
+  switch (s.state) {
+    case 'ready': {
+      const n = ringCameras().length;
+      return [{ ...base, level: 'ok', detail: n ? `Connected, ${n === 1 ? '1 camera' : `${n} cameras`} in HomeHub` : 'Connected. Add your Ring cameras on the Cameras page.' }];
+    }
+    case 'connecting': return [{ ...base, level: 'info', detail: 'Connecting…' }];
+    case 'expired': return [{ ...base, level: 'warn', detail: 'Ring stopped accepting HomeHub\'s sign-in, so doorbell presses won\'t arrive. Sign in to Ring again on the Cameras page.' }];
+    case 'error': return [{ ...base, level: 'warn', detail: `HomeHub can't reach Ring, so doorbell presses won't arrive. It keeps trying. (${s.detail})` }];
+  }
+}
+
 function sensors(): HealthItem[] {
   const rows = getDb().prepare('SELECT alias, stale_since FROM sensors').all() as { alias: string; stale_since: string | null }[];
   if (!rows.length) return [];
@@ -325,6 +341,7 @@ export async function checkHealth(opts: { probe?: Probe; now?: number; dataDir?:
     ...(await services(opts.probe ?? httpProbe)),
     ...devices(),
     ...cameraPictures(now),
+    ...ring(),
     ...sensors(),
     ...voice(now),
     ...backups(dataDir, now),

@@ -11,6 +11,7 @@ import { cameraDevices, lastMotionFor, liveCameras } from '../cameras/watch';
 import { noPictureHint, pictureHealth } from '../cameras/picture-status';
 import { clearPowerCache } from '../drivers/WyzeDriver';
 import { canPan, isMoving, ptz, PTZ_ACTIONS, type PtzAction } from '../cameras/ptz';
+import { signedIn as ringSignedIn } from '../ring/ring';
 
 /**
  * Wyze cameras through the camera bridge. Everyone signed in can watch and
@@ -78,21 +79,23 @@ camerasRouter.get('/bridge/cameras', requireAdmin, async (_req: Request, res: Re
 });
 
 // GET /api/cameras/settings
-// bridgeInstalled: false when .env leaves the bridge out, so the menu can hide Cameras.
+// bridgeInstalled: false when .env leaves the bridge out, so the menu can hide Cameras,
+// unless ringSignedIn: Ring cameras need no bridge.
 camerasRouter.get('/settings', (_req: Request, res: Response) => {
-  res.json({ ...snaps.getSettings(), bridgeInstalled: cameraBridgeInstalled(), limits: snaps.LIMITS });
+  res.json({ ...snaps.getSettings(), bridgeInstalled: cameraBridgeInstalled(), ringSignedIn: ringSignedIn(), limits: snaps.LIMITS });
 });
 
 // PUT /api/cameras/settings
 camerasRouter.put('/settings', requireAdmin, (req: Request, res: Response) => {
   try {
-    res.json({ ...snaps.saveSettings(req.body ?? {}), bridgeInstalled: cameraBridgeInstalled(), limits: snaps.LIMITS });
+    res.json({ ...snaps.saveSettings(req.body ?? {}), bridgeInstalled: cameraBridgeInstalled(), ringSignedIn: ringSignedIn(), limits: snaps.LIMITS });
   } catch (err) {
     res.status(400).json({ error: (err as Error).message, code: 'VALIDATION_ERROR' });
   }
 });
 
-// GET /api/cameras/snapshots?deviceId=&before=&limit=
+// GET /api/cameras/snapshots?deviceId=&camera=&before=&limit=
+// camera is a camera's key, such as ring-123, for cameras that aren't devices.
 camerasRouter.get('/snapshots', (req: Request, res: Response) => {
   const num = (v: unknown) => (v === undefined || v === '' ? undefined : Number(v));
   const deviceId = num(req.query.deviceId);
@@ -101,7 +104,11 @@ camerasRouter.get('/snapshots', (req: Request, res: Response) => {
   if ([deviceId, before, limit].some((v) => v !== undefined && !Number.isInteger(v))) {
     return res.status(400).json({ error: 'deviceId, before and limit must be whole numbers', code: 'VALIDATION_ERROR' });
   }
-  res.json(snaps.listSnapshots({ deviceId, before, limit }));
+  const camera = typeof req.query.camera === 'string' && req.query.camera ? req.query.camera : undefined;
+  if (camera !== undefined && !/^[A-Za-z0-9._-]{1,100}$/.test(camera)) {
+    return res.status(400).json({ error: 'Bad camera', code: 'VALIDATION_ERROR' });
+  }
+  res.json(snaps.listSnapshots({ deviceId, camera, before, limit }));
 });
 
 // GET /api/cameras/snapshots/:id/image

@@ -67,6 +67,7 @@ Garage doors are always protected: HomeHub asks you to confirm, and Chat and voi
 | Wyze Cam Pan v3 | ✅ Tested (3 in one home) | Cloud sign-in, then local video | Sign in to Wyze on the **Cameras** page with a free Wyze API key. Live video, snapshots, motion snapshots, pause and resume, and turning the camera from live view. |
 | Wyze Cam v2 | ⚠️ Untested on the same network | Cloud sign-in, then local video | The same. The one tested was on another network, where no camera connects. |
 | Other Wyze cameras supported by the [camera bridge](https://github.com/IDisposable/docker-wyze-bridge) | 🟡 Should work | Cloud sign-in, then local video | The same. Check your model on the bridge's list. |
+| Ring doorbells and cameras | 🟡 Should work, not yet tested with a real account | Cloud | Sign in to Ring on the **Cameras** page with the code Ring sends. Doorbell presses, motion and snapshots, and motion lights. No live view yet. Wired doorbells give pictures most reliably; battery cameras save power by sharing fewer. |
 
 Wyze cameras need to be on the same network as the HomeHub computer.
 

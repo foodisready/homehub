@@ -1,0 +1,8 @@
+{
+  "name": "ffmpeg-for-homebridge",
+  "version": "0.0.0-homehub",
+  "description": "Stands in for ffmpeg-for-homebridge, which downloads a 28 MB FFmpeg binary on install. ring-client-api needs FFmpeg only for recording and streaming, which HomeHub doesn't use.",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "license": "AGPL-3.0-only"
+}

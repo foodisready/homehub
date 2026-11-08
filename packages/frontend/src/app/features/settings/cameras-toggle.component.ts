@@ -1,11 +1,13 @@
 import { Component, inject, signal } from '@angular/core';
 import { HttpErrorResponse } from '@angular/common/http';
+import { RouterLink } from '@angular/router';
 import { CamerasStateService } from '../../core/services/cameras-state.service';
 
-/** Settings → Integrations → Wyze cameras: turn cameras on or off in HomeHub. Admin only. */
+/** Settings → Integrations → Cameras: turn Wyze and Ring cameras on or off in HomeHub. Admin only. */
 @Component({
   selector: 'app-cameras-toggle',
   standalone: true,
+  imports: [RouterLink],
   styles: [`
     .row { display:flex; align-items:center; gap:0.75rem; justify-content:space-between; padding:0.6rem 0; }
     .label { font-size:0.9rem; }
@@ -19,22 +21,22 @@ import { CamerasStateService } from '../../core/services/cameras-state.service';
     @if (cams.state(); as s) {
       <div class="row">
         <div>
-          <div class="label">Wyze cameras</div>
-          @if (!s.bridgeInstalled) {
-            <div class="sub">
-              The camera bridge is left out of this HomeHub. To add it, remove <code>HOMEHUB_CAMERA_BRIDGE=0</code>
-              from HomeHub's <code>.env</code>, then run <code>docker compose -f docker-compose.yml up -d</code>.
-            </div>
-          } @else if (s.enabled) {
-            <div class="sub">Shown in the menu. Turn off to hide Cameras and stop watching for motion.</div>
+          <div class="label">Cameras</div>
+          @if (s.enabled) {
+            <div class="sub">Wyze and Ring cameras. Turn off to hide Cameras from the menu and stop watching for motion and doorbell presses.</div>
           } @else {
             <div class="sub">Off. Cameras is hidden from the menu and nothing is watched.</div>
           }
+          @if (!s.bridgeInstalled && s.enabled) {
+            <div class="sub">
+              Wyze cameras need the camera bridge, which is left out of this HomeHub. To add it, remove <code>HOMEHUB_CAMERA_BRIDGE=0</code>
+              from HomeHub's <code>.env</code>, then run <code>docker compose -f docker-compose.yml up -d</code>.
+              Ring cameras don't need it: <a routerLink="/cameras">set them up on the Cameras page</a>.
+            </div>
+          }
         </div>
-        @if (s.bridgeInstalled) {
-          <input type="checkbox" [checked]="s.enabled" [disabled]="busy()" (change)="set($any($event.target))"
-                 aria-label="Wyze cameras on" />
-        }
+        <input type="checkbox" [checked]="s.enabled" [disabled]="busy()" (change)="set($any($event.target))"
+               aria-label="Cameras on" />
       </div>
       @if (error()) { <p class="msg err">{{ error() }}</p> }
     }

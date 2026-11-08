@@ -132,7 +132,7 @@ function messageFor(createdAt: string, reason: EmailReason, version: string, hin
   return [
     `This is an encrypted backup of HomeHub on ${os.hostname()}, made ${when}. ${why}`,
     '',
-    "It has your devices, rooms, schedules, scenes, motion rules, users and device logins. It doesn't include energy history, the Wyze camera sign-in or Matter pairings, which you set up again after restoring.",
+    "It has your devices, rooms, schedules, scenes, motion rules, users and device logins. It doesn't include energy history, the Wyze and Ring sign-ins or Matter pairings, which you set up again after restoring.",
     '',
     'To restore it, for example on a new computer:',
     '1. Install HomeHub and open it in a browser.',

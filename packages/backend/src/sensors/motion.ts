@@ -36,6 +36,8 @@ export interface MotionRuleRow {
   last_lux_at:       string | null;
   skipped_at:        string | null;
   skipped_reason:    string | null;
+  /** A Ring camera whose motion and doorbell presses count as motion, by Ring's id. */
+  ring_camera_id:    number | null;
 }
 
 export type RuleWithDevice = MotionRuleRow & PowerDevice & {

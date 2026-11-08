@@ -10,6 +10,7 @@ import {
 } from '../sensors/motion';
 import { MAX_LUX, MAX_SUN_OFFSET_MINUTES, TURN_ON_WHEN, isTime, sunTimes, type TurnOnWhen } from '../sensors/motion-when';
 import { getHomeSettings } from '../home/home-settings';
+import { addedCameras as ringCameras } from '../ring/ring';
 
 const MAX_MINUTES = 24 * 60;
 
@@ -28,6 +29,9 @@ const toPublic = (rule: RuleWithDevice) => ({
   sensorIp:        rule.sensor_ip,
   sensorUsername:  rule.sensor_username,
   hasSensorPassword: !!rule.sensor_password,
+  // A Ring camera that also reports motion for this rule.
+  ringCameraId:    rule.ring_camera_id ?? null,
+  ringCameraName:  rule.ring_camera_id == null ? null : (ringCameras().find((c) => c.id === rule.ring_camera_id)?.name ?? null),
   occupied:        rule.occupied === 1,
   lastMotionAt:    rule.last_motion_at,
   status:          motionStatus(rule, Date.now()),
@@ -135,6 +139,10 @@ motionRouter.patch('/:id', (req: Request, res: Response) => {
   if (turnOnWithMotion !== undefined && typeof turnOnWithMotion !== 'boolean') {
     return res.status(400).json({ error: 'turnOnWithMotion must be true or false', code: 'VALIDATION_ERROR' });
   }
+  const { ringCameraId } = req.body as { ringCameraId?: unknown };
+  if (ringCameraId !== undefined && ringCameraId !== null && !ringCameras().some((c) => c.id === ringCameraId)) {
+    return res.status(400).json({ error: 'Add that Ring camera on the Cameras page first', code: 'VALIDATION_ERROR' });
+  }
 
   const db = getDb();
   if (deviceId !== undefined) {
@@ -156,7 +164,8 @@ motionRouter.patch('/:id', (req: Request, res: Response) => {
     db.prepare(`
       UPDATE motion_rules
          SET name = ?, device_id = ?, off_after_minutes = ?, turn_on_with_motion = ?,
-             turn_on_when = ?, dark_below_lux = ?, sun_offset_minutes = ?, hours_from = ?, hours_to = ?
+             turn_on_when = ?, dark_below_lux = ?, sun_offset_minutes = ?, hours_from = ?, hours_to = ?,
+             ring_camera_id = ?
        WHERE id = ?
     `).run(
       name === undefined ? rule.name : (name as string).trim(),
@@ -168,6 +177,7 @@ motionRouter.patch('/:id', (req: Request, res: Response) => {
       body.sunOffsetMinutes ?? rule.sun_offset_minutes,
       body.hoursFrom ?? rule.hours_from,
       body.hoursTo ?? rule.hours_to,
+      ringCameraId === undefined ? rule.ring_camera_id : ringCameraId,
       rule.id,
     );
   } catch (err: any) {

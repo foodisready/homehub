@@ -4,7 +4,7 @@ import { sendPushToAll } from '../push/push.service';
 import * as bridge from './bridge';
 import { signInSavedAt } from './bridge';
 import * as cloud from './wyze-cloud';
-import { capture, getSettings, pruneSnapshots } from './snapshots';
+import { capture, getSettings } from './snapshots';
 import { automationsPaused } from '../automation/pause';
 import { getCachedState } from '../kasa/device.cache';
 import { lastAsked, onLocalNetwork, pictureHealth } from './picture-status';
@@ -279,11 +279,6 @@ export function startCameraWatch(): void {
   timer = setTimeout(loop, POLL_MS);
 
   pictureTimer = setInterval(() => { checkPictures().catch(() => undefined); }, 60_000);
-
-  pruneSnapshots();
-  setInterval(() => {
-    try { pruneSnapshots(); } catch (err) { logger.error({ err }, 'Snapshot prune failed'); }
-  }, 6 * 60 * 60 * 1000);
   logger.info('Camera motion watch started');
 }
 
