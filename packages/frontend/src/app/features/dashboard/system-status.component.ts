@@ -7,6 +7,8 @@ const POLL_IDLE_MS    = 60_000;
 const POLL_UPDATE_MS  = 3_000;
 const UPDATE_DEADLINE = 5 * 60_000;
 const RELOAD_AFTER_MS = 2_500;
+/** Past the deadline, this many failed checks in a row mean HomeHub really hasn't come back. */
+const FAILED_CHECKS = 3;
 
 type Phase = 'idle' | 'confirm' | 'updating' | 'done' | 'failed';
 
@@ -182,6 +184,11 @@ export class SystemStatusComponent implements OnInit, OnDestroy {
     this.stopPolling();
   }
 
+  private deadline = 0;
+  private failedChecks = 0;
+  /** A phone that slept through the update checks as soon as it's looked at again. */
+  private readonly onVisible = () => { if (!document.hidden && this.updateTimer) this.check(); };
+
   private refresh(): void {
     if (this.phase() === 'updating') return;
     this.svc.version().subscribe({
@@ -222,27 +229,38 @@ export class SystemStatusComponent implements OnInit, OnDestroy {
   }
 
   /* The backend restarts partway through, so requests fail for a while; then
-   * it answers with the new version. Give it 5 minutes. */
+   * it answers with the new version. Give it 5 minutes. A phone that slept
+   * meanwhile fails a check or two as it reconnects, so only several failures
+   * in a row past the deadline count. */
   private poll(): void {
-    const deadline = Date.now() + UPDATE_DEADLINE;
-    this.updateTimer = setInterval(() => {
-      this.svc.version().subscribe({
-        next: (v) => {
-          if (v.running === this.target() || (this.restarted() && !v.updateAvailable)) {
-            this.version.set(v);
-            this.stopPolling();
-            this.phase.set('done');
-            setTimeout(() => this.reload(), RELOAD_AFTER_MS);
-          } else if (Date.now() > deadline) {
-            this.fail(`HomeHub is still running ${v.running} after 5 minutes. Run the installer on the HomeHub computer to update instead.`);
-          }
-        },
-        error: () => {
-          this.restarted.set(true);
-          if (Date.now() > deadline) this.fail("HomeHub hasn't come back after 5 minutes. Check that the HomeHub computer is on, then reload this page.");
-        },
-      });
-    }, POLL_UPDATE_MS);
+    this.deadline = Date.now() + UPDATE_DEADLINE;
+    this.failedChecks = 0;
+    document.addEventListener('visibilitychange', this.onVisible);
+    this.updateTimer = setInterval(() => this.check(), POLL_UPDATE_MS);
+  }
+
+  private check(): void {
+    this.svc.version().subscribe({
+      next: (v) => {
+        this.failedChecks = 0;
+        if (!this.updateTimer) return;
+        if (v.running === this.target() || (this.restarted() && !v.updateAvailable)) {
+          this.version.set(v);
+          this.stopPolling();
+          this.phase.set('done');
+          setTimeout(() => this.reload(), RELOAD_AFTER_MS);
+        } else if (Date.now() > this.deadline) {
+          this.fail(`HomeHub is still running ${v.running} after 5 minutes. Run the installer on the HomeHub computer to update instead.`);
+        }
+      },
+      error: () => {
+        this.restarted.set(true);
+        this.failedChecks++;
+        if (this.updateTimer && Date.now() > this.deadline && this.failedChecks >= FAILED_CHECKS) {
+          this.fail("HomeHub hasn't come back after 5 minutes. Check that the HomeHub computer is on, then reload this page.");
+        }
+      },
+    });
   }
 
   private fail(message: string): void {
@@ -252,6 +270,7 @@ export class SystemStatusComponent implements OnInit, OnDestroy {
   }
 
   private stopPolling(): void {
+    document.removeEventListener('visibilitychange', this.onVisible);
     if (this.updateTimer) { clearInterval(this.updateTimer); this.updateTimer = undefined; }
     if (this.clock) { clearInterval(this.clock); this.clock = undefined; }
   }
