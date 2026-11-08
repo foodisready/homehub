@@ -29,6 +29,8 @@ export interface RingCam {
   name: string;
   /** Ring's model name, such as "Wired Doorbell Plus". */
   model: string;
+  /** The home it's at, as named in the Ring app, for accounts with more than one. */
+  home: string | null;
   isDoorbell: boolean;
   hasBattery: boolean;
   offline: boolean;
@@ -121,13 +123,14 @@ async function attempt(client: Lib, code?: string): Promise<SignInResult> {
   }
 }
 
-function toCam(camera: Lib): RingCam {
+function toCam(camera: Lib, home: string | null = null): RingCam {
   const kindOf = (category: string): RingEventKind | null =>
     /\.ding$/.test(category) ? 'ding' : /\.motion$/.test(category) ? 'motion' : null;
   return {
     id: camera.id,
     name: camera.name,
     model: camera.model ?? 'Ring camera',
+    home: home || null,
     isDoorbell: !!camera.isDoorbot,
     hasBattery: !!camera.hasBattery,
     offline: !!camera.isOffline,
@@ -182,7 +185,10 @@ export const ringLibrary: RingConnector = {
     let cams: Promise<RingCam[]> | null = null;
     return {
       cameras() {
-        cams ??= ready.then((a) => a.getCameras()).then((list: Lib[]) => list.map(toCam)).catch((err: Error) => {
+        // By home, so each camera knows which home it's at.
+        cams ??= ready.then((a) => a.getLocations())
+          .then((homes: Lib[]) => homes.flatMap((h) => (h.cameras ?? []).map((c: Lib) => toCam(c, h.name ?? null))))
+          .catch((err: Error) => {
           cams = null;
           throw /oauth token|refresh token/i.test(err.message ?? '')
             ? new RingAuthError('Ring no longer accepts HomeHub\'s sign-in. Sign in to Ring again.')

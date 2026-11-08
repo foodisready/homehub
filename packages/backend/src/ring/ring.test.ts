@@ -26,6 +26,7 @@ class FakeCam implements RingCam {
   constructor(
     public id: number, public name: string, public model = 'Wired Doorbell Plus',
     public isDoorbell = true, public hasBattery = false, public offline = false,
+    public home: string | null = 'Home',
   ) {}
   async snapshot(uuid?: string): Promise<Buffer> {
     this.snapshots.push(uuid);
@@ -388,6 +389,22 @@ describe('Ring cameras', () => {
     });
   });
 
+  describe('more than one home', () => {
+    it('names the home when two added cameras share a name', async () => {
+      fake.cams.push(new FakeCam(3, 'Front Door', 'Battery Doorbell', true, true, false, 'Lake house'));
+      await signInAndAdd();
+      const account = (await api('GET', '/api/ring/account')).body as { id: number; home: string }[];
+      assert.equal(account.find((c) => c.id === 3)?.home, 'Lake house');
+      assert.equal((await api('GET', '/api/ring')).body.cameras[0].label, 'Front Door');   // no clash yet
+      await api('POST', '/api/ring/cameras', { id: 3 });
+      const labels = (await api('GET', '/api/ring')).body.cameras.map((c: { label: string }) => c.label);
+      assert.deepEqual(labels, ['Front Door (Home)', 'Front Door (Lake house)']);
+      const snap = await ring.handleEvent(fake.cams[2], event());
+      assert.equal(snap?.cameraName, 'Front Door (Lake house)');
+      assert.deepEqual(pushes.map((p) => p.body), ['Someone rang Front Door (Lake house)']);
+    });
+  });
+
   describe('motion rules', () => {
     function ruleWithLight(): number {
       const { lastInsertRowid } = db.prepare("INSERT INTO devices (alias, ip, driver_type) VALUES ('Porch light', '192.0.2.10', 'kasa')").run();
@@ -411,6 +428,14 @@ describe('Ring cameras', () => {
       await new Promise((r) => setTimeout(r, 80));
       rule = db.prepare('SELECT occupied FROM motion_rules WHERE id = ?').get(id) as typeof rule;
       assert.equal(rule.occupied, 0);
+
+      // A Ring camera replaces a Shelly Motion: its login goes, its token changes, and "dark" becomes "sun".
+      db.prepare("UPDATE motion_rules SET ring_camera_id = NULL, sensor_ip = '192.0.2.20', sensor_password = 'pw', turn_on_when = 'dark' WHERE id = ?").run(id);
+      const swapped = await api('PATCH', `/api/motion/${id}`, { ringCameraId: 1 });
+      assert.equal(swapped.body.sensorIp, null);
+      assert.equal(swapped.body.hasSensorPassword, false);
+      assert.equal(swapped.body.turnOnWhen, 'sun');
+      assert.notEqual(db.prepare('SELECT token FROM motion_rules WHERE id = ?').pluck().get(id), 'tok');
 
       // A rename keeps the rule's other fields.
       const renamed = await api('PATCH', `/api/motion/${id}`, { name: 'Front porch' });

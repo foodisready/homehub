@@ -8,7 +8,10 @@ import { AuthImgComponent } from './auth-img.component';
 
 export interface RingSnapshot { id: number; deviceId: number | null; camera: string; cameraName: string; trigger: 'motion' | 'manual' | 'doorbell'; sizeBytes: number; takenAt: string }
 export interface RingCamera {
-  id: number; name: string; key: string; model: string | null; isDoorbell: boolean;
+  id: number; name: string; home: string | null;
+  /** The name, with its home when another camera here has the same name. */
+  label: string;
+  key: string; model: string | null; isDoorbell: boolean;
   offline: boolean | null; hasBattery: boolean; lastDingAt: string | null; lastMotionAt: string | null;
   encrypted: boolean; latestSnapshot: RingSnapshot | null;
 }
@@ -16,7 +19,7 @@ type RingStatus =
   | { state: 'signed-out' | 'standby' | 'connecting' | 'ready' }
   | { state: 'expired' | 'error'; detail: string };
 interface RingInfo { state: RingStatus['state']; detail?: string; cameras: RingCamera[]; notifyDoorbell: boolean }
-interface AccountCamera { id: number; name: string; model: string; isDoorbell: boolean; hasBattery: boolean; offline: boolean; added: boolean }
+interface AccountCamera { id: number; name: string; home: string | null; model: string; isDoorbell: boolean; hasBattery: boolean; offline: boolean; added: boolean }
 
 /**
  * Ring doorbells and cameras on the Cameras page: sign in with the code Ring
@@ -153,7 +156,7 @@ interface AccountCamera { id: number; name: string; model: string; isDoorbell: b
           <div class="add-list">
             @for (c of notAdded(); track c.id) {
               <div class="add-row">
-                <span class="name">{{ c.name }}<span class="sub">{{ c.model }}{{ c.hasBattery ? ' · battery' : '' }}{{ c.offline ? ' · offline' : '' }}</span></span>
+                <span class="name">{{ c.name }}<span class="sub">{{ c.home ? c.home + ' · ' : '' }}{{ c.model }}{{ c.hasBattery ? ' · battery' : '' }}{{ c.offline ? ' · offline' : '' }}</span></span>
                 <button class="btn-sm btn-primary" type="button" (click)="add(c)" [disabled]="busy()">Add</button>
               </div>
             }
@@ -179,7 +182,7 @@ interface AccountCamera { id: number; name: string; model: string; isDoorbell: b
                   @else { <span class="pill">{{ c.isDoorbell ? 'Doorbell' : 'Camera' }}</span> }
                 </div>
                 <div class="cam-sub">
-                  {{ c.model ?? 'Ring' }}
+                  {{ c.home ? c.home + ' · ' : '' }}{{ c.model ?? 'Ring' }}
                   @if (c.lastDingAt) { · rang {{ ago(c.lastDingAt) }} }
                   @if (c.lastMotionAt) { · motion {{ ago(c.lastMotionAt) }} }
                   @if (c.latestSnapshot; as s) { · picture {{ ago(s.takenAt) }} }

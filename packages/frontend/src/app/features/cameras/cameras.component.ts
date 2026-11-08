@@ -291,7 +291,7 @@ const PAGE = 48;
             <button class="chip" type="button" [class.active]="filterId() === c.deviceId" (click)="setFilter(c.deviceId)">{{ c.name }}</button>
           }
           @for (c of ringCams(); track c.id) {
-            <button class="chip" type="button" [class.active]="filterCamera() === c.key" (click)="setCameraFilter(c.key)">{{ c.name }}</button>
+            <button class="chip" type="button" [class.active]="filterCamera() === c.key" (click)="setCameraFilter(c.key)">{{ c.label }}</button>
           }
         </div>
         @if (snapshots().length) {

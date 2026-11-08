@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { Router, Request, Response } from 'express';
 import { getDb } from '../db';
 import { isProtectedDevice, type PowerDevice } from '../devices/power';
@@ -186,6 +187,17 @@ motionRouter.patch('/:id', (req: Request, res: Response) => {
     }
     throw err;
   }
+  // A rule has one sensor. A Ring camera replaces a Shelly Motion: forget its
+  // login, and change the rule's token, which the Shelly's own settings still
+  // call, so it no longer counts. Ring has no light reading, so "dark" becomes "sun".
+  if (typeof ringCameraId === 'number' && rule.ring_camera_id !== ringCameraId) {
+    db.prepare(`
+      UPDATE motion_rules
+         SET sensor_ip = NULL, sensor_username = NULL, sensor_password = NULL, token = ?,
+             turn_on_when = CASE turn_on_when WHEN 'dark' THEN 'sun' ELSE turn_on_when END
+       WHERE id = ?
+    `).run(crypto.randomBytes(16).toString('hex'), rule.id);
+  }
   res.json(toPublic(readRule(rule.id)!));
 });
 
@@ -230,8 +242,9 @@ motionRouter.post('/:id/connect', async (req: Request, res: Response) => {
   if (!rule) return res.status(404).json({ error: 'Rule not found', code: 'NOT_FOUND' });
 
   const password = newPassword || (rule.sensor_password ?? '');
+  // A rule has one sensor: a Shelly Motion replaces a Ring camera.
   const saveLogin = () => getDb().prepare(
-    'UPDATE motion_rules SET sensor_ip = ?, sensor_username = ?, sensor_password = ? WHERE id = ?',
+    'UPDATE motion_rules SET sensor_ip = ?, sensor_username = ?, sensor_password = ?, ring_camera_id = NULL WHERE id = ?',
   ).run(sensorIp, username, password, rule.id);
 
   try {

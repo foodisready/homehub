@@ -55,8 +55,9 @@ describe('Ring library layer', () => {
       },
       async getSnapshot(opts?: { uuid: string }) { return new Uint8Array([0xff, 0xd8, opts ? 1 : 0]); },
     };
-    const cam = lib.toCam(camera);
-    assert.deepEqual([cam.id, cam.name, cam.model, cam.isDoorbell, cam.hasBattery, cam.offline], [42, 'Front Door', 'Wired Doorbell Plus', true, false, false]);
+    const cam = lib.toCam(camera, 'Lake house');
+    assert.deepEqual([cam.id, cam.name, cam.home, cam.model, cam.isDoorbell, cam.hasBattery, cam.offline], [42, 'Front Door', 'Lake house', 'Wired Doorbell Plus', true, false, false]);
+    assert.equal(lib.toCam(camera).home, null);
     assert.deepEqual([...await cam.snapshot('u1')], [0xff, 0xd8, 1]);
     assert.deepEqual([...await cam.snapshot()], [0xff, 0xd8, 0]);
 

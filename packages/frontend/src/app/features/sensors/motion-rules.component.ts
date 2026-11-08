@@ -32,7 +32,7 @@ interface MotionRule {
   ringCameraName:  string | null;
 }
 
-interface RingCameraChoice { id: number; name: string; isDoorbell: boolean }
+interface RingCameraChoice { id: number; name: string; label: string; isDoorbell: boolean }
 
 /** "Dark" and "dim" as a Shelly Motion's own light bands put them. */
 const LUX_CHOICES = [
@@ -83,6 +83,8 @@ interface FoundSensor { ip: string; name: string; model: string; needsLogin: boo
       color: var(--text); border-radius: 0; padding: 0.55rem 0.75rem; font-size: 0.88rem; }
     .found button:hover, .found button.picked { background: rgba(59,130,246,0.15); }
     .found .used { color: var(--text-muted); font-size: 0.78rem; white-space: nowrap; }
+    .sensor { display: flex; flex-direction: column; gap: 0.45rem; padding: 0.6rem 0.75rem; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); }
+    .sensor-now { display: flex; align-items: baseline; gap: 0.5rem; flex-wrap: wrap; }
     .btn-remove { background: transparent; border: 1px solid var(--border); color: var(--text-muted); padding: 0.3rem 0.7rem; font-size: 0.8rem; }
   `],
   template: `
@@ -101,12 +103,44 @@ interface FoundSensor { ip: string; name: string; model: string; needsLogin: boo
             @case ('waiting') { Waiting for the sensor's first report, so this rule isn't active yet }
             @case ('occupied') { Motion detected. The light stays on. }
             @case ('counting') { <span class="countdown">Turns off in {{ countdown(rule) }}</span> }
-            @case ('off_cooldown') { Light is off. The sensor needs about a minute without motion before motion can turn it on again. }
+            @case ('off_cooldown') {
+              @if (rule.ringCameraId !== null) { Light is off. There was motion a moment ago. }
+              @else { Light is off. The sensor needs about a minute without motion before motion can turn it on again. }
+            }
             @case ('held') { The light is on a keep-on timer, so this rule won't turn it off yet. }
             @case ('offline') { The light is offline. }
             @default { Light is off. Last motion {{ rule.lastMotionAt | date:'short' }} }
           }
           @if (skippedNote(rule); as note) { <div>{{ note }}</div> }
+        </div>
+        <div class="sensor">
+          <div class="sensor-now">
+            <span class="meta">Sensor</span>
+            @if (rule.ringCameraId !== null) {
+              <strong>Ring {{ ringIsDoorbell(rule) ? 'doorbell' : 'camera' }}: {{ rule.ringCameraName ?? 'removed from HomeHub' }}</strong>
+            } @else if (rule.sensorIp) {
+              <strong>Shelly Motion at {{ rule.sensorIp }}</strong>
+            } @else {
+              <strong>None yet</strong>
+            }
+          </div>
+          @if (rule.ringCameraId !== null) {
+            <span class="meta">Motion it sees{{ ringIsDoorbell(rule) ? ', and the doorbell ringing,' : '' }} turns on this light, a few seconds after it happens. The light goes off when it has seen nothing for the minutes below.</span>
+          }
+          @if (connecting() !== rule.id) {
+            <div class="fields">
+              <button class="btn-remove" type="button" (click)="startConnect(rule)">
+                {{ rule.sensorIp ? 'Reconnect the Shelly Motion' : 'Use a Shelly Motion' }}
+              </button>
+              @if (ringCameras().length) {
+                <select [attr.aria-label]="'Ring camera for ' + rule.name" [ngModel]="rule.ringCameraId" (ngModelChange)="useRing(rule, $event)">
+                  @if (rule.ringCameraId === null) { <option [ngValue]="null" disabled>Use a Ring camera…</option> }
+                  @for (c of ringCameras(); track c.id) { <option [ngValue]="c.id">Ring: {{ c.label }}</option> }
+                  @if (rule.ringCameraId !== null) { <option [ngValue]="null">No sensor</option> }
+                </select>
+              }
+            </div>
+          }
         </div>
         <div class="fields">
           <select [ngModel]="rule.deviceId" aria-label="Light" (ngModelChange)="save(rule, { deviceId: $event })">
@@ -136,7 +170,7 @@ interface FoundSensor { ip: string; name: string; model: string; needsLogin: boo
               <label class="meta" [for]="'when-' + rule.id">Only</label>
               <select [id]="'when-' + rule.id" [ngModel]="rule.turnOnWhen" (ngModelChange)="save(rule, { turnOnWhen: $event })">
                 <option value="always">Any time</option>
-                <option value="dark" [disabled]="!rule.sensorIp">When the room is dark{{ rule.sensorIp ? '' : ' (connect the sensor first)' }}</option>
+                <option value="dark" [disabled]="!rule.sensorIp">When the room is dark{{ rule.sensorIp ? '' : ' (needs a Shelly Motion)' }}</option>
                 <option value="sun">Between sunset and sunrise</option>
                 <option value="hours">Between set hours</option>
               </select>
@@ -215,20 +249,7 @@ interface FoundSensor { ip: string; name: string; model: string; needsLogin: boo
             </button>
           </div>
           <span class="meta">Press the sensor's button first to wake it. HomeHub saves this login, so you won't need to enter it again.</span>
-        } @else {
-          <div><button class="btn-remove" (click)="startConnect(rule)">Connect sensor</button></div>
-        }
-        @if (ringCameras().length || rule.ringCameraId !== null) {
-          <div class="fields">
-            <label class="meta" [for]="'ring-' + rule.id">Ring camera</label>
-            <select [id]="'ring-' + rule.id" [ngModel]="rule.ringCameraId" (ngModelChange)="save(rule, { ringCameraId: $event })">
-              <option [ngValue]="null">None</option>
-              @for (c of ringCameras(); track c.id) { <option [ngValue]="c.id">{{ c.name }}</option> }
-            </select>
-          </div>
-          @if (rule.ringCameraId !== null) {
-            <span class="meta">Motion it sees{{ ringIsDoorbell(rule) ? ', and the doorbell ringing,' : '' }} counts as motion for this light, a few seconds after it happens.</span>
-          }
+          <div><button class="btn-remove" type="button" (click)="connecting.set(null)">Cancel</button></div>
         }
         @if (messageFor() === rule.id && message()) {
           <span [class]="failed() ? 'err' : 'ok'">{{ message() }}</span>
@@ -334,6 +355,18 @@ export class MotionRulesComponent implements OnInit, OnDestroy {
     this.http.get<Device[]>('/api/devices').subscribe((devices) => this.devices.set(devices));
   }
 
+  /** A Ring camera becomes the rule's one sensor, in place of a Shelly Motion; null leaves it with none. */
+  useRing(rule: MotionRule, id: number | null): void {
+    const had = rule.sensorIp;
+    this.http.patch(`/api/motion/${rule.id}`, { ringCameraId: id }).subscribe({
+      next: () => {
+        this.show(rule, id === null ? 'This rule has no sensor now.' : had ? 'Saved. The Ring camera is this rule\'s sensor now, in place of the Shelly Motion.' : 'Saved', false);
+        this.load();
+      },
+      error: (err) => { this.show(rule, err.error?.error ?? 'Could not save.', true); this.load(); },
+    });
+  }
+
   ringIsDoorbell(rule: MotionRule): boolean {
     return this.ringCameras().find((c) => c.id === rule.ringCameraId)?.isDoorbell ?? false;
   }
@@ -378,8 +411,9 @@ export class MotionRulesComponent implements OnInit, OnDestroy {
         this.newDeviceId = null;
         this.newMinutes = 10;
         this.load();
-        // Next step for a new rule: its sensor.
-        if (created?.id) this.startConnect(created);
+        // Next step for a new rule: its sensor. With Ring cameras to choose from, let the card ask.
+        if (created?.id && !this.ringCameras().length) this.startConnect(created);
+        else if (created?.id) this.show(created, 'Added. Now choose its sensor: a Shelly Motion or a Ring camera.', false);
       },
       error: (err) => this.createError.set(err.error?.error ?? 'Could not add the rule.'),
     });

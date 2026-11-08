@@ -44,7 +44,7 @@ const MOTION_CLEAR_MS = Number(process.env.RING_MOTION_CLEAR_MS) || 60_000;
 const PENDING_MS = 10 * 60_000;
 const DETECTIONS: Record<string, string> = { human: 'a person', vehicle: 'a vehicle', package_delivery: 'a package', package: 'a package', animal: 'an animal' };
 
-export interface AddedCamera { id: number; name: string }
+export interface AddedCamera { id: number; name: string; home?: string | null }
 
 export type RingState =
   | { state: 'signed-out' }
@@ -172,15 +172,22 @@ export async function checkRing(now = Date.now()): Promise<void> {
   return connecting;
 }
 
-/** Keeps the names of added cameras as they are in the Ring app. */
+/** Keeps the names and homes of added cameras as they are in the Ring app. */
 function refreshNames(list: RingCam[]): void {
   const added = addedCameras();
   let changed = false;
   for (const a of added) {
     const cam = list.find((c) => c.id === a.id);
     if (cam && cam.name && cam.name !== a.name) { a.name = cam.name; changed = true; }
+    if (cam && cam.home && cam.home !== a.home) { a.home = cam.home; changed = true; }
   }
   if (changed) saveAdded(added);
+}
+
+/** "Front Door", or "Front Door (Lake house)" when two added cameras share the name. */
+export function labelFor(camera: AddedCamera, added = addedCameras()): string {
+  const clash = added.some((c) => c.id !== camera.id && c.name === camera.name);
+  return clash && camera.home ? `${camera.name} (${camera.home})` : camera.name;
 }
 
 let timer: NodeJS.Timeout | null = null;
@@ -266,13 +273,13 @@ async function liveCameras(): Promise<RingCam[]> {
   return cams;
 }
 
-export interface AccountCamera { id: number; name: string; model: string; isDoorbell: boolean; hasBattery: boolean; offline: boolean; added: boolean }
+export interface AccountCamera { id: number; name: string; home: string | null; model: string; isDoorbell: boolean; hasBattery: boolean; offline: boolean; added: boolean }
 
 /** Every camera on the Ring account, and whether it's in HomeHub. */
 export async function accountCameras(): Promise<AccountCamera[]> {
   const added = new Set(addedCameras().map((c) => c.id));
   return (await liveCameras()).map((c) => ({
-    id: c.id, name: c.name, model: c.model, isDoorbell: c.isDoorbell, hasBattery: c.hasBattery, offline: c.offline, added: added.has(c.id),
+    id: c.id, name: c.name, home: c.home, model: c.model, isDoorbell: c.isDoorbell, hasBattery: c.hasBattery, offline: c.offline, added: added.has(c.id),
   }));
 }
 
@@ -280,7 +287,7 @@ export async function addCamera(id: number): Promise<AddedCamera> {
   const cam = (await liveCameras()).find((c) => c.id === id);
   if (!cam) throw new RingError('That camera isn\'t on your Ring account', 404);
   const list = addedCameras().filter((c) => c.id !== id);
-  const entry = { id, name: cam.name };
+  const entry: AddedCamera = { id, name: cam.name, home: cam.home };
   saveAdded([...list, entry]);
   logger.info({ camera: cam.name }, 'Ring camera added');
   return entry;
@@ -299,6 +306,8 @@ export function removeCamera(id: number): boolean {
 const lastEvent = new Map<number, { ding?: number; motion?: number; encrypted?: boolean }>();
 
 export interface CameraStatus extends AddedCamera {
+  /** The name, with its home when another added camera has the same name. */
+  label: string;
   key: string;
   model: string | null;
   isDoorbell: boolean;
@@ -314,11 +323,14 @@ export interface CameraStatus extends AddedCamera {
 
 export function cameraStatuses(): CameraStatus[] {
   const iso = (ms?: number) => (ms ? new Date(ms).toISOString() : null);
-  return addedCameras().map((a) => {
+  const added = addedCameras();
+  return added.map((a) => {
     const cam = cams.find((c) => c.id === a.id);
     const last = lastEvent.get(a.id) ?? {};
     return {
       ...a,
+      home: cam?.home ?? a.home ?? null,
+      label: labelFor(a, added),
       key: cameraKey(a.id),
       model: cam?.model ?? null,
       isDoorbell: cam?.isDoorbell ?? false,
@@ -345,7 +357,7 @@ export async function takeSnapshot(id: number): Promise<Snapshot> {
     logger.warn({ camera: added.name, reason: (err as Error).message }, 'Ring snapshot failed');
     throw new RingError(`No picture from ${added.name}. ${cam.offline ? 'Ring says it\'s offline.' : 'Try again in a moment.'}`, 502);
   }
-  return capture({ id: null, alias: added.name, cam: cameraKey(id) }, 'manual', new Date(), jpeg);
+  return capture({ id: null, alias: labelFor(added), cam: cameraKey(id) }, 'manual', new Date(), jpeg);
 }
 
 // ── Events ───────────────────────────────────────────────────────────
@@ -427,15 +439,16 @@ export async function handleEvent(cam: RingCam, event: RingEvent, now = Date.now
   lastShot.set(shotKey, now);
 
   const what = (event.detection && DETECTIONS[event.detection]) || 'motion';
+  const label = labelFor(added);
   const notify = ding ? notifyDoorbell() : settings.notify;
   const title = ding ? 'Doorbell' : 'Motion';
-  const body = ding ? `Someone rang ${added.name}` : `${added.name} saw ${what}`;
+  const body = ding ? `Someone rang ${label}` : `${label} saw ${what}`;
 
   const picture = event.encrypted ? null : await eventPicture(cam, event);
   let snap: Snapshot | null = null;
   if (picture) {
     try {
-      snap = await capture({ id: null, alias: added.name, cam: cameraKey(cam.id) }, ding ? 'doorbell' : 'motion', new Date(event.at), picture);
+      snap = await capture({ id: null, alias: label, cam: cameraKey(cam.id) }, ding ? 'doorbell' : 'motion', new Date(event.at), picture);
       logger.info({ camera: added.name, event: event.kind, id: snap.id, lagSeconds: Math.round((now - event.at) / 1000) }, 'Ring snapshot saved');
     } catch (err) {
       logger.warn({ err, camera: added.name }, 'Couldn\'t save the Ring snapshot');
