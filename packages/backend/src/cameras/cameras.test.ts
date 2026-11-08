@@ -639,6 +639,37 @@ describe('Wyze cameras', () => {
       assert.match(await pictures.noPictureHint('living_pan', '80482C000002', null), /Check that the camera is on/, 'no address table');
     });
 
+    it("tells which cameras are on a network HomeHub isn't on", () => {
+      const ifaces = {
+        lo: [{ address: '127.0.0.1', netmask: '255.0.0.0', family: 'IPv4', internal: true }],
+        wlan0: [
+          { address: '192.0.2.88', netmask: '255.255.255.0', family: 'IPv4', internal: false },
+          { address: 'fe80::1', netmask: 'ffff:ffff:ffff:ffff::', family: 'IPv6', internal: false },
+        ],
+        docker0: [{ address: '172.17.0.1', netmask: '255.255.0.0', family: 'IPv4', internal: false }],
+        'br-a664b3c45181': [{ address: '172.18.0.1', netmask: '255.255.0.0', family: 'IPv4', internal: false }],
+      } as unknown as ReturnType<typeof os.networkInterfaces>;
+      const nets = pictures.localNetworks(ifaces);
+      assert.deepEqual(nets, [{ address: '192.0.2.88', netmask: '255.255.255.0' }], 'Docker\'s networks and loopback left out');
+      assert.equal(pictures.inNetworks('192.0.2.32', nets), true);
+      assert.equal(pictures.inNetworks('198.51.100.76', nets), false);
+      assert.equal(pictures.inNetworks('172.17.0.5', nets), false, 'not a Docker network');
+      assert.equal(pictures.inNetworks(null, nets), null);
+      assert.equal(pictures.inNetworks('not-an-ip', nets), null);
+      assert.equal(pictures.inNetworks('192.0.2.300', nets), null);
+
+      assert.deepEqual([...pictures.camerasElsewhere(['192.0.2.32', '198.51.100.76', null], nets)], ['198.51.100.76']);
+      assert.deepEqual([...pictures.camerasElsewhere(['198.51.100.76', '203.0.113.9'], nets)], [],
+        'no camera on HomeHub\'s network: HomeHub may not see the home network\'s addresses, so it says nothing');
+      assert.deepEqual([...pictures.camerasElsewhere(['198.51.100.76'], [])], []);
+
+      assert.equal(pictures.networkLabel(nets), '192.0.2.x');
+      assert.equal(pictures.networkLabel([]), null);
+      const hint = pictures.elsewhereHint('198.51.100.76', nets);
+      assert.match(hint, /different network \(198\.51\.100\.76\) from HomeHub \(192\.0\.2\.x\)/);
+      assert.match(hint, /same Wi-Fi as HomeHub/);
+    });
+
     it('checks cameras nobody has looked at lately, but not paused ones', async () => {
       addCamera('Front Door', 'front_door', '192.168.1.40', '2CAA8E000001');
       const pan = addCamera('Living Pan', 'living_pan', '192.168.0.32', '80482C000002');

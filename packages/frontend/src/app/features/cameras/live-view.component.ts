@@ -9,6 +9,8 @@ const MAX_ZOOM = 5;
 const DOUBLE_TAP_MS = 300;
 /** While an arrow is held, how often HomeHub hears that it still is. Its safety stop waits 1.5 s. */
 const TURN_REPEAT_MS = 500;
+/** How long the picture must stop before live view says it's reconnecting. */
+const STALL_MS = 2_000;
 /** A tap turns the camera this long: a small nudge. */
 const MIN_TURN_MS = 250;
 
@@ -147,10 +149,16 @@ export class LiveViewComponent implements AfterViewInit, OnDestroy {
   private readonly auth = inject(AuthService);
   private readonly http = inject(HttpClient);
 
-  readonly deviceId = input.required<number>();
+  /** A Wyze camera's device id. */
+  readonly deviceId = input<number | null>(null);
+  /** Where the camera's hls/ and ptz are, for cameras that aren't Wyze devices, such as /api/ip-cameras/3. */
+  readonly apiBase = input<string | null>(null);
+  private base(): string { return this.apiBase() ?? `/api/cameras/${this.deviceId()}`; }
   readonly name = input('');
   /** A Pan camera, which HomeHub can turn. */
   readonly canPan = input(false);
+  /** Why live video is unlikely to work, such as the camera being on another network. Shown if it doesn't. */
+  readonly problem = input<string | null>(null);
   readonly closed = output<void>();
 
   private readonly video = viewChild.required<ElementRef<HTMLVideoElement>>('video');
@@ -192,6 +200,13 @@ export class LiveViewComponent implements AfterViewInit, OnDestroy {
   private readonly onHidden = () => { if (document.hidden) this.endTurn(true); };
 
   private hls?: Hls;
+  private stallTimer?: ReturnType<typeof setTimeout>;
+
+  private showPlaying(): void {
+    clearTimeout(this.stallTimer);
+    this.playing.set(true);
+    this.needsTap.set(false);
+  }
   private retries = 0;
   private readonly onWheel = (e: WheelEvent) => this.wheel(e);
   private readonly onFullscreen = () => this.resetZoom();
@@ -200,9 +215,17 @@ export class LiveViewComponent implements AfterViewInit, OnDestroy {
     const el = this.video().nativeElement;
     // The template's `muted` attribute doesn't mute a video Angular creates; browsers only autoplay muted video.
     el.muted = true;
-    const src = `/api/cameras/${this.deviceId()}/hls/index.m3u8`;
-    el.addEventListener('playing', () => { this.playing.set(true); this.needsTap.set(false); });
-    el.addEventListener('waiting', () => this.playing.set(false));
+    const src = `${this.base()}/hls/index.m3u8`;
+    el.addEventListener('playing', () => this.showPlaying());
+    // Live video plays close to its newest segment, so "waiting" fires between
+    // segments while the picture keeps moving: only a picture that stops for a
+    // moment counts as stalled.
+    el.addEventListener('timeupdate', () => { if (!el.paused) this.showPlaying(); });
+    el.addEventListener('waiting', () => {
+      clearTimeout(this.stallTimer);
+      const at = el.currentTime;
+      this.stallTimer = setTimeout(() => { if (el.currentTime === at) this.playing.set(false); }, STALL_MS);
+    });
     // Not passive, so scrolling over the video zooms it instead of scrolling the page.
     this.wrap().nativeElement.addEventListener('wheel', this.onWheel, { passive: false });
     document.addEventListener('fullscreenchange', this.onFullscreen);
@@ -230,12 +253,13 @@ export class LiveViewComponent implements AfterViewInit, OnDestroy {
         this.auth.refresh().subscribe({ next: () => this.hls?.startLoad(), error: () => this.status.set('Sign in again to watch.') });
         return;
       }
-      if (data.type === Hls.ErrorTypes.NETWORK_ERROR && this.retries++ < 5) {
+      // A camera on another network won't come through by retrying: say why soon.
+      if (data.type === Hls.ErrorTypes.NETWORK_ERROR && this.retries++ < (this.problem() ? 1 : 5)) {
         this.status.set('Reconnecting…');
         setTimeout(() => this.hls?.startLoad(), 2000);
         return;
       }
-      this.status.set(code === 404 ? 'No live video from this camera. It may be off, on another network, or still connecting.' : 'Live video stopped. Close and try again.');
+      this.status.set(this.problem() ?? (code === 404 ? 'No live video from this camera. It may be off, on another network, or still connecting.' : 'Live video stopped. Close and try again.'));
       this.playing.set(false);
     });
     this.hls.on(Hls.Events.MANIFEST_PARSED, () => {
@@ -274,7 +298,7 @@ export class LiveViewComponent implements AfterViewInit, OnDestroy {
     this.inFlight++;
     const run = async () => {
       try {
-        await firstValueFrom(this.http.post(`/api/cameras/${this.deviceId()}/ptz`, { action }));
+        await firstValueFrom(this.http.post(`${this.base()}/ptz`, { action }));
       } catch (err) {
         const e = err as HttpErrorResponse;
         if (action !== 'stop') this.endTurn(true, false);
@@ -458,6 +482,7 @@ export class LiveViewComponent implements AfterViewInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    clearTimeout(this.stallTimer);
     if (this.pendingStop) { clearTimeout(this.pendingStop); this.send('stop'); }
     this.endTurn(true);
     clearTimeout(this.turnErrorTimer);

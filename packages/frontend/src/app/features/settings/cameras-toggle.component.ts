@@ -3,7 +3,7 @@ import { HttpErrorResponse } from '@angular/common/http';
 import { RouterLink } from '@angular/router';
 import { CamerasStateService } from '../../core/services/cameras-state.service';
 
-/** Settings → Integrations → Cameras: turn Wyze and Ring cameras on or off in HomeHub. Admin only. */
+/** Settings → Integrations → Cameras: turn Wyze, Ring and IP cameras on or off in HomeHub. Admin only. */
 @Component({
   selector: 'app-cameras-toggle',
   standalone: true,
@@ -23,7 +23,7 @@ import { CamerasStateService } from '../../core/services/cameras-state.service';
         <div>
           <div class="label">Cameras</div>
           @if (s.enabled) {
-            <div class="sub">Wyze and Ring cameras. Turn off to hide Cameras from the menu and stop watching for motion and doorbell presses.</div>
+            <div class="sub">Wyze, Ring and IP cameras. Turn off to hide Cameras from the menu and stop watching for motion and doorbell presses.</div>
           } @else {
             <div class="sub">Off. Cameras is hidden from the menu and nothing is watched.</div>
           }
@@ -31,7 +31,7 @@ import { CamerasStateService } from '../../core/services/cameras-state.service';
             <div class="sub">
               Wyze cameras need the camera bridge, which is left out of this HomeHub. To add it, remove <code>HOMEHUB_CAMERA_BRIDGE=0</code>
               from HomeHub's <code>.env</code>, then run <code>docker compose -f docker-compose.yml up -d</code>.
-              Ring cameras don't need it: <a routerLink="/cameras">set them up on the Cameras page</a>.
+              Ring and IP cameras (Reolink, Amcrest and others) don't need it: <a routerLink="/cameras">set them up on the Cameras page</a>.
             </div>
           }
         </div>

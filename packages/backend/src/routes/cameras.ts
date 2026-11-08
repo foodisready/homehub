@@ -8,10 +8,11 @@ import { getCachedState } from '../kasa/device.cache';
 import * as bridge from '../cameras/bridge';
 import * as snaps from '../cameras/snapshots';
 import { cameraDevices, lastMotionFor, liveCameras } from '../cameras/watch';
-import { noPictureHint, pictureHealth } from '../cameras/picture-status';
+import { camerasElsewhere, elsewhereHint, localNetworks, noPictureHint, pictureHealth } from '../cameras/picture-status';
 import { clearPowerCache } from '../drivers/WyzeDriver';
 import { canPan, isMoving, ptz, PTZ_ACTIONS, type PtzAction } from '../cameras/ptz';
 import { signedIn as ringSignedIn } from '../ring/ring';
+import { cameraCount as ipCameraCount } from '../ipcam/ipcam';
 
 /**
  * Wyze cameras through the camera bridge. Everyone signed in can watch and
@@ -80,15 +81,15 @@ camerasRouter.get('/bridge/cameras', requireAdmin, async (_req: Request, res: Re
 
 // GET /api/cameras/settings
 // bridgeInstalled: false when .env leaves the bridge out, so the menu can hide Cameras,
-// unless ringSignedIn: Ring cameras need no bridge.
+// unless ringSignedIn or ipCameras: Ring and IP cameras need no bridge.
 camerasRouter.get('/settings', (_req: Request, res: Response) => {
-  res.json({ ...snaps.getSettings(), bridgeInstalled: cameraBridgeInstalled(), ringSignedIn: ringSignedIn(), limits: snaps.LIMITS });
+  res.json({ ...snaps.getSettings(), bridgeInstalled: cameraBridgeInstalled(), ringSignedIn: ringSignedIn(), ipCameras: ipCameraCount(), limits: snaps.LIMITS });
 });
 
 // PUT /api/cameras/settings
 camerasRouter.put('/settings', requireAdmin, (req: Request, res: Response) => {
   try {
-    res.json({ ...snaps.saveSettings(req.body ?? {}), bridgeInstalled: cameraBridgeInstalled(), ringSignedIn: ringSignedIn(), limits: snaps.LIMITS });
+    res.json({ ...snaps.saveSettings(req.body ?? {}), bridgeInstalled: cameraBridgeInstalled(), ringSignedIn: ringSignedIn(), ipCameras: ipCameraCount(), limits: snaps.LIMITS });
   } catch (err) {
     res.status(400).json({ error: (err as Error).message, code: 'VALIDATION_ERROR' });
   }
@@ -138,10 +139,14 @@ camerasRouter.get('/', async (_req: Request, res: Response) => {
   const rooms = new Map((getDb().prepare("SELECT id, room FROM devices WHERE driver_type = 'wyze'").all() as { id: number; room: string | null }[])
     .map((r) => [r.id, r.room]));
   const iso = (ms: number | null) => (ms ? new Date(ms).toISOString() : null);
+  const nets = localNetworks();
+  const elsewhere = camerasElsewhere(live.map((c) => c.ip), nets);
   const cameras = await Promise.all(devices.map(async (d) => {
     const cam = live.find((c) => c.id === d.cam);
     const cached = getCachedState(d.id);
     const picture = pictureHealth(d.cam);
+    // On another network from HomeHub: say so whether or not a picture has been asked for yet.
+    const otherNetwork = !!cam?.ip && elsewhere.has(cam.ip);
     return {
       deviceId: d.id,
       name: d.alias,
@@ -156,9 +161,12 @@ camerasRouter.get('/', async (_req: Request, res: Response) => {
       picture: picture.state,
       lastPictureAt: iso(picture.lastOkAt),
       noPictureSince: iso(picture.failingSince),
-      noPictureHint: picture.state === 'failing' && cached?.state !== false
-        ? await noPictureHint(d.cam, d.mac ?? cam?.mac ?? null, cam?.ip ?? null)
-        : null,
+      otherNetwork,
+      noPictureHint: otherNetwork
+        ? elsewhereHint(cam!.ip!, nets)
+        : picture.state === 'failing' && cached?.state !== false
+          ? await noPictureHint(d.cam, d.mac ?? cam?.mac ?? null, cam?.ip ?? null)
+          : null,
       lastMotionAt: lastMotionFor(d.id),
       latestSnapshot: snaps.latestFor(d.id),
     };

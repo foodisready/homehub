@@ -21,6 +21,7 @@ export const BACKUP_TABLES = [
   'scene_actions',
   'schedules',
   'motion_rules',
+  'ip_cameras',
   'settings',
   'notification_preferences',
   'push_subscriptions',

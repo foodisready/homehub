@@ -332,6 +332,28 @@ function migrate(db: Database.Database): void {
   try { db.exec('ALTER TABLE camera_snapshots ADD COLUMN detail TEXT'); } catch {}
   db.exec('CREATE INDEX IF NOT EXISTS idx_camera_snapshots_camera ON camera_snapshots(camera, id)');
 
+  // ── IP cameras reached directly on the home network (ONVIF / RTSP) ──
+  // URLs are kept without the login, which has its own columns.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS ip_cameras (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      name         TEXT    NOT NULL,
+      host         TEXT    NOT NULL,
+      onvif_port   INTEGER,                 -- NULL: added by its RTSP address, no ONVIF
+      username     TEXT    NOT NULL DEFAULT '',
+      password     TEXT    NOT NULL DEFAULT '',
+      main_url     TEXT    NOT NULL,
+      sub_url      TEXT,
+      snapshot_url TEXT,
+      quality      TEXT    NOT NULL DEFAULT 'main' CHECK(quality IN ('main', 'sub')),
+      maker        TEXT,
+      model        TEXT,
+      can_pan      INTEGER NOT NULL DEFAULT 0,
+      motion       INTEGER NOT NULL DEFAULT 1,
+      created_at   TEXT    NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
+
   db.exec(`
     CREATE TABLE IF NOT EXISTS firmware_releases (
       id          INTEGER PRIMARY KEY AUTOINCREMENT,

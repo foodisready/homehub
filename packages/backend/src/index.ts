@@ -44,6 +44,8 @@ import { startCameraWatch } from './cameras/watch';
 import { startSnapshotPruning } from './cameras/snapshots';
 import { ringRouter } from './routes/ring';
 import { startRing } from './ring/ring';
+import { ipCamerasRouter } from './routes/ip-cameras';
+import { startIpCameras } from './ipcam/ipcam';
 import { activityMiddleware, startActivityPruning } from './activity/activity';
 import { activityRouter } from './routes/activity';
 import { runBackup } from './db/backup';
@@ -121,6 +123,7 @@ app.use('/api/system',                 systemRouter);
 app.use('/api/backups',                requireAdmin, backupsRouter);
 app.use('/api/cameras',                camerasRouter);
 app.use('/api/ring',                   ringRouter);
+app.use('/api/ip-cameras',             ipCamerasRouter);
 app.use('/api/activity',               activityRouter);
 app.use('/api/home-settings',          homeSettingsRouter);
 app.use('/api/setup',                  setupRouter);
@@ -145,6 +148,7 @@ httpServer.listen(PORT, async () => {
   startMotionRules();        // turn lights off when a room has been empty long enough
   startCameraWatch();        // save snapshots when Wyze cameras see motion
   startRing();               // Ring doorbell presses and motion, once someone signs in to Ring
+  startIpCameras();          // motion from IP cameras added on the Cameras page
   startSnapshotPruning();    // delete camera snapshots older than the keep setting
   startActivityPruning();    // delete activity older than the keep setting
   applyRole();               // a backup or dev server holds the voice and camera bridges back

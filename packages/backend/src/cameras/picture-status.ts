@@ -1,5 +1,6 @@
 import dgram from 'dgram';
 import fs from 'fs';
+import os from 'os';
 
 /**
  * Whether each camera is actually sending pictures. The camera bridge reports
@@ -105,6 +106,78 @@ export async function onLocalNetwork(mac: string, ip: string | null): Promise<bo
   if (before.has(want)) return true;
   if (ip && /^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) await nudge(ip);
   return arpTable()?.has(want) ?? null;
+}
+
+// ── Is the camera's address on one of HomeHub's networks? ───────
+
+export interface LocalNetwork { address: string; netmask: string }
+
+/** Docker's own networks on this computer, which no camera is on. */
+const CONTAINER_IFACE = /^(docker|br-|veth|cni|flannel|virbr)/;
+
+/** HomeHub's own IPv4 networks: Wi-Fi, Ethernet. */
+export function localNetworks(ifaces: ReturnType<typeof os.networkInterfaces> = os.networkInterfaces()): LocalNetwork[] {
+  const nets: LocalNetwork[] = [];
+  for (const [name, addrs] of Object.entries(ifaces)) {
+    if (CONTAINER_IFACE.test(name)) continue;
+    for (const a of addrs ?? []) {
+      if (a.family === 'IPv4' && !a.internal) nets.push({ address: a.address, netmask: a.netmask });
+    }
+  }
+  return nets;
+}
+
+const ipv4 = (ip: string): number | null => {
+  const parts = ip.split('.');
+  if (parts.length !== 4) return null;
+  let n = 0;
+  for (const p of parts) {
+    if (!/^\d{1,3}$/.test(p) || Number(p) > 255) return null;
+    n = n * 256 + Number(p);
+  }
+  return n;
+};
+
+/** Whether `ip` is inside one of `nets`, or null when `ip` isn't an IPv4 address. */
+export function inNetworks(ip: string | null, nets: LocalNetwork[]): boolean | null {
+  const n = ip ? ipv4(ip) : null;
+  if (n === null) return null;
+  return nets.some((net) => {
+    const a = ipv4(net.address);
+    const m = ipv4(net.netmask);
+    return a !== null && m !== null && (n & m) >>> 0 === (a & m) >>> 0;
+  });
+}
+
+/**
+ * Wyze cameras whose address isn't on any of HomeHub's networks, such as one
+ * on a second Wi-Fi behind another router. The bridge reaches cameras
+ * directly on the home network, so it can't get video from those, though
+ * Wyze's cloud still sends their motion pictures.
+ *
+ * Only decided when at least one camera is on HomeHub's network: otherwise
+ * HomeHub may be in a container that can't see the home network's addresses,
+ * and every camera would look elsewhere.
+ */
+export function camerasElsewhere(ips: (string | null)[], nets: LocalNetwork[] = localNetworks()): Set<string> {
+  const elsewhere = new Set<string>();
+  if (!ips.some((ip) => inNetworks(ip, nets) === true)) return elsewhere;
+  for (const ip of ips) if (ip && inNetworks(ip, nets) === false) elsewhere.add(ip);
+  return elsewhere;
+}
+
+/** "192.0.2.x" for HomeHub's main network, to show beside a camera's address. */
+export function networkLabel(nets: LocalNetwork[] = localNetworks()): string | null {
+  const net = nets.find((n) => n.netmask === '255.255.255.0') ?? nets[0];
+  if (!net) return null;
+  return net.netmask === '255.255.255.0' ? net.address.replace(/\.\d+$/, '.x') : net.address;
+}
+
+/** What to tell someone whose camera is on another network from HomeHub. */
+export function elsewhereHint(ip: string, nets: LocalNetwork[] = localNetworks()): string {
+  const home = networkLabel(nets);
+  return `This camera is on a different network (${ip}) from HomeHub${home ? ` (${home})` : ''}, so live video and pictures can't reach HomeHub. `
+    + 'Motion pictures from Wyze still arrive. To fix it, set the camera up again in the Wyze app on the same Wi-Fi as HomeHub.';
 }
 
 const HINT_MS = 2 * 60_000;

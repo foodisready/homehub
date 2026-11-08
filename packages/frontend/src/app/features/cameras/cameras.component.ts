@@ -7,6 +7,7 @@ import { CamerasStateService } from '../../core/services/cameras-state.service';
 import { AuthImgComponent } from './auth-img.component';
 import { LiveViewComponent } from './live-view.component';
 import { RingCamerasComponent, type RingCamera } from './ring-cameras.component';
+import { IpCamerasComponent, type IpCamera } from './ip-cameras.component';
 import { MAX_SHARE, canShareFiles, shareOrSave, snapshotFileName } from './snapshot-share';
 
 type BridgeState =
@@ -22,6 +23,8 @@ interface Camera {
   watching: boolean | null; online: boolean | null; streaming: boolean;
   /** Whether pictures actually arrive from the camera. */
   picture: 'ok' | 'failing' | 'unknown'; lastPictureAt: string | null; noPictureSince: string | null; noPictureHint: string | null;
+  /** On a different network from HomeHub, so its video can't reach HomeHub. */
+  otherNetwork?: boolean;
   lastMotionAt: string | null; latestSnapshot: Snapshot | null;
 }
 interface AccountCamera { cam: string; name: string; model: string | null; ip: string | null; mac: string | null; streaming: boolean; added: boolean }
@@ -37,7 +40,7 @@ const PAGE = 48;
 @Component({
   selector: 'app-cameras',
   standalone: true,
-  imports: [FormsModule, AuthImgComponent, LiveViewComponent, RingCamerasComponent],
+  imports: [FormsModule, AuthImgComponent, LiveViewComponent, RingCamerasComponent, IpCamerasComponent],
   styles: [`
     h1 { font-size: 1.4rem; font-weight: 700; margin-bottom: 1rem; }
     h2 { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); margin: 1.75rem 0 0.75rem; }
@@ -78,7 +81,7 @@ const PAGE = 48;
     .pill.watching { border-color: var(--green); color: #4ade80; }
     .pill.paused { border-color: #f59e0b; color: #fbbf24; }
     .pill.offline { border-color: var(--red); color: #f87171; }
-    .pill.nopicture { border-color: #f59e0b; color: #fbbf24; }
+    .pill.nopicture, .pill.othernet { border-color: #f59e0b; color: #fbbf24; }
     .hint { font-size: 0.78rem; color: #fbbf24; margin: -0.3rem 0 0.6rem; line-height: 1.45; }
     .cam-sub { font-size: 0.75rem; color: var(--text-muted); margin: 0.2rem 0 0.6rem; }
     .cam-actions { display: flex; gap: 0.4rem; flex-wrap: wrap; }
@@ -235,7 +238,7 @@ const PAGE = 48;
           @for (c of cameras(); track c.deviceId) {
             <div class="card cam">
               <app-auth-img [src]="'/api/cameras/' + c.deviceId + '/live.jpg?cached=1'" (result)="thumbResult(c, $event)" [refreshSeconds]="c.watching === false ? 0 : 20"
-                            [alt]="c.name" [failedText]="c.watching === false ? 'Paused' : c.streaming ? 'No picture right now' : 'Not connected to this camera yet'"
+                            [alt]="c.name" [failedText]="c.watching === false ? 'Paused' : c.otherNetwork ? 'On another network' : c.streaming ? 'No picture right now' : 'Not connected to this camera yet'"
                             (click)="openLive(c)" role="button" [attr.aria-label]="'Watch ' + c.name + ' live'" />
               <div class="cam-body">
                 <div class="cam-title">
@@ -246,7 +249,9 @@ const PAGE = 48;
                   {{ c.room ?? 'No room' }}{{ c.model ? ' · ' + c.model : '' }}
                   @if (c.lastMotionAt) { · motion {{ ago(c.lastMotionAt) }} }
                 </div>
-                @if (statusOf(c) === 'nopicture') {
+                @if (statusOf(c) === 'othernet') {
+                  <p class="hint">{{ c.noPictureHint }}</p>
+                } @else if (statusOf(c) === 'nopicture') {
                   <p class="hint">
                     {{ c.lastPictureAt ? 'Last picture ' + ago(c.lastPictureAt) + '.' : 'No picture yet.' }}
                     {{ c.noPictureHint }}
@@ -281,9 +286,10 @@ const PAGE = 48;
 
       @if (bridge() && bridge()!.state !== 'off') {
         <app-ring-cameras (openSnapshot)="openShot($any($event))" (camerasChange)="ringCams.set($event)" />
+        <app-ip-cameras (camerasChange)="ipCams.set($event)" />
       }
 
-      @if (cameras().length || ringCams().length || snapshots().length) {
+      @if (cameras().length || ringCams().length || ipCams().length || snapshots().length) {
         <h2>Snapshots</h2>
         <div class="chips" role="group" aria-label="Filter snapshots by camera">
           <button class="chip" type="button" [class.active]="filterId() === null && filterCamera() === null" (click)="setFilter(null)">All</button>
@@ -292,6 +298,9 @@ const PAGE = 48;
           }
           @for (c of ringCams(); track c.id) {
             <button class="chip" type="button" [class.active]="filterCamera() === c.key" (click)="setCameraFilter(c.key)">{{ c.label }}</button>
+          }
+          @for (c of ipCams(); track c.id) {
+            <button class="chip" type="button" [class.active]="filterCamera() === c.key" (click)="setCameraFilter(c.key)">{{ c.name }}</button>
           }
         </div>
         @if (snapshots().length) {
@@ -329,11 +338,11 @@ const PAGE = 48;
         }
       }
 
-      @if (isAdmin() && (bridge()?.state === 'ready' || ringCams().length) && settings(); as st) {
+      @if (isAdmin() && (bridge()?.state === 'ready' || ringCams().length || ipCams().length) && settings(); as st) {
         <h2>Camera settings</h2>
         <div class="card">
           <div class="settings-row">
-            <span class="label">Save a snapshot on motion<small>When Wyze or Ring reports motion from a camera. Wyze takes up to half a minute, Ring a few seconds</small></span>
+            <span class="label">Save a snapshot on motion<small>When a camera reports motion. Wyze takes up to half a minute; Ring and IP cameras a few seconds</small></span>
             <input type="checkbox" [checked]="st.motionSnapshots" (change)="saveSettings({ motionSnapshots: $any($event.target).checked })" aria-label="Save a snapshot on motion" />
           </div>
           <div class="settings-row">
@@ -369,7 +378,7 @@ const PAGE = 48;
     </div>
 
     @if (live(); as c) {
-      <app-live-view [deviceId]="c.deviceId" [name]="c.name" [canPan]="c.canPan" (closed)="live.set(null)" />
+      <app-live-view [deviceId]="c.deviceId" [name]="c.name" [canPan]="c.canPan" [problem]="c.otherNetwork ? c.noPictureHint : null" (closed)="live.set(null)" />
     }
 
     @if (shot(); as s) {
@@ -407,9 +416,10 @@ export class CamerasComponent implements OnInit, OnDestroy {
   readonly snapshots = signal<Snapshot[]>([]);
   readonly hasMore = signal(false);
   readonly filterId = signal<number | null>(null);
-  /** A filter by camera key, for Ring cameras, which aren't devices. */
+  /** A filter by camera key, for Ring and IP cameras, which aren't devices. */
   readonly filterCamera = signal<string | null>(null);
   readonly ringCams = signal<RingCamera[]>([]);
+  readonly ipCams = signal<IpCamera[]>([]);
   readonly settings = signal<Settings | null>(null);
 
   readonly busy = signal(false);
@@ -751,13 +761,15 @@ export class CamerasComponent implements OnInit, OnDestroy {
   statusOf(c: Camera): string {
     if (c.online === false) return 'offline';
     if (c.watching === false) return 'paused';
+    // Pictures may come through anyway one day, as when the routers change: then it's watching.
+    if (c.otherNetwork && c.picture !== 'ok' && this.thumbOk()[c.deviceId] !== true) return 'othernet';
     if (c.picture === 'failing') return 'nopicture';
     if (c.watching && (c.picture === 'ok' || this.thumbOk()[c.deviceId] === true)) return 'watching';
     return '';
   }
 
   statusLabel(c: Camera): string {
-    return ({ offline: 'Offline', paused: 'Paused', watching: 'Watching', nopicture: 'No picture' } as Record<string, string>)[this.statusOf(c)] ?? 'Checking…';
+    return ({ offline: 'Offline', paused: 'Paused', watching: 'Watching', nopicture: 'No picture', othernet: 'Other network' } as Record<string, string>)[this.statusOf(c)] ?? 'Checking…';
   }
 
   ago(iso: string): string {

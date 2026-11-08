@@ -323,6 +323,31 @@ services:
     restart: unless-stopped
     logging: *default-logging
 
+  # ── Camera relay (IP cameras: Reolink, Amcrest and others) ───
+  # go2rtc, unchanged from its own image. When someone watches an IP camera,
+  # HomeHub hands it the camera's RTSP stream and it serves the video as HLS,
+  # which HomeHub passes on with its own login; it also makes pictures from
+  # the video for cameras without a snapshot address. It keeps no camera list
+  # or password: HomeHub tells it again after a restart.
+  #
+  # Host networking so HomeHub reaches it on 127.0.0.1, where alone it
+  # listens. Idle, it uses about 15 MB of memory. HOMEHUB_CAMERA_RELAY=0 in
+  # .env leaves it out.
+  camera-relay:
+    # Pinned, like every image here, so updates only arrive when this file changes.
+    image: alexxit/go2rtc:1.9.14@sha256:675c318b23c06fd862a61d262240c9a63436b4050d177ffc68a32710d9e05bae
+    deploy:
+      replicas: ${HOMEHUB_CAMERA_RELAY:-1}
+    network_mode: host
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        printf 'api:\n  listen: "127.0.0.1:1985"\nrtsp:\n  listen: ""\nwebrtc:\n  listen: ""\nsrtp:\n  listen: ""\nlog:\n  level: warn\n' > /tmp/go2rtc.yaml
+        exec go2rtc -config /tmp/go2rtc.yaml
+    restart: unless-stopped
+    logging: *default-logging
+
   # ── Voice bridge (speakers → speech recognition → HomeHub) ───
   # Waits, using almost no memory, until voice is turned on in Settings →
   # Voice control, then downloads its speech models into its own volume and

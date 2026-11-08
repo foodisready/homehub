@@ -15,6 +15,7 @@ HomeHub controls devices directly over your home network. All of them are switch
 | **Meross** | MSG100 and MSG200 garage door openers | Needs a one-time Meross sign-in |
 | **Wyze** | Cameras, such as Cam v2, v3 and Pan v3 | Needs the camera bridge and a Wyze API key. See [Cameras](#cameras) |
 | **Ring** | Doorbells and cameras: doorbell presses, motion, snapshots and live view | Through your Ring account. See [Ring doorbells and cameras](#ring-doorbells-and-cameras) |
+| **IP cameras** | Reolink, Amcrest and other cameras with ONVIF or RTSP: live video, snapshots, motion snapshots and turning | Local, no cloud. See [IP cameras](#ip-cameras-reolink-amcrest-and-others) |
 | **Any Matter brand** | Plugs, lights, switches and power strips (on and off) | Shared from Google Home, Apple Home, Alexa or SmartThings. See [Matter devices](#matter-devices) |
 
 Zigbee devices aren't supported. "Works with Google or Alexa" on a box doesn't mean it works with HomeHub, but the **Matter** logo does.
@@ -123,7 +124,7 @@ HomeHub keeps your Wyze sign-in on the HomeHub computer, in its data folder, whe
 
 If your Wyze account uses two-step verification, the bridge can't sign in yet; turn it off in the Wyze app first.
 
-The cameras need to be on the same network as the HomeHub computer. A camera on another network, such as a second router's Wi-Fi, appears but shows no picture.
+The cameras need to be on the same network as the HomeHub computer. A camera on another network, such as a second router's Wi-Fi, appears with **Other network** and no live video, because HomeHub talks to the cameras directly on its own network. Its motion pictures still arrive from Wyze. To fix it, set the camera up again in the Wyze app on the same Wi-Fi as HomeHub.
 
 ### Turn cameras off
 
@@ -193,6 +194,35 @@ Ring's own settings still decide what counts as motion, such as its motion zones
 While automations are paused, Ring motion does nothing, but doorbell presses still save a picture and notify you. A backup or development HomeHub doesn't connect to Ring.
 
 If Ring stops accepting HomeHub's sign-in, **Health** says so; sign in again on the Cameras page. Ring has no official way for other apps to connect, so HomeHub uses the same unofficial library as Homebridge and Home Assistant's Ring add-on. A change at Ring can stop it working until the library is updated.
+
+### IP cameras (Reolink, Amcrest and others)
+
+HomeHub can show IP cameras live, save a picture when one sees motion, and turn one that turns. It talks to the camera directly on your home network, with no cloud account or subscription, so it keeps working when the internet is down. Most IP cameras work: any with **ONVIF**, such as Reolink, Amcrest, Axis, and UniFi with ONVIF turned on. A camera without ONVIF can still be added by its RTSP address, for live video and pictures but no motion.
+
+Before you start, in the camera's own app or web page:
+
+- Note the camera's **username and password**. These are set on the camera itself, not a cloud account.
+- Turn on **ONVIF**. On a Reolink: **Settings → Network → Advanced → Server Settings**. Many Amcrest cameras have it on already.
+- Make sure the camera is on the same Wi-Fi as HomeHub. HomeHub can't reach a camera on a second router's Wi-Fi.
+
+Then, as an administrator:
+
+1. Open **Cameras** and select **Add an IP camera**.
+2. Select **Search the network** and **Use** next to your camera, or type its address, as shown in the camera's app.
+3. Enter the camera's username and password, and a name if you like, then select **Add camera**.
+
+HomeHub asks the camera where its video and pictures are and whether it turns, which takes a few seconds. If it says the camera didn't answer, check the address and that ONVIF is on. For a camera without ONVIF, select **No ONVIF? Add by RTSP address** and enter the address from its manual, which starts with `rtsp://`.
+
+Each camera's card shows a picture that refreshes every 20 seconds, and whether HomeHub is watching it for motion:
+
+- **Live** shows the camera live, through HomeHub, so it works over HomeHub's own address. Arrows turn a camera that turns. If live video stutters, or a phone shows nothing, select **Edit** and choose the smaller stream; full-quality streams from 4K cameras use a format some phones can't play.
+- **Snapshot** saves a picture now.
+- **Motion** follows the same settings as Wyze and Ring motion: **Save a snapshot on motion**, **Notify my phone** and **Wait between snapshots**. The camera's own settings decide what counts as motion. A Reolink that tells people, vehicles and animals apart says which it saw in the notification. To stop motion snapshots from one camera, select **Edit** and clear **Save a picture when it sees motion**.
+- **Edit** changes the name, login, stream and motion. Leave the password blank to keep the saved one.
+
+HomeHub keeps each camera's login on this computer and in backups, where it's hidden when a backup is viewed. Video goes through the **camera relay**, a small service HomeHub adds when you update, using about 15 MB of memory while nobody watches. While automations are paused, IP camera motion does nothing. A backup or development HomeHub doesn't watch for motion.
+
+Motion lights can't use an IP camera as their sensor yet.
 
 ## Control your devices
 
