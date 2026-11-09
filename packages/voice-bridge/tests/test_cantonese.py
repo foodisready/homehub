@@ -43,6 +43,18 @@ class ReadingTest(unittest.TestCase):
         self.assertEqual(read('着卓机房等。'), ('on', '卓希房燈'))
         self.assertEqual(read('熄卓希房燈'), ('off', '卓希房燈'))
 
+    def test_said_or_heard_twice(self):
+        # From the Pi's log, 2026-11-09.
+        self.assertEqual(read('开卓气房灯开卓气房灯。'), ('on', '卓希房燈'))
+        self.assertEqual(read('熄熄桌戏房灯。'), ('off', '卓希房燈'))
+        self.assertEqual(read('开开厨房灯'), ('on', '廚房燈'))
+        # 着 then a name that starts with 着: not a repeated verb.
+        self.assertEqual(yue.parse('着着氣燈', NAMES + ['着氣燈']).name, '着氣燈')
+
+    def test_two_names_that_sound_alike_are_never_guessed_between(self):
+        # 卓k房灯 next to 卓希房燈 made every 卓希房燈 command fail: remove one of them.
+        self.assertIsNone(yue.parse('開卓希房燈', NAMES + ['卓k房灯']))
+
     def test_a_scene_by_its_name(self):
         self.assertEqual(read('晚安'), ('scene', '晚安'))
 

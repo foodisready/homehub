@@ -247,9 +247,21 @@ def parse(text: str, names: list[str], scenes: list[str] | None = None) -> Comma
     s = syllables(text)
     while s and s[-1] in TRAILING:
         s = s[:-1]
+    # The whole command heard twice: 开卓希房灯开卓希房灯.
+    half = len(s) // 2
+    if half and len(s) % 2 == 0 and s[:half] == s[half:]:
+        s = s[:half]
     action, rest = read_verb(s)
     if action and rest:
         name, score, runner = best_name(rest, cantonese)
+        # The verb heard twice: 熄熄卓希房燈. Only taken as a repeat if that matches a name better,
+        # since a name can start with a verb's sound: 着着氣燈 is 着 and then 着氣燈.
+        again, repeated = read_verb(rest)
+        verb = s[len(s) - len(rest) - (len(rest) - len(repeated)): len(s) - len(rest)]   # the first verb's sounds
+        if again == action and repeated and rest[: len(rest) - len(repeated)] == verb:
+            alt = best_name(repeated, cantonese)
+            if alt[0] and alt[1] - alt[2] > score - runner and alt[1] > score:
+                name, score, runner = alt
         if name and score >= MATCH and score - runner >= MARGIN:
             if minutes and action == 'off':
                 return None   # "off for ten minutes" isn't something HomeHub does: don't guess
