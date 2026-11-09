@@ -37,6 +37,8 @@ class Run:
     speaker: str = ''
     # Cancelled by the speaker, so it can't be the one to answer.
     dropped: bool = False
+    # The wake word the speaker heard, as it names it; empty when it listens again after a question.
+    wake: str = ''
 
     def volume(self) -> float:
         return loudness(bytes(self.listen.audio)) if self.listen.spoke else 0.0
@@ -190,7 +192,7 @@ class SpeakerLink:
             event(E.VOICE_ASSISTANT_STT_VAD_END)
             try:
                 if not await self.one_answers.answers(run):
-                    log.info('%s #%d: another speaker heard the same command louder, so it answers', self.name, run.n)
+                    log.info('%s #%d (%s): another speaker heard the same command louder, so it answers', self.name, run.n, run.wake or 'no wake word')
                     return
                 # A question asked lately is answered by this command, or forgotten.
                 asked = self.asked[0] if self.asked and time.monotonic() - self.asked[1] <= FOLLOW_UP_S else None
@@ -208,8 +210,8 @@ class SpeakerLink:
                 if follow_up:
                     self.asked = (follow_up, time.monotonic())
                 log.info(
-                    '%s #%d heard %r -> %r (%s; speech %.1fs, recognise %.2fs, HomeHub %.2fs, reply ready %.2fs after speech ended)',
-                    self.name, run.n, a.heard, a.reply, 'done' if a.handled else 'not handled',
+                    '%s #%d (%s) heard %r -> %r (%s; speech %.1fs, recognise %.2fs, HomeHub %.2fs, reply ready %.2fs after speech ended)',
+                    self.name, run.n, run.wake or 'no wake word', a.heard, a.reply, 'done' if a.handled else 'not handled',
                     run.listen.seconds, a.stt_s, a.homehub_s, time.monotonic() - t_end,
                 )
             except Exception as e:  # noqa: BLE001 — the speaker must always hear the run end
@@ -228,7 +230,7 @@ class SpeakerLink:
                 self.run.ended.set()
             self.run = run
             self.one_answers.started(run)
-            log.debug('%s #%d wake word %r', self.name, run.n, wake_word)
+            run.wake = (wake_word or '').strip()
             event(E.VOICE_ASSISTANT_RUN_START, {'conversation_id': run.conversation})
             event(E.VOICE_ASSISTANT_STT_START)
             event(E.VOICE_ASSISTANT_STT_VAD_START)
