@@ -12,7 +12,7 @@ import aioesphomeapi as api
 from aioesphomeapi.model import VoiceAssistantEventType as E
 
 from .config import Speaker
-from .endpoint import MAX_S, Endpointer
+from .endpoint import MAX_S, Endpointer, loudness
 from .pipeline import Answer
 
 log = logging.getLogger('homehub-voice')
@@ -20,15 +20,54 @@ log = logging.getLogger('homehub-voice')
 ESPHOME_SERVICE = '_esphomelib._tcp.local.'
 # How long an "on or off?" question waits for its answer, from when it was asked.
 FOLLOW_UP_S = 15.0
+# Speakers that wake within this long of each other heard the same person say the wake word.
+SAME_WAKE_S = 1.0
+# How long a speaker that has finished listening waits for another that heard the same command.
+WAIT_FOR_OTHERS_S = 2.0
 
 
-@dataclass
+@dataclass(eq=False)
 class Run:
     n: int
     conversation: str
     listen: Endpointer = field(default_factory=Endpointer)
     ended: asyncio.Event = field(default_factory=asyncio.Event)
     started: float = field(default_factory=time.monotonic)
+    # Which speaker heard it, by address: two speakers can have the same name.
+    speaker: str = ''
+    # Cancelled by the speaker, so it can't be the one to answer.
+    dropped: bool = False
+
+    def volume(self) -> float:
+        return loudness(bytes(self.listen.audio)) if self.listen.spoke else 0.0
+
+
+# Runs are remembered this long, so a speaker that finishes listening late still sees who answered.
+REMEMBER_S = 30.0
+
+
+class OneAnswers:
+    """When several speakers wake for the same command, only the one that heard it loudest
+    (most likely the nearest) answers; the others go quiet. Shared by all the speakers."""
+
+    def __init__(self) -> None:
+        self.runs: list[Run] = []
+
+    def started(self, run: Run) -> None:
+        self.runs = [r for r in self.runs if run.started - r.started <= REMEMBER_S] + [run]
+
+    async def answers(self, run: Run) -> bool:
+        """Called when `run` has finished listening. False if another speaker should answer instead."""
+        others = [r for r in self.runs if r.speaker != run.speaker and not r.dropped and abs(r.started - run.started) <= SAME_WAKE_S]
+        if not others:
+            return True
+        waits = [asyncio.ensure_future(r.ended.wait()) for r in others]
+        await asyncio.wait(waits, timeout=WAIT_FOR_OTHERS_S)
+        for w in waits:
+            w.cancel()
+        # Every speaker reaches the same verdict: loudest, then the one that woke first, then by name.
+        rank = lambda r: (r.volume(), -r.started, r.speaker, -r.n)  # noqa: E731
+        return max([run, *[r for r in others if not r.dropped]], key=rank) is run
 
 
 class StopTrying(Exception):
@@ -45,8 +84,10 @@ class SpeakerLink:
         speak: Callable[[str, str, str], str],
         listed: bool,
         on_change: Callable[[], None] = lambda: None,
+        one_answers: OneAnswers | None = None,
     ) -> None:
         self.speaker = speaker
+        self.one_answers = one_answers or OneAnswers()
         self.answer = answer
         self.speak = speak  # (text, speaker host, language) -> URL of the spoken reply
         self.listed = listed  # listed in SPEAKERS rather than found on the network
@@ -143,13 +184,17 @@ class SpeakerLink:
             except TimeoutError:
                 pass
             if self.run is not run:
+                run.dropped = True
                 return
             t_end = time.monotonic()
             event(E.VOICE_ASSISTANT_STT_VAD_END)
-            # A question asked lately is answered by this command, or forgotten.
-            asked = self.asked[0] if self.asked and time.monotonic() - self.asked[1] <= FOLLOW_UP_S else None
-            self.asked = None
             try:
+                if not await self.one_answers.answers(run):
+                    log.info('%s #%d: another speaker heard the same command louder, so it answers', self.name, run.n)
+                    return
+                # A question asked lately is answered by this command, or forgotten.
+                asked = self.asked[0] if self.asked and time.monotonic() - self.asked[1] <= FOLLOW_UP_S else None
+                self.asked = None
                 a = await loop.run_in_executor(None, self.answer, bytes(run.listen.audio), run.listen.spoke, asked)
                 follow_up = a.asked if isinstance(getattr(a, 'asked', None), str) else None
                 event(E.VOICE_ASSISTANT_STT_END, {'text': a.heard or ' '})
@@ -177,10 +222,12 @@ class SpeakerLink:
 
         async def on_start(conversation: str, flags: int, settings, wake_word: str | None) -> int:
             self.count += 1
-            run = Run(self.count, conversation or f'homehub-{self.count}')
+            run = Run(self.count, conversation or f'homehub-{self.count}', speaker=f'{self.speaker.host}:{self.speaker.port}')
             if self.run:
+                self.run.dropped = True
                 self.run.ended.set()
             self.run = run
+            self.one_answers.started(run)
             log.debug('%s #%d wake word %r', self.name, run.n, wake_word)
             event(E.VOICE_ASSISTANT_RUN_START, {'conversation_id': run.conversation})
             event(E.VOICE_ASSISTANT_STT_START)
@@ -193,6 +240,7 @@ class SpeakerLink:
             if run:
                 if abort:
                     self.run = None
+                    run.dropped = True
                 run.ended.set()
 
         async def on_audio(data: bytes, *_rest) -> None:

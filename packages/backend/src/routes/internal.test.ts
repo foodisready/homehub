@@ -211,6 +211,12 @@ describe('/internal/voice', () => {
     assert.equal((await say('Office lamp')).body.handled, false);   // a name starting with "off" stays a name
   });
 
+  it('accepts a comma after the whole verb, as speech recognition writes it', async () => {
+    // From the Pi's log: "Turn off, Office light." wasn't understood.
+    assert.equal((await say('Turn off, Office light.')).body.response, 'Turned off My office lamp.');
+    assert.equal((await say('Switch on, my office lamp')).body.response, 'Turned on My office lamp.');
+  });
+
   it('accepts a spoken possessive', async () => {
     getDb().prepare('INSERT INTO devices (alias, ip) VALUES (?, ?)').run('Brenden bed lamp', '10.9.0.3');
     const { body } = await say("Turn on Brenden's bed lamp.");
@@ -224,6 +230,23 @@ describe('/internal/voice', () => {
 
     const missed = getDb().prepare('SELECT text FROM voice_commands WHERE understood = 0 ORDER BY id DESC').get();
     assert.deepEqual(missed, { text: 'Turn on my office lens.' });
+  });
+
+  it('records a miss only when the bridge will not try again', async () => {
+    const count = () => (getDb().prepare('SELECT COUNT(*) AS n FROM voice_commands').get() as { n: number }).n;
+    const before = count();
+    const res = await fetch(`${baseUrl}/internal/voice/command`, {
+      method: 'POST', headers: key, body: JSON.stringify({ text: 'Turn on my office lands.', retry: true }),
+    });
+    assert.equal(((await res.json()) as any).handled, false);
+    assert.equal(count(), before, 'a first try that missed is not recorded');
+
+    const hit = await fetch(`${baseUrl}/internal/voice/command`, {
+      method: 'POST', headers: key, body: JSON.stringify({ text: 'Turn on my office lamp.', retry: true }),
+    });
+    assert.equal(((await hit.json()) as any).handled, true);
+    assert.equal(count(), before + 1, 'a first try that worked is recorded');
+    assert.deepEqual(calls, [{ ip: '10.9.0.1', state: true }]);
   });
 
   it('refuses a protected device', async () => {

@@ -16,7 +16,7 @@ from . import __version__, config as cfg
 from .homehub import HomeHub, HomeHubError
 from .pipeline import answer
 from .replies import ReplyServer
-from .speakers import SpeakerLink, Speakers
+from .speakers import OneAnswers, SpeakerLink, Speakers
 
 log = logging.getLogger('homehub-voice')
 
@@ -82,11 +82,12 @@ async def main() -> int:
         return replies.url(name, host)
 
     speakers: Speakers
+    one_answers = OneAnswers()   # so two speakers that hear the same command don't both answer
     speakers = Speakers(
         conf.speakers,
         lambda s, listed: SpeakerLink(
             s, lambda audio, spoke, asked=None: answer(audio, spoke, listener, homehub, ears, asked), speak, listed,
-            on_change=lambda: speakers.changed.set(),
+            on_change=lambda: speakers.changed.set(), one_answers=one_answers,
         ),
         conf.discover,
     )

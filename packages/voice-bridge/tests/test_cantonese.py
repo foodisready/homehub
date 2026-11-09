@@ -153,15 +153,19 @@ class FakeEars:
     def __init__(self, lang, text):
         self.lang, self.text = lang, text
 
-    def language(self, audio):
-        return self.lang
+    def hear(self, audio):
+        return self.lang, self.text
 
     def transcribe(self, audio):
         return self.text
 
 
 class FakeListener:
+    def __init__(self):
+        self.ran = 0
+
     def transcribe(self, audio, names):
+        self.ran += 1
         return 'Turn on the kitchen lights.'
 
 
@@ -172,11 +176,13 @@ class FakeHomeHub:
     def __init__(self, response='Turned on Kitchen lights.', handled=True, fail=False):
         self.response, self.handled, self.fail = response, handled, fail
         self.sent: list[str] = []
+        self.retries: list[bool] = []
 
-    def command(self, text):
+    def command(self, text, retry=False):
         if self.fail:
             raise HomeHubError('down')
         self.sent.append(text)
+        self.retries.append(retry)
         return CommandResult(self.handled, self.response)
 
 
@@ -192,11 +198,54 @@ class PipelineTest(unittest.TestCase):
         h = FakeHomeHub()
         self.assertEqual(answer(b'x', True, FakeListener(), h, FakeEars('zh', '着厨房灯。')).lang, 'yue')
 
-    def test_english_still_goes_to_whisper(self):
-        h = FakeHomeHub()
-        a = answer(b'x', True, FakeListener(), h, FakeEars('en', 'Turn on the kitchen lights.'))
-        self.assertEqual(h.sent, ['Turn on the kitchen lights.'])
-        self.assertEqual(a.lang, 'en')
+    def test_english_heard_by_sensevoice_skips_whisper(self):
+        h, l = FakeHomeHub(), FakeListener()
+        a = answer(b'x', True, l, h, FakeEars('en', 'Turn on the kitchen light.'))
+        self.assertEqual(h.sent, ['Turn on the kitchen light.'])
+        self.assertEqual((a.lang, a.handled, l.ran), ('en', True, 0))
+
+    def test_english_not_understood_is_heard_again_by_whisper(self):
+        class Learns(FakeHomeHub):
+            def command(self, text, retry=False):
+                self.handled = text == 'Turn on the kitchen lights.'
+                return super().command(text, retry)
+        h, l = Learns(), FakeListener()
+        a = answer(b'x', True, l, h, FakeEars('en', 'Turn on the zebra.'))
+        self.assertEqual(h.sent, ['Turn on the zebra.', 'Turn on the kitchen lights.'])
+        self.assertEqual(h.retries, [True, False], 'only the last try is recorded as a miss')
+        self.assertEqual((a.heard, a.handled, l.ran), ('Turn on the kitchen lights.', True, 1))
+
+    def test_english_missed_twice_is_recorded_once(self):
+        h = FakeHomeHub(response="Sorry, I didn't understand that.", handled=False)
+        a = answer(b'x', True, FakeListener(), h, FakeEars('en', 'Turn on the zebra.'))
+        self.assertEqual(h.retries, [True, False])
+        self.assertFalse(a.handled)
+
+    def test_a_nearly_right_name_is_corrected_before_asking_whisper(self):
+        class Knows(FakeHomeHub):
+            names = ['My office lamp', 'Kitchen lights', 'Office', '書房燈']
+            def command(self, text, retry=False):
+                self.handled = text == 'Turn on My office lamp'
+                return super().command(text, retry)
+        h, l = Knows(), FakeListener()
+        a = answer(b'x', True, l, h, FakeEars('en', 'Turn on my office la.'))
+        self.assertEqual(h.sent, ['Turn on my office la.', 'Turn on My office lamp'])
+        self.assertEqual((a.handled, l.ran), (True, 0))
+
+    def test_closest_name(self):
+        from homehub_voice.pipeline import closest_name
+        names = ['My office lamp', 'Kitchen lights', 'Office', "Brenden's left bedside lamp", "Brenden's right bedside lamp", '書房燈']
+        self.assertEqual(closest_name('Turn on my office la.', names), 'Turn on My office lamp')
+        self.assertEqual(closest_name('switch off, the kitchen light', names), 'switch off Kitchen lights')
+        # Too close to call between two names, or nothing like any: left as heard.
+        self.assertEqual(closest_name("Turn on Brenden's bedside lamp.", names), "Turn on Brenden's bedside lamp.")
+        self.assertEqual(closest_name('Turn on the garage.', names), 'Turn on the garage.')
+        self.assertEqual(closest_name('What time is it?', names), 'What time is it?')
+
+    def test_homehub_down_does_not_wait_for_whisper(self):
+        l = FakeListener()
+        a = answer(b'x', True, l, FakeHomeHub(fail=True), FakeEars('en', 'Turn on the kitchen lights.'))
+        self.assertEqual((a.reply, l.ran), ('I can\'t reach HomeHub right now.', 0))
 
     def test_unread_cantonese_is_still_logged_by_homehub(self):
         h = FakeHomeHub(response="Sorry, I didn't understand that.", handled=False)

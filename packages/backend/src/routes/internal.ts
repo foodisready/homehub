@@ -75,16 +75,19 @@ internalRouter.post('/voice/status', (req: Request, res: Response) => {
 // POST /internal/voice/command  { text: string }
 // Rules only. Spoken text can be misheard, so a model never gets to guess a device from it.
 internalRouter.post('/voice/command', async (req: Request, res: Response) => {
-  const { text } = req.body as { text?: unknown };
+  // retry: the bridge will try again with a slower, more careful hearing if this isn't understood,
+  // so a miss isn't recorded yet. A command that is understood is recorded either way.
+  const { text, retry } = req.body as { text?: unknown; retry?: unknown };
   if (typeof text !== 'string' || !text.trim()) {
     return res.status(400).json({ error: '`text` is required', code: 'VALIDATION_ERROR' });
   }
 
-  // The wake word can swallow the first word, leaving "off my office lamp" or "Off, kitchen light."
-  const spoken = text.trim().replace(/^(on|off)(?:\s*,\s*|\s+)/i, 'turn $1 ');
+  // The wake word can swallow the first word, leaving "off my office lamp" or "Off, kitchen light.",
+  // and speech recognition can put a comma after the verb: "Turn off, Office light."
+  const spoken = text.trim().replace(/^(?:(?:turn|switch)\s+)?(on|off)(?:\s*,\s*|\s+)/i, 'turn $1 ');
 
   const handled = await withActivity({ source: 'voice' }, () => runPowerCommand(spoken)) ?? answerStatusQuestion(spoken);
-  recordVoiceCommand(text.trim(), handled !== null);
+  if (handled || retry !== true) recordVoiceCommand(text.trim(), handled !== null);
   if (!handled) return res.json({ handled: false, response: reply('not_understood', {}), actions: [] });
 
   res.json({ handled: true, ...handled });

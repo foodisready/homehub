@@ -78,9 +78,14 @@ class SenseVoice:
             rec.decode_stream(s)
         return s.result
 
+    def hear(self, audio: bytes) -> tuple[str, str]:
+        """The language ('en', 'yue', 'zh', ... from a tag like <|yue|>) and the words, from one quick pass.
+        On a Pi 4 this takes about a second, where Whisper takes ten."""
+        r = self._run(self.auto, audio)
+        return r.lang.strip('<|>') or 'en', r.text.strip()
+
     def language(self, audio: bytes) -> str:
-        """'en', 'yue', 'zh', ... from a tag like <|yue|>."""
-        return self._run(self.auto, audio).lang.strip('<|>') or 'en'
+        return self.hear(audio)[0]
 
     def transcribe(self, audio: bytes) -> str:
         return self._run(self.yue, audio).text.strip()

@@ -102,7 +102,7 @@ class FakeHomeHub:
         self.fail = fail
         self.sent: list[str] = []
 
-    def command(self, text):
+    def command(self, text, retry=False):
         if self.fail:
             raise HomeHubError('down')
         self.sent.append(text)
@@ -329,6 +329,75 @@ class SpeakerLinkTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn('VOICE_ASSISTANT_ERROR', kinds)
         self.assertEqual(kinds[-1], 'VOICE_ASSISTANT_RUN_END')
         link.task.cancel()
+
+    async def test_only_the_loudest_of_two_speakers_answers(self):
+        from homehub_voice import speakers
+
+        answered = []
+
+        def answer_fn(audio, spoke, asked=None):
+            answered.append(len(audio))
+            return mock.Mock(heard='turn on office lamp', reply='Office Lamp is on.', handled=True, stt_s=0, homehub_s=0, lang='en', asked=None)
+
+        one = speakers.OneAnswers()
+        links, clients = [], []
+        with mock.patch.object(speakers.api, 'APIClient', FakeClient):
+            for host in ('10.0.0.5', '10.0.0.6'):
+                link = speakers.SpeakerLink(cfg.Speaker(host), answer_fn, lambda t, h, lang='en': 'http://me/r.wav', listed=True, one_answers=one)
+                link.start()
+                links.append(link)
+            for _ in range(50):
+                await asyncio.sleep(0.01)
+                if len(FakeClient.instances) == 2 and all(c.handlers for c in FakeClient.instances):
+                    break
+        near, far = FakeClient.instances
+
+        def speech(volume):
+            loud = (np.sin(np.arange(16000) * 0.2) * volume).astype(np.int16).tobytes()
+            return tone(0.5, False) + loud + tone(2, False)
+
+        def earlier_commands_were_long_ago():
+            for r in one.runs:
+                r.started -= 10
+
+        async def say_both(first, second):
+            earlier_commands_were_long_ago()
+            for c in (first, second):
+                c.events.clear()
+            await first.handlers['handle_start']('a', 0, None, None)
+            await second.handlers['handle_start']('b', 0, None, None)
+            for a, b in zip(chunks(speech(9000 if first is near else 2000)), chunks(speech(9000 if second is near else 2000))):
+                await first.handlers['handle_audio'](a, None)
+                await second.handlers['handle_audio'](b, None)
+            for _ in range(300):
+                await asyncio.sleep(0.01)
+                if all(c.events and c.events[-1][0] == 'VOICE_ASSISTANT_RUN_END' for c in (near, far)):
+                    break
+
+        # Whichever wakes first, the nearer (louder) speaker answers and the other goes quiet.
+        for first, second in ((far, near), (near, far)):
+            answered.clear()
+            await say_both(first, second)
+            self.assertEqual(len(answered), 1, 'the command is carried out once')
+            self.assertIn('VOICE_ASSISTANT_TTS_END', [k for k, _ in near.events])
+            far_kinds = [k for k, _ in far.events]
+            self.assertNotIn('VOICE_ASSISTANT_TTS_START', far_kinds)
+            self.assertEqual(far_kinds[-1], 'VOICE_ASSISTANT_RUN_END', 'the quiet one still ends its run')
+
+        # A speaker alone isn't held up.
+        earlier_commands_were_long_ago()
+        answered.clear()
+        far.events.clear()
+        await far.handlers['handle_start']('c', 0, None, None)
+        for ch in chunks(speech(2000)):
+            await far.handlers['handle_audio'](ch, None)
+        for _ in range(300):
+            await asyncio.sleep(0.01)
+            if far.events and far.events[-1][0] == 'VOICE_ASSISTANT_RUN_END':
+                break
+        self.assertIn('VOICE_ASSISTANT_TTS_END', [k for k, _ in far.events])
+        for link in links:
+            link.task.cancel()
 
     async def test_not_a_speaker_is_left_alone(self):
         FakeClient.voice_flags = 0

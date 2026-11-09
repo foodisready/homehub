@@ -2,10 +2,14 @@
 connection so it can be tested with recordings.
 
 With Cantonese on, SenseVoice hears each command first and says which
-language it is in. English goes on to Whisper as before; Cantonese is read by
-sound against the home's Cantonese names (see cantonese.py)."""
+language it is in. Cantonese is read by sound against the home's Cantonese
+names (see cantonese.py). English is tried with SenseVoice's words first,
+which takes about a second on a Pi, and goes to Whisper, about ten seconds
+but better at the home's names, only if HomeHub doesn't understand them.
+Without Cantonese, English goes straight to Whisper."""
 from __future__ import annotations
 
+import difflib
 import logging
 import re
 import time
@@ -27,14 +31,14 @@ class Transcriber(Protocol):
 
 
 class CantoneseEars(Protocol):
-    def language(self, audio: bytes) -> str: ...
+    def hear(self, audio: bytes) -> tuple[str, str]: ...
     def transcribe(self, audio: bytes) -> str: ...
 
 
 class Commander(Protocol):
     names: list[str]
 
-    def command(self, text: str) -> CommandResult: ...
+    def command(self, text: str, retry: bool = False) -> CommandResult: ...
 
 
 @dataclass
@@ -64,22 +68,67 @@ def answer(audio: bytes, spoke: bool, listener: Transcriber, homehub: Commander,
     if not spoke:
         return Answer('', NOTHING_HEARD, False)
     t0 = time.monotonic()
-    if ears is not None and ears.language(audio) in CANTONESE:
-        return answer_cantonese(audio, ears, homehub, t0, asked)
+    quick = ''
+    if ears is not None:
+        lang, quick = ears.hear(audio)
+        if lang in CANTONESE:
+            return answer_cantonese(audio, ears, homehub, t0, asked)
+    # English. SenseVoice has already heard the words, in about a second; Whisper takes about ten
+    # on a Pi, but knows the home's device names. So try SenseVoice's words first, and ask Whisper
+    # only if HomeHub doesn't understand them.
+    if quick.strip(' .,!?'):
+        # As heard, then with the device's name spelled as HomeHub knows it ("my office la" → "My office lamp").
+        for text in dict.fromkeys([quick, closest_name(quick, homehub.names)]):
+            first = english(text, homehub, asked, retry=True)
+            if first[1] is None or first[1].handled:
+                return finish(first, time.monotonic() - t0)
     text = listener.transcribe(audio, homehub.names)
-    t1 = time.monotonic()
     if not text.strip(' .,!?'):
-        return Answer('', NOT_CAUGHT, False, t1 - t0)
+        return Answer('', NOT_CAUGHT, False, time.monotonic() - t0)
+    return finish(english(text, homehub, asked), time.monotonic() - t0)
+
+
+# "Turn on my office la.": a verb, then a name.
+SWITCH = re.compile(r'^\s*(?:please\s+)?((?:turn|switch)\s+(?:on|off))\b[\s,]*(.+?)[\s.,!?]*$', re.I)
+# How alike a heard name and a real one must be, from 0 to 1, and how far ahead of the next-best name.
+NAME_MATCH = 0.75
+NAME_MARGIN = 0.05
+
+
+def closest_name(text: str, names: list[str]) -> str:
+    """The command with its device name replaced by the closest English name HomeHub knows, if one is
+    clearly closest. SenseVoice doesn't know the home's names the way Whisper does, so it gets them
+    nearly right: "office la" for "office lamp". Otherwise the text as it was."""
+    m = SWITCH.match(text)
+    if not m:
+        return text
+    key = lambda s: re.sub(r"^(my|the)\s+|['’]s\b", '', s.lower().strip())  # noqa: E731
+    said = key(m.group(2))
+    scored = sorted(((difflib.SequenceMatcher(None, said, key(n)).ratio(), n) for n in set(names) if n.isascii()), reverse=True)
+    if not scored or scored[0][0] < NAME_MATCH or (len(scored) > 1 and scored[0][0] - scored[1][0] < NAME_MARGIN):
+        return text
+    return f'{m.group(1)} {scored[0][1]}'
+
+
+def english(text: str, homehub: Commander, asked: str | None, retry: bool = False) -> tuple[str, CommandResult | None, float]:
+    """Sends English words to HomeHub: what was heard, HomeHub's result (None if it can't be reached), and how long it took."""
     # "On" alone, answering "on or off?" about a device.
     reply_to = ON_OR_OFF.match(text) if asked else None
     send = f'turn {reply_to.group(1).lower()} {asked}' if reply_to else text
     heard = f'{text} → {send}' if reply_to else text
+    t = time.monotonic()
     try:
-        res = homehub.command(send)
+        return heard, homehub.command(send, retry=retry), time.monotonic() - t
     except HomeHubError as e:
         log.warning('%s', e)
-        return Answer(heard, NO_HOMEHUB, False, t1 - t0, time.monotonic() - t1)
-    return Answer(heard, res.response or NOT_CAUGHT, res.handled, t1 - t0, time.monotonic() - t1)
+        return heard, None, time.monotonic() - t
+
+
+def finish(sent: tuple[str, CommandResult | None, float], total_s: float) -> Answer:
+    heard, res, homehub_s = sent
+    if res is None:
+        return Answer(heard, NO_HOMEHUB, False, total_s - homehub_s, homehub_s)
+    return Answer(heard, res.response or NOT_CAUGHT, res.handled, total_s - homehub_s, homehub_s)
 
 
 def answer_cantonese(audio: bytes, ears: CantoneseEars, homehub: Commander, t0: float, asked: str | None = None) -> Answer:

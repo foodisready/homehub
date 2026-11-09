@@ -74,8 +74,9 @@ class HomeHub:
         """Voice on or off, and its languages, from HomeHub's Settings."""
         return self._call('/config')
 
-    def command(self, text: str) -> CommandResult:
-        res = self._call('/command', {'text': text})
+    def command(self, text: str, retry: bool = False) -> CommandResult:
+        """retry: if this isn't understood, the bridge will try again, so HomeHub doesn't list it as missed yet."""
+        res = self._call('/command', {'text': text, **({'retry': True} if retry else {})})
         failed = [str((a.get('args') or {}).get('alias', '')) for a in res.get('actions') or []
                   if isinstance(a, dict) and isinstance(a.get('result'), dict) and a['result'].get('error')]
         return CommandResult(bool(res.get('handled')), str(res.get('response') or ''), failed)

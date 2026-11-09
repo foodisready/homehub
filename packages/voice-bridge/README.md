@@ -6,7 +6,7 @@ Lets you control HomeHub by voice, with no cloud and no Home Assistant:
 speaker → wake word → bridge: Whisper (speech to text) → HomeHub → Piper (spoken reply) → speaker
 ```
 
-It works with ESPHome voice speakers: [Ava](https://github.com/brownard/Ava) on an Android tablet, and should work with the Home Assistant Voice Preview Edition (not tested yet; see below). Speakers on your network are found automatically.
+It works with ESPHome voice speakers: [Ava](https://github.com/brownard/Ava) on an Android tablet, and should work with the Home Assistant Voice Preview Edition (not tested yet; see below). Speakers on your network are found automatically. When two speakers hear the same command, only the one that heard it loudest, usually the nearest, answers and carries it out.
 
 Commands go through HomeHub's rules only, never an AI model, so a misheard command can't switch a device the rules didn't match. Protected devices are never switched by voice.
 
@@ -14,7 +14,7 @@ Commands go through HomeHub's rules only, never an AI model, so a misheard comma
 
 The bridge comes with HomeHub, and updates with it. Open **Settings → Voice control**, tick **Voice control**, and save. Within a minute the bridge downloads its speech models (about 200 MB for English; Cantonese adds about 350 MB) and starts listening. Until then it waits, using almost no memory. A change there, such as adding Cantonese, is applied within a minute.
 
-It needs a computer that's fast enough: an old laptop is fine, but a Raspberry Pi 4 takes about 10 seconds to understand a command. It uses about 1 GB of memory once on. To leave it out of HomeHub entirely, set `HOMEHUB_VOICE_BRIDGE=0` in `.env`.
+It needs a computer that's fast enough: an old laptop is fine. On a Raspberry Pi 4, Whisper takes about 10 seconds to understand an English command; with Cantonese on, English usually takes about a second instead (see [Cantonese](#cantonese)). It uses about 1 GB of memory once on. To leave it out of HomeHub entirely, set `HOMEHUB_VOICE_BRIDGE=0` in `.env`.
 
 ## On another computer
 
@@ -59,7 +59,7 @@ With Cantonese on, each command can be English or Cantonese, and is answered in 
 3. Say the verb, then the nickname: 開廚房燈, 着廚房燈, 關廚房燈, 熄廚房燈. 幫我 or 唔該 first, and 啦 or 呀 at the end, are fine. A scene with a Cantonese name runs by its name alone.
 4. To turn something on for a while, add how long: 開廚房燈十分鐘, 開廚房燈半個鐘, 開廚房燈個半鐘, 開廚房燈兩個鐘, 開廚房燈三個字 (fifteen minutes), or 開廚房燈，十分鐘後熄. Numbers can be spoken or digits. The bridge sends HomeHub "turn on 廚房燈 for 10 minutes", and answers 開咗廚房燈，十分鐘後熄。 A duration with 熄 isn't guessed at, since HomeHub has no "off for a while".
 
-How it works: SenseVoice hears each command first and says which language it's in, in about 0.1 seconds. English then goes to Whisper as before. Cantonese is matched to your Cantonese nicknames by how it sounds, using Jyutping with tones ignored, because speech recognition often writes a word with a different character that sounds the same (民房 for 文房). Only the first word is read as the verb, so a name that starts with a verb's sound, such as 卓 and 着, still works. A command that doesn't clearly match one nickname isn't guessed: the speaker says 唔好意思，我聽唔明, and HomeHub lists it with the commands it missed. HomeHub's rules still decide what happens, so protected devices and cameras are as safe as in English.
+How it works: SenseVoice hears each command first and says which language it's in, and its words. English is tried with SenseVoice's words, which takes about a second on a Raspberry Pi 4. If HomeHub doesn't understand them, the bridge tries again with the device name replaced by the closest one HomeHub knows ("my office la" becomes "My office lamp"), and only then asks Whisper, which knows your device names but takes about 10 seconds on a Pi. A command that's understood on the first try isn't listed as missed. Cantonese is matched to your Cantonese nicknames by how it sounds, using Jyutping with tones ignored, because speech recognition often writes a word with a different character that sounds the same (民房 for 文房). Only the first word is read as the verb, so a name that starts with a verb's sound, such as 卓 and 着, still works. A command that doesn't clearly match one nickname isn't guessed: the speaker says 唔好意思，我聽唔明, and HomeHub lists it with the commands it missed. HomeHub's rules still decide what happens, so protected devices and cameras are as safe as in English.
 
 On the household's 37 test recordings, it read all 33 commands for devices that exist correctly, and refused the 4 for a room with no light. Its matching was tuned on those same recordings, so expect some misses on new ones.
 
