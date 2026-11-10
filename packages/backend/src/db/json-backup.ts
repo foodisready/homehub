@@ -319,6 +319,8 @@ export const THIS_HOMEHUB_ONLY = [
   'backup_email_key', 'backup_email_hint', 'backup_email_auto', 'backup_email_last', 'backup_email_sent',
   // Ring replaces its sign-in token as it's used, so two HomeHubs sharing one would sign each other out.
   'ring_token',
+  // Pairing between an active HomeHub and its backup (backup-sync.ts): each side's own.
+  'backup_sync_serve', 'backup_sync_follow',
 ];
 
 /** Settings this HomeHub keeps when it already has them: the backup fills them in only if unset. */

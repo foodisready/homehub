@@ -444,6 +444,20 @@ A banner on every page of a backup says so, with the active HomeHub's address wh
 
 If two HomeHubs are active on the same network, both show a red banner with the other's address. Make one of them a backup.
 
+### Keeping the backup up to date
+
+A backup can copy the active HomeHub every hour, so it's ready to take over with your current devices, rooms, nicknames, schedules and scenes. You pair the two once:
+
+1. Make the second HomeHub a **Backup**, as above.
+2. On the **active** HomeHub, open **Settings → Backups** and select **Pair a backup HomeHub**. It shows a pairing code, once.
+3. On the **backup**, open **Settings → Backups**, enter the code and select **Pair**. Leave the address empty if the backup has found the active HomeHub on your network; otherwise enter the active HomeHub's IP address, such as 192.168.1.20.
+
+The backup copies straight away, then every hour when something has changed. **Settings → Backups** on the backup shows when it last copied, and why not if it couldn't; **Sync now** copies at once. The copy is restored like any backup: accounts already on the backup keep their passwords, and accounts only on the active HomeHub are added. Matter pairings, the Wyze sign-in and energy history aren't copied.
+
+It's safe both ways. Only a backup copies, and only an active HomeHub hands out its settings, so an active HomeHub is never overwritten. If the active HomeHub is off or can't be reached, the backup keeps the copy it has, and it won't take a copy with no devices in it. The copy travels on your home network, from port 3000 on the active HomeHub, and only to a HomeHub with the code; ten wrong codes in a row make the active HomeHub refuse for ten minutes.
+
+To stop, select **Stop syncing** on the backup, or **Unpair** on the active HomeHub. **New pairing code** on the active HomeHub replaces the old code, so a backup with the old one stops copying. When a backup becomes **Active**, it stops copying; make the other one a backup and pair them again the other way round.
+
 The role isn't part of backups, so restoring a backup never changes which HomeHub is in charge.
 
 ## Pause automations

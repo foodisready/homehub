@@ -20,7 +20,7 @@ import { logger } from './logger';
 import { healthRouter } from './routes/health';
 import { authRouter } from './routes/auth';
 import { devicesRouter } from './routes/devices';
-import { schedulesRouter } from './routes/schedules';
+import { notifyScheduler, schedulesRouter } from './routes/schedules';
 import { usersRouter } from './routes/users';
 import { internalRouter } from './routes/internal';
 import { nlpRouter } from './routes/nlp';
@@ -37,7 +37,7 @@ import { notificationsAckRouter } from './routes/notifications-ack';
 import { notificationSettingsRouter } from './routes/notification-settings';
 import { notificationHistoryRouter } from './routes/notification-history';
 import { systemRouter } from './routes/system';
-import { backupsRouter } from './routes/backups';
+import { backupSyncPublicRouter, backupsRouter } from './routes/backups';
 import { startLocalName } from './discovery/local-name';
 import { camerasRouter } from './routes/cameras';
 import { startCameraWatch } from './cameras/watch';
@@ -50,11 +50,12 @@ import { activityMiddleware, startActivityPruning } from './activity/activity';
 import { activityRouter } from './routes/activity';
 import { runBackup } from './db/backup';
 import { startBackupEmails } from './db/backup-email';
+import { startBackupSync, whenCopied } from './db/backup-sync';
 import { applyRole } from './system/role';
 import { checkAllSensors } from './sensors/stale-check';
 import { authenticate, requireAdmin } from './middleware/auth';
 import { getDb } from './db';
-import { startPolling } from './kasa/device.cache';
+import { refreshDevices, startPolling } from './kasa/device.cache';
 import { startPowerTimers } from './devices/power';
 import { startMotionRules } from './sensors/motion';
 import { seedAdminIfEmpty } from './auth/auth.service';
@@ -95,6 +96,9 @@ app.use('/firmware', firmwarePublicRouter);
 
 // ── Public motion events — sensors can't log in, so the URL's token is the auth.
 app.use('/motion', motionEventsRouter);
+
+// ── A backup HomeHub fetching the active one's settings: the pairing code is the auth.
+app.use('/sync', backupSyncPublicRouter);
 
 // ── All routes below require a valid JWT ──────────────────────
 app.use('/api', (req: Request, res: Response, next: NextFunction) => {
@@ -160,6 +164,11 @@ httpServer.listen(PORT, async () => {
   runBackup();
   setInterval(runBackup, 24 * 60 * 60 * 1000);
   startBackupEmails();       // weekly and after-update backup emails, when turned on
+  whenCopied(() => {         // as after a restore by hand
+    notifyScheduler();
+    refreshDevices().catch((err) => logger.warn({ err }, 'Device refresh after backup sync failed'));
+  });
+  startBackupSync();         // on a paired backup, copy the active HomeHub every hour
 
   // Hourly prune of flow_readings older than 7 days. flow_events are kept indefinitely.
   pruneFlowReadings();

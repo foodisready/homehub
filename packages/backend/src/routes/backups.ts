@@ -5,6 +5,7 @@ import {
 } from '../db/json-backup';
 import { asEncrypted, decryptBackup } from '../db/backup-crypto';
 import { backupEmailStatus, checkBackupEmail, emailBackup, setAutoEmail, setBackupPassphrase } from '../db/backup-email';
+import { follow, makePairingCode, serveSnapshot, stopFollowing, syncNow, syncStatus, unpair } from '../db/backup-sync';
 import { refreshDevices } from '../kasa/device.cache';
 import { notifyScheduler } from './schedules';
 
@@ -45,6 +46,57 @@ backupsRouter.post('/upload', async (req: Request, res: Response) => {
     logger.info({ name: entry.name, encrypted: !!encrypted }, 'JSON backup uploaded');
     res.status(201).json(entry);
   } catch (err) { fail(res, err); }
+});
+
+// ── Keeping a backup HomeHub in step (backup-sync.ts) ──────────────
+// Before the /:name routes, so "sync" is never taken for a backup name.
+
+backupsRouter.get('/sync', (_req: Request, res: Response) => {
+  try { res.json(syncStatus()); } catch (err) { fail(res, err); }
+});
+
+/** On the active HomeHub: a new pairing code for the backup. Shown once. */
+backupsRouter.post('/sync/code', (_req: Request, res: Response) => {
+  try { res.status(201).json({ ...makePairingCode(), status: syncStatus() }); } catch (err) { fail(res, err); }
+});
+
+backupsRouter.delete('/sync/code', (_req: Request, res: Response) => {
+  try { unpair(); res.json(syncStatus()); } catch (err) { fail(res, err); }
+});
+
+/** On a backup: { code, address? }. Pairs with the active HomeHub and copies it straight away. */
+backupsRouter.put('/sync/follow', async (req: Request, res: Response) => {
+  try {
+    const { code, address } = req.body ?? {};
+    if (typeof code !== 'string') throw new BackupError('"code" must be the pairing code from the active HomeHub');
+    if (address !== undefined && address !== null && typeof address !== 'string') throw new BackupError('"address" must be text');
+    await follow(code, address ?? undefined);
+    res.json(syncStatus());
+  } catch (err) { fail(res, err); }
+});
+
+backupsRouter.post('/sync/now', async (_req: Request, res: Response) => {
+  try { await syncNow(); res.json(syncStatus()); } catch (err) { fail(res, err); }
+});
+
+backupsRouter.delete('/sync/follow', (_req: Request, res: Response) => {
+  try { stopFollowing(); res.json(syncStatus()); } catch (err) { fail(res, err); }
+});
+
+/**
+ * The active HomeHub's settings, for its paired backup on the home network. Not
+ * behind a login: the pairing code, sent as "Authorization: Bearer <code>", is
+ * the key. Mounted at /sync.
+ */
+export const backupSyncPublicRouter = Router();
+
+backupSyncPublicRouter.get('/snapshot', (req: Request, res: Response) => {
+  const auth = req.headers.authorization;
+  const key = auth?.startsWith('Bearer ') ? auth.slice(7) : undefined;
+  const { status, body } = serveSnapshot(key, req.ip ?? 'unknown');
+  if (status === 200) logger.info({ from: req.ip }, 'Backup sync: settings copied to the backup HomeHub');
+  res.setHeader('Cache-Control', 'no-store');
+  res.status(status).json(body);
 });
 
 // ── Emailing backups ────────────────────────────────────────────────

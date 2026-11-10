@@ -8,6 +8,7 @@ import { SocketService } from '../../core/socket/socket.service';
 import { DeviceFilterComponent, matchesDevice, type DeviceFilter } from '../../shared/device-filter/device-filter.component';
 import { Device } from '../../shared/models/device.model';
 import { BackupsComponent } from './backups.component';
+import { BackupSyncComponent } from './backup-sync.component';
 import { ServerRoleComponent } from './server-role.component';
 import { MailProvider, providerForAddress, providerForHost } from './email-providers';
 import { InviteQrComponent } from '../welcome/invite-qr.component';
@@ -73,7 +74,7 @@ const DRIVER_LABEL: Record<string, string> = {
 @Component({
   selector: 'app-settings',
   standalone: true,
-  imports: [FormsModule, RouterLink, InviteQrComponent, MatterPairComponent, DeviceFilterComponent, BackupsComponent, ServerRoleComponent, MerossLoginComponent, OtherNetworksComponent, HomeSettingsComponent, AiConnectionComponent, CamerasToggleComponent, TeachCommandsComponent, VoiceRepliesComponent, VoiceControlComponent],
+  imports: [FormsModule, RouterLink, InviteQrComponent, MatterPairComponent, DeviceFilterComponent, BackupsComponent, BackupSyncComponent, ServerRoleComponent, MerossLoginComponent, OtherNetworksComponent, HomeSettingsComponent, AiConnectionComponent, CamerasToggleComponent, TeachCommandsComponent, VoiceRepliesComponent, VoiceControlComponent],
   styles: [`
     .topbar { display:flex; align-items:center; justify-content:space-between; margin-bottom:1.5rem; }
     .topbar h1 { font-size:1.4rem; font-weight:700; }
@@ -892,6 +893,7 @@ const DRIVER_LABEL: Record<string, string> = {
           </button>
           @if (isSectionOpen('backups')) {
             <div class="card">
+              <app-backup-sync (copied)="reloadAfterRestore()" />
               <app-backups [emailChanged]="emailSettingsChanged()" (restored)="reloadAfterRestore()" />
             </div>
           }
