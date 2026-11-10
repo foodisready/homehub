@@ -52,6 +52,8 @@ class Answer:
     lang: str = 'en'
     # The device HomeHub just asked "on or off?" about, waiting for the answer.
     asked: str | None = None
+    # How many times SenseVoice listened to a Cantonese command: once if the first was clear.
+    passes: int = 0
 
 
 # "On", "off", "turn it on", "switch it off, please": an answer to "on or off?".
@@ -72,7 +74,7 @@ def answer(audio: bytes, spoke: bool, listener: Transcriber, homehub: Commander,
     if ears is not None:
         lang, quick = ears.hear(audio)
         if lang in CANTONESE:
-            return answer_cantonese(audio, ears, homehub, t0, asked)
+            return answer_cantonese(audio, ears, homehub, t0, asked, quick)
     # English. SenseVoice has already heard the words, in about a second; Whisper takes about ten
     # on a Pi, but knows the home's device names. So try SenseVoice's words first, and ask Whisper
     # only if HomeHub doesn't understand them.
@@ -131,9 +133,23 @@ def finish(sent: tuple[str, CommandResult | None, float], total_s: float) -> Ans
     return Answer(heard, res.response or NOT_CAUGHT, res.handled, total_s - homehub_s, homehub_s)
 
 
-def answer_cantonese(audio: bytes, ears: CantoneseEars, homehub: Commander, t0: float, asked: str | None = None) -> Answer:
-    text = ears.transcribe(audio)
-    command = yue.parse(text, homehub.names, getattr(homehub, 'scenes', homehub.names))
+# How sure a Cantonese command read from SenseVoice's first pass must be to skip the second, from 0 to 1.
+# The first pass tells the language; the second, set to Cantonese, hears the words better but takes a
+# second or two more on a Pi. Most commands are already clear the first time.
+SURE = 0.9
+
+
+def answer_cantonese(audio: bytes, ears: CantoneseEars, homehub: Commander, t0: float, asked: str | None = None,
+                     quick: str = '') -> Answer:
+    scenes = getattr(homehub, 'scenes', homehub.names)
+    command = yue.parse(quick, homehub.names, scenes) if quick else None
+    passes = 1
+    if command is not None and command.action in ('on', 'off', 'scene') and command.score >= SURE:
+        text = quick
+    else:
+        # Not sure, or a name alone, or an answer to a question: listen again, set to Cantonese.
+        text, passes = ears.transcribe(audio), 2
+        command = yue.parse(text, homehub.names, scenes)
     # 開 or 熄 alone, answering "你想開定熄廚房燈？".
     if asked and (command is None or command.action == 'ask'):
         verb = yue.verb_alone(text)
@@ -141,7 +157,7 @@ def answer_cantonese(audio: bytes, ears: CantoneseEars, homehub: Commander, t0: 
             command = yue.Command(verb, asked, 1.0)
     t1 = time.monotonic()
     if not text.strip(' 。，.,!?！？'):
-        return Answer('', yue.NOT_UNDERSTOOD, False, t1 - t0, lang='yue')
+        return Answer('', yue.NOT_UNDERSTOOD, False, t1 - t0, lang='yue', passes=passes)
     # A name alone switches nothing: HomeHub can't know whether on or off was meant.
     act = command if command and command.action != 'ask' else None
     heard = f'{text} → {act.homehub_text}' if act else text
@@ -150,7 +166,7 @@ def answer_cantonese(audio: bytes, ears: CantoneseEars, homehub: Commander, t0: 
         res = homehub.command(act.homehub_text if act else yue.traditional(text))
     except HomeHubError as e:
         log.warning('%s', e)
-        return Answer(heard, yue.NO_HOMEHUB, False, t1 - t0, time.monotonic() - t1, lang='yue')
+        return Answer(heard, yue.NO_HOMEHUB, False, t1 - t0, time.monotonic() - t1, lang='yue', passes=passes)
     reply = yue.reply(command, res.handled, res.response, res.failed)
     return Answer(heard, reply, bool(act) and res.handled, t1 - t0, time.monotonic() - t1, lang='yue',
-                  asked=command.name if command and command.action == 'ask' else None)
+                  asked=command.name if command and command.action == 'ask' else None, passes=passes)

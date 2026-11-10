@@ -78,6 +78,8 @@ Each command is logged with what was heard, HomeHub's reply and how long each st
 
 On a 2015 MacBook Pro (Core i7-4980HQ) with `base.en`, recognising a 2 to 4 second command took 0.6 to 0.8 seconds, and making the spoken reply 0.1 to 0.2 seconds. Spoken to Ava on a tablet, with HomeHub on the same laptop, the reply was ready 1.0 to 1.3 seconds after the speaker stopped talking.
 
+On a Raspberry Pi 4, SenseVoice takes about 0.9 seconds a pass. A Cantonese command that clearly matches one nickname the first time is read from that pass. Otherwise SenseVoice listens again, set to Cantonese, which hears the words better. In a test of 21 commands, 16 were read in one pass, and none of those was read differently from two passes. The log says `in 1 pass` or `in 2 passes`. Making a spoken Cantonese reply takes about 4 to 5 seconds, so replies are kept, up to 500 of them, in `reply-cache` in the models folder. A reply said before, such as 熄咗廚房燈, is ready at once, even after a restart, and is made again if the voice changes.
+
 ## Not done yet
 
 - **Home Assistant Voice:** its firmware expects Home Assistant to set its encryption key, so whether the bridge can connect to one out of the box hasn't been tested.

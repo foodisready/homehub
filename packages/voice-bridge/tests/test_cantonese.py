@@ -162,13 +162,16 @@ class VolumeTest(unittest.TestCase):
 
 
 class FakeEars:
-    def __init__(self, lang, text):
-        self.lang, self.text = lang, text
+    """SenseVoice: `quick` from its first pass (the words as `text` unless given), `text` when set to Cantonese."""
+    def __init__(self, lang, text, quick=None):
+        self.lang, self.text, self.quick = lang, text, text if quick is None else quick
+        self.listened_again = 0
 
     def hear(self, audio):
-        return self.lang, self.text
+        return self.lang, self.quick
 
     def transcribe(self, audio):
+        self.listened_again += 1
         return self.text
 
 
@@ -205,6 +208,31 @@ class PipelineTest(unittest.TestCase):
         self.assertEqual(h.sent, ['turn on 廚房燈'])
         self.assertEqual((a.reply, a.lang, a.handled), ('開咗廚房燈。', 'yue', True))
         self.assertIn('开厨房灯', a.heard)
+
+    def test_a_clear_cantonese_command_is_read_from_the_first_pass(self):
+        h, ears = FakeHomeHub(), FakeEars('yue', '开厨房灯。')
+        a = answer(b'x', True, FakeListener(), h, ears)
+        self.assertEqual(h.sent, ['turn on 廚房燈'])
+        self.assertEqual((ears.listened_again, a.passes, a.handled), (0, 1, True))
+
+    def test_an_unclear_first_pass_is_heard_again_in_cantonese(self):
+        for quick in ('开厨。', '我哋今晚食乜嘢', '厨房灯。', ''):   # half heard; not a command; a name alone; nothing
+            with self.subTest(quick=quick):
+                h, ears = FakeHomeHub(), FakeEars('yue', '开厨房灯。', quick=quick)
+                a = answer(b'x', True, FakeListener(), h, ears)
+                self.assertEqual(h.sent, ['turn on 廚房燈'])
+                self.assertEqual((ears.listened_again, a.passes, a.heard), (1, 2, '开厨房灯。 → turn on 廚房燈'))
+
+    def test_a_bare_answer_to_a_question_is_heard_again_in_cantonese(self):
+        h, ears = FakeHomeHub(), FakeEars('yue', '开。', quick='海。')
+        a = answer(b'x', True, FakeListener(), h, ears, asked='廚房燈')
+        self.assertEqual(h.sent, ['turn on 廚房燈'])
+        self.assertEqual(ears.listened_again, 1)
+
+    def test_english_is_never_heard_twice_by_sensevoice(self):
+        ears = FakeEars('en', 'Turn on the kitchen light.')
+        answer(b'x', True, FakeListener(), FakeHomeHub(), ears)
+        self.assertEqual(ears.listened_again, 0)
 
     def test_chinese_label_counts_as_cantonese(self):
         h = FakeHomeHub()

@@ -463,3 +463,97 @@ class EnglishVoiceTest(unittest.TestCase):
     def test_the_default_voice_is_public_domain(self):
         from homehub_voice import models
         self.assertIn('ljspeech', models.PIPER)
+
+
+class CountingVoice:
+    """A voice that writes a small WAV and counts what it was asked to say."""
+    def __init__(self, model_file=None):
+        self.said: list[str] = []
+        self.model_file = model_file
+
+    def say(self, text, path):
+        import wave
+        self.said.append(text)
+        with wave.open(str(path), 'wb') as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)
+            w.setframerate(16000)
+            w.writeframes(text.encode() * 100)
+
+
+class ReplyCacheTest(unittest.TestCase):
+    def setUp(self):
+        from homehub_voice.replies import ReplyServer
+        self.tmp = Path(tempfile.mkdtemp())
+        self.server = ReplyServer(0)
+        self.addCleanup(self.server.close)
+
+    def speak_fn(self, voices, folder=None, keep=500):
+        from homehub_voice.replies import ReplyCache, speak_with
+        return speak_with(self.server, ReplyCache(self.tmp / 'cache' if folder is None else folder, keep), voices)
+
+    def served(self, url):
+        return (self.server.dir / url.rsplit('/', 1)[1]).read_bytes()
+
+    def test_a_reply_said_before_is_reused(self):
+        en, yue = CountingVoice(), CountingVoice()
+        speak = self.speak_fn({'en': en, 'yue': yue})
+        first = speak('熄咗廚房燈。', '127.0.0.1', 'yue')
+        again = speak('熄咗廚房燈。', '127.0.0.1', 'yue')
+        self.assertEqual(yue.said, ['熄咗廚房燈。'], 'made once')
+        self.assertNotEqual(first, again, 'each answer gets its own file to play')
+        self.assertEqual(self.served(first), self.served(again))
+        speak('開咗廚房燈。', '127.0.0.1', 'yue')
+        speak('Kitchen lights is on.', '127.0.0.1')
+        self.assertEqual(len(yue.said), 2)
+        self.assertEqual(en.said, ['Kitchen lights is on.'])
+
+    def test_kept_across_restarts_but_not_for_a_new_voice(self):
+        model = self.tmp / 'voice.onnx'
+        model.write_bytes(b'one')
+        speak = self.speak_fn({'en': CountingVoice(model)})
+        speak('Office lamp is off.', '127.0.0.1')
+        after_restart = CountingVoice(model)
+        self.speak_fn({'en': after_restart})('Office lamp is off.', '127.0.0.1')
+        self.assertEqual(after_restart.said, [])
+        model.write_bytes(b'a new voice')
+        new_voice = CountingVoice(model)
+        self.speak_fn({'en': new_voice})('Office lamp is off.', '127.0.0.1')
+        self.assertEqual(new_voice.said, ['Office lamp is off.'])
+
+    def test_the_least_recently_used_are_dropped(self):
+        import os
+        import time as t
+        voice = CountingVoice()
+        speak = self.speak_fn({'en': voice}, keep=2)
+        speak('one', '127.0.0.1')
+        speak('two', '127.0.0.1')
+        cache = self.tmp / 'cache'
+        for i, f in enumerate(sorted(cache.glob('*.wav'), key=lambda f: f.stat().st_mtime)):
+            os.utime(f, (t.time() - 100 + i, t.time() - 100 + i))   # 'one' older than 'two'
+        speak('one', '127.0.0.1')     # used again: now the newest
+        speak('three', '127.0.0.1')   # so 'two' goes
+        self.assertEqual(len(list(cache.glob('*.wav'))), 2)
+        speak('one', '127.0.0.1')
+        speak('two', '127.0.0.1')
+        self.assertEqual(voice.said, ['one', 'two', 'three', 'two'])
+
+    def test_a_folder_that_cant_be_used_only_means_replies_are_made_each_time(self):
+        blocked = self.tmp / 'a-file'
+        blocked.write_text('not a folder')
+        voice = CountingVoice()
+        speak = self.speak_fn({'en': voice}, folder=blocked / 'cache')
+        url = speak('hello', '127.0.0.1')
+        speak('hello', '127.0.0.1')
+        self.assertEqual(voice.said, ['hello', 'hello'])
+        self.assertGreater(len(self.served(url)), 44)
+
+    def test_a_kept_reply_that_vanished_is_made_again(self):
+        voice = CountingVoice()
+        speak = self.speak_fn({'en': voice})
+        speak('hello', '127.0.0.1')
+        for f in (self.tmp / 'cache').glob('*.wav'):
+            f.write_bytes(b'')   # cut short, say by a full disk
+        url = speak('hello', '127.0.0.1')
+        self.assertEqual(voice.said, ['hello', 'hello'])
+        self.assertGreater(len(self.served(url)), 44)

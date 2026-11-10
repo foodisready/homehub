@@ -215,10 +215,12 @@ class SpeakerLink:
                 event(E.VOICE_ASSISTANT_TTS_END, {'url': url})
                 if follow_up:
                     self.asked = (follow_up, time.monotonic())
+                passes = getattr(a, 'passes', 0)
                 log.info(
-                    '%s #%d (%s) heard %r -> %r (%s; speech %.1fs, recognise %.2fs, HomeHub %.2fs, reply ready %.2fs after speech ended)',
+                    '%s #%d (%s) heard %r -> %r (%s; speech %.1fs, recognise %.2fs%s, HomeHub %.2fs, reply ready %.2fs after speech ended)',
                     self.name, run.n, run.wake or 'no wake word', a.heard, a.reply, 'done' if a.handled else 'not handled',
-                    run.listen.seconds, a.stt_s, a.homehub_s, time.monotonic() - t_end,
+                    run.listen.seconds, a.stt_s, {1: ' in 1 pass', 2: ' in 2 passes'}.get(passes, '') if isinstance(passes, int) else '',
+                    a.homehub_s, time.monotonic() - t_end,
                 )
             except Exception as e:  # noqa: BLE001 — the speaker must always hear the run end
                 log.exception('%s #%d failed', self.name, run.n)

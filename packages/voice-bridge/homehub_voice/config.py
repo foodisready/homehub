@@ -36,6 +36,8 @@ class Config:
     # Where Whisper keeps its model; None for its usual cache.
     whisper_dir: Path | None = None
     reply_port: int = 39500
+    # Spoken replies kept for reuse, so a reply said before is ready at once. None: not kept.
+    reply_cache_dir: Path | None = None
     # Look for speakers on the network as well as any listed in SPEAKERS.
     discover: bool = True
 
@@ -102,6 +104,7 @@ def load(env: dict[str, str] | None = None) -> Config:
         language=env.get('LANGUAGE', '').strip() or 'en',
         piper_voice=voice,
         reply_port=int(port),
+        reply_cache_dir=data / 'reply-cache',
         discover=_flag(env.get('DISCOVER'), True),
         cantonese='yue' in extra,
         managed=managed,

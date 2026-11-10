@@ -15,7 +15,7 @@ import warnings
 from . import __version__, config as cfg
 from .homehub import HomeHub, HomeHubError
 from .pipeline import answer
-from .replies import ReplyServer
+from .replies import ReplyCache, ReplyServer, speak_with
 from .speakers import OneAnswers, SpeakerLink, Speakers
 
 log = logging.getLogger('homehub-voice')
@@ -76,10 +76,7 @@ async def main() -> int:
     replies = ReplyServer(conf.reply_port)
     log.info('HomeHub at %s knows %d device and scene names', conf.homehub_url, len(homehub.refresh_names()))
 
-    def speak(text: str, host: str, lang: str = 'en') -> str:
-        path, name = replies.new_file()
-        voices.get(lang, voices['en']).say(text, path)
-        return replies.url(name, host)
+    speak = speak_with(replies, ReplyCache(conf.reply_cache_dir), voices)
 
     speakers: Speakers
     one_answers = OneAnswers()   # so two speakers that hear the same command don't both answer

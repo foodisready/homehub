@@ -45,6 +45,7 @@ class Speaker:
         if not voice.exists():
             raise FileNotFoundError(f'Piper voice not found: {voice}')
         self.voice = PiperVoice.load(str(voice))
+        self.model_file = voice
         self.lock = threading.Lock()
 
     def say(self, text: str, path: Path) -> None:
@@ -107,6 +108,7 @@ class CantoneseVoice:
             model=sherpa_onnx.OfflineTtsModelConfig(vits=v, num_threads=threads),
             rule_fsts=str(folder / 'rule.fst')))
         self.simplify = opencc.OpenCC('t2s').convert
+        self.model_file = model
         self.lock = threading.Lock()
 
     def say(self, text: str, path: Path) -> None:
