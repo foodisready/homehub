@@ -314,6 +314,17 @@ class SpeakerLinkTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(given[-1], None)
         link.task.cancel()
 
+    async def test_woken_by_a_noise_it_stays_quiet(self):
+        def answer_fn(audio, spoke, asked=None):
+            return mock.Mock(heard='', reply="Sorry, I didn't catch that.", handled=False, stt_s=0, homehub_s=0, lang='en', asked=None)
+
+        link, c = await self.connected_link(answer_fn)
+        events = await self.say(c, 1)
+        self.assertNotIn('VOICE_ASSISTANT_TTS_START', events)
+        self.assertNotIn('VOICE_ASSISTANT_ERROR', events)
+        self.assertEqual(c.events[-1][0], 'VOICE_ASSISTANT_RUN_END', 'the run still ends')
+        link.task.cancel()
+
     async def test_failure_still_ends_run(self):
         def boom(audio, spoke, asked=None):
             raise RuntimeError('whisper crashed')

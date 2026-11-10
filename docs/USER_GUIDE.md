@@ -511,7 +511,7 @@ Say a command to a speaker or tablet, and HomeHub does it and answers, with no c
 
 To turn it on, an administrator opens **Settings → Voice control**, ticks **Voice control** and saves. The first time, HomeHub downloads its speech models, about 200 MB, which takes a few minutes; the card says when it's running. Speakers on the network are found by themselves, and appear under **Health**. The [voice bridge](../packages/voice-bridge/README.md) that does this comes with HomeHub and updates with it. See the [voice control plan](./VOICE_CONTROL.md) for what's still to come.
 
-If two speakers hear the same command, only the one that heard you loudest, usually the nearest, answers, and the command is carried out once.
+If two speakers hear the same command, only the one that heard you loudest, usually the nearest, answers, and the command is carried out once. If a speaker wakes but hears no words, usually because something on TV or in a conversation sounded like the wake word, it stops listening without saying anything.
 
 Voice also understands Cantonese, and answers in it. Tick **Cantonese** in **Settings → Voice control**, which downloads about 350 MB more, and give your devices Cantonese nicknames in **Settings → Devices**, such as 廚房燈. Say the verb, then the nickname: 開廚房燈, 熄廚房燈. Leave a short pause after the wake word, so the verb isn't cut off: if HomeHub hears only a light's nickname, it asks 你想開定熄廚房燈？ and switches nothing. Answer 開 or 熄 (or "on" or "off") within 15 seconds; a speaker that listens again by itself after a question needs no wake word for the answer. Otherwise, say the wake word and the whole command. See [Cantonese](../packages/voice-bridge/README.md#cantonese).
 

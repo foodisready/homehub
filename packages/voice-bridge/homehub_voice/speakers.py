@@ -198,6 +198,12 @@ class SpeakerLink:
                 asked = self.asked[0] if self.asked and time.monotonic() - self.asked[1] <= FOLLOW_UP_S else None
                 self.asked = None
                 a = await loop.run_in_executor(None, self.answer, bytes(run.listen.audio), run.listen.spoke, asked)
+                # No words at all: most often the wake word heard in a noise or a conversation, so the
+                # speaker goes quiet instead of saying "Sorry, I didn't hear anything" to nobody.
+                if not a.heard.strip(' 。，.,!?！？') and not a.handled:
+                    log.info('%s #%d (%s) woke but heard no words, so it stays quiet (speech %.1fs, recognise %.2fs)',
+                             self.name, run.n, run.wake or 'no wake word', run.listen.seconds, a.stt_s)
+                    return
                 follow_up = a.asked if isinstance(getattr(a, 'asked', None), str) else None
                 event(E.VOICE_ASSISTANT_STT_END, {'text': a.heard or ' '})
                 event(E.VOICE_ASSISTANT_INTENT_START)
