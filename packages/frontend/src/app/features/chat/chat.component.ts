@@ -1,23 +1,7 @@
 import { Component, signal, computed, ViewChild, ElementRef, AfterViewChecked, AfterViewInit, NgZone, OnDestroy } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { AuthService } from '../../core/auth/auth.service';
-
-interface ActionTaken {
-  tool: string;
-  args: Record<string, unknown>;
-  result: unknown;
-}
-
-interface ChatEntry {
-  role: 'user' | 'assistant';
-  content: string;
-  actions?: ActionTaken[];
-  error?: boolean;
-  /** Who answered: HomeHub's own rules, or the AI model, and how long it took. */
-  by?: 'rules' | 'model';
-  model?: string;
-  seconds?: number;
-}
+import { ChatHistory, type ActionTaken, type ChatEntry } from './chat-history';
 
 // Human-readable labels for tool names
 const TOOL_LABELS: Record<string, string> = {
@@ -184,6 +168,9 @@ const TOOL_LABELS: Record<string, string> = {
         <div style="display:flex; align-items:center; gap:1rem">
           <h1>Chat</h1>
         </div>
+        @if (entries().length > 0) {
+          <button class="suggestion-btn" type="button" (click)="newChat()" [disabled]="loading()">New chat</button>
+        }
       </div>
 
       <div class="chat-wrap" #chatWrap>
@@ -271,7 +258,6 @@ export class ChatComponent implements AfterViewInit, AfterViewChecked, OnDestroy
   private resizeWatch?: ResizeObserver;
   private readonly onResize = () => this.fit();
 
-  private readonly _entries      = signal<ChatEntry[]>([]);
   private readonly _loading      = signal(false);
   private readonly _streamingText = signal('');
   /** While waiting: who is answering, and for how many seconds so far. */
@@ -281,7 +267,7 @@ export class ChatComponent implements AfterViewInit, AfterViewChecked, OnDestroy
   private ticker?: ReturnType<typeof setInterval>;
   private shouldScroll = false;
 
-  readonly entries       = this._entries.asReadonly();
+  readonly entries       = this.history.entries;
   readonly loading       = this._loading.asReadonly();
   readonly streamingText = this._streamingText.asReadonly();
   readonly userInitial   = computed(() => {
@@ -298,7 +284,17 @@ export class ChatComponent implements AfterViewInit, AfterViewChecked, OnDestroy
     'Show me all schedules',
     'Turn on the living room lamp'];
 
-  constructor(readonly auth: AuthService, private zone: NgZone) {}
+  constructor(readonly auth: AuthService, private zone: NgZone, private history: ChatHistory) {
+    const id = auth.user()?.id;
+    if (id !== undefined) history.open(id);
+    this.shouldScroll = true;   // a kept conversation opens at its latest message
+  }
+
+  newChat(): void {
+    if (this.loading()) return;
+    this.history.clear();
+    this.chatInput?.nativeElement.focus();
+  }
 
   /**
    * The chat fills the window below the menu, so the box to type in is always
@@ -350,12 +346,12 @@ export class ChatComponent implements AfterViewInit, AfterViewChecked, OnDestroy
     this.refocus = !!active && (active === this.chatInput?.nativeElement || active.classList.contains('btn-send'));
 
     this.draft = '';
-    this._entries.update((list) => [...list, { role: 'user', content: text }]);
+    this.history.add({ role: 'user', content: text });
     this._loading.set(true);
     this._streamingText.set('');
     this.shouldScroll = true;
 
-    const history = this._entries()
+    const history = this.entries()
       .slice(0, -1)
       .filter((e) => !e.error)
       .map((e) => ({ role: e.role, content: e.content }));
@@ -408,15 +404,11 @@ export class ChatComponent implements AfterViewInit, AfterViewChecked, OnDestroy
                 this.shouldScroll = true;
               } else if (event.type === 'done') {
                 const finalText = this._streamingText();
-                this._entries.update((list) => [
-                  ...list, { role: 'assistant', content: finalText, actions: [...actions], by, model, seconds: seconds() }
-                ]);
+                this.history.add({ role: 'assistant', content: finalText, actions: [...actions], by, model, seconds: seconds() });
                 this.finish();
                 this.shouldScroll = true;
               } else if (event.type === 'error') {
-                this._entries.update((list) => [
-                  ...list, { role: 'assistant', content: event.message, error: true }
-                ]);
+                this.history.add({ role: 'assistant', content: event.message, error: true });
                 this.finish();
               }
             });
@@ -425,9 +417,7 @@ export class ChatComponent implements AfterViewInit, AfterViewChecked, OnDestroy
       }
     }).catch((err) => {
       this.zone.run(() => {
-        this._entries.update((list) => [
-          ...list, { role: 'assistant', content: 'Connection error. Please try again.', error: true }
-        ]);
+        this.history.add({ role: 'assistant', content: 'Connection error. Please try again.', error: true });
         this.finish();
       });
     });

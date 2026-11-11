@@ -2,6 +2,7 @@ import { Injectable, signal, computed } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable, tap, map } from 'rxjs';
 import { type AuthUser } from '../../shared/models/user.model';
+import { ChatHistory } from '../../features/chat/chat-history';
 
 const API = '/api';
 
@@ -24,7 +25,7 @@ export class AuthService {
   readonly user        = this._user.asReadonly();
   readonly isLoggedIn  = computed(() => this._user() !== null);
 
-  constructor(private http: HttpClient) {}
+  constructor(private http: HttpClient, private chat: ChatHistory) {}
 
   login(username: string, password: string): Observable<AuthUser> {
     return this.http.post<LoginResponse>(`${API}/auth/login`, { username, password }).pipe(
@@ -67,6 +68,7 @@ export class AuthService {
     this.http.post(`${API}/auth/logout`, {}).subscribe();
     this._token.set(null);
     this._user.set(null);
+    this.chat.forget();
   }
 
   refresh(): Observable<string> {
@@ -80,5 +82,6 @@ export class AuthService {
   clear(): void {
     this._token.set(null);
     this._user.set(null);
+    this.chat.forget();
   }
 }
