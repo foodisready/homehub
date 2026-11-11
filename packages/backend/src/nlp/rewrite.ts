@@ -102,7 +102,8 @@ export async function primeRewrite(opts: RewriteOptions = {}): Promise<boolean> 
 /** The model's one line, tidied; null for NONE or anything unusable. */
 export function readRewrite(output: string): string | null {
   const line = output.split('\n').map((l) => l.trim()).find(Boolean) ?? '';
-  const text = line.replace(/^["'`]+|["'`.]+$/g, '').trim();
+  // "Turned on the lamp" is how some people say it, and how a model echoes it.
+  const text = line.replace(/^["'`]+|["'`.]+$/g, '').trim().replace(/^turned\s+(on|off)\b/i, 'turn $1');
   if (!text || text.toUpperCase().startsWith(NONE) || text.length > 120) return null;
   return text;
 }

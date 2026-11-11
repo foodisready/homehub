@@ -10,7 +10,7 @@ import { logger } from '../logger';
 import { findDeviceByName } from './find-device';
 import { runPowerCommand } from './commands';
 import { recordCommand } from './command-log';
-import { toolArguments } from './tool-args';
+import { looksLikeToolCall, toolArguments, toolCallInText } from './tool-args';
 import { primeRewrite, rewriteMessage } from './rewrite';
 
 export interface ChatMessage {
@@ -289,6 +289,11 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
 
 // ── Shared helpers ─────────────────────────────────────────────
 
+const TOOL_NAMES = TOOLS.map((t) => t.function.name);
+
+/** Said instead of a reply the model garbled. */
+export const NOT_UNDERSTOOD = "Sorry, I didn't manage that. Try saying it another way, such as \"turn on the office lights\".";
+
 /**
  * How long Ollama keeps the model in memory after a reply. Loading it takes
  * seconds, so a computer with memory to spare keeps it for a day; a small one,
@@ -382,6 +387,18 @@ export async function resolveTools(
 
     const data         = await res.json() as any;
     const assistantMsg = data.message as OllamaMessage;
+
+    // A call written out as text is made after all; one too broken to read
+    // isn't shown, since a person can't do anything with it.
+    if (!assistantMsg.tool_calls?.length && assistantMsg.content) {
+      const call = toolCallInText(assistantMsg.content, TOOL_NAMES);
+      if (call) {
+        assistantMsg.tool_calls = [{ function: call }];
+        assistantMsg.content = '';
+      } else if (looksLikeToolCall(assistantMsg.content, TOOL_NAMES)) {
+        assistantMsg.content = NOT_UNDERSTOOD;
+      }
+    }
     messages.push(assistantMsg);
 
     // No more tool calls — messages are ready for final text response
@@ -544,9 +561,9 @@ export async function* processMessageStream(
           if (chunk.done) {
             // If the entire response looks like a raw tool-call JSON, suppress it
             const trimmed = accumulated.trim();
-            if (trimmed.startsWith('{') && trimmed.includes('"name"') && trimmed.includes('"parameters"')) {
+            if (looksLikeToolCall(trimmed, TOOL_NAMES)) {
               // Model output a tool call as text — emit a fallback message instead
-              yield { type: 'error', message: 'Model returned invalid output. Try switching to a better model (e.g. qwen2.5:3b) via OLLAMA_MODEL.' };
+              yield { type: 'error', message: NOT_UNDERSTOOD };
             } else {
               yield { type: 'done' };
             }

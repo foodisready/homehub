@@ -57,6 +57,7 @@ describe('plain rewrites', () => {
     it('takes its first line, without quotes or a full stop', () => {
       assert.equal(rw.readRewrite('"turn on office lights."\nanything else'), 'turn on office lights');
       assert.equal(rw.readRewrite('\n  turn off kitchen lights  '), 'turn off kitchen lights');
+      assert.equal(rw.readRewrite("Turned on Brenden's room lights"), "turn on Brenden's room lights");
     });
 
     it('treats NONE and nothing as no rewrite', () => {
@@ -208,6 +209,35 @@ describe('plain rewrites', () => {
       assert.equal(nlp.timerMinutes(90), 90);
       assert.ok(Number.isNaN(nlp.timerMinutes('soon')), 'refused by the tool, not read as no timer');
       assert.equal(nlp.timerMinutes(-5), -5, 'refused by the tool');
+    });
+
+    it('makes a call the full model wrote out as text', async () => {
+      const replies: any[] = [
+        { role: 'assistant', content: 'NONE' },
+        { role: 'assistant', content: '{"type":"function","function":"set_power_state","parameters":{"alias":"office lights","state":"on","minutes":"0"}}' },
+        { role: 'assistant', content: 'The office lights are on.' },
+      ];
+      globalThis.fetch = (async () => new Response(JSON.stringify({ message: replies.shift() }), { status: 200 })) as unknown as typeof fetch;
+
+      const events = await run('office please, lights, on');
+
+      assert.deepEqual(switched, [{ ip: '10.0.0.1', state: true }]);
+      assert.equal(events.find((e) => e.type === 'token').content, 'The office lights are on.');
+    });
+
+    it('never shows a call too garbled to make', async () => {
+      const replies: any[] = [
+        { role: 'assistant', content: 'NONE' },
+        { role: 'assistant', content: '{"type":"function","function":"set_power_state","parameters":{"alias":"Brendens room",state":"on"}}' },
+      ];
+      globalThis.fetch = (async () => new Response(JSON.stringify({ message: replies.shift() }), { status: 200 })) as unknown as typeof fetch;
+
+      const events = await run('office please, lights, on');
+
+      assert.deepEqual(switched, []);
+      const said = events.find((e) => e.type === 'token').content as string;
+      assert.equal(said, nlp.NOT_UNDERSTOOD);
+      assert.doesNotMatch(said, /set_power_state|\{/);
     });
 
     it('never asks the model when the rules understand', async () => {

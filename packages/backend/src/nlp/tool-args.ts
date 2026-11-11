@@ -20,3 +20,34 @@ export function toolArguments(raw: unknown): Record<string, unknown> {
   }
   return obj;
 }
+
+/**
+ * A small model sometimes writes its tool call as the reply's text instead of
+ * making it: {"name": "set_power_state", "parameters": {...}}. If that text is
+ * a whole, readable call to a tool HomeHub has, it's made after all. Text that
+ * only looks like one (cut short, broken quotes) gives null, and
+ * looksLikeToolCall says not to show it.
+ */
+export function toolCallInText(
+  content: string,
+  tools: readonly string[],
+): { name: string; arguments: Record<string, unknown> } | null {
+  const text = content.trim().replace(/^```(?:json)?\s*|\s*```$/g, '').trim();
+  if (!text.startsWith('{')) return null;
+  let parsed: any;
+  try { parsed = JSON.parse(text); } catch { return null; }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+
+  const inner = parsed.function && typeof parsed.function === 'object' ? parsed.function : parsed;
+  const name = typeof inner.name === 'string' ? inner.name
+    : typeof inner.function === 'string' ? inner.function : null;
+  if (!name || !tools.includes(name)) return null;
+  return { name, arguments: toolArguments(inner.parameters ?? inner.arguments ?? {}) };
+}
+
+/** Reply text that is a tool call, readable or not: never shown to anyone. */
+export function looksLikeToolCall(content: string, tools: readonly string[]): boolean {
+  const text = content.trim().replace(/^```(?:json)?\s*/, '');
+  if (!text.startsWith('{') && !text.startsWith('[')) return false;
+  return tools.some((t) => text.includes(t)) || /"(?:parameters|arguments)"\s*:/.test(text);
+}
