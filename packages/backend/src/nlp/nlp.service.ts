@@ -11,6 +11,7 @@ import { findDeviceByName } from './find-device';
 import { runPowerCommand } from './commands';
 import { recordCommand } from './command-log';
 import { toolArguments } from './tool-args';
+import { rewriteMessage } from './rewrite';
 
 export interface ChatMessage {
   role: 'user' | 'assistant';
@@ -353,15 +354,35 @@ export async function resolveTools(
   return { messages, actions };
 }
 
+// ── HomeHub's own rules, then a plain rewrite ───────────────────
+
+type Handled = { response: string; actions: ActionTaken[] };
+
+const byRules = async (text: string): Promise<Handled | null> =>
+  await runPowerCommand(text) ?? answerStatusQuestion(text);
+
+/**
+ * The rules didn't understand it: a small model says it again plainly
+ * ("turn on ffice liights" → "turn on office lights"), and if the rules
+ * understand that, they act on it. Null leaves it to the full chat model.
+ */
+async function byRewrite(text: string): Promise<Handled | null> {
+  const plain = await rewriteMessage(text, { keepAlive: keepAlive() });
+  return plain ? byRules(plain) : null;
+}
+
 // ── Non-streaming entry point ───────────────────────────────────
 
 export async function processMessage(
   userMessage: string,
   history: ChatMessage[],
 ): Promise<{ response: string; actions: ActionTaken[] }> {
-  const handled = await runPowerCommand(userMessage) ?? answerStatusQuestion(userMessage);
+  const handled = await byRules(userMessage);
   recordCommand(userMessage, handled ? 'rules' : 'model');
   if (handled) return handled;
+
+  const rewritten = await byRewrite(userMessage);
+  if (rewritten) return rewritten;
 
   const { messages, actions } = await resolveTools(userMessage, history);
 
@@ -389,7 +410,7 @@ export async function* processMessageStream(
   userMessage: string,
   history: ChatMessage[],
 ): AsyncGenerator<StreamEvent> {
-  const handled = await runPowerCommand(userMessage) ?? answerStatusQuestion(userMessage);
+  const handled = await byRules(userMessage);
   recordCommand(userMessage, handled ? 'rules' : 'model');
   if (handled) {
     yield { type: 'meta', by: 'rules' };
@@ -402,6 +423,14 @@ export async function* processMessageStream(
   const ollamaUrl = process.env.OLLAMA_URL ?? 'http://localhost:11434';
   const model     = process.env.OLLAMA_MODEL ?? 'llama3.2:3b';
   yield { type: 'meta', by: 'model', model };
+
+  const rewritten = await byRewrite(userMessage);
+  if (rewritten) {
+    for (const action of rewritten.actions) yield { type: 'action', action };
+    yield { type: 'token', content: rewritten.response };
+    yield { type: 'done' };
+    return;
+  }
 
   let messages: OllamaMessage[];
   let actions: ActionTaken[];
