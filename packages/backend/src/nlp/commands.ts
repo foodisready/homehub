@@ -71,8 +71,9 @@ export function parsePowerCommand(text: string): PowerCommand | null {
   }
 
   // "Turn back on the cameras", "turn the cameras back on".
-  const stateFirst = command.match(/^(?:turn|switch)\s+(?:back\s+)?(on|off)\s+(.+)$/);
-  const stateLast  = command.match(/^(turn|switch|keep|leave)\s+(.+?)(?:\s+back)?\s+(on|off)$/);
+  // "Turn of" is a common slip for "turn off": it can't mean anything else here.
+  const stateFirst = command.match(/^(?:turn|switch)\s+(?:back\s+)?(on|off?)\s+(.+)$/);
+  const stateLast  = command.match(/^(turn|switch|keep|leave)\s+(.+?)(?:\s+back)?\s+(on|off?)$/);
 
   let name: string;
   let state: boolean;

@@ -1,4 +1,4 @@
-import { Component, signal, computed, ViewChild, ElementRef, AfterViewChecked, NgZone, OnDestroy } from '@angular/core';
+import { Component, signal, computed, ViewChild, ElementRef, AfterViewChecked, AfterViewInit, NgZone, OnDestroy } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { AuthService } from '../../core/auth/auth.service';
 
@@ -49,7 +49,8 @@ const TOOL_LABELS: Record<string, string> = {
     .chat-wrap {
       display: flex;
       flex-direction: column;
-      height: calc(100vh - 160px);
+      /* Until fit() measures it: the menu can wrap to two rows, so this is only a guess. */
+      height: calc(100dvh - 160px);
       min-height: 300px;
     }
 
@@ -185,7 +186,7 @@ const TOOL_LABELS: Record<string, string> = {
         </div>
       </div>
 
-      <div class="chat-wrap">
+      <div class="chat-wrap" #chatWrap>
 
         <!-- Suggestions (only when history is empty) -->
         @if (entries().length === 0) {
@@ -260,8 +261,11 @@ const TOOL_LABELS: Record<string, string> = {
     </div>
   `,
 })
-export class ChatComponent implements AfterViewChecked, OnDestroy {
+export class ChatComponent implements AfterViewInit, AfterViewChecked, OnDestroy {
   @ViewChild('messageList') private messageList!: ElementRef<HTMLDivElement>;
+  @ViewChild('chatWrap') private chatWrap!: ElementRef<HTMLDivElement>;
+  private resizeWatch?: ResizeObserver;
+  private readonly onResize = () => this.fit();
 
   private readonly _entries      = signal<ChatEntry[]>([]);
   private readonly _loading      = signal(false);
@@ -291,6 +295,29 @@ export class ChatComponent implements AfterViewChecked, OnDestroy {
     'Turn on the living room lamp'];
 
   constructor(readonly auth: AuthService, private zone: NgZone) {}
+
+  /**
+   * The chat fills the window below the menu, so the box to type in is always
+   * on screen. The menu's height varies (it wraps to two rows on narrower
+   * windows, and notices can appear above the page), so it's measured.
+   */
+  ngAfterViewInit(): void {
+    this.zone.runOutsideAngular(() => {
+      window.addEventListener('resize', this.onResize);
+      this.resizeWatch = new ResizeObserver(this.onResize);
+      this.resizeWatch.observe(document.body);
+    });
+    this.fit();
+  }
+
+  private fit(): void {
+    const el = this.chatWrap?.nativeElement;
+    if (!el) return;
+    const top = el.getBoundingClientRect().top + window.scrollY;
+    const bottomGap = 24;   // the page's own bottom padding
+    const height = Math.max(300, Math.floor(window.innerHeight - top - bottomGap));
+    if (el.style.height !== `${height}px`) el.style.height = `${height}px`;
+  }
 
   ngAfterViewChecked(): void {
     if (this.shouldScroll) {
@@ -405,6 +432,8 @@ export class ChatComponent implements AfterViewChecked, OnDestroy {
 
   ngOnDestroy(): void {
     clearInterval(this.ticker);
+    window.removeEventListener('resize', this.onResize);
+    this.resizeWatch?.disconnect();
   }
 
   private stopTicker(): void {
@@ -428,6 +457,8 @@ export class ChatComponent implements AfterViewChecked, OnDestroy {
   actionLabel(action: ActionTaken): string {
     const base = TOOL_LABELS[action.tool] ?? action.tool;
     const r = action.result as any;
+    // The tool refused or failed: say so, rather than claim it was done.
+    if (r?.error) return action.tool === 'set_power_state' ? "Couldn't switch a device" : `Didn't work: ${base.toLowerCase()}`;
     if (action.tool === 'set_power_state' && r?.alias) {
       return `${r.state === 'on' ? 'Turned on' : 'Turned off'}: ${r.alias}`;
     }

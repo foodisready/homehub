@@ -10,6 +10,7 @@ import { logger } from '../logger';
 import { findDeviceByName } from './find-device';
 import { runPowerCommand } from './commands';
 import { recordCommand } from './command-log';
+import { toolArguments } from './tool-args';
 
 export interface ChatMessage {
   role: 'user' | 'assistant';
@@ -337,7 +338,7 @@ export async function resolveTools(
 
     for (const call of assistantMsg.tool_calls) {
       const toolName = call.function.name;
-      const toolArgs = call.function.arguments ?? {};
+      const toolArgs = toolArguments(call.function.arguments);
       logger.info({ tool: toolName, args: toolArgs }, 'NLP tool call');
 
       let result: unknown;

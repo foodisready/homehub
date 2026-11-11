@@ -63,6 +63,9 @@ describe('chat commands', () => {
       ['turn the lamp on for 90 min',           { name: 'the lamp', state: true, minutes: 90 }],
       ['keep the lamp on for two hours',        { name: 'the lamp', state: true, minutes: 120 }],
       ['leave the lamp on for half an hour',    { name: 'the lamp', state: true, minutes: 30 }],
+      ['turn of office lights',                 { name: 'office lights', state: false }],
+      ['switch the lamp of',                    { name: 'the lamp', state: false }],
+      ['turn office lights off',                { name: 'office lights', state: false }],
     ];
 
     for (const [text, expected] of parses) {
