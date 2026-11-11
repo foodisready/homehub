@@ -62,6 +62,43 @@ const EXAMPLES: Array<[string, string]> = [
   ['when does the sun set', NONE],
 ];
 
+/** The instructions, the worked examples, then the message: the same start every time, so Ollama caches it. */
+function rewriteMessages(text: string, names: { devices: string[]; scenes: string[] }) {
+  return [
+    { role: 'system', content: buildRewritePrompt(names.devices, names.scenes) },
+    ...EXAMPLES.flatMap(([q, a]) => [{ role: 'user', content: q }, { role: 'assistant', content: a }]),
+    { role: 'user', content: text },
+  ];
+}
+
+/**
+ * Have Ollama read the instructions now, at startup, so it has them cached
+ * and the first real rewrite takes seconds rather than most of a minute.
+ */
+export async function primeRewrite(opts: RewriteOptions = {}): Promise<boolean> {
+  const url   = opts.url ?? process.env.OLLAMA_URL ?? 'http://localhost:11434';
+  const model = opts.model ?? process.env.OLLAMA_REWRITE_MODEL ?? process.env.OLLAMA_MODEL ?? 'llama3.2:3b';
+  const names = opts.names ?? { devices: listDeviceNames(), scenes: listSceneNames() };
+  const started = Date.now();
+  try {
+    const res = await (opts.fetchImpl ?? fetch)(`${url}/api/chat`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({
+        model, messages: rewriteMessages('hello', names), stream: false,
+        ...(opts.keepAlive ? { keep_alive: opts.keepAlive } : {}),
+        options: { temperature: 0, num_predict: 1 },
+      }),
+      signal: AbortSignal.timeout(opts.timeoutMs ?? 5 * 60_000),
+    });
+    logger.info({ model, ok: res.ok, ms: Date.now() - started }, 'NLP rewrite instructions read');
+    return res.ok;
+  } catch (err: any) {
+    logger.warn({ model, err: err.message }, 'NLP rewrite instructions not read');
+    return false;
+  }
+}
+
 /** The model's one line, tidied; null for NONE or anything unusable. */
 export function readRewrite(output: string): string | null {
   const line = output.split('\n').map((l) => l.trim()).find(Boolean) ?? '';
@@ -186,15 +223,14 @@ export function isFaithful(original: string, rewritten: string, known: string[] 
 export async function rewriteMessage(text: string, opts: RewriteOptions = {}): Promise<string | null> {
   const url       = opts.url ?? process.env.OLLAMA_URL ?? 'http://localhost:11434';
   const model     = opts.model ?? process.env.OLLAMA_REWRITE_MODEL ?? process.env.OLLAMA_MODEL ?? 'llama3.2:3b';
-  const timeoutMs = opts.timeoutMs ?? Number(process.env.OLLAMA_REWRITE_TIMEOUT_MS ?? 20_000);
+  // Generous: the full chat model it would hand over to is slower still. A Pi 4
+  // reads about 14 words a second, so new instructions (names changed) take ~40 s
+  // once; after that Ollama has them cached and a rewrite takes ~3 s.
+  const timeoutMs = opts.timeoutMs ?? Number(process.env.OLLAMA_REWRITE_TIMEOUT_MS ?? 60_000);
   const doFetch   = opts.fetchImpl ?? fetch;
   const names     = opts.names ?? { devices: listDeviceNames(), scenes: listSceneNames() };
 
-  const messages = [
-    { role: 'system', content: buildRewritePrompt(names.devices, names.scenes) },
-    ...EXAMPLES.flatMap(([q, a]) => [{ role: 'user', content: q }, { role: 'assistant', content: a }]),
-    { role: 'user', content: text },
-  ];
+  const messages = rewriteMessages(text, names);
 
   const started = Date.now();
   try {

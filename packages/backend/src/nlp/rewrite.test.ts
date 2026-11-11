@@ -185,6 +185,31 @@ describe('plain rewrites', () => {
       assert.match(events.find((e) => e.type === 'token').content, /protected/);
     });
 
+    it('switches when the full model fills in an empty timer, as small models do', async () => {
+      // The rewrite says NONE, so the full model answers with a tool call.
+      const replies: any[] = [
+        { role: 'assistant', content: 'NONE' },
+        { role: 'assistant', content: '', tool_calls: [{ function: { name: 'set_power_state', arguments: { alias: 'office lights', minutes: '0', state: 'on' } } }] },
+        { role: 'assistant', content: 'Turned on the office lights.' },
+      ];
+      globalThis.fetch = (async () => new Response(JSON.stringify({ message: replies.shift() }), { status: 200 })) as unknown as typeof fetch;
+
+      const events = await run('office please, lights, on');
+
+      assert.deepEqual(switched, [{ ip: '10.0.0.1', state: true }]);
+      const action = events.find((e) => e.type === 'action').action;
+      assert.equal(action.result.success, true);
+      assert.equal(action.result.minutes, undefined, 'no timer');
+    });
+
+    it('reads a timer as the model wrote it', () => {
+      for (const none of [undefined, null, '', ' ', '0', 0, false]) assert.equal(nlp.timerMinutes(none), undefined, String(none));
+      assert.equal(nlp.timerMinutes('6'), 6);
+      assert.equal(nlp.timerMinutes(90), 90);
+      assert.ok(Number.isNaN(nlp.timerMinutes('soon')), 'refused by the tool, not read as no timer');
+      assert.equal(nlp.timerMinutes(-5), -5, 'refused by the tool');
+    });
+
     it('never asks the model when the rules understand', async () => {
       const ollama = fakeOllama();
       globalThis.fetch = ollama.impl;

@@ -11,7 +11,7 @@ import { findDeviceByName } from './find-device';
 import { runPowerCommand } from './commands';
 import { recordCommand } from './command-log';
 import { toolArguments } from './tool-args';
-import { rewriteMessage } from './rewrite';
+import { primeRewrite, rewriteMessage } from './rewrite';
 
 export interface ChatMessage {
   role: 'user' | 'assistant';
@@ -146,6 +146,18 @@ export const TOOLS: OllamaTool[] = [
 
 // ── Tool executor ──────────────────────────────────────────────
 
+/**
+ * A tool call's timer. Small models fill in every parameter, so "", "0", 0
+ * and null mean no timer, not a timer of nothing. Anything else unreadable
+ * stays NaN, which the tool refuses.
+ */
+export function timerMinutes(value: unknown): number | undefined {
+  if (value === undefined || value === null || value === false) return undefined;
+  if (typeof value === 'string' && value.trim() === '') return undefined;
+  const minutes = Number(value);
+  return minutes === 0 ? undefined : minutes;
+}
+
 async function executeTool(name: string, args: Record<string, unknown>): Promise<unknown> {
   const db = getDb();
 
@@ -171,7 +183,7 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
       if (!assistantMaySwitch(device, state)) {
         return { error: `${device.alias} is protected. Tell the user to use its tile on the dashboard.` };
       }
-      const minutes = args.minutes ? Number(args.minutes) : undefined;
+      const minutes = timerMinutes(args.minutes);
       if (minutes !== undefined && !(minutes > 0)) return { error: 'minutes must be a positive number' };
       if (minutes !== undefined && !state) return { error: 'minutes only works when turning a device on' };
       await applyPower(device, state, minutes);
@@ -321,6 +333,9 @@ export async function warmModels(
       if (i < tries - 1) await new Promise((r) => setTimeout(r, waitMs));
     }
   }
+  // The rewrite's instructions, read now so the first command is quick.
+  const rewriteModel = models[models.length - 1];
+  if (loaded.includes(rewriteModel)) await primeRewrite({ url, model: rewriteModel, keepAlive: keep, fetchImpl: opts.fetchImpl });
   return loaded;
 }
 
