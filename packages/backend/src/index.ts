@@ -53,7 +53,7 @@ import { startBackupEmails } from './db/backup-email';
 import { startBackupSync, whenCopied } from './db/backup-sync';
 import { startComputerWatch } from './system/computer-watch';
 import { backupReadOnly } from './middleware/backup-read-only';
-import { applyRole } from './system/role';
+import { applyRole, isActiveServer } from './system/role';
 import { checkAllSensors } from './sensors/stale-check';
 import { authenticate, requireAdmin } from './middleware/auth';
 import { getDb } from './db';
@@ -68,6 +68,7 @@ import { matterRouter } from './routes/matter';
 import { startMatter, stopMatter } from './matter/service';
 import { noteRunningVersion } from './system/updater';
 import { initSocket } from './socket';
+import { warmModels } from './nlp/nlp.service';
 
 const app = express();
 const httpServer = createServer(app);
@@ -175,6 +176,7 @@ httpServer.listen(PORT, async () => {
   });
   startBackupSync();         // on a paired backup, copy the active HomeHub every hour
   startComputerWatch();      // how hot the computer is, and on a Pi whether it has enough power
+  if (isActiveServer()) warmModels().catch(() => undefined);   // load the chat models now, not on the first message
 
   // Hourly prune of flow_readings older than 7 days. flow_events are kept indefinitely.
   pruneFlowReadings();

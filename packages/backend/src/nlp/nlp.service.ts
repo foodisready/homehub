@@ -289,6 +289,41 @@ export function keepAlive(totalBytes = os.totalmem()): string {
   return totalBytes >= 7 * 1024 ** 3 ? '24h' : '5m';
 }
 
+/**
+ * Load the chat models when HomeHub starts, on a computer that keeps them
+ * loaded (keepAlive), so the first message after a restart or update doesn't
+ * wait a minute for a Pi to load one. Ollama may still be starting, so this
+ * tries again for a while. It never blocks or fails startup.
+ */
+export async function warmModels(
+  opts: { fetchImpl?: typeof fetch; tries?: number; waitMs?: number; totalBytes?: number } = {},
+): Promise<string[]> {
+  const keep = keepAlive(opts.totalBytes);
+  if (keep === '5m' || keep === '0') return [];   // it would be unloaded again before anyone asks
+  const url = process.env.OLLAMA_URL ?? 'http://localhost:11434';
+  const main = process.env.OLLAMA_MODEL ?? 'llama3.2:3b';
+  const models = [...new Set([main, process.env.OLLAMA_REWRITE_MODEL?.trim() || main])];
+  const doFetch = opts.fetchImpl ?? fetch;
+  const tries = opts.tries ?? 10;
+  const waitMs = opts.waitMs ?? 30_000;
+
+  const loaded: string[] = [];
+  for (const model of models) {
+    for (let i = 0; i < tries; i++) {
+      try {
+        // A request with no prompt only loads the model.
+        const res = await doFetch(`${url}/api/generate`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model, keep_alive: keep }),
+        });
+        if (res.ok) { loaded.push(model); logger.info({ model }, 'AI model loaded'); break; }
+      } catch { /* Ollama isn't up yet */ }
+      if (i < tries - 1) await new Promise((r) => setTimeout(r, waitMs));
+    }
+  }
+  return loaded;
+}
+
 export function buildSystemPrompt(): string {
   return `You are HomeHub, a helpful smart home assistant. You control smart plugs and switches (TP-Link Kasa, Shelly, and others) and manage automation schedules.
 
