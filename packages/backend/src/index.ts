@@ -51,6 +51,7 @@ import { activityRouter } from './routes/activity';
 import { runBackup } from './db/backup';
 import { startBackupEmails } from './db/backup-email';
 import { startBackupSync, whenCopied } from './db/backup-sync';
+import { startComputerWatch } from './system/computer-watch';
 import { backupReadOnly } from './middleware/backup-read-only';
 import { applyRole } from './system/role';
 import { checkAllSensors } from './sensors/stale-check';
@@ -173,6 +174,7 @@ httpServer.listen(PORT, async () => {
     refreshDevices().catch((err) => logger.warn({ err }, 'Device refresh after backup sync failed'));
   });
   startBackupSync();         // on a paired backup, copy the active HomeHub every hour
+  startComputerWatch();      // how hot the computer is, and on a Pi whether it has enough power
 
   // Hourly prune of flow_readings older than 7 days. flow_events are kept indefinitely.
   pruneFlowReadings();

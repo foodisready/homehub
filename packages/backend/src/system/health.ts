@@ -10,6 +10,7 @@ import { roleStatus } from './role';
 import { pictureHealth } from '../cameras/picture-status';
 import { cameraDevices } from '../cameras/watch';
 import { addedCameras as ringCameras, ringState } from '../ring/ring';
+import { HOT_C, HWMON_ROOT, THERMAL_ROOT, lowPowerSeen, readLowPower, readTemperature, recentPeak } from './computer-watch';
 import { bridgeLastState, bridgeRestartState, bridgeSeenAt, getVoiceSettings, lastBridgeReport, recentBridges } from './voice-bridge';
 
 /**
@@ -288,23 +289,35 @@ function disk(dataDir: string): HealthItem[] {
   }
 }
 
-/** The hottest sensor the computer reports, if it reports any (Linux only). */
-export function temperature(root = '/sys/class/thermal'): HealthItem[] {
-  let hottest = 0;
-  try {
-    for (const zone of fs.readdirSync(root)) {
-      if (!zone.startsWith('thermal_zone')) continue;
-      const milli = Number(fs.readFileSync(path.join(root, zone, 'temp'), 'utf8').trim());
-      if (Number.isFinite(milli)) hottest = Math.max(hottest, milli / 1000);
-    }
-  } catch {
-    return [];
-  }
-  if (!hottest) return [];
+/**
+ * The hottest sensor the computer reports, if it reports any (Linux only), and
+ * the hottest it got in the last day when that was hotter.
+ */
+export function temperature(root = THERMAL_ROOT, now = Date.now()): HealthItem[] {
+  const hottest = readTemperature(root);
+  if (hottest === null) return [];
   const t = Math.round(hottest);
-  if (t >= 85) return [{ id: 'temperature', group: 'Computer', label: 'Temperature', level: 'error', detail: `${t} °C, which is too hot. Give it air, and check its fan.` }];
-  if (t >= 75) return [{ id: 'temperature', group: 'Computer', label: 'Temperature', level: 'warn', detail: `${t} °C, which is warm. Make sure air can reach it.` }];
-  return [{ id: 'temperature', group: 'Computer', label: 'Temperature', level: 'ok', detail: `${t} °C` }];
+  const base: Pick<HealthItem, 'id' | 'group' | 'label'> = { id: 'temperature', group: 'Computer', label: 'Temperature' };
+  if (t >= 85) return [{ ...base, level: 'error', detail: `${t} °C, which is too hot. Give it air, and check its fan.` }];
+  if (t >= 75) return [{ ...base, level: 'warn', detail: `${t} °C, which is warm. Make sure air can reach it.` }];
+  const peak = recentPeak(now);
+  if (peak && Math.round(peak.t) >= 75 && Math.round(peak.t) > t) {
+    const p = Math.round(peak.t);
+    return [{ ...base, level: 'info', detail: `${t} °C now. It reached ${p} °C ${ago(now - peak.at)}${p >= HOT_C ? ', hot enough to slow itself down' : ''}.` }];
+  }
+  return [{ ...base, level: 'ok', detail: `${t} °C` }];
+}
+
+/** On a Raspberry Pi, whether it's getting enough power. */
+export function power(root = HWMON_ROOT, now = Date.now()): HealthItem[] {
+  const low = readLowPower(root);
+  if (low === null) return [];
+  const base: Pick<HealthItem, 'id' | 'group' | 'label'> = { id: 'power', group: 'Computer', label: 'Power' };
+  const adapter = 'Use a 5.1 V 3 A adapter (the official Raspberry Pi one) and a short cable.';
+  if (low) return [{ ...base, level: 'error', detail: `Not enough power right now, which can make HomeHub slow or unreliable. ${adapter}` }];
+  const seen = lowPowerSeen(now);
+  if (seen !== null) return [{ ...base, level: 'warn', detail: `Enough now, but it ran low ${ago(now - seen)}. ${adapter}` }];
+  return [{ ...base, level: 'ok', detail: 'Enough power' }];
 }
 
 function settingsChecks(): HealthItem[] {
@@ -334,7 +347,7 @@ function settingsChecks(): HealthItem[] {
 
 const RANK: Record<Level, number> = { error: 0, warn: 1, info: 2, ok: 3 };
 
-export async function checkHealth(opts: { probe?: Probe; now?: number; dataDir?: string; thermalRoot?: string } = {}): Promise<HealthReport> {
+export async function checkHealth(opts: { probe?: Probe; now?: number; dataDir?: string; thermalRoot?: string; hwmonRoot?: string } = {}): Promise<HealthReport> {
   const now = opts.now ?? Date.now();
   const dataDir = opts.dataDir ?? path.dirname(process.env.DB_PATH || path.join(process.cwd(), 'data', 'db.sqlite'));
   const items = [
@@ -346,7 +359,8 @@ export async function checkHealth(opts: { probe?: Probe; now?: number; dataDir?:
     ...voice(now),
     ...backups(dataDir, now),
     ...disk(dataDir),
-    ...temperature(opts.thermalRoot),
+    ...temperature(opts.thermalRoot, now),
+    ...power(opts.hwmonRoot, now),
     ...settingsChecks(),
   ];
   const worst = items.reduce((w, i) => Math.min(w, RANK[i.level]), RANK.ok);

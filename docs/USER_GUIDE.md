@@ -509,6 +509,8 @@ To reach HomeHub away from home, set up [Remote Access](./REMOTE_ACCESS.md). Don
 
 **More → Health** shows whether HomeHub is working, in plain words: its services, devices that aren't responding, voice speakers, the nightly backup, disk space and the computer's temperature. Anything that needs a look comes first, with what to do about it. Admins also see a notice on the Home page when something does.
 
+HomeHub checks its computer's temperature every minute, so Health also says how hot it got in the last day if that was hotter than now. On a Raspberry Pi, it also shows whether the Pi is getting enough power. Admins get a notification when the computer stays at 80 °C or more for 5 minutes, which is where a Raspberry Pi starts slowing itself down, or when a Pi reports low power. Each notification is sent at most once every 6 hours.
+
 ### Restart the voice bridge
 
 If speakers stop answering, administrators can select **Restart voice bridge** under **Voice**. The bridge restarts when it next checks in, within a minute, and the page shows it restarting. You don't need it for new nicknames: the bridge picks those up by itself within a minute.
