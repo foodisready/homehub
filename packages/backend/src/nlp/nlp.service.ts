@@ -7,11 +7,11 @@ import { answerStatusQuestion } from './status';
 import { getDriver } from '../drivers/registry';
 import { applyPower, assistantMaySwitch, type PowerDevice } from '../devices/power';
 import { logger } from '../logger';
-import { findDeviceByName } from './find-device';
-import { runPowerCommand } from './commands';
+import { findDeviceByName, findDeviceGroup, listDeviceNames } from './find-device';
+import { runGroupCommand, runPowerCommand } from './commands';
 import { recordCommand } from './command-log';
 import { looksLikeToolCall, toolArguments, toolCallInText } from './tool-args';
-import { primeRewrite, rewriteMessage } from './rewrite';
+import { asksForLater, primeRewrite, rewriteMessage } from './rewrite';
 
 export interface ChatMessage {
   role: 'user' | 'assistant';
@@ -158,7 +158,7 @@ export function timerMinutes(value: unknown): number | undefined {
   return minutes === 0 ? undefined : minutes;
 }
 
-async function executeTool(name: string, args: Record<string, unknown>): Promise<unknown> {
+async function executeTool(name: string, args: Record<string, unknown>, userMessage = ''): Promise<unknown> {
   const db = getDb();
 
   switch (name) {
@@ -177,15 +177,32 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
     case 'set_power_state': {
       const alias = String(args.alias ?? '');
       const state = String(args.state ?? '') === 'on';
+      // A small model may switch now what was asked for later ("every day at
+      // sunset") and then say it's scheduled. Now isn't what was asked.
+      if (asksForLater(userMessage)) {
+        return { error: 'The user asked for this at a later time or on a schedule, not now. Use create_schedule, or ask them when. Nothing was switched.' };
+      }
+      const minutes = timerMinutes(args.minutes);
+      if (minutes !== undefined && !(minutes > 0)) return { error: 'minutes must be a positive number' };
+      if (minutes !== undefined && !state) return { error: 'minutes only works when turning a device on' };
+
+      // A room or a shared name ("Brenden's room lights") is all of its
+      // devices, as when it's typed and the rules switch it.
+      const group = findDeviceGroup(alias) as unknown as PowerDevice[];
+      if (group.length) {
+        const { response, actions } = await runGroupCommand(group, { name: alias, state, ...(minutes ? { minutes } : {}) });
+        const switched = actions.filter((a) => (a.result as any)?.success).map((a) => String(a.args.alias));
+        return switched.length
+          ? { success: true, alias: switched.join(', '), state: state ? 'on' : 'off', ...(minutes ? { minutes } : {}), note: response }
+          : { error: response || `Nothing in ${alias} could be switched.` };
+      }
+
       const match = findDeviceByName(alias);
       if ('error' in match) return { error: match.error };
       const device = match.device as unknown as PowerDevice;
       if (!assistantMaySwitch(device, state)) {
         return { error: `${device.alias} is protected. Tell the user to use its tile on the dashboard.` };
       }
-      const minutes = timerMinutes(args.minutes);
-      if (minutes !== undefined && !(minutes > 0)) return { error: 'minutes must be a positive number' };
-      if (minutes !== undefined && !state) return { error: 'minutes only works when turning a device on' };
       await applyPower(device, state, minutes);
       return { success: true, alias: device.alias, state: state ? 'on' : 'off', ...(minutes ? { minutes } : {}) };
     }
@@ -291,6 +308,13 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
 
 const TOOL_NAMES = TOOLS.map((t) => t.function.name);
 
+/**
+ * The most a reply may run to. A small model sometimes doesn't stop: on a Pi
+ * one wrote for over 5 minutes, and the request failed. A chat reply or a tool
+ * call is far shorter than this.
+ */
+export const MAX_REPLY_TOKENS = 300;
+
 /** Said instead of a reply the model garbled. */
 export const NOT_UNDERSTOOD = "Sorry, I didn't manage that. Try saying it another way, such as \"turn on the office lights\".";
 
@@ -338,13 +362,39 @@ export async function warmModels(
       if (i < tries - 1) await new Promise((r) => setTimeout(r, waitMs));
     }
   }
+  // The chat model's instructions, with and without its tools (the final
+  // answer is written without them), read now so they're cached.
+  if (loaded.includes(main)) {
+    for (const tools of [TOOLS, undefined]) {
+      try {
+        await doFetch(`${url}/api/chat`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: main, stream: false, keep_alive: keep, ...(tools ? { tools } : {}),
+            messages: [{ role: 'system', content: buildSystemPrompt() }, { role: 'user', content: 'hello' }],
+            options: { num_predict: 1 },
+          }),
+          signal: AbortSignal.timeout(5 * 60_000),
+        });
+      } catch { /* only slower on the first message */ }
+    }
+  }
+
   // The rewrite's instructions, read now so the first command is quick.
   const rewriteModel = models[models.length - 1];
   if (loaded.includes(rewriteModel)) await primeRewrite({ url, model: rewriteModel, keepAlive: keep, fetchImpl: opts.fetchImpl });
   return loaded;
 }
 
-export function buildSystemPrompt(): string {
+/**
+ * The chat model's instructions, with the home's device and room names, read
+ * from the database each time, so a model doesn't invent names like
+ * "pavilion_porch". They change rarely, so Ollama caches them: on a Pi only the
+ * first message after a change pays to read them. The date comes last, so a
+ * new day only re-reads that line.
+ */
+export function buildSystemPrompt(names: string[] = listDeviceNames()): string {
+  const list = names.length ? names.map((n) => `- ${n}`).join('\n') : '(none yet)';
   return `You are HomeHub, a helpful smart home assistant. You control smart plugs and switches (TP-Link Kasa, Shelly, and others) and manage automation schedules.
 
 Use the provided tools when the user wants to control devices or manage schedules. Be concise and friendly. After taking actions, briefly summarize what you did.
@@ -352,6 +402,9 @@ Use the provided tools when the user wants to control devices or manage schedule
 IMPORTANT: When reporting device states, always use the exact data returned by the list_devices tool. Never guess or assume device states. To say which devices are on, report exactly the names in the "on" list of the tool result, and no others.
 
 Do NOT output raw JSON or tool call syntax in your responses. Always respond in plain English.
+
+Devices, rooms and their other names in this home. For a tool's alias, use one of these names exactly; never make one up:
+${list}
 
 Today's date: ${new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}`;
 }
@@ -380,7 +433,7 @@ export async function resolveTools(
     const res = await fetch(`${ollamaUrl}/api/chat`, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ model, messages, tools: TOOLS, stream: false, keep_alive: keepAlive() }),
+      body:    JSON.stringify({ model, messages, tools: TOOLS, stream: false, keep_alive: keepAlive(), options: { num_predict: MAX_REPLY_TOKENS } }),
     });
 
     if (!res.ok) throw new Error(`Ollama error ${res.status}: ${await res.text()}`);
@@ -410,7 +463,7 @@ export async function resolveTools(
       logger.info({ tool: toolName, args: toolArgs }, 'NLP tool call');
 
       let result: unknown;
-      try { result = await executeTool(toolName, toolArgs); }
+      try { result = await executeTool(toolName, toolArgs, userMessage); }
       catch (err: any) { result = { error: err.message }; }
 
       actions.push({ tool: toolName, args: toolArgs, result });
@@ -528,7 +581,7 @@ export async function* processMessageStream(
     streamRes = await fetch(`${ollamaUrl}/api/chat`, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ model, messages, stream: true, keep_alive: keepAlive() }),
+      body:    JSON.stringify({ model, messages, stream: true, keep_alive: keepAlive(), options: { num_predict: MAX_REPLY_TOKENS } }),
     });
     if (!streamRes.ok) throw new Error(`Ollama error ${streamRes.status}`);
   } catch (err: any) {

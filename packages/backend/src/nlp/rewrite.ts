@@ -156,6 +156,8 @@ const ON  = /\b(?:o+n+|start|resume|unpause)\b/;
 const OFF = /\b(?:o+f+|stop|pause|shut|out)\b/;
 const QUESTION_START = /^(?:is|are|was|were|what|whats|what's|which|when|where|why|how|who|did|does|do|can|could|should|will|would|tell|show|list)\b/;
 const LATER = /\b(?:in|after)\s+(?:\d+|a|an|one|two|three|four|five|six|seven|eight|nine|ten|fifteen|twenty|thirty|half|a\s+few|few)\b|\b(?:at|until|till|by)\s+\d|\b(?:tomorrow|tonight|morning|evening|afternoon|sunset|sunrise|dusk|dawn|every|daily|weekdays?|weekends?|later|o'?clock|[ap]\.?m\.?)\b/;
+/** "In an hour", "at 10pm", "every sunset": something for later, which switching now would get wrong. */
+export const asksForLater = (text: string): boolean => LATER.test(cleanUp(text));
 const DIMMING = /%|\b(?:dim|dimmer|brighten|brightness|bright|percent|colou?r|warm|cool)\b/;
 const NUMBER_WORD: Record<string, number> = {
   a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,

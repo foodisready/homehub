@@ -135,7 +135,7 @@ const leftAlone = (names: string[]) =>
   names.length > 1 ? `${joinNames(names)} are protected, so I left them alone.` : `${names[0]} is protected, so I left it alone.`;
 
 /** Switches every device sharing a nickname. A protected device is left alone. */
-async function runGroupCommand(
+export async function runGroupCommand(
   devices: PowerDevice[],
   { state, minutes }: PowerCommand,
 ): Promise<{ response: string; actions: ActionTaken[] }> {

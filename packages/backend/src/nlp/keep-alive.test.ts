@@ -85,15 +85,28 @@ describe('loading the AI model at startup', () => {
     process.env.OLLAMA_REWRITE_MODEL = 'qwen2.5:1.5b';
     const o = recorder();
     await nlp.warmModels({ fetchImpl: o.impl, totalBytes: 8 * GB, waitMs: 1 });
-    assert.equal(o.primed.length, 1);
-    assert.equal(o.primed[0].model, 'qwen2.5:1.5b');
-    assert.equal(o.primed[0].keep_alive, '24h');
-    assert.equal(o.primed[0].options.num_predict, 1, 'reads the instructions, writes next to nothing');
-    assert.match(o.primed[0].messages[0].content, /plain command/);
+    const rewrite = o.primed.filter((p) => /plain command/.test(p.messages[0].content));
+    assert.equal(rewrite.length, 1);
+    assert.equal(rewrite[0].model, 'qwen2.5:1.5b');
+    assert.equal(rewrite[0].keep_alive, '24h');
+    assert.equal(rewrite[0].options.num_predict, 1, 'reads the instructions, writes next to nothing');
+  });
+
+  it("has the chat model read its instructions, with and without its tools", async () => {
+    process.env.OLLAMA_MODEL = 'qwen2.5:1.5b';
+    delete process.env.OLLAMA_REWRITE_MODEL;
+    const o = recorder();
+    await nlp.warmModels({ fetchImpl: o.impl, totalBytes: 8 * GB, waitMs: 1 });
+    const chat = o.primed.filter((p) => /You are HomeHub/.test(p.messages[0].content));
+    assert.equal(chat.length, 2);
+    assert.ok(chat[0].tools?.length, 'with tools, as the first call of a chat');
+    assert.equal(chat[1].tools, undefined, 'without, as the final answer');
+    assert.ok(chat.every((p) => p.model === 'qwen2.5:1.5b' && p.options.num_predict === 1));
     delete process.env.OLLAMA_REWRITE_MODEL;
   });
 
   it('waits for Ollama to start', async () => {
+    process.env.OLLAMA_MODEL = 'llama3.2:1b';
     const o = recorder(2);
     assert.deepEqual(await nlp.warmModels({ fetchImpl: o.impl, totalBytes: 8 * GB, waitMs: 1 }), ['llama3.2:1b']);
   });

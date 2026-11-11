@@ -240,6 +240,57 @@ describe('plain rewrites', () => {
       assert.doesNotMatch(said, /set_power_state|\{/);
     });
 
+    it("gives the chat model the home's names, and caps its replies", async () => {
+      const prompt = nlp.buildSystemPrompt();
+      assert.match(prompt, /- Office lights\n- Kitchen lights\n- Main Valve/);
+      assert.ok(prompt.indexOf('- Office lights') < prompt.indexOf("Today's date"), 'the date, which changes daily, comes last');
+      assert.match(nlp.buildSystemPrompt([]), /\(none yet\)/);
+
+      const ollama = fakeOllama('NONE', 'Hello!');
+      globalThis.fetch = ollama.impl;
+      await run('hi there');
+      assert.equal(ollama.asked[1].options.num_predict, nlp.MAX_REPLY_TOKENS);
+      assert.match(ollama.asked[1].messages[0].content, /- Office lights/);
+    });
+
+    /** NONE from the rewrite, then the full model's tool call, then its answer. */
+    const fullModel = (call: Record<string, unknown>, answer = 'Done.') => {
+      const replies: any[] = [
+        { role: 'assistant', content: 'NONE' },
+        { role: 'assistant', content: '', tool_calls: [{ function: { name: 'set_power_state', arguments: call } }] },
+        { role: 'assistant', content: answer },
+      ];
+      const asked: any[] = [];
+      globalThis.fetch = (async (_u: string, init: any) => {
+        asked.push(JSON.parse(init.body));
+        return new Response(JSON.stringify({ message: replies.shift() }), { status: 200 });
+      }) as unknown as typeof fetch;
+      return asked;
+    };
+
+    it("switches a whole room the model names, except what's protected", async () => {
+      db.prepare("UPDATE devices SET room = 'Downstairs'").run();
+      try {
+        fullModel({ alias: 'Downstairs', state: 'off' });
+        const events = await run('everything downstairs of please');
+        assert.deepEqual(switched.map((s) => s.ip).sort(), ['10.0.0.1', '10.0.0.2'], 'both lights, not the valve');
+        const action = events.find((e) => e.type === 'action').action;
+        assert.equal(action.result.success, true);
+        assert.match(action.result.alias, /Office lights/);
+        assert.match(action.result.alias, /Kitchen lights/);
+      } finally {
+        db.prepare('UPDATE devices SET room = NULL').run();
+      }
+    });
+
+    it('switches nothing now for something asked for later, and tells the model why', async () => {
+      const asked = fullModel({ alias: 'Office lights', state: 'on' }, 'I can set that up as a schedule.');
+      const events = await run('turn on office lights every day at sunset');
+      assert.deepEqual(switched, []);
+      assert.match(events.find((e) => e.type === 'action').action.result.error, /create_schedule/);
+      assert.match(asked.at(-1).messages.at(-1).content, /Nothing was switched/, 'the model hears it');
+    });
+
     it('never asks the model when the rules understand', async () => {
       const ollama = fakeOllama();
       globalThis.fetch = ollama.impl;
