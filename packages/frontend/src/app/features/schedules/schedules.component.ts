@@ -1,4 +1,5 @@
-import { Component, OnInit, signal, computed } from '@angular/core';
+import { Component, OnInit, signal, computed, inject } from '@angular/core';
+import { AutomationsService } from '../../core/services/automations.service';
 import { HttpClient } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
 import { AuthService } from '../../core/auth/auth.service';
@@ -246,7 +247,7 @@ const CRON_PRESETS = [
         <div style="display:flex; align-items:center; gap:1rem">
           <h1>Schedules</h1>
         </div>
-        @if (auth.user()?.role === 'admin') {
+        @if (canEdit()) {
           <button class="btn-add" (click)="openCreate()">+ New Schedule</button>
         }
       </div>
@@ -269,7 +270,7 @@ const CRON_PRESETS = [
                     <span class="group-count">{{ group.schedules.length }}</span>
                   </button>
                 </h2>
-                @if (auth.user()?.role === 'admin') {
+                @if (canEdit()) {
                   <button class="group-add" (click)="openCreate(group.deviceId)">+ Add</button>
                 }
               </div>
@@ -294,7 +295,7 @@ const CRON_PRESETS = [
                     }
                   </div>
 
-                  @if (auth.user()?.role === 'admin') {
+                  @if (canEdit()) {
                     <div class="schedule-actions">
                       <button
                         class="toggle-btn"
@@ -489,6 +490,10 @@ export class SchedulesComponent implements OnInit {
   readonly editingId     = signal<number | null>(null);
 
   form = this.blankForm();
+
+  private readonly automations = inject(AutomationsService);
+  /** Admins edit, except on a backup HomeHub, which is copied from the active one. */
+  readonly canEdit = computed(() => this.auth.user()?.role === 'admin' && !this.automations.readOnly());
 
   constructor(readonly auth: AuthService, private http: HttpClient) {}
 

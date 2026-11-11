@@ -368,7 +368,7 @@ const DRIVER_LABEL: Record<string, string> = {
                       {{ !d.online ? 'Offline' : d.state ? 'On' : 'Off' }}
                     </button>
                   }
-                  @if (isAdmin()) {
+                  @if (isAdmin() && !automations.readOnly()) {
                     <button class="btn-sm btn-ghost" (click)="startDeviceEdit(d)">Edit</button>
                     <button class="btn-sm btn-danger" (click)="deleteDevice(d.id, d.alias)">✕</button>
                   }
@@ -385,7 +385,7 @@ const DRIVER_LABEL: Record<string, string> = {
               <p style="color:var(--text-muted);font-size:0.85rem;padding:0.5rem 0">No devices registered. Use Discover to find devices on your network.</p>
             }
 
-            @if (isAdmin()) {
+            @if (isAdmin() && !automations.readOnly()) {
               <!-- Manual add with Probe -->
               <div class="add-form" style="margin-top:0.75rem">
                 <input type="text" [(ngModel)]="newDeviceAlias" placeholder="Alias (e.g. Porch Light)" />
@@ -520,7 +520,7 @@ const DRIVER_LABEL: Record<string, string> = {
       </div>
 
       <!-- ── Home location and time zone (admin only) ─────────── -->
-      @if (isAdmin()) {
+      @if (isAdmin() && !automations.readOnly()) {
         <div class="section">
           <button type="button" class="section-title section-toggle" (click)="toggleSection('home')" [attr.aria-expanded]="isSectionOpen('home')">
             <span class="chev">{{ isSectionOpen('home') ? '▾' : '▸' }}</span> Home
@@ -537,7 +537,7 @@ const DRIVER_LABEL: Record<string, string> = {
       }
 
       <!-- ── Integrations (admin only) ────────────────────────── -->
-      @if (isAdmin()) {
+      @if (isAdmin() && !automations.readOnly()) {
         <div class="section">
           <button type="button" class="section-title section-toggle" (click)="toggleSection('integrations')" [attr.aria-expanded]="isSectionOpen('integrations')">
             <span class="chev">{{ isSectionOpen('integrations') ? '▾' : '▸' }}</span> Integrations
@@ -796,7 +796,7 @@ const DRIVER_LABEL: Record<string, string> = {
 
       <!-- ── Preferences ───────────────────────────────────────── -->
       <!-- ── Voice control (admin only) ─────────────────────────── -->
-      @if (isAdmin()) {
+      @if (isAdmin() && !automations.readOnly()) {
         <div class="section">
           <button type="button" class="section-title section-toggle" (click)="toggleSection('voice')" [attr.aria-expanded]="isSectionOpen('voice')">
             <span class="chev">{{ isSectionOpen('voice') ? '▾' : '▸' }}</span> Voice control
@@ -808,7 +808,7 @@ const DRIVER_LABEL: Record<string, string> = {
       }
 
       <!-- ── Teach HomeHub (admin only) ───────────────────────── -->
-      @if (isAdmin()) {
+      @if (isAdmin() && !automations.readOnly()) {
         <div class="section" id="teach-homehub">
           <button type="button" class="section-title section-toggle" (click)="toggleSection('teach')" [attr.aria-expanded]="isSectionOpen('teach')">
             <span class="chev">{{ isSectionOpen('teach') ? '▾' : '▸' }}</span> Teach HomeHub
@@ -820,7 +820,7 @@ const DRIVER_LABEL: Record<string, string> = {
       }
 
       <!-- ── Voice replies (admin only) ─────────────────────────── -->
-      @if (isAdmin()) {
+      @if (isAdmin() && !automations.readOnly()) {
         <div class="section">
           <button type="button" class="section-title section-toggle" (click)="toggleSection('replies')" [attr.aria-expanded]="isSectionOpen('replies')">
             <span class="chev">{{ isSectionOpen('replies') ? '▾' : '▸' }}</span> Voice replies
@@ -848,7 +848,7 @@ const DRIVER_LABEL: Record<string, string> = {
                   <div style="font-size:0.85rem;padding:0.15rem 0;overflow-wrap:anywhere">{{ item.text }}</div>
                 }
                 @if (isAdmin()) {
-                  <button type="button" class="btn-sm btn-primary teach-link" (click)="openTeach()">Teach these</button>
+                  @if (!automations.readOnly()) { <button type="button" class="btn-sm btn-primary teach-link" (click)="openTeach()">Teach these</button> }
                 }
               }
             } @else {
@@ -876,7 +876,7 @@ const DRIVER_LABEL: Record<string, string> = {
                     <div style="font-size:0.85rem;padding:0.15rem 0;overflow-wrap:anywhere">{{ item.text }}</div>
                   }
                   @if (isAdmin()) {
-                    <button type="button" class="btn-sm btn-primary teach-link" (click)="openTeach()">Teach these</button>
+                    @if (!automations.readOnly()) { <button type="button" class="btn-sm btn-primary teach-link" (click)="openTeach()">Teach these</button> }
                   }
                 }
               </div>

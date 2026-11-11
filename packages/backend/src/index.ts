@@ -51,6 +51,7 @@ import { activityRouter } from './routes/activity';
 import { runBackup } from './db/backup';
 import { startBackupEmails } from './db/backup-email';
 import { startBackupSync, whenCopied } from './db/backup-sync';
+import { backupReadOnly } from './middleware/backup-read-only';
 import { applyRole } from './system/role';
 import { checkAllSensors } from './sensors/stale-check';
 import { authenticate, requireAdmin } from './middleware/auth';
@@ -104,6 +105,9 @@ app.use('/sync', backupSyncPublicRouter);
 app.use('/api', (req: Request, res: Response, next: NextFunction) => {
   authenticate(req, res, next);
 });
+
+// A backup HomeHub is read-only, apart from switching things by hand: it's copied from the active one.
+app.use('/api', backupReadOnly);
 
 // Activity records who made each change. The AI assistant server identifies itself.
 app.use('/api', activityMiddleware((req) => (req.headers['x-homehub-client'] === 'mcp' ? 'assistant' : 'app')));

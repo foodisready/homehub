@@ -1,4 +1,5 @@
-import { Component, OnInit, signal, computed } from '@angular/core';
+import { Component, OnInit, signal, computed, inject } from '@angular/core';
+import { AutomationsService } from '../../core/services/automations.service';
 import { HttpClient } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
 import { AuthService } from '../../core/auth/auth.service';
@@ -91,7 +92,7 @@ const SCENE_ICONS = ['💡','🌙','🌅','🎬','🏠','🎉','😴','🔒','�
         <div style="display:flex;align-items:center;gap:1rem">
           <h1>Scenes</h1>
         </div>
-        @if (auth.user()?.role === 'admin') {
+        @if (canEdit()) {
           <button class="btn-primary" style="padding:0.5rem 1.1rem;font-weight:600" (click)="showForm.set(true)">+ New Scene</button>
         }
       </div>
@@ -116,7 +117,7 @@ const SCENE_ICONS = ['💡','🌙','🌅','🎬','🏠','🎉','😴','🔒','�
               }
               @if (pausesCameras(s)) {
                 <div class="voice-pause" [class.on]="s.voiceMayPause">
-                  @if (auth.user()?.role === 'admin') {
+                  @if (canEdit()) {
                     <label class="check">
                       <input type="checkbox" [checked]="!!s.voiceMayPause" [disabled]="savingVoice() === s.id"
                              (change)="setVoiceMayPause(s, $any($event.target))" />
@@ -128,7 +129,7 @@ const SCENE_ICONS = ['💡','🌙','🌅','🎬','🏠','🎉','😴','🔒','�
                   @if (voiceError()[s.id]) { <div class="voice-err">{{ voiceError()[s.id] }}</div> }
                 </div>
               }
-              @if (auth.user()?.role === 'admin') {
+              @if (canEdit()) {
                 <button class="delete-btn" (click)="deleteScene(s)">✕ Delete</button>
               }
             </div>
@@ -223,6 +224,10 @@ export class ScenesComponent implements OnInit {
   form = this.blankForm();
   // Map deviceId → true/false/null(skip)
   private actionMap = new Map<number, boolean | null>();
+
+  private readonly automations = inject(AutomationsService);
+  /** Admins edit, except on a backup HomeHub, which is copied from the active one. */
+  readonly canEdit = computed(() => this.auth.user()?.role === 'admin' && !this.automations.readOnly());
 
   constructor(readonly auth: AuthService, private http: HttpClient) {}
 

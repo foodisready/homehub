@@ -435,7 +435,7 @@ You can keep a second HomeHub, such as an old laptop, as a backup ready to take 
 Choose each HomeHub's part in **Settings → Preferences → This server** (administrators only):
 
 - **Active** runs everything. This is the default, so a single HomeHub needs no change.
-- **Backup** is a standby copy. It runs no schedules, motion lights, timers or automatic water shutoff. Its voice and camera bridges wait, so the voice speaker and cameras stay with the active HomeHub. It answers to `homehub-backup.local` instead of `homehub.local`. You can still open it and switch devices by hand.
+- **Backup** is a standby copy. It runs no schedules, motion lights, timers or automatic water shutoff. Its voice and camera bridges wait, so the voice speaker and cameras stay with the active HomeHub. It answers to `homehub-backup.local` instead of `homehub.local`. It's read-only, because its settings are copied from the active HomeHub (see [Keeping the backup up to date](#keeping-the-backup-up-to-date)): you can switch devices on and off and run scenes by hand, but devices, rooms, schedules, scenes and settings are changed on the active HomeHub. Its own accounts, backups, and **This server** can still be changed, so it can always be made active. Once it's active, everything can be changed again.
 - **Development** is the same as Backup, for a development copy. It answers to `homehub-dev.local`.
 
 A banner on every page of a backup says so, with the active HomeHub's address when it can see it on your network. Your voice and camera choices, and your Wyze sign-in, are kept on a backup, ready for when it becomes active.

@@ -1,4 +1,4 @@
-import { Injectable, effect, inject, signal } from '@angular/core';
+import { Injectable, computed, effect, inject, signal } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable, tap } from 'rxjs';
 import { AuthService } from '../auth/auth.service';
@@ -25,6 +25,8 @@ export class AutomationsService {
   /** Paused by hand with the switch in Settings → Preferences. */
   readonly paused = signal(false);
   readonly role = signal<RoleStatus | null>(null);
+  /** A backup is read-only: its settings are copied from the active HomeHub. A development copy isn't. */
+  readonly readOnly = computed(() => this.role()?.role === 'backup');
   private timer: ReturnType<typeof setInterval> | null = null;
 
   constructor() {

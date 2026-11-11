@@ -4,6 +4,7 @@ import { AppNavComponent } from './core/nav/app-nav.component';
 import { AuthService } from './core/auth/auth.service';
 import { AutomationsService } from './core/services/automations.service';
 import { AppUpdateService } from './core/services/app-update.service';
+import { ReadOnlyNotice } from './core/services/read-only-notice.service';
 
 @Component({
   selector: 'app-root',
@@ -36,6 +37,7 @@ import { AppUpdateService } from './core/services/app-update.service';
           <span>
             <strong>This HomeHub is a {{ r.role === 'dev' ? 'development' : 'backup' }} server.</strong>
             Schedules, motion lights, timers, water shutoff, voice and cameras run on the active HomeHub{{ r.other ? ', at ' + r.other.address : '' }}.
+            @if (r.role === 'backup') { It's read-only: make changes there, and they're copied here every hour. You can still switch devices on and off. }
           </span>
           @if (isAdmin()) { <a routerLink="/settings" [queryParams]="{ section: 'preferences' }">Change</a> }
         </div>
@@ -56,6 +58,12 @@ import { AppUpdateService } from './core/services/app-update.service';
         }
       </div>
     }
+    @if (notice.message()) {
+      <div class="paused standby" role="alert">
+        <span>{{ notice.message() }}</span>
+        <button type="button" (click)="notice.message.set('')">OK</button>
+      </div>
+    }
     <div [class.tab-space]="auth.isLoggedIn()">
       <router-outlet />
     </div>
@@ -64,6 +72,7 @@ import { AppUpdateService } from './core/services/app-update.service';
 export class AppComponent {
   readonly auth = inject(AuthService);
   readonly automations = inject(AutomationsService);
+  readonly notice = inject(ReadOnlyNotice);
   readonly isAdmin = computed(() => this.auth.user()?.role === 'admin');
   readonly resuming = signal(false);
 
