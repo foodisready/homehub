@@ -247,6 +247,7 @@ const TOOL_LABELS: Record<string, string> = {
         <!-- Input -->
         <div class="input-row">
           <input
+            #chatInput
             type="text"
             placeholder="Ask anything — &quot;turn off all lights&quot;, &quot;what's on right now?&quot;…"
             [(ngModel)]="draft"
@@ -264,6 +265,9 @@ const TOOL_LABELS: Record<string, string> = {
 export class ChatComponent implements AfterViewInit, AfterViewChecked, OnDestroy {
   @ViewChild('messageList') private messageList!: ElementRef<HTMLDivElement>;
   @ViewChild('chatWrap') private chatWrap!: ElementRef<HTMLDivElement>;
+  @ViewChild('chatInput') private chatInput?: ElementRef<HTMLInputElement>;
+  /** Sent from the box or the Send button: put the cursor back when the reply is done. */
+  private refocus = false;
   private resizeWatch?: ResizeObserver;
   private readonly onResize = () => this.fit();
 
@@ -340,6 +344,11 @@ export class ChatComponent implements AfterViewInit, AfterViewChecked, OnDestroy
     const text = this.draft.trim();
     if (!text || this.loading()) return;
 
+    // The box is disabled while waiting, which takes the cursor out of it. A
+    // tapped suggestion doesn't bring it back, so a phone's keyboard stays down.
+    const active = document.activeElement;
+    this.refocus = !!active && (active === this.chatInput?.nativeElement || active.classList.contains('btn-send'));
+
     this.draft = '';
     this._entries.update((list) => [...list, { role: 'user', content: text }]);
     this._loading.set(true);
@@ -402,17 +411,13 @@ export class ChatComponent implements AfterViewInit, AfterViewChecked, OnDestroy
                 this._entries.update((list) => [
                   ...list, { role: 'assistant', content: finalText, actions: [...actions], by, model, seconds: seconds() }
                 ]);
-                this.stopTicker();
-                this._loading.set(false);
-                this._streamingText.set('');
+                this.finish();
                 this.shouldScroll = true;
               } else if (event.type === 'error') {
                 this._entries.update((list) => [
                   ...list, { role: 'assistant', content: event.message, error: true }
                 ]);
-                this.stopTicker();
-                this._loading.set(false);
-                this._streamingText.set('');
+                this.finish();
               }
             });
           } catch { /* skip malformed line */ }
@@ -423,11 +428,21 @@ export class ChatComponent implements AfterViewInit, AfterViewChecked, OnDestroy
         this._entries.update((list) => [
           ...list, { role: 'assistant', content: 'Connection error. Please try again.', error: true }
         ]);
-        this.stopTicker();
-        this._loading.set(false);
-        this._streamingText.set('');
+        this.finish();
       });
     });
+  }
+
+  /** The reply is in (or failed): ready for the next message. */
+  private finish(): void {
+    this.stopTicker();
+    this._loading.set(false);
+    this._streamingText.set('');
+    if (this.refocus) {
+      this.refocus = false;
+      // After Angular has re-enabled the box.
+      setTimeout(() => this.chatInput?.nativeElement.focus());
+    }
   }
 
   ngOnDestroy(): void {
