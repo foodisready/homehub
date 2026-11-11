@@ -85,6 +85,16 @@ describe('plain rewrites', () => {
       it(`accepts "${typed}" → "${plain}"`, () => assert.equal(rw.isFaithful(typed, plain), true));
     }
 
+    const home = ['Front Porch', 'Kitchen lights', 'Kitchen Island', 'Kitchen counter lights', 'Kitchen', 'My office lamp'];
+    it('lets the model finish a name only the typed words fit', () => {
+      assert.equal(rw.isFaithful('turn on the porch light', 'turn on front porch', home), true);
+      assert.equal(rw.isFaithful('turn on the prch light', 'turn on front porch', home), true);
+      assert.equal(rw.isFaithful('turn on kitchn', 'turn on kitchen island', home), false, 'several kitchen names fit');
+      assert.equal(rw.isFaithful('turn on the porch light', 'turn on front porch', []), false, 'unknown names are never finished');
+      assert.equal(rw.isFaithful('turn on the lamp', 'turn on my office lamp', home), false, 'only filler was typed');
+      assert.equal(rw.isFaithful('turn on porch', 'turn on front porch kitchen', home), false, 'words from another name');
+    });
+
     const strays: Array<[string, string, string]> = [
       ['turn on ffice lights',            'turn off office lights',               'on became off'],
       ['is the office light on?',         'turn on office lights',                'a question became a command'],
@@ -97,6 +107,10 @@ describe('plain rewrites', () => {
       ['turn on ofice lights for 6 min',  'turn on office lights',                'the timer was dropped'],
       ['turn on kitchen and off office',  'turn on kitchen lights',               'two commands became one'],
       ['open the valve',                  'turn on main valve',                   '"open" is not "on"'],
+      ['turn on the office lights in an hour', 'turn on office lights',           'later is a schedule'],
+      ['turn off kitchen lights at 10pm', 'turn off kitchen lights',              'a time is a schedule'],
+      ['turn on porch light every sunset','turn on porch light',                  'every day is a schedule'],
+      ['dim the kitchen lights to 50%',   'turn on kitchen lights',               'dimming is not on'],
       ['goodnight',                       'run movie time',                       'another scene'],
       ['turn on ofice lights',            'delete all schedules',                 'not a command the rules run'],
     ];
