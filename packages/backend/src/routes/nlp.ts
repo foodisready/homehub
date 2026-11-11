@@ -108,6 +108,10 @@ nlpRouter.post('/stream', async (req: Request, res: Response) => {
   res.flushHeaders();
 
   const send = (event: object) => res.write(`data: ${JSON.stringify(event)}\n\n`);
+  // A slow model can think for minutes without a word. Proxies (nginx, Tailscale)
+  // close a quiet connection after about a minute, so say something meanwhile.
+  // Lines starting with ":" are comments that the browser ignores.
+  const heartbeat = setInterval(() => res.write(': waiting\n\n'), 15_000);
 
   try {
     for await (const event of processMessageStream(message.trim(), history)) {
@@ -117,6 +121,8 @@ nlpRouter.post('/stream', async (req: Request, res: Response) => {
   } catch (err: any) {
     logger.error(err, 'NLP stream failed');
     send({ type: 'error', message: 'NLP service unavailable.' });
+  } finally {
+    clearInterval(heartbeat);
   }
 
   res.end();
