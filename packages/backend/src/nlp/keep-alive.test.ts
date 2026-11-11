@@ -102,6 +102,7 @@ describe('loading the AI model at startup', () => {
     assert.ok(chat[0].tools?.length, 'with tools, as the first call of a chat');
     assert.equal(chat[1].tools, undefined, 'without, as the final answer');
     assert.ok(chat.every((p) => p.model === 'qwen2.5:1.5b' && p.options.num_predict === 1));
+    assert.match(o.primed[0].messages[0].content, /plain command/, "the rewrite's first: commands use it first");
     delete process.env.OLLAMA_REWRITE_MODEL;
   });
 

@@ -1,6 +1,12 @@
-import { describe, it } from 'node:test';
+import { describe, it, before, after } from 'node:test';
+import path from 'node:path';
+import os from 'node:os';
+import fs from 'node:fs';
 import assert from 'node:assert/strict';
 import { looksLikeToolCall, toolArguments, toolCallInText } from './tool-args';
+
+/** For the honest-reply tests, which load the chat service, and with it a database. */
+const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'homehub-tool-args-test-'));
 
 describe('toolArguments', () => {
   it('takes plain arguments as they are', () => {
@@ -40,5 +46,36 @@ describe('toolArguments', () => {
     assert.deepEqual(toolArguments(undefined), {});
     assert.deepEqual(toolArguments('not json'), {});
     assert.deepEqual(toolArguments([1, 2]), {});
+  });
+});
+
+describe('honest replies', () => {
+  let nlp: typeof import('./nlp.service');
+  before(async () => {
+    process.env.DB_PATH = path.join(TMP, 'db.sqlite');
+    nlp = await import('./nlp.service');
+  });
+  after(() => fs.rmSync(TMP, { recursive: true, force: true }));
+
+  const ok  = { tool: 'set_power_state', args: {}, result: { success: true, alias: 'Lamp', state: 'on' } };
+  const bad = (error: string) => ({ tool: 'set_power_state', args: {}, result: { error } });
+  const listed = { tool: 'list_devices', args: {}, result: { on: ['Lamp'], off: [], offline: [] } };
+
+  it('passes on a claim a switch backs up, and anything that claims nothing', () => {
+    assert.equal(nlp.honestReply('Lamp is now on.', [ok]), 'Lamp is now on.');
+    assert.equal(nlp.honestReply('Sunset is at 4:52 PM.', []), 'Sunset is at 4:52 PM.');
+    assert.equal(nlp.honestReply('Which lamp did you mean?', [bad('x')]), 'Which lamp did you mean?');
+  });
+
+  it("leaves a report of what's on alone", () => {
+    assert.equal(nlp.honestReply('Lamp is on.', [listed]), 'Lamp is on.');
+  });
+
+  it('replaces a claim nothing backs up, saying why for a person', () => {
+    for (const claim of ["Brenden's room lights are now on.", 'I turned off the fan.', 'The lamp has been switched on.']) {
+      assert.match(nlp.honestReply(claim, []), /^I didn't switch anything, as I couldn't work out which device/, claim);
+    }
+    assert.equal(nlp.honestReply('Done, it is on now.', [bad('"lamp" could mean "A", "B". Ask the user which one they mean.')]),
+      `I didn't switch anything. "lamp" could mean "A", "B".`);
   });
 });

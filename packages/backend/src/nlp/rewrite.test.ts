@@ -291,6 +291,30 @@ describe('plain rewrites', () => {
       assert.match(asked.at(-1).messages.at(-1).content, /Nothing was switched/, 'the model hears it');
     });
 
+    it('never says something was switched when nothing was', async () => {
+      // Seen on the Pi: no tool call, only the claim.
+      const ollama = fakeOllama('NONE', "Brenden's room lights are now on.");
+      globalThis.fetch = ollama.impl;
+      const events = await run('turn on brendan freaking lights');
+      assert.deepEqual(switched, []);
+      const said = events.find((e) => e.type === 'token').content as string;
+      assert.match(said, /^I didn't switch anything/);
+      assert.equal(ollama.asked[1].options.temperature, 0, 'tool decisions at temperature 0');
+    });
+
+    it("says why when a switch failed, whatever the model's answer claims", async () => {
+      const replies: any[] = [
+        { role: 'assistant', content: 'NONE' },
+        { role: 'assistant', content: '', tool_calls: [{ function: { name: 'set_power_state', arguments: { alias: 'Garden fountain', state: 'on' } } }] },
+        { role: 'assistant', content: 'Done! The garden fountain has been turned on.' },
+      ];
+      globalThis.fetch = (async () => new Response(JSON.stringify({ message: replies.shift() }), { status: 200 })) as unknown as typeof fetch;
+      const events = await run('fountain on pls');
+      assert.deepEqual(switched, []);
+      const said = events.filter((e) => e.type === 'token').map((e) => e.content).join('');
+      assert.equal(said, `I didn't switch anything. Device "Garden fountain" not found.`);
+    });
+
     it('never asks the model when the rules understand', async () => {
       const ollama = fakeOllama();
       globalThis.fetch = ollama.impl;

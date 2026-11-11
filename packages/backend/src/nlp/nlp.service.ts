@@ -315,6 +315,38 @@ const TOOL_NAMES = TOOLS.map((t) => t.function.name);
  */
 export const MAX_REPLY_TOKENS = 300;
 
+/** A reply saying something was switched: "are now on", "has been turned off", "switched on". */
+const SAYS_SWITCHED = /\b(?:(?:is|are|was|were|has been|have been|now)\s+(?:now\s+)?(?:turned\s+|switched\s+)?(?:on|off)|(?:turned|switched)\s+(?:on|off))\b/i;
+
+const switchedAnything = (actions: ActionTaken[]) =>
+  actions.some((a) => a.tool === 'set_power_state' && (a.result as any)?.success);
+
+/** What a tool's error says, for a person rather than the model. */
+const forPeople = (error: string) =>
+  error.split(/(?<=\.)\s+/).filter((s) => !/^(?:Ask|Tell|Use)\b/.test(s)).join(' ').trim();
+
+/**
+ * A small model can say "Brenden's room lights are now on" without having
+ * switched anything (seen on the Pi with qwen2.5:1.5b). HomeHub never passes
+ * that on: a reply that says something was switched must have a switch that
+ * worked behind it. A report of what's on, after list_devices, is left alone.
+ */
+export function honestReply(reply: string, actions: ActionTaken[]): string {
+  if (switchedAnything(actions) || !SAYS_SWITCHED.test(reply)) return reply;
+  const tried = actions.filter((a) => a.tool === 'set_power_state');
+  if (!tried.length && actions.length) return reply;   // e.g. a list of what's on
+  return didntSwitch(actions);
+}
+
+/** Said when nothing was switched, with the reason a tool gave, if any. */
+export function didntSwitch(actions: ActionTaken[]): string {
+  const why = actions.filter((a) => a.tool === 'set_power_state')
+    .map((a) => forPeople(String((a.result as any)?.error ?? ''))).find(Boolean);
+  return why
+    ? `I didn't switch anything. ${why}`
+    : "I didn't switch anything, as I couldn't work out which device you meant. Try its name as it's shown on the dashboard.";
+}
+
 /** Said instead of a reply the model garbled. */
 export const NOT_UNDERSTOOD = "Sorry, I didn't manage that. Try saying it another way, such as \"turn on the office lights\".";
 
@@ -362,6 +394,11 @@ export async function warmModels(
       if (i < tries - 1) await new Promise((r) => setTimeout(r, waitMs));
     }
   }
+  // The rewrite's instructions first: a typed command uses them first, and
+  // Ollama answers one request at a time, so a command waits behind these.
+  const rewriteModel = models[models.length - 1];
+  if (loaded.includes(rewriteModel)) await primeRewrite({ url, model: rewriteModel, keepAlive: keep, fetchImpl: opts.fetchImpl });
+
   // The chat model's instructions, with and without its tools (the final
   // answer is written without them), read now so they're cached.
   if (loaded.includes(main)) {
@@ -379,10 +416,6 @@ export async function warmModels(
       } catch { /* only slower on the first message */ }
     }
   }
-
-  // The rewrite's instructions, read now so the first command is quick.
-  const rewriteModel = models[models.length - 1];
-  if (loaded.includes(rewriteModel)) await primeRewrite({ url, model: rewriteModel, keepAlive: keep, fetchImpl: opts.fetchImpl });
   return loaded;
 }
 
@@ -433,7 +466,9 @@ export async function resolveTools(
     const res = await fetch(`${ollamaUrl}/api/chat`, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ model, messages, tools: TOOLS, stream: false, keep_alive: keepAlive(), options: { num_predict: MAX_REPLY_TOKENS } }),
+      // Temperature 0: the same message gets the same decision (at the default,
+      // qwen2.5:1.5b called the tool one time and only claimed to the next).
+      body:    JSON.stringify({ model, messages, tools: TOOLS, stream: false, keep_alive: keepAlive(), options: { num_predict: MAX_REPLY_TOKENS, temperature: 0 } }),
     });
 
     if (!res.ok) throw new Error(`Ollama error ${res.status}: ${await res.text()}`);
@@ -509,7 +544,7 @@ export async function processMessage(
   // The last message is already a text response (no tool calls) — return it directly
   const last = messages[messages.length - 1];
   if (last.role === 'assistant' && !last.tool_calls?.length && last.content) {
-    return { response: last.content, actions };
+    return { response: honestReply(last.content, actions), actions };
   }
 
   // Shouldn't reach here normally, but fall back to a final call
@@ -570,7 +605,24 @@ export async function* processMessageStream(
   if (last.role === 'assistant' && !last.tool_calls?.length && last.content) {
     // Stream it character-by-character to simulate streaming from cache
     // (In practice resolveTools already made the final non-streaming call)
-    yield { type: 'token', content: last.content };
+    yield { type: 'token', content: honestReply(last.content, actions) };
+    yield { type: 'done' };
+    return;
+  }
+
+  // A switch was tried and none worked: the answer is checked whole before
+  // it's shown, so it can't say otherwise. (Streaming can't be taken back.)
+  if (actions.some((a) => a.tool === 'set_power_state') && !switchedAnything(actions)) {
+    let answer = '';
+    try {
+      const res = await fetch(`${ollamaUrl}/api/chat`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ model, messages, stream: false, keep_alive: keepAlive(), options: { num_predict: MAX_REPLY_TOKENS } }),
+      });
+      if (res.ok) answer = ((await res.json()) as any).message?.content ?? '';
+    } catch { /* answered below */ }
+    yield { type: 'token', content: answer ? honestReply(answer, actions) : didntSwitch(actions) };
     yield { type: 'done' };
     return;
   }
