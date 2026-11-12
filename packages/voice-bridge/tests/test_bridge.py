@@ -69,6 +69,16 @@ class EndpointTest(unittest.TestCase):
         self.assertTrue(e.done and e.spoke)
         self.assertAlmostEqual(e.seconds, 0.5 + 1.2 + 0.8, delta=0.1)
 
+    def test_a_pause_after_a_short_start_doesnt_end_it(self):
+        # "Mở đèn" (0.7 s), a 1-second pause, then "nhà bếp": 0.8 s of quiet used to end it after "đèn".
+        e = self.feed(tone(0.5, False) + tone(0.7, True) + tone(1.0, False) + tone(0.6, True) + tone(3, False))
+        self.assertAlmostEqual(e.voiced, 1.3, delta=0.1)
+        self.assertAlmostEqual(e.seconds, 0.5 + 0.7 + 1.0 + 0.6 + 0.8, delta=0.1)
+
+    def test_a_short_command_waits_a_little_longer(self):
+        e = self.feed(tone(0.5, False) + tone(0.7, True) + tone(3, False))
+        self.assertAlmostEqual(e.seconds, 0.5 + 0.7 + 1.3, delta=0.1)
+
     def test_nobody_speaks(self):
         e = self.feed(tone(10, False))
         self.assertTrue(e.done)
@@ -443,8 +453,6 @@ class SpeakerLinkTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(group.status(), [{'name': '10.0.0.5', 'address': '10.0.0.5', 'connected': True}])
 
 
-if __name__ == '__main__':
-    unittest.main()
 
 
 class EnglishVoiceTest(unittest.TestCase):
@@ -557,3 +565,34 @@ class ReplyCacheTest(unittest.TestCase):
         url = speak('hello', '127.0.0.1')
         self.assertEqual(voice.said, ['hello', 'hello'])
         self.assertGreater(len(self.served(url)), 44)
+
+
+class ProgressTest(unittest.TestCase):
+    """What Settings → Voice control shows while the bridge downloads and loads its models."""
+
+    def test_progress_text(self):
+        from homehub_voice.models import Progress
+        p = Progress()
+        self.assertEqual(p.text(), '')
+        p.start('Downloading the Vietnamese voice')
+        self.assertEqual(p.text(), 'Downloading the Vietnamese voice')
+        p.total, p.done = 60_000_000, 27_000_000
+        self.assertEqual(p.text(), 'Downloading the Vietnamese voice: 45% of 60 MB')
+        p.total, p.done = 0, 12_000_000
+        self.assertEqual(p.text(), 'Downloading the Vietnamese voice: 12 MB so far')
+
+    def test_check_in_says_languages_and_progress(self):
+        from homehub_voice.homehub import HomeHub
+        h = HomeHub('http://h:3000', 'k')
+        sent = []
+        h._call = lambda path, body=None: sent.append((path, body)) or {}
+        h.report('1.0', [], 'starting', ['en', 'vi'], 'Downloading the Vietnamese voice: 45% of 60 MB')
+        h.report('1.0', [])
+        self.assertEqual(sent[0][1]['languages'], ['en', 'vi'])
+        self.assertEqual(sent[0][1]['detail'], 'Downloading the Vietnamese voice: 45% of 60 MB')
+        self.assertNotIn('languages', sent[1][1])
+        self.assertNotIn('detail', sent[1][1])
+
+
+if __name__ == '__main__':
+    unittest.main()

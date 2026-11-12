@@ -11,7 +11,7 @@ import { pictureHealth } from '../cameras/picture-status';
 import { cameraDevices } from '../cameras/watch';
 import { addedCameras as ringCameras, ringState } from '../ring/ring';
 import { HOT_C, HWMON_ROOT, THERMAL_ROOT, lowPowerSeen, readLowPower, readTemperature, recentPeak } from './computer-watch';
-import { bridgeLastState, bridgeRestartState, bridgeSeenAt, getVoiceSettings, lastBridgeReport, recentBridges } from './voice-bridge';
+import { bridgeLastState, bridgeRestartState, bridgeSeenAt, getVoiceSettings, languagesPending, lastBridgeReport, recentBridges } from './voice-bridge';
 
 /**
  * One look at whether HomeHub is working: its services, devices, sensors,
@@ -230,7 +230,13 @@ function voice(now: number): HealthItem[] {
     return [...two, { id: 'voice-bridge', group: 'Voice', label: 'Voice bridge', level: 'info', detail: 'Turning on…' }];
   }
   if (fresh.state === 'starting') {
-    return [...two, { id: 'voice-bridge', group: 'Voice', label: 'Voice bridge', level: 'info', detail: 'Starting. The first time, it downloads its speech models, which can take a few minutes.' }];
+    return [...two, {
+      id: 'voice-bridge', group: 'Voice', label: 'Voice bridge', level: 'info',
+      detail: fresh.detail ?? 'Starting. The first time, it downloads its speech models, which can take a few minutes.',
+    }];
+  }
+  if (languagesPending()) {
+    return [...two, { id: 'voice-bridge', group: 'Voice', label: 'Voice bridge', level: 'info', detail: 'Applying the new voice languages: the voice bridge restarts to load them.' }];
   }
   const restart = bridgeRestartState();
   if (restart) {

@@ -29,17 +29,50 @@ VIETNAMESE_VOICE = 'https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/v
 TIMEOUT_S = 60
 
 
+class Progress:
+    """What the bridge is doing while it starts, for Settings → Voice control and Health:
+    "Downloading the Vietnamese speech model: 45% of 60 MB". Read from another thread."""
+
+    def __init__(self) -> None:
+        self.what = ''
+        self.done = 0
+        self.total = 0
+
+    def start(self, what: str) -> None:
+        self.what, self.done, self.total = what, 0, 0
+
+    def text(self) -> str:
+        if not self.what:
+            return ''
+        if self.total:
+            return f'{self.what}: {min(100, self.done * 100 // self.total)}% of {round(self.total / 1e6)} MB'
+        if self.done:
+            return f'{self.what}: {round(self.done / 1e6)} MB so far'
+        return self.what
+
+
+progress = Progress()
+
+
 def _fetch(url: str, dest: Path) -> None:
     """Downloads to a temporary name first, so an interrupted download is never mistaken for a model."""
     part = dest.with_name(dest.name + '.part')
     with urllib.request.urlopen(url, timeout=TIMEOUT_S) as r, open(part, 'wb') as f:
-        shutil.copyfileobj(r, f, 1 << 20)
+        try:
+            progress.total = int(r.headers.get('Content-Length') or 0)
+        except ValueError:
+            progress.total = 0
+        progress.done = 0
+        while chunk := r.read(1 << 20):
+            f.write(chunk)
+            progress.done += len(chunk)
     part.replace(dest)
 
 
 def _piper(url: str, path: Path, what: str) -> None:
     if not (path.exists() and path.with_name(path.name + '.json').exists()):
         log.info('downloading %s (about 60 MB)', what)
+        progress.start(f'Downloading {what}')
         path.parent.mkdir(parents=True, exist_ok=True)
         _fetch(url + '.json', path.with_name(path.name + '.json'))
         _fetch(url, path)
@@ -71,12 +104,14 @@ def _archive(url: str, inside: str, dest: Path, keep: list[str]) -> None:
 def sensevoice(dest: Path) -> None:
     if not (dest / 'model.int8.onnx').exists():
         log.info('downloading SenseVoice, for Cantonese (about 1 GB; keeps 230 MB)')
+        progress.start('Downloading the Cantonese speech model')
     _archive(f'{SHERPA}/asr-models/{SENSEVOICE}.tar.bz2', SENSEVOICE, dest, ['model.int8.onnx', 'tokens.txt'])
 
 
 def cantonese_voice(dest: Path) -> None:
     if not (dest / f'{CANTONESE_VOICE}.onnx').exists():
         log.info('downloading the Cantonese voice (about 110 MB)')
+        progress.start('Downloading the Cantonese voice')
     _archive(f'{SHERPA}/tts-models/{CANTONESE_VOICE}.tar.bz2', CANTONESE_VOICE, dest,
              [f'{CANTONESE_VOICE}.onnx', 'lexicon.txt', 'tokens.txt', 'rule.fst'])
 
@@ -84,6 +119,7 @@ def cantonese_voice(dest: Path) -> None:
 def vietnamese(dest: Path) -> None:
     if not (dest / VIETNAMESE_FILES[0]).exists():
         log.info('downloading the Vietnamese speech model (about 60 MB)')
+        progress.start('Downloading the Vietnamese speech model')
     _archive(f'{SHERPA}/asr-models/{VIETNAMESE}.tar.bz2', VIETNAMESE, dest, VIETNAMESE_FILES)
 
 

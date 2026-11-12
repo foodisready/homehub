@@ -11,6 +11,10 @@ SKIP_S = 0.4
 THRESHOLD = 0.006
 # This much quiet after speech ends the command.
 END_SILENCE_S = 0.8
+# But after less speech than SHORT_SPEECH_S, wait this long: people pause after a verb and
+# "light" ("mở đèn … nhà bếp"), and 0.8 s cut that off. A finished short command waits a moment longer.
+SHORT_SPEECH_S = 1.0
+SHORT_END_SILENCE_S = 1.3
 # Give up if nobody speaks this soon after the wake word.
 NO_SPEECH_S = 4.0
 # The longest command.
@@ -31,6 +35,8 @@ class Endpointer:
         self.audio = bytearray()
         self.spoke = False
         self.quiet = 0.0
+        # Seconds that were loud enough to be speech.
+        self.voiced = 0.0
         self.done = False
 
     @property
@@ -46,8 +52,10 @@ class Endpointer:
             if loudness(chunk) > THRESHOLD:
                 self.spoke = True
                 self.quiet = 0.0
+                self.voiced += len(chunk) / BYTES_PER_SECOND
             else:
                 self.quiet += len(chunk) / BYTES_PER_SECOND
-        if (self.spoke and self.quiet >= END_SILENCE_S) or (not self.spoke and self.seconds >= NO_SPEECH_S) or self.seconds >= MAX_S:
+        end_after = END_SILENCE_S if self.voiced >= SHORT_SPEECH_S else SHORT_END_SILENCE_S
+        if (self.spoke and self.quiet >= end_after) or (not self.spoke and self.seconds >= NO_SPEECH_S) or self.seconds >= MAX_S:
             self.done = True
         return self.done

@@ -27,6 +27,11 @@ NAMES_RETRY_S = 15
 RESTART_EXIT = 75
 # How often the bridge checks in with HomeHub's Health page, at most. Changes are reported straight away.
 REPORT_EVERY_S = 60
+# Between check-ins, how often to look whether the voice settings changed, so a newly ticked
+# language starts loading within seconds of Save rather than a minute.
+CONFIG_CHECK_S = 10
+# While starting, how often to say what it's doing, so the download's progress moves on screen.
+STARTING_REPORT_S = 5
 # Loggers that report every web request of a model download.
 NOISY = ('httpx', 'huggingface_hub', 'faster_whisper')
 # While voice is off, how often to look whether it has been turned on.
@@ -64,8 +69,10 @@ async def main() -> int:
         languages = settings.get('languages', [])
         cantonese, vietnamese, config_version = 'yue' in languages, 'vi' in languages, settings.get('version')
 
+    languages = ['en'] + (['yue'] if cantonese else []) + (['vi'] if vietnamese else [])
     try:
-        loaded = await while_reporting(homehub, 'starting', stop, lambda: load_models(conf, cantonese, vietnamese))
+        loaded = await while_reporting(homehub, 'starting', stop, lambda: load_models(conf, cantonese, vietnamese),
+                                       languages)
     except (FileNotFoundError, OSError) as e:   # OSError includes a download that failed
         log.error('%s', e)
         if conf.managed:
@@ -100,18 +107,37 @@ async def main() -> int:
 
     restart = False
 
+    async def settings_changed() -> bool:
+        """A quick look at the voice settings, between check-ins."""
+        if not config_version:
+            return False
+        try:
+            res = await asyncio.get_running_loop().run_in_executor(None, homehub.config)
+        except HomeHubError:
+            return False
+        return bool(res.get('version')) and res['version'] != config_version
+
     async def report() -> None:
         nonlocal restart
         failing = False
+        last_report = 0.0
+        loop = asyncio.get_running_loop()
         while True:
             try:
-                await asyncio.wait_for(speakers.changed.wait(), REPORT_EVERY_S)
+                await asyncio.wait_for(speakers.changed.wait(), CONFIG_CHECK_S if config_version else REPORT_EVERY_S)
                 await asyncio.sleep(1)  # let a burst of changes settle
             except TimeoutError:
-                pass
+                if last_report and loop.time() - last_report < REPORT_EVERY_S:
+                    if await settings_changed():
+                        log.info('voice settings changed in HomeHub: restarting to apply them')
+                        restart = True
+                        stop.set()
+                        return
+                    continue
             speakers.changed.clear()
+            last_report = loop.time()
             try:
-                res = await asyncio.get_running_loop().run_in_executor(None, homehub.report, __version__, speakers.status())
+                res = await loop.run_in_executor(None, homehub.report, __version__, speakers.status(), 'running', languages)
                 if res.get('restart'):
                     log.info('HomeHub asked for a restart')
                     restart = True
@@ -159,6 +185,7 @@ def load_models(conf: cfg.Config, cantonese: bool, vietnamese: bool = False):
         if vietnamese:
             models.vietnamese(conf.vietnamese_dir)
             models.vietnamese_voice(conf.vietnamese_voice)
+    models.progress.start('Loading the speech models')
     log.info('HomeHub voice bridge %s: loading Whisper %s and the Piper voice', __version__, conf.whisper_model)
     listener = Listener(conf.whisper_model, conf.language, conf.whisper_dir)
     voices = {'en': Voice(conf.piper_voice)}
@@ -175,16 +202,19 @@ def load_models(conf: cfg.Config, cantonese: bool, vietnamese: bool = False):
     return listener, voices, ears, vi_ears
 
 
-async def while_reporting(homehub: HomeHub, state: str, stop: asyncio.Event, work):
-    """Runs slow work in a thread, checking in as `state` meanwhile so Health can say what's happening."""
+async def while_reporting(homehub: HomeHub, state: str, stop: asyncio.Event, work, languages: list[str] | None = None):
+    """Runs slow work in a thread, checking in as `state` meanwhile, with what it's doing, so Settings
+    and Health can say so ("Downloading the Vietnamese voice: 45% of 60 MB")."""
+    from .models import progress
+
     loop = asyncio.get_running_loop()
     job = loop.run_in_executor(None, work)
     while True:
         try:
-            await loop.run_in_executor(None, homehub.report, __version__, [], state)
+            await loop.run_in_executor(None, homehub.report, __version__, [], state, languages, progress.text())
         except HomeHubError:
             pass
-        done, _ = await asyncio.wait({job}, timeout=REPORT_EVERY_S)
+        done, _ = await asyncio.wait({job}, timeout=STARTING_REPORT_S)
         if done or stop.is_set():
             return await job if done else None
 

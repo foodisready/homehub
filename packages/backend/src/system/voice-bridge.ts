@@ -24,6 +24,10 @@ export interface BridgeReport {
   id: string | null;
   /** 'docker' when it comes with HomeHub; 'service' when installed with install.sh. */
   kind: 'docker' | 'service' | null;
+  /** The languages it's running with; null from a bridge before v0.1.60. */
+  languages: string[] | null;
+  /** While starting, what it's doing: "Downloading the Vietnamese speech model: 45% of 60 MB". */
+  detail: string | null;
 }
 
 const SEEN_KEY = 'voice_bridge_seen_at';
@@ -45,10 +49,27 @@ export function recentBridges(now = Date.now()): { id: string; kind: BridgeRepor
  * install.sh is still checking in, that's what it shows, even when the one that
  * comes with HomeHub spoke last, so the admin is told to stop the old one.
  */
-export function bridgeForSettings(now = Date.now(), lateMs: number): Pick<BridgeReport, 'state' | 'kind' | 'version'> | null {
+export function bridgeForSettings(now = Date.now(), lateMs: number):
+  (Pick<BridgeReport, 'state' | 'kind' | 'version' | 'languages' | 'detail'> & { applying: boolean }) | null {
   if (!last || now - last.at > lateMs) return null;
   const service = recentBridges(now).some((b) => b.kind === 'service');
-  return { state: last.state, kind: service ? 'service' : last.kind, version: last.version };
+  return {
+    state: last.state, kind: service ? 'service' : last.kind, version: last.version,
+    languages: last.languages, detail: last.detail, applying: languagesPending(),
+  };
+}
+
+/**
+ * True while the bridge is running with other languages than the ones saved: it
+ * restarts to apply them within seconds of noticing, and until then a command in a
+ * newly ticked language goes to another one. Unknown for a bridge before v0.1.60.
+ */
+export function languagesPending(): boolean {
+  if (!last || last.state !== 'running' || !last.languages) return false;
+  const want = voiceConfig();
+  if (!want.enabled) return false;
+  const have = new Set(last.languages);
+  return want.languages.length !== have.size || want.languages.some((l) => !have.has(l));
 }
 
 // ── Voice settings, chosen in Settings → Voice control ──────────
@@ -110,7 +131,11 @@ export function recordBridgeReport(body: unknown, now = Date.now()): BridgeRepor
   const id = str(b['id'], 40) || null;
   // Bridges from before v0.1.23 send neither: they were all installed with install.sh.
   const kind = b['kind'] === 'docker' || b['kind'] === 'service' ? b['kind'] : id ? null : 'service';
-  last = { at: now, version: str(b['version'], 40) || null, speakers, state, id, kind };
+  const languages = Array.isArray(b['languages'])
+    ? VOICE_LANGUAGES.filter((l) => (b['languages'] as unknown[]).includes(l))
+    : null;
+  const detail = state === 'starting' ? str(b['detail'], 200) || null : null;
+  last = { at: now, version: str(b['version'], 40) || null, speakers, state, id, kind, languages, detail };
   bridges.set(id ?? LEGACY_ID, { at: now, kind });
   for (const [k, seen] of bridges) if (now - seen.at > TWO_BRIDGES_MS) bridges.delete(k);
   // Remembered across restarts, so a bridge that stops checking in is noticed.

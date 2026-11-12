@@ -3,7 +3,13 @@ import { HttpClient } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
 import { AutomationsService } from '../../core/services/automations.service';
 
-interface BridgeStatus { state: 'off' | 'starting' | 'running'; kind: 'docker' | 'service' | null; version: string | null }
+interface BridgeStatus {
+  state: 'off' | 'starting' | 'running'; kind: 'docker' | 'service' | null; version: string | null;
+  /** While starting, what it's doing: "Downloading the Vietnamese voice: 45% of 60 MB". From v0.1.60. */
+  detail?: string | null;
+  /** Running with other languages than the ones saved: it's about to restart to load them. */
+  applying?: boolean;
+}
 interface VoiceSettings { enabled: boolean; languages: string[]; bridge: BridgeStatus | null }
 
 const POLL_MS = 5_000;
@@ -113,7 +119,14 @@ export class VoiceControlComponent implements OnInit, OnDestroy {
     if (!s?.enabled) return { text: 'Voice is off.', tone: 'none' };
     if (!b) return { text: 'Turning on. The voice bridge checks in within a minute.', tone: 'busy' };
     if (b.state === 'off') return { text: 'Turning on…', tone: 'busy' };
-    if (b.state === 'starting') return { text: 'Starting. The first time, it downloads its speech models, which can take a few minutes.', tone: 'busy' };
+    if (b.state === 'starting') {
+      return { text: b.detail ? `${b.detail}…` : 'Starting. The first time, it downloads its speech models, which can take a few minutes.', tone: 'busy' };
+    }
+    // Saved, but the bridge is still running with the old languages: a command in a newly
+    // ticked language would go to another one until it restarts.
+    if (b.applying) {
+      return { text: 'Applying your change: the voice bridge restarts to load the new languages.', tone: 'busy' };
+    }
     return { text: `Running${b.version ? ` (${b.version})` : ''}. Speakers are listed under More → Health.`, tone: 'ok' };
   });
 

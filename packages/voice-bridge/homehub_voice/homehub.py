@@ -71,9 +71,16 @@ class HomeHub:
     bridge_id = uuid.uuid4().hex[:12]
     kind = 'service'
 
-    def report(self, version: str, speakers: list[dict], state: str = 'running') -> dict:
-        """Checks in for HomeHub's Health page. HomeHub answers with the names' and settings' versions, and whether to restart."""
-        return self._call('/status', {'version': version, 'speakers': speakers, 'state': state, 'id': self.bridge_id, 'kind': self.kind})
+    def report(self, version: str, speakers: list[dict], state: str = 'running',
+               languages: list[str] | None = None, detail: str = '') -> dict:
+        """Checks in for HomeHub's Health page: the languages it runs with, and while starting what it's
+        doing. HomeHub answers with the names' and settings' versions, and whether to restart."""
+        body = {'version': version, 'speakers': speakers, 'state': state, 'id': self.bridge_id, 'kind': self.kind}
+        if languages is not None:
+            body['languages'] = languages
+        if detail:
+            body['detail'] = detail
+        return self._call('/status', body)
 
     def config(self) -> dict:
         """Voice on or off, and its languages, from HomeHub's Settings."""

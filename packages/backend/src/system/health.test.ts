@@ -161,6 +161,22 @@ describe('checkHealth', () => {
       (await vb()).setVoiceSettings({ enabled: true, languages: ['en', 'yue'] });
       recordBridgeReport({ speakers: [], state: 'starting', kind: 'docker', id: 'a' }, NOW - 5_000);
       assert.match((await voiceItems())[0].detail, /downloads its speech models/);
+      // A bridge from v0.1.60 says what it's doing.
+      recordBridgeReport({ speakers: [], state: 'starting', kind: 'docker', id: 'a', detail: 'Downloading the Vietnamese voice: 45% of 60 MB' }, NOW - 5_000);
+      assert.equal((await voiceItems())[0].detail, 'Downloading the Vietnamese voice: 45% of 60 MB');
+    });
+
+    it('says a change of languages is being applied until the bridge runs with them', async () => {
+      const v = await vb();
+      v.setVoiceSettings({ enabled: true, languages: ['en', 'yue', 'vi'] });
+      recordBridgeReport({ speakers: [], kind: 'docker', id: 'a', languages: ['en', 'yue'] }, NOW - 5_000);
+      assert.equal(v.languagesPending(), true);
+      assert.match((await voiceItems())[0].detail, /Applying the new voice languages/);
+      recordBridgeReport({ speakers: [], kind: 'docker', id: 'a', languages: ['en', 'vi', 'yue'] }, NOW - 1_000);
+      assert.equal(v.languagesPending(), false, 'the order doesn\'t matter');
+      // A bridge before v0.1.60 doesn't say: nothing is claimed.
+      recordBridgeReport({ speakers: [], kind: 'docker', id: 'a' }, NOW - 1_000);
+      assert.equal(v.languagesPending(), false);
     });
 
     it('warns when voice is on but no bridge ever checked in', async () => {
