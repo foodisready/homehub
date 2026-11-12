@@ -52,8 +52,8 @@ PREFIX_LEFT_OUT = 0.99
 @dataclass(frozen=True)
 class Command:
     """What was said: switch a name on or off, run a scene, or ask on or off."""
-    action: str        # 'on', 'off', 'scene', or 'ask'
-    name: str          # as HomeHub knows it
+    action: str        # 'on', 'off', 'scene', 'ask' (a name alone: on or off?), or 'which' (a verb and "đèn" alone: which light?)
+    name: str          # as HomeHub knows it; for 'which', the word said ("đèn", "cửa")
     score: float
     minutes: int | None = None   # with 'on': turn it off again after this long
     verb: str = ''               # the verb as said, for the reply: "mở" for a door, "bật" for a light
@@ -207,10 +207,11 @@ def _aligned(heard: list[str], name: list[str]) -> float:
 
 
 def _core(s: str) -> str:
-    """The name without a leading "đèn", "cửa" or "cái", which every light or door shares."""
-    for p in NAME_PREFIXES:
-        if s.startswith(p) and len(s) > len(p):
-            return s[len(p):]
+    """The name without a leading "đèn", "cửa" or "cái", which every light or door shares. A first
+    word that rhymes with "đèn" counts as it: speech recognition wrote "nền nhà bếp" for "đèn nhà bếp"."""
+    first, _, rest = s.partition(' ')
+    if rest and (first + ' ' in NAME_PREFIXES or _split(first)[1] == 'en'):
+        return rest
     return s
 
 
@@ -290,6 +291,9 @@ def parse(text: str, names: list[str], scenes: list[str] | None = None,
     ws, minutes = take_duration(words(text))
     action, verb, rest = read_verb(ws)
     rest = _tidy_name(rest)
+    if action in ('on', 'off') and [plain(w) for w in rest] in (['den'], ['cua']):
+        # "Bật đèn" with the name lost, often cut off or said too quietly: ask which.
+        return Command('which', rest[0], 1.0, minutes if action == 'on' else None, verb or ('bật' if action == 'on' else 'tắt'))
     if action and rest:
         name, score, runner = best_name(' '.join(rest), usable, groups)
         if name and score >= MATCH and score - runner >= MARGIN:
@@ -309,6 +313,39 @@ def parse(text: str, names: list[str], scenes: list[str] | None = None,
     name, score, runner = best_name(whole, devices, groups)
     if name and score >= ALONE_MATCH and score - runner >= MARGIN and has_vietnamese(name):
         return Command('ask', name, round(score, 2))
+    return None
+
+
+# The follow-up after "Bật đèn nào?": what the speaker remembers until the answer comes.
+WHICH_PREFIX = 'vi-which:'
+
+
+def which_asked(command: Command) -> str:
+    action = 'on' if command.verb in ON_VERBS else 'off'
+    return f'{WHICH_PREFIX}{action}:{command.verb}:{command.minutes or 0}:{plain(" ".join(words(command.name or "đèn")))}'
+
+
+def answer_which(asked: str, text: str, names: list[str], groups: list[list[str]] | None) -> Command | None:
+    """The name said after "Bật đèn nào?" ("nhà bếp", "đèn nhà bepping"), as the command first asked for."""
+    try:
+        action, verb, minutes, kind = asked[len(WHICH_PREFIX):].split(':', 3)
+    except ValueError:
+        return None
+    ws = words(text)
+    # The whole command again ("bật đèn nhà bếp"): read as it is.
+    again = parse(text, names, [], groups)
+    if again is not None and again.action in ('on', 'off'):
+        return again
+    _, _, rest = read_verb(ws)
+    rest = _tidy_name(rest)
+    if not rest:
+        return None
+    heard = ' '.join(rest)
+    if kind and not plain(heard).startswith(kind):
+        heard = f'{kind} {heard}'   # "nhà bếp" answering "đèn nào?" is "đèn nhà bếp"
+    name, score, runner = best_name(heard, candidates(names), groups)
+    if name and score >= MATCH and score - runner >= MARGIN:
+        return Command(action, name, round(score, 2), int(minutes) or None, verb)
     return None
 
 
@@ -340,6 +377,8 @@ def reply(command: Command | None, handled: bool, response: str, failed: list[st
     """A short Vietnamese reply from HomeHub's answer. HomeHub's own wording is English."""
     if command is not None and command.action == 'ask':
         return f'Bật hay tắt {command.name}?'
+    if command is not None and command.action == 'which':
+        return f'{command.verb.capitalize()} {command.name} nào?'
     if command is None or not handled:
         return NOT_UNDERSTOOD
     if "can't pause cameras" in response:

@@ -76,10 +76,17 @@ def answer(audio: bytes, spoke: bool, listener: Transcriber, homehub: Commander,
     if not spoke:
         return Answer('', NOTHING_HEARD, False)
     t0 = time.monotonic()
+    which = asked if asked and asked.startswith(vi.WHICH_PREFIX) else None
+    if which:
+        asked = None   # not a device's name: English and Cantonese have nothing to answer
     if vi_ears is not None:
         # First, since SenseVoice takes most Vietnamese for Cantonese. It takes about a third of a
         # second on a Pi, and what it writes for English or Cantonese is never a Vietnamese command.
         heard = vi_ears.transcribe(audio)
+        if which and has_words(heard):
+            command = vi.answer_which(which, heard, homehub.names, getattr(homehub, 'groups', None))
+            if command is not None:
+                return send_vietnamese(heard, command, homehub, t0)
         if vi.is_vietnamese(heard, homehub.names, getattr(homehub, 'scenes', homehub.names),
                             getattr(homehub, 'groups', None), asked):
             return answer_vietnamese(heard, homehub, t0, asked)
@@ -185,6 +192,10 @@ def answer_cantonese(audio: bytes, ears: CantoneseEars, homehub: Commander, t0: 
                   asked=command.name if command and command.action == 'ask' else None, passes=passes)
 
 
+def has_words(text: str) -> bool:
+    return bool(text.strip(' .,!?'))
+
+
 def answer_vietnamese(text: str, homehub: Commander, t0: float, asked: str | None = None) -> Answer:
     scenes = getattr(homehub, 'scenes', homehub.names)
     command = vi.parse(text, homehub.names, scenes, getattr(homehub, 'groups', None))
@@ -193,7 +204,14 @@ def answer_vietnamese(text: str, homehub: Commander, t0: float, asked: str | Non
         verb = vi.verb_alone(text)
         if verb:
             command = vi.Command(verb, asked, 1.0, verb='bật' if verb == 'on' else 'tắt')
+    return send_vietnamese(text, command, homehub, t0)
+
+
+def send_vietnamese(text: str, command: vi.Command | None, homehub: Commander, t0: float) -> Answer:
     t1 = time.monotonic()
+    if command is not None and command.action == 'which':
+        # "Bật đèn": the name was lost. Ask which, and listen for it.
+        return Answer(text, vi.reply(command, False, '', []), False, t1 - t0, lang='vi', asked=vi.which_asked(command))
     # A name alone switches nothing: HomeHub can't know whether on or off was meant.
     act = command if command and command.action != 'ask' else None
     heard = f'{text} → {act.homehub_text}' if act else text

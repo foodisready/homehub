@@ -61,6 +61,8 @@ HEARD = [
     ('BẬT ĐÈN PHÒNG NGỦ LỚN', ('on', 'đèn phòng ngủ lớn')),
     ('MỞ ĐÈN PHÒNG LÀM VIỆC', ('on', 'đèn phòng làm việc')),
     ('BẬT ĐÈN VĂN PHÒNG', ('on', 'đèn văn phòng')),
+    # From the Pi, 2026-11-12: "đèn" heard as "nền".
+    ('MỞ NỀN NHÀ BẾP', ('on', 'đèn nhà bếp')),
 ]
 # What it wrote for Cantonese and English recordings.
 NOT_VIETNAMESE = ['QUAN CHE PHỦ', 'GIÓ CHEN', 'QUAN TRƯỚC KHI PHÓNG', 'XÍCH SAU KHI PHÓNG', 'XÍCH CHÁO LOẠN',
@@ -254,6 +256,32 @@ class PipelineTest(unittest.TestCase):
         self.assertEqual((a.reply, a.asked, hub.sent), ('Bật hay tắt đèn bếp?', 'đèn bếp', []))
         b = answer(b'\0' * 32000, True, FakeWhisper(), hub, None, asked='đèn bếp', vi_ears=FakeVietnamese('TẮT'))
         self.assertEqual((b.reply, hub.sent), ('Đã tắt đèn bếp.', ['turn off đèn bếp']))
+
+    def test_a_lost_name_asks_which_light_then_hears_it(self):
+        # From the Pi, 2026-11-12: "Bật đèn nhà bếp" heard as "BẬT ĐÈN".
+        hub = FakeHomeHub()
+        a = answer(b'\0' * 32000, True, FakeWhisper(), hub, None, vi_ears=FakeVietnamese('BẬT ĐÈN'))
+        self.assertEqual((a.lang, a.reply, hub.sent), ('vi', 'Bật đèn nào?', []))
+        self.assertTrue(a.asked.startswith(vi.WHICH_PREFIX))
+        b = answer(b'\0' * 32000, True, FakeWhisper(), hub, None, asked=a.asked, vi_ears=FakeVietnamese('NHÀ BẾP'))
+        self.assertEqual((b.reply, hub.sent), ('Đã bật đèn nhà bếp.', ['turn on đèn nhà bếp']))
+        # Or the whole command again.
+        c = answer(b'\0' * 32000, True, FakeWhisper(), hub, None, asked=a.asked, vi_ears=FakeVietnamese('TẮT ĐÈN BẾP'))
+        self.assertEqual(c.reply, 'Đã tắt đèn bếp.')
+
+    def test_which_door(self):
+        hub = FakeHomeHub()
+        a = answer(b'\0' * 32000, True, FakeWhisper(), hub, None, vi_ears=FakeVietnamese('ĐÓNG CỬA'))
+        self.assertEqual(a.reply, 'Đóng cửa nào?')
+        b = answer(b'\0' * 32000, True, FakeWhisper(), hub, None, asked=a.asked, vi_ears=FakeVietnamese('NHÀ XE'))
+        self.assertEqual((b.reply, hub.sent), ('Đã đóng cửa nhà xe.', ['turn off cửa nhà xe']))
+
+    def test_an_unclear_answer_to_which_is_not_guessed(self):
+        hub = FakeHomeHub(handled=False)
+        a = answer(b'\0' * 32000, True, FakeWhisper(), hub, None, vi_ears=FakeVietnamese('BẬT ĐÈN'))
+        b = answer(b'\0' * 32000, True, FakeWhisper('what'), hub, None, asked=a.asked, vi_ears=FakeVietnamese('PHÒNG'))
+        self.assertNotIn('turn on', ' '.join(hub.sent))
+        self.assertIsNone(b.asked)
 
     def test_unknown_name_is_listed_as_missed(self):
         hub = FakeHomeHub(handled=False)

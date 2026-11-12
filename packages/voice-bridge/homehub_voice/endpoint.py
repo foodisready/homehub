@@ -37,6 +37,9 @@ class Endpointer:
         self.quiet = 0.0
         # Seconds that were loud enough to be speech.
         self.voiced = 0.0
+        # The loudest moment, and the quietest stretch after the wake word: for the log, to tune THRESHOLD.
+        self.peak = 0.0
+        self.floor = 1.0
         self.done = False
 
     @property
@@ -49,7 +52,9 @@ class Endpointer:
             return True
         self.audio.extend(chunk)
         if self.seconds > SKIP_S:
-            if loudness(chunk) > THRESHOLD:
+            level = loudness(chunk)
+            self.peak, self.floor = max(self.peak, level), min(self.floor, level)
+            if level > THRESHOLD:
                 self.spoke = True
                 self.quiet = 0.0
                 self.voiced += len(chunk) / BYTES_PER_SECOND
