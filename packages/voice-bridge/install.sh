@@ -64,6 +64,19 @@ if grep -Eq '^LANGUAGES=.*\byue\b' "$CONF/config.env"; then
   fetch_model "$MODELS/tts-models/vits-cantonese-hf-xiaomaiiwn.tar.bz2" \
     vits-cantonese-hf-xiaomaiiwn "$DATA/cantonese-voice" vits-cantonese-hf-xiaomaiiwn.onnx lexicon.txt tokens.txt rule.fst
 fi
+# Vietnamese (LANGUAGES=en vi): a Zipformer model to hear it, and a Piper voice to answer.
+if grep -Eq '^LANGUAGES=.*\bvi\b' "$CONF/config.env"; then
+  echo "== Vietnamese: a speech model (downloads about 60 MB, keeps 86 MB) and a Vietnamese voice (60 MB)"
+  fetch_model "$MODELS/asr-models/sherpa-onnx-zipformer-vi-int8-2025-04-20.tar.bz2" \
+    sherpa-onnx-zipformer-vi-int8-2025-04-20 "$DATA/vietnamese" \
+    encoder-epoch-12-avg-8.int8.onnx decoder-epoch-12-avg-8.onnx joiner-epoch-12-avg-8.int8.onnx tokens.txt
+  VI_VOICE_URL="https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/vi/vi_VN/vais1000/medium/vi_VN-vais1000-medium.onnx"
+  if [ ! -s "$DATA/vi_VN-vais1000-medium.onnx" ]; then
+    curl -fsSL -o "$DATA/vi_VN-vais1000-medium.onnx.json" "$VI_VOICE_URL.json"
+    curl -fsSL -o "$DATA/vi_VN-vais1000-medium.onnx.part" "$VI_VOICE_URL"
+    mv "$DATA/vi_VN-vais1000-medium.onnx.part" "$DATA/vi_VN-vais1000-medium.onnx"
+  fi
+fi
 chmod 700 "$CONF"
 chmod 600 "$CONF/config.env"
 [ -f "$CONF/internal-key" ] && chmod 600 "$CONF/internal-key"

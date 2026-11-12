@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { getDb } from '../db';
-import { listDeviceNames, listSceneNames } from '../nlp/find-device';
+import { listDeviceNameGroups, listDeviceNames, listSceneNames } from '../nlp/find-device';
 import { isActiveServer } from './role';
 
 /**
@@ -53,7 +53,7 @@ export function bridgeForSettings(now = Date.now(), lateMs: number): Pick<Bridge
 
 // ── Voice settings, chosen in Settings → Voice control ──────────
 
-export const VOICE_LANGUAGES = ['en', 'yue'] as const;
+export const VOICE_LANGUAGES = ['en', 'yue', 'vi'] as const;
 export type VoiceLanguage = typeof VOICE_LANGUAGES[number];
 export interface VoiceSettings { enabled: boolean; languages: VoiceLanguage[] }
 
@@ -150,10 +150,13 @@ export function forgetBridge(): void {
  * Every name, for speech recognition, and the scenes' among them, so the bridge
  * never sends a light's name heard alone ("廚房燈") as a scene to run.
  */
-export function voiceNames(): { names: string[]; scenes: string[]; version: string } {
+export function voiceNames(): { names: string[]; scenes: string[]; groups: string[][]; version: string } {
   const scenes = listSceneNames();
   const names = [...listDeviceNames(), ...scenes];
-  return { names, scenes, version: createHash('sha1').update(JSON.stringify([names, scenes])).digest('hex').slice(0, 12) };
+  // Each device's names together, so the bridge knows "đèn bếp" and "đèn nhà bếp" are one light,
+  // not two it can't choose between.
+  const groups = listDeviceNameGroups().filter((g) => g.length > 1);
+  return { names, scenes, groups, version: createHash('sha1').update(JSON.stringify([names, scenes, groups])).digest('hex').slice(0, 12) };
 }
 
 // An admin asked for a restart, which the bridge picks up at its next check-in.

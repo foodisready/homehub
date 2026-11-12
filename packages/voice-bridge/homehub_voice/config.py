@@ -30,6 +30,10 @@ class Config:
     cantonese: bool = False
     sensevoice_dir: Path = Path()
     cantonese_voice_dir: Path = Path()
+    # 'vi' adds Vietnamese: a Zipformer model to hear it, and a Piper voice to answer.
+    vietnamese: bool = False
+    vietnamese_dir: Path = Path()
+    vietnamese_voice: Path = Path()
     # Comes with HomeHub (Docker): waits until voice is turned on in HomeHub's
     # Settings, takes its languages from there, and downloads its own models.
     managed: bool = False
@@ -90,9 +94,9 @@ def load(env: dict[str, str] | None = None) -> Config:
     managed = _flag(env.get('HOMEHUB_VOICE_MANAGED'), False)
     port = env.get('REPLY_PORT', '39500').strip()
     extra = {x.strip().lower() for x in env.get('LANGUAGES', '').replace(',', ' ').split()}
-    unknown = extra - {'en', 'yue'}
+    unknown = extra - {'en', 'yue', 'vi'}
     if unknown:
-        raise ConfigError(f'LANGUAGES: {", ".join(sorted(unknown))} isn\'t supported yet. Use en and yue (Cantonese).')
+        raise ConfigError(f'LANGUAGES: {", ".join(sorted(unknown))} isn\'t supported yet. Use en, yue (Cantonese) and vi (Vietnamese).')
     if not port.isdigit():
         raise ConfigError('REPLY_PORT must be a number')
 
@@ -111,4 +115,7 @@ def load(env: dict[str, str] | None = None) -> Config:
         whisper_dir=data / 'whisper' if managed else None,
         sensevoice_dir=Path(env.get('SENSEVOICE_DIR', '').strip() or data / 'sensevoice').expanduser(),
         cantonese_voice_dir=Path(env.get('CANTONESE_VOICE_DIR', '').strip() or data / 'cantonese-voice').expanduser(),
+        vietnamese='vi' in extra,
+        vietnamese_dir=Path(env.get('VIETNAMESE_DIR', '').strip() or data / 'vietnamese').expanduser(),
+        vietnamese_voice=Path(env.get('VIETNAMESE_VOICE', '').strip() or data / 'vi_VN-vais1000-medium.onnx').expanduser(),
     )

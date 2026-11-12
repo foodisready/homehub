@@ -1,4 +1,5 @@
-"""Speech to text (Whisper; SenseVoice for Cantonese) and text to speech (Piper; VITS for Cantonese)."""
+"""Speech to text (Whisper; SenseVoice for Cantonese; Zipformer for Vietnamese) and text to speech
+(Piper, for English and Vietnamese; VITS for Cantonese)."""
 from __future__ import annotations
 
 import threading
@@ -90,6 +91,28 @@ class SenseVoice:
 
     def transcribe(self, audio: bytes) -> str:
         return self._run(self.yue, audio).text.strip()
+
+
+class VietnameseEars:
+    """Vietnamese speech to text (sherpa-onnx Zipformer): about a third of a second a command on a Pi 4."""
+
+    def __init__(self, folder: Path, threads: int = 2) -> None:
+        import sherpa_onnx
+
+        from .models import VIETNAMESE_FILES
+        enc, dec, join, tokens = (folder / f for f in VIETNAMESE_FILES)
+        if not all(f.exists() for f in (enc, dec, join, tokens)):
+            raise FileNotFoundError(f'The Vietnamese speech model isn\'t in {folder}: run install.sh with LANGUAGES=en vi')
+        self.rec = sherpa_onnx.OfflineRecognizer.from_transducer(
+            encoder=str(enc), decoder=str(dec), joiner=str(join), tokens=str(tokens), num_threads=threads)
+        self.lock = threading.Lock()
+
+    def transcribe(self, audio: bytes) -> str:
+        s = self.rec.create_stream()
+        s.accept_waveform(16000, _pcm(audio))
+        with self.lock:
+            self.rec.decode_stream(s)
+        return s.result.text.strip()
 
 
 class CantoneseVoice:

@@ -49,6 +49,7 @@ systemctl --user restart homehub-voice
 - **Add a speaker by address** if it isn't found: `SPEAKERS=192.168.0.40`. For one with an encryption key: `SPEAKERS=192.168.0.40|<key>`.
 - **Speech model:** `WHISPER_MODEL=base.en` is English and fastest. `small` is more accurate and handles other languages, set with `LANGUAGE`, but takes about three times as long.
 - **Cantonese:** see below.
+- **Vietnamese:** see below.
 
 ## Cantonese
 
@@ -80,10 +81,23 @@ On a 2015 MacBook Pro (Core i7-4980HQ) with `base.en`, recognising a 2 to 4 seco
 
 On a Raspberry Pi 4, SenseVoice takes about 0.9 seconds a pass. A Cantonese command that clearly matches one nickname the first time is read from that pass. Otherwise SenseVoice listens again, set to Cantonese, which hears the words better. In a test of 21 commands, 16 were read in one pass, and none of those was read differently from two passes. The log says `in 1 pass` or `in 2 passes`. Making a spoken Cantonese reply takes about 4 to 5 seconds, so replies are kept, up to 500 of them, in `reply-cache` in the models folder. A reply said before, such as 熄咗廚房燈, is ready at once, even after a restart, and is made again if the voice changes.
 
+## Vietnamese
+
+With Vietnamese on, each command can be in Vietnamese as well as English (and Cantonese, if that's on too), and is answered in the same language.
+
+1. In **Settings → Voice control**, tick **Vietnamese** and save. The bridge downloads a Vietnamese speech model (86 MB) and a Vietnamese voice (60 MB). For a bridge installed with install.sh, add `vi` to `LANGUAGES` in its `config.env` (for example `LANGUAGES=en vi`) and run `./install.sh` again instead.
+2. Give each device a Vietnamese nickname in **Settings → Devices**, and one for each way the household says it: for example đèn bếp and đèn nhà bếp on the kitchen lights, or cửa ga-ra and cửa nhà xe on the garage door. Accents can be typed or left out.
+3. Say the verb, then the nickname: bật đèn bếp, mở đèn bếp, tắt đèn bếp, mở cửa ga-ra, đóng cửa ga-ra. "Làm ơn" or "giúp tôi" first, "hết" after the verb, and "đi" or "nhé" at the end are fine. A scene with a Vietnamese name runs by its name alone.
+4. To turn something on for a while, add how long: bật đèn bếp mười phút, bật đèn bếp trong nửa tiếng, bật đèn bếp một tiếng rưỡi, bật đèn bếp 20 phút rồi tắt. The bridge sends HomeHub "turn on đèn bếp for 10 minutes", and answers "Đã bật đèn bếp, mười phút nữa sẽ tắt."
+
+How it works: the Vietnamese model hears each command first, which takes about a third of a second on a Raspberry Pi 4. SenseVoice can't tell Vietnamese apart (it takes most of it for Cantonese), but this model can: what it writes for English or Cantonese never starts with a Vietnamese verb and a name. In a test with the household's recordings, it read 33 of 35 Vietnamese commands right, and none of 37 Cantonese and 16 English commands was taken for Vietnamese. A command that isn't Vietnamese goes on to Cantonese or English as before.
+
+The name is compared with your nicknames word by word, with accents left out, so "phong cách" still finds đèn phòng khách. A word more or less is another name, not a near miss: "đèn phòng ngủ" never switches đèn phòng ngủ lớn, and "ga" alone doesn't find ga-ra. The verb is read with its accents, since they tell bật (on) from tắt (off). Speech recognition sometimes writes "bắt" for either, so then the speaker asks "Bật hay tắt đèn bếp?" and switches nothing; answer "bật" or "tắt". A command that doesn't clearly match one nickname isn't guessed: the speaker says "Xin lỗi, tôi không hiểu", and HomeHub lists it with the commands it missed.
+
 ## Not done yet
 
 - **Home Assistant Voice:** its firmware expects Home Assistant to set its encryption key, so whether the bridge can connect to one out of the box hasn't been tested.
-- Languages other than English and Cantonese.
+- Languages other than English, Cantonese and Vietnamese.
 
 ## Credits
 
@@ -94,6 +108,8 @@ The bridge downloads these speech models when voice is turned on. They aren't pa
 | Whisper `base.en`, as converted for faster-whisper | Hearing English | OpenAI; Systran (conversion). MIT |
 | Piper voice `en_US-ljspeech-medium` | Speaking English | Piper (Michael Hansen, Rhasspy), trained on the LJ Speech dataset by Keith Ito and Linda Johnson. Public domain dataset |
 | SenseVoice Small, as converted for sherpa-onnx (int8) | Telling the language apart, and hearing Cantonese | [SenseVoice](https://github.com/FunAudioLLM/SenseVoice) by Tongyi Lab, Alibaba Group; sherpa-onnx (conversion). [FunASR Model Open Source License](https://github.com/modelscope/FunASR/blob/main/MODEL_LICENSE) |
+| Zipformer Vietnamese (int8), as converted for sherpa-onnx | Hearing Vietnamese | [zzasdf/viet_iter3_pseudo_label](https://huggingface.co/zzasdf/viet_iter3_pseudo_label), trained on about 70,000 hours of Vietnamese; sherpa-onnx (conversion). Apache 2.0 |
+| Piper voice `vi_VN-vais1000-medium` | Speaking Vietnamese | Piper (Michael Hansen, Rhasspy), trained on the [VAIS-1000](https://ieee-dataport.org/documents/vais-1000-vietnamese-speech-synthesis-corpus) dataset (CC BY 4.0), fine-tuned from Piper's `en_US-lessac-medium` voice |
 | `vits-cantonese` | Speaking Cantonese | [xiaomaiiwn on Hugging Face](https://huggingface.co/xiaomaiiwn/vits-cantonese); sherpa-onnx (conversion). No license stated |
 
 Until v0.1.25 the English voice was Piper's `en_US-lessac-medium`, whose recordings are licensed for research only. Updating removes it.

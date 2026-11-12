@@ -31,6 +31,8 @@ class HomeHub:
         self.names: list[str] = []
         # The scenes' names among them: only these may be run by saying a name alone.
         self.scenes: list[str] = []
+        # Each device's names (its alias and nicknames), so two nicknames of one light aren't a close call.
+        self.groups: list[list[str]] = []
         # HomeHub's version of the names, so the bridge knows when they change.
         self.names_version: str | None = None
 
@@ -58,6 +60,9 @@ class HomeHub:
             # HomeHub before v0.1.27 didn't list scenes apart, so every name could be one.
             self.scenes = list(res['scenes']) if isinstance(res.get('scenes'), list) else self.names
             self.names_version = res.get('version')
+            # HomeHub before v0.1.59 didn't group them: every name is then its own device.
+            groups = res.get('groups')
+            self.groups = [list(map(str, g)) for g in groups if isinstance(g, list)] if isinstance(groups, list) else []
         except HomeHubError as e:
             log.warning('%s; keeping %d known names', e, len(self.names))
         return self.names

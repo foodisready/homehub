@@ -1,4 +1,4 @@
-"""HomeHub voice bridge: speakers → Whisper (or SenseVoice for Cantonese) → HomeHub → Piper → speakers.
+"""HomeHub voice bridge: speakers → Whisper (SenseVoice for Cantonese, Zipformer for Vietnamese) → HomeHub → Piper → speakers.
 
 Run with `python -m homehub_voice`. Settings come from environment variables;
 see config.env.example.
@@ -55,16 +55,17 @@ async def main() -> int:
     for sig in (signal.SIGTERM, signal.SIGINT):
         loop.add_signal_handler(sig, stop.set)
 
-    cantonese, config_version = conf.cantonese, None
+    cantonese, vietnamese, config_version = conf.cantonese, conf.vietnamese, None
     if conf.managed:
         homehub.kind = 'docker'
         settings = await wait_until_on(homehub, stop)
         if settings is None:
             return 0
-        cantonese, config_version = 'yue' in settings.get('languages', []), settings.get('version')
+        languages = settings.get('languages', [])
+        cantonese, vietnamese, config_version = 'yue' in languages, 'vi' in languages, settings.get('version')
 
     try:
-        loaded = await while_reporting(homehub, 'starting', stop, lambda: load_models(conf, cantonese))
+        loaded = await while_reporting(homehub, 'starting', stop, lambda: load_models(conf, cantonese, vietnamese))
     except (FileNotFoundError, OSError) as e:   # OSError includes a download that failed
         log.error('%s', e)
         if conf.managed:
@@ -72,7 +73,7 @@ async def main() -> int:
         return 2
     if loaded is None or stop.is_set():
         return 0
-    listener, voices, ears = loaded
+    listener, voices, ears, vi_ears = loaded
     replies = ReplyServer(conf.reply_port)
     log.info('HomeHub at %s knows %d device and scene names', conf.homehub_url, len(homehub.refresh_names()))
 
@@ -83,7 +84,7 @@ async def main() -> int:
     speakers = Speakers(
         conf.speakers,
         lambda s, listed: SpeakerLink(
-            s, lambda audio, spoke, asked=None: answer(audio, spoke, listener, homehub, ears, asked), speak, listed,
+            s, lambda audio, spoke, asked=None: answer(audio, spoke, listener, homehub, ears, asked, vi_ears), speak, listed,
             on_change=lambda: speakers.changed.set(), one_answers=one_answers,
         ),
         conf.discover,
@@ -145,16 +146,19 @@ async def main() -> int:
     return RESTART_EXIT if restart else 0
 
 
-def load_models(conf: cfg.Config, cantonese: bool):
+def load_models(conf: cfg.Config, cantonese: bool, vietnamese: bool = False):
     """Downloads what's missing (only when the bridge comes with HomeHub) and loads it. Slow: run it in a thread."""
     from . import models
-    from .speech import CantoneseVoice, Listener, SenseVoice, Speaker as Voice
+    from .speech import CantoneseVoice, Listener, SenseVoice, Speaker as Voice, VietnameseEars
 
     if conf.managed:
         models.piper_voice(conf.piper_voice)
         if cantonese:
             models.sensevoice(conf.sensevoice_dir)
             models.cantonese_voice(conf.cantonese_voice_dir)
+        if vietnamese:
+            models.vietnamese(conf.vietnamese_dir)
+            models.vietnamese_voice(conf.vietnamese_voice)
     log.info('HomeHub voice bridge %s: loading Whisper %s and the Piper voice', __version__, conf.whisper_model)
     listener = Listener(conf.whisper_model, conf.language, conf.whisper_dir)
     voices = {'en': Voice(conf.piper_voice)}
@@ -163,7 +167,12 @@ def load_models(conf: cfg.Config, cantonese: bool):
         log.info('Cantonese on: loading SenseVoice and the Cantonese voice')
         ears = SenseVoice(conf.sensevoice_dir)
         voices['yue'] = CantoneseVoice(conf.cantonese_voice_dir)
-    return listener, voices, ears
+    vi_ears = None
+    if vietnamese:
+        log.info('Vietnamese on: loading its speech model and voice')
+        vi_ears = VietnameseEars(conf.vietnamese_dir)
+        voices['vi'] = Voice(conf.vietnamese_voice)
+    return listener, voices, ears, vi_ears
 
 
 async def while_reporting(homehub: HomeHub, state: str, stop: asyncio.Event, work):

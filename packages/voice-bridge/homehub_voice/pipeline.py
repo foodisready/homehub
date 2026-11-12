@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from . import cantonese as yue
+from . import vietnamese as vi
 from .homehub import CommandResult, HomeHubError
 
 log = logging.getLogger('homehub-voice')
@@ -35,6 +36,10 @@ class CantoneseEars(Protocol):
     def transcribe(self, audio: bytes) -> str: ...
 
 
+class VietnameseEars(Protocol):
+    def transcribe(self, audio: bytes) -> str: ...
+
+
 class Commander(Protocol):
     names: list[str]
 
@@ -48,7 +53,7 @@ class Answer:
     handled: bool
     stt_s: float = 0.0
     homehub_s: float = 0.0
-    # The reply's language: 'en' or 'yue'.
+    # The reply's language: 'en', 'yue' or 'vi'.
     lang: str = 'en'
     # The device HomeHub just asked "on or off?" about, waiting for the answer.
     asked: str | None = None
@@ -65,11 +70,19 @@ CANTONESE = {'yue', 'zh'}
 
 
 def answer(audio: bytes, spoke: bool, listener: Transcriber, homehub: Commander,
-           ears: CantoneseEars | None = None, asked: str | None = None) -> Answer:
+           ears: CantoneseEars | None = None, asked: str | None = None,
+           vi_ears: VietnameseEars | None = None) -> Answer:
     """asked: the device HomeHub just asked "on or off?" about, if any, so "on" alone answers it."""
     if not spoke:
         return Answer('', NOTHING_HEARD, False)
     t0 = time.monotonic()
+    if vi_ears is not None:
+        # First, since SenseVoice takes most Vietnamese for Cantonese. It takes about a third of a
+        # second on a Pi, and what it writes for English or Cantonese is never a Vietnamese command.
+        heard = vi_ears.transcribe(audio)
+        if vi.is_vietnamese(heard, homehub.names, getattr(homehub, 'scenes', homehub.names),
+                            getattr(homehub, 'groups', None), asked):
+            return answer_vietnamese(heard, homehub, t0, asked)
     quick = ''
     if ears is not None:
         lang, quick = ears.hear(audio)
@@ -170,3 +183,27 @@ def answer_cantonese(audio: bytes, ears: CantoneseEars, homehub: Commander, t0: 
     reply = yue.reply(command, res.handled, res.response, res.failed)
     return Answer(heard, reply, bool(act) and res.handled, t1 - t0, time.monotonic() - t1, lang='yue',
                   asked=command.name if command and command.action == 'ask' else None, passes=passes)
+
+
+def answer_vietnamese(text: str, homehub: Commander, t0: float, asked: str | None = None) -> Answer:
+    scenes = getattr(homehub, 'scenes', homehub.names)
+    command = vi.parse(text, homehub.names, scenes, getattr(homehub, 'groups', None))
+    # "Bật" or "tắt" alone, answering "Bật hay tắt đèn bếp?".
+    if asked and (command is None or command.action == 'ask'):
+        verb = vi.verb_alone(text)
+        if verb:
+            command = vi.Command(verb, asked, 1.0, verb='bật' if verb == 'on' else 'tắt')
+    t1 = time.monotonic()
+    # A name alone switches nothing: HomeHub can't know whether on or off was meant.
+    act = command if command and command.action != 'ask' else None
+    heard = f'{text} → {act.homehub_text}' if act else text
+    if command is not None and command.action == 'ask':
+        return Answer(heard, vi.reply(command, False, '', []), False, t1 - t0, lang='vi', asked=command.name)
+    try:
+        # Unread commands go to HomeHub too, as heard, so they're listed with the commands it missed.
+        res = homehub.command(act.homehub_text if act else ' '.join(vi.words(text)))
+    except HomeHubError as e:
+        log.warning('%s', e)
+        return Answer(heard, vi.NO_HOMEHUB, False, t1 - t0, time.monotonic() - t1, lang='vi')
+    reply = vi.reply(command, res.handled, res.response, res.failed)
+    return Answer(heard, reply, bool(act) and res.handled, t1 - t0, time.monotonic() - t1, lang='vi')

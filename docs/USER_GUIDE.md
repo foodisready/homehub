@@ -535,6 +535,8 @@ To turn a light on for a while, add how long, as you would in English with "for 
 
 A Cantonese command HomeHub didn't understand is listed under **Settings → Teach HomeHub**, like an English one. **Teach** suggests the name without its verb, such as 主人房燈 from 開主人房燈. Choose its devices and save, and voice understands it within a minute.
 
+Voice also understands Vietnamese, and answers in it. Tick **Vietnamese** in **Settings → Voice control**, which downloads about 150 MB more, and give your devices Vietnamese nicknames in **Settings → Devices**, such as đèn bếp. Add one for each way your household says it, such as đèn bếp and đèn nhà bếp, because a word more or less counts as a different name. Say the verb, then the nickname: bật đèn bếp, tắt đèn bếp, mở cửa ga-ra, đóng cửa ga-ra. Add how long to turn something on for a while: bật đèn bếp mười phút. If HomeHub isn't sure whether you said bật or tắt, it asks "Bật hay tắt đèn bếp?" and switches nothing until you answer. See [Vietnamese](../packages/voice-bridge/README.md#vietnamese).
+
 ## Troubleshooting
 
 **A device shows as offline:** check that it has power and is on Wi-Fi. Its address may also have changed. Run **Discover on network**, and if it's listed as moved, select **Update address**. Don't add it as a new device, or you'll lose its schedules.

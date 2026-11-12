@@ -364,8 +364,8 @@ class ConfigTest(unittest.TestCase):
         self.assertEqual(c.sensevoice_dir.name, 'sensevoice')
 
     def test_unknown_language(self):
-        with self.assertRaisesRegex(cfg.ConfigError, 'vi'):
-            cfg.load({**self.base, 'LANGUAGES': 'en vi'})
+        with self.assertRaisesRegex(cfg.ConfigError, 'es'):
+            cfg.load({**self.base, 'LANGUAGES': 'en es'})
 
 
 if __name__ == '__main__':

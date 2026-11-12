@@ -34,6 +34,12 @@ function namesOf(device: NamedDevice): string[] {
 
 const deviceNames = (device: NamedDevice) => namesOf(device).map(normalize);
 
+/** Each device's names, as typed: its alias, then its nicknames. */
+export function listDeviceNameGroups(): string[][] {
+  const devices = getDb().prepare('SELECT * FROM devices').all() as NamedDevice[];
+  return devices.map(namesOf);
+}
+
 /** Every name and nickname, as typed. Speech recognition uses these as hints. */
 export function listDeviceNames(): string[] {
   const devices = getDb().prepare('SELECT * FROM devices').all() as NamedDevice[];

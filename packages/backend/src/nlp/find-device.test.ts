@@ -101,6 +101,14 @@ describe('findDeviceByName', () => {
     assert.equal(foundAlias('reading'), 'Long Lamp');
   });
 
+  it('finds a device by a Vietnamese nickname', () => {
+    db.prepare("UPDATE devices SET nicknames = ? WHERE alias = 'Long Lamp'")
+      .run(JSON.stringify(['đèn phòng khách', 'cửa ga-ra']));
+    assert.equal(foundAlias('đèn phòng khách'), 'Long Lamp');
+    assert.equal(foundAlias('cửa ga-ra'), 'Long Lamp');
+    db.prepare("UPDATE devices SET nicknames = NULL WHERE alias = 'Long Lamp'").run();
+  });
+
   it('refuses to guess when a nickname is another device\'s name', () => {
     db.prepare("UPDATE devices SET nicknames = ? WHERE alias = 'Main Valve'")
       .run(JSON.stringify(['Kitchen lights']));

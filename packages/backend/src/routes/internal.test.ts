@@ -268,8 +268,11 @@ describe('/internal/voice', () => {
   it('lists names and nicknames', async () => {
     getDb().prepare("INSERT OR IGNORE INTO scenes (name, nicknames) VALUES ('Good night', '[\"晚安\"]')").run();
     const res = await fetch(`${baseUrl}/internal/voice/device-names`, { headers: key });
-    const { names, scenes } = await res.json() as { names: string[]; scenes: string[] };
+    const { names, scenes, groups } = await res.json() as { names: string[]; scenes: string[]; groups: string[][] };
     for (const name of ['My office lamp', 'desk light', 'Main Valve']) assert.ok(names.includes(name));
+    // Each device's names together, so the bridge knows two nicknames are the same light.
+    assert.ok(groups.some((g) => g[0] === 'My office lamp' && g.includes('desk light')));
+    assert.ok(groups.every((g) => g.length > 1));
     // Scenes are listed apart too, so a light's name heard alone is never run as a scene.
     assert.deepEqual(scenes, ['Good night', '晚安']);
     for (const scene of scenes) assert.ok(names.includes(scene));
@@ -293,7 +296,9 @@ describe('/internal/voice', () => {
     const on = await config();
     assert.deepEqual([on.enabled, on.languages], [true, ['en', 'yue']], 'English is always included');
     assert.notEqual(on.version, off.version);
-    assert.throws(() => vb.setVoiceSettings({ enabled: true, languages: ['vi'] }), /languages/);
+    vb.setVoiceSettings({ enabled: true, languages: ['vi', 'yue'] });
+    assert.deepEqual((await config()).languages, ['en', 'yue', 'vi'], 'Vietnamese too');
+    assert.throws(() => vb.setVoiceSettings({ enabled: true, languages: ['es'] }), /languages/);
     assert.throws(() => vb.setVoiceSettings({ enabled: 'yes', languages: [] }), /enabled/);
     vb.setVoiceSettings({ enabled: false, languages: ['en'] });
   });

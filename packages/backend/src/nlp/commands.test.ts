@@ -66,6 +66,9 @@ describe('chat commands', () => {
       ['turn of office lights',                 { name: 'office lights', state: false }],
       ['switch the lamp of',                    { name: 'the lamp', state: false }],
       ['turn office lights off',                { name: 'office lights', state: false }],
+      // The voice bridge sends Vietnamese nicknames as they're written.
+      ['turn on đèn bếp for 10 minutes',        { name: 'đèn bếp', state: true, minutes: 10 }],
+      ['turn off cửa ga-ra',                    { name: 'cửa ga-ra', state: false }],
     ];
 
     for (const [text, expected] of parses) {

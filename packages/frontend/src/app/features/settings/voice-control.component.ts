@@ -9,7 +9,7 @@ interface VoiceSettings { enabled: boolean; languages: string[]; bridge: BridgeS
 const POLL_MS = 5_000;
 
 /**
- * Settings → Voice control: turns voice on or off, and adds Cantonese. The
+ * Settings → Voice control: turns voice on or off, and adds Cantonese or Vietnamese. The
  * voice bridge that comes with HomeHub waits until voice is on, downloads its
  * speech models the first time, and restarts by itself to apply a change.
  * Admin only.
@@ -62,6 +62,12 @@ const POLL_MS = 5_000;
             <small>Commands in either language, answered in the same one. Needs Cantonese nicknames on your devices, such as 廚房燈. Adds about 350 MB.</small>
           </span>
         </label>
+        <label class="check">
+          <input type="checkbox" [(ngModel)]="vietnamese" (ngModelChange)="dirty.set(true)" [disabled]="!enabled" />
+          <span>Vietnamese Tiếng Việt
+            <small>Answered in Vietnamese. Needs Vietnamese nicknames on your devices, such as đèn bếp, and one for each way you say it, such as đèn nhà bếp. Adds about 150 MB.</small>
+          </span>
+        </label>
       </div>
 
       <div class="bar">
@@ -91,6 +97,7 @@ export class VoiceControlComponent implements OnInit, OnDestroy {
   private readonly saved = signal<VoiceSettings | null>(null);
   enabled = false;
   cantonese = false;
+  vietnamese = false;
   private timer?: ReturnType<typeof setInterval>;
 
   /** What the voice bridge is doing, in words. */
@@ -127,6 +134,7 @@ export class VoiceControlComponent implements OnInit, OnDestroy {
         if (first || !this.dirty()) {
           this.enabled = s.enabled;
           this.cantonese = s.languages.includes('yue');
+          this.vietnamese = s.languages.includes('vi');
         }
         this.loaded.set(true);
       },
@@ -137,7 +145,7 @@ export class VoiceControlComponent implements OnInit, OnDestroy {
   save(): void {
     this.saving.set(true);
     this.message.set('');
-    const languages = ['en', ...(this.cantonese ? ['yue'] : [])];
+    const languages = ['en', ...(this.cantonese ? ['yue'] : []), ...(this.vietnamese ? ['vi'] : [])];
     this.http.put<{ enabled: boolean; languages: string[] }>('/api/nlp/voice', { enabled: this.enabled, languages }).subscribe({
       next: (s) => {
         this.saving.set(false);
