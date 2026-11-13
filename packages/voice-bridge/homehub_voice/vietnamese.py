@@ -175,6 +175,10 @@ INITIALS = ('ngh', 'ng', 'nh', 'ch', 'gh', 'gi', 'kh', 'ph', 'th', 'tr', 'qu',
             'b', 'c', 'd', 'g', 'h', 'k', 'l', 'm', 'n', 'p', 'r', 's', 't', 'v', 'x')
 
 
+# Opening consonants that sound alike, or are said alike in the South: "pep" for "bếp", "dô" for "vô".
+CLOSE_INITIALS = [{'b', 'p'}, {'d', 'gi', 'r', 'v'}, {'s', 'x'}, {'ch', 'tr'}, {'c', 'k', 'q', 'qu'}, {'n', 'l'}, {'g', 'gh'}, {'ng', 'ngh'}]
+
+
 def _split(word: str) -> tuple[str, str]:
     for i in INITIALS:
         if word.startswith(i) and len(word) > len(i):
@@ -189,7 +193,7 @@ def _word(a: str, b: str) -> float:
         return 1.0
     (ia, ra), (ib, rb) = _split(a), _split(b)
     if ra == rb:
-        return 0.75
+        return 0.9 if any(ia in g and ib in g for g in CLOSE_INITIALS) else 0.75
     if ia == ib and (ra.startswith(rb) or rb.startswith(ra)) and abs(len(ra) - len(rb)) == 1:
         return 0.7
     return 0.6 * difflib.SequenceMatcher(None, a, b).ratio() ** 2
@@ -331,11 +335,14 @@ def answer_which(asked: str, text: str, names: list[str], groups: list[list[str]
         action, verb, minutes, kind = asked[len(WHICH_PREFIX):].split(':', 3)
     except ValueError:
         return None
-    ws = words(text)
     # The whole command again ("bật đèn nhà bếp"): read as it is.
     again = parse(text, names, [], groups)
     if again is not None and again.action in ('on', 'off'):
         return again
+    # The name, perhaps with how long again: "nhà bếp ba mươi phút".
+    ws, said_minutes = take_duration(words(text))
+    if said_minutes and action == 'on':
+        minutes = str(said_minutes)
     _, _, rest = read_verb(ws)
     rest = _tidy_name(rest)
     if not rest:

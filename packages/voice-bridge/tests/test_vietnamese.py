@@ -63,6 +63,8 @@ HEARD = [
     ('BẬT ĐÈN VĂN PHÒNG', ('on', 'đèn văn phòng')),
     # From the Pi, 2026-11-12: "đèn" heard as "nền".
     ('MỞ NỀN NHÀ BẾP', ('on', 'đèn nhà bếp')),
+    ('TẮT ĐÈN VÀ BẾP', ('off', 'đèn nhà bếp')),
+    ('MỞ ĐÈN VÀ PEP', ('on', 'đèn nhà bếp')),      # b heard as p
 ]
 # What it wrote for Cantonese and English recordings.
 NOT_VIETNAMESE = ['QUAN CHE PHỦ', 'GIÓ CHEN', 'QUAN TRƯỚC KHI PHÓNG', 'XÍCH SAU KHI PHÓNG', 'XÍCH CHÁO LOẠN',
@@ -268,6 +270,22 @@ class PipelineTest(unittest.TestCase):
         # Or the whole command again.
         c = answer(b'\0' * 32000, True, FakeWhisper(), hub, None, asked=a.asked, vi_ears=FakeVietnamese('TẮT ĐÈN BẾP'))
         self.assertEqual(c.reply, 'Đã tắt đèn bếp.')
+
+    def test_which_light_with_how_long(self):
+        # From the Pi, 2026-11-13: "mở đèn nhà bếp ba mươi phút", the name lost, then said with the time again.
+        hub = FakeHomeHub()
+        a = answer(b'\0' * 32000, True, FakeWhisper(), hub, None, vi_ears=FakeVietnamese('MỞ ĐÈN BA MƯƠI PHÚT'))
+        self.assertEqual(a.reply, 'Mở đèn nào?')
+        b = answer(b'\0' * 32000, True, FakeWhisper(), hub, None, asked=a.asked, vi_ears=FakeVietnamese('NHÀ BẾP BA MƯƠI PHÚT'))
+        self.assertEqual(hub.sent, ['turn on đèn nhà bếp for 30 minutes'])
+        self.assertEqual(b.reply, 'Đã mở đèn nhà bếp, nửa tiếng nữa sẽ tắt.')
+        # The name alone keeps the time said first.
+        hub.sent.clear()
+        c = answer(b'\0' * 32000, True, FakeWhisper(), hub, None, asked=a.asked, vi_ears=FakeVietnamese('NHÀ BẾP'))
+        self.assertEqual(hub.sent, ['turn on đèn nhà bếp for 30 minutes'])
+
+    def test_full_command_with_how_long(self):
+        self.assertEqual(vi.parse('MỞ ĐÈN VÀ PEP BA MƯƠI PHÚT', NAMES, SCENES, GROUPS).homehub_text, 'turn on đèn nhà bếp for 30 minutes')
 
     def test_which_door(self):
         hub = FakeHomeHub()
