@@ -242,7 +242,7 @@ interface FoundSensor { ip: string; name: string; model: string; needsLogin: boo
           <div class="fields">
             <input [(ngModel)]="sensorIp" placeholder="Sensor IP address" autocomplete="off" />
             <input [(ngModel)]="username" placeholder="Sensor username" autocomplete="off" />
-            <input [(ngModel)]="password" type="password" autocomplete="new-password"
+            <input [(ngModel)]="password" type="text" class="secret" autocomplete="off" spellcheck="false" autocapitalize="off" data-1p-ignore data-lpignore="true" data-bwignore
                    [placeholder]="rule.hasSensorPassword ? 'Password saved' : 'Sensor password'" />
             <button class="btn-primary" [disabled]="!sensorIp.trim() || busy()" (click)="connect(rule)">
               {{ busy() ? 'Connecting…' : 'Connect' }}

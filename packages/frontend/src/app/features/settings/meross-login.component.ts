@@ -40,7 +40,7 @@ interface MerossLogin { email: string | null; signedIn: boolean; hasNames?: bool
     @if (expanded()) {
       <div class="form">
         <input type="email" [(ngModel)]="email" placeholder="Meross email" autocomplete="off" aria-label="Meross email" />
-        <input type="password" [(ngModel)]="password" placeholder="Meross password" autocomplete="new-password"
+        <input type="text" class="secret" autocomplete="off" spellcheck="false" autocapitalize="off" data-1p-ignore data-lpignore="true" data-bwignore [(ngModel)]="password" placeholder="Meross password"
                aria-label="Meross password" (keydown.enter)="save()" />
         @if (needsCode()) {
           <input class="wide" type="text" inputmode="numeric" [(ngModel)]="code" placeholder="Verification code from Meross"

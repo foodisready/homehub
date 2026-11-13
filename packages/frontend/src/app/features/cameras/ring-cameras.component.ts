@@ -183,7 +183,7 @@ interface AccountCamera { id: number; name: string; home: string | null; model: 
               </p>
               <div class="form">
                 <input type="email" [(ngModel)]="email" placeholder="Ring email" aria-label="Ring email" autocomplete="off" />
-                <input type="password" [(ngModel)]="password" placeholder="Ring password" aria-label="Ring password" autocomplete="new-password" (keyup.enter)="signIn()" />
+                <input type="text" class="secret" autocomplete="off" spellcheck="false" autocapitalize="off" data-1p-ignore data-lpignore="true" data-bwignore [(ngModel)]="password" placeholder="Ring password" aria-label="Ring password" (keyup.enter)="signIn()" />
                 <div class="wide">
                   <button class="btn-sm btn-primary" type="button" (click)="signIn()" [disabled]="busy() || !email.trim() || !password">
                     {{ busy() ? 'Signing in…' : 'Sign in' }}

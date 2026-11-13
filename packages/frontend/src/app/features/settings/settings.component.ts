@@ -316,7 +316,7 @@ const DRIVER_LABEL: Record<string, string> = {
                     @if (usesKasaLogin(d)) {
                       <div class="edit-row" style="margin-top:0.4rem">
                         <input type="email" [(ngModel)]="editKasaUser" placeholder="TP-Link email" autocomplete="off" />
-                        <input type="password" [(ngModel)]="editKasaPass" placeholder="TP-Link password" autocomplete="new-password" />
+                        <input type="text" class="secret" autocomplete="off" spellcheck="false" autocapitalize="off" data-1p-ignore data-lpignore="true" data-bwignore [(ngModel)]="editKasaPass" placeholder="TP-Link password" />
                         <button class="btn-sm btn-ghost" (click)="saveEditedKasaLogin()"
                                 [disabled]="!editKasaUser.trim() || !editKasaPass || kasaLoginSaving()">
                           {{ kasaLoginSaving() ? 'Checking…' : 'Save login' }}
@@ -456,7 +456,7 @@ const DRIVER_LABEL: Record<string, string> = {
                         </div>
                         <div class="discover-key">
                           <span class="discover-key-label">Password</span>
-                          <input type="password" [(ngModel)]="d.pendingPass" autocomplete="new-password" />
+                          <input type="text" class="secret" autocomplete="off" spellcheck="false" autocapitalize="off" data-1p-ignore data-lpignore="true" data-bwignore [(ngModel)]="d.pendingPass" />
                         </div>
                         @if (d.driverType === 'kasa') {
                           <button class="btn-sm btn-primary" (click)="saveDiscoveredKasaLogin(d)"
@@ -741,7 +741,7 @@ const DRIVER_LABEL: Record<string, string> = {
                   @if (editingUserId() === u.id) {
                     <div style="flex:1;width:100%">
                       <div class="edit-row single">
-                        <input type="password" [(ngModel)]="editPassword" placeholder="New password" autocomplete="new-password" />
+                        <input type="text" class="secret" autocomplete="off" spellcheck="false" autocapitalize="off" data-1p-ignore data-lpignore="true" data-bwignore [(ngModel)]="editPassword" placeholder="New password" />
                       </div>
                       <div style="display:flex;gap:0.5rem;margin-top:0.4rem">
                         <button class="btn-sm btn-primary" (click)="savePassword(u.id)">Save</button>
@@ -762,7 +762,7 @@ const DRIVER_LABEL: Record<string, string> = {
 
               <div class="add-form" style="margin-top:0.75rem">
                 <input type="text"     [(ngModel)]="newUsername" placeholder="Username" autocomplete="off" />
-                <input type="password" [(ngModel)]="newPassword" placeholder="Password" autocomplete="new-password" />
+                <input type="text" class="secret" autocomplete="off" spellcheck="false" autocapitalize="off" data-1p-ignore data-lpignore="true" data-bwignore [(ngModel)]="newPassword" placeholder="Password" />
                 <button class="btn-sm btn-primary" style="grid-column:span 2" (click)="addUser()" [disabled]="!newUsername.trim() || !newPassword.trim()">Add user</button>
               </div>
               @if (addUserMsg()) { <p class="msg" [class.ok]="!addUserErr()" [class.err]="addUserErr()">{{ addUserMsg() }}</p> }

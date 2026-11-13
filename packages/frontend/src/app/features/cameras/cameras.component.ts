@@ -311,9 +311,9 @@ const SEEN_KEY = 'homehub.cameras.seenSnapshot';
                   </p>
                   <div class="form">
                     <input type="email" [(ngModel)]="email" placeholder="Wyze email" aria-label="Wyze email" autocomplete="off" />
-                    <input type="password" [(ngModel)]="password" placeholder="Wyze password" aria-label="Wyze password" autocomplete="new-password" />
+                    <input type="text" class="secret" autocomplete="off" spellcheck="false" autocapitalize="off" data-1p-ignore data-lpignore="true" data-bwignore [(ngModel)]="password" placeholder="Wyze password" aria-label="Wyze password" />
                     <input type="text" [(ngModel)]="keyId" placeholder="API key ID" aria-label="API key ID" autocomplete="off" />
-                    <input type="password" [(ngModel)]="apiKey" placeholder="API key" aria-label="API key" autocomplete="new-password" />
+                    <input type="text" class="secret" autocomplete="off" spellcheck="false" autocapitalize="off" data-1p-ignore data-lpignore="true" data-bwignore [(ngModel)]="apiKey" placeholder="API key" aria-label="API key" />
                     <div class="wide">
                       <button class="btn-sm btn-primary" type="button" (click)="signIn()"
                               [disabled]="busy() || !email.trim() || !password || !keyId.trim() || !apiKey.trim()">

@@ -109,7 +109,7 @@ interface IpInfo { relay: { state: 'ready' } | { state: 'unreachable'; detail: s
                 <div class="form">
                   <input type="text" [(ngModel)]="editName" placeholder="Name" aria-label="Name" maxlength="80" style="grid-column:1/-1" />
                   <input type="text" [(ngModel)]="editUser" placeholder="Camera username" aria-label="Camera username" autocomplete="off" />
-                  <input type="password" [(ngModel)]="editPass" placeholder="New password (blank keeps it)" aria-label="Camera password" autocomplete="new-password" />
+                  <input type="text" class="secret" autocomplete="off" spellcheck="false" autocapitalize="off" data-1p-ignore data-lpignore="true" data-bwignore [(ngModel)]="editPass" placeholder="New password (blank keeps it)" aria-label="Camera password" />
                   @if (c.hasSubStream) {
                     <select [(ngModel)]="editQuality" aria-label="Live video quality" style="grid-column:1/-1">
                       <option value="main">Live video: full quality</option>
@@ -182,7 +182,7 @@ interface IpInfo { relay: { state: 'ready' } | { state: 'unreachable'; detail: s
                 <span></span>
               }
               <input type="text" [(ngModel)]="username" placeholder="Camera username" aria-label="Camera username" autocomplete="off" />
-              <input type="password" [(ngModel)]="password" placeholder="Camera password" aria-label="Camera password" autocomplete="new-password" (keyup.enter)="add()" />
+              <input type="text" class="secret" autocomplete="off" spellcheck="false" autocapitalize="off" data-1p-ignore data-lpignore="true" data-bwignore [(ngModel)]="password" placeholder="Camera password" aria-label="Camera password" (keyup.enter)="add()" />
               <div class="wide">
                 <button class="btn-sm btn-primary" type="button" (click)="add()" [disabled]="busy() || (byRtsp() ? !rtspUrl.trim() : !host.trim())">
                   {{ busy() ? 'Connecting…' : 'Add camera' }}

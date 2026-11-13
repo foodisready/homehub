@@ -80,3 +80,8 @@ input:focus { border-color: var(--accent); }
   margin: 0 auto;
   padding: 1.5rem 1rem;
 }
+
+/* Passwords for other services (TP-Link, Meross, Wyze, cameras) and for other people's HomeHub
+   accounts: hidden as they're typed, but not password boxes, so the browser doesn't offer to
+   save them as this site's sign-in and replace the admin's saved password. */
+input.secret { -webkit-text-security: disc; text-security: disc; }
