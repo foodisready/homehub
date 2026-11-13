@@ -299,7 +299,8 @@ export class ChatComponent implements AfterViewInit, AfterViewChecked, OnDestroy
   /**
    * The chat fills the window below the menu, so the box to type in is always
    * on screen. The menu's height varies (it wraps to two rows on narrower
-   * windows, and notices can appear above the page), so it's measured.
+   * windows, and notices can appear above the page), and phones have a tab bar
+   * at the bottom, so both are measured.
    */
   ngAfterViewInit(): void {
     this.zone.runOutsideAngular(() => {
@@ -315,7 +316,10 @@ export class ChatComponent implements AfterViewInit, AfterViewChecked, OnDestroy
     if (!el) return;
     const top = el.getBoundingClientRect().top + window.scrollY;
     const bottomGap = 24;   // the page's own bottom padding
-    const height = Math.max(300, Math.floor(window.innerHeight - top - bottomGap));
+    // On phones the tab bar is fixed over the bottom of the window: the box to type in goes above it.
+    const tabs = document.querySelector('nav.tabs');
+    const tabBar = tabs && getComputedStyle(tabs).display !== 'none' ? tabs.getBoundingClientRect().height : 0;
+    const height = Math.max(240, Math.floor(window.innerHeight - top - bottomGap - tabBar));
     if (el.style.height !== `${height}px`) el.style.height = `${height}px`;
   }
 

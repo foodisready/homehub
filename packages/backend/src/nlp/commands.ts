@@ -106,6 +106,26 @@ export function parseCameraCommand(text: string): PowerCommand | null {
 }
 
 /**
+ * "Open the garage door", "close the garage", "shut the garage door". Only garage
+ * door openers open and close (on is open), so a name that isn't one is left for the model.
+ */
+export function parseDoorCommand(text: string): PowerCommand | null {
+  const match = cleanUp(text).match(/^(open|close|shut)\s+(?:up\s+|down\s+)?(.+?)$/);
+  if (!match) return null;
+  return { name: match[2], state: match[1] === 'open' };
+}
+
+/** A garage door opener: the only Meross devices HomeHub supports. */
+export const isGarageDoor = (device: { driver_type?: string | null }) => device.driver_type === 'meross';
+
+/** "Closing Garage Left." A door takes a while to move, and its sensor says so only once it's down. */
+function doorReply(result: { response: string; actions: ActionTaken[] }, state: boolean) {
+  const moved = result.actions.filter((a) => (a.result as { success?: boolean } | undefined)?.success).map((a) => String(a.args.alias));
+  if (!moved.length || moved.length !== result.actions.length) return result;
+  return { ...result, response: `${state ? 'Opening' : 'Closing'} ${joinNames(moved)}.` };
+}
+
+/**
  * "The cameras", "all cameras", "every camera", "my cams": every camera,
  * unless a device or room has that very name.
  */
@@ -171,6 +191,26 @@ export async function runGroupCommand(
   ].filter(Boolean).join(' ');
   return { response, actions };
 }
+
+/** Opens or closes the garage doors a name means; anything else is left for the model. */
+async function runDoorCommand(command: PowerCommand): Promise<{ response: string; actions: ActionTaken[] } | null> {
+  const group = (findDeviceGroup(command.name) as unknown as PowerDevice[]).filter(isGarageDoor);
+  if (group.length) {
+    if (command.state && group.every((d) => !assistantMaySwitch(d, true))) return { response: DOOR_OPEN_REFUSED, actions: [] };
+    return doorReply(await runGroupCommand(group, command), command.state);
+  }
+  const match = findDeviceByName(command.name);
+  if ('error' in match) {
+    return match.candidates ? { response: `Which one do you mean: ${match.candidates.join(', ')}?`, actions: [] } : null;
+  }
+  const device = match.device as unknown as PowerDevice;
+  if (!isGarageDoor(device)) return null;
+  if (command.state && !assistantMaySwitch(device, true)) return { response: DOOR_OPEN_REFUSED, actions: [] };
+  return doorReply(await runGroupCommand([device], command), command.state);
+}
+
+/** Why a garage door wasn't opened: closing is fine by voice or Chat, opening only from the dashboard. */
+export const DOOR_OPEN_REFUSED = "For safety, I won't open a garage door from here. Use its tile on the dashboard. I can close it.";
 
 type SceneAction = PowerDevice & { scene_state: number };
 
@@ -255,8 +295,10 @@ export async function runPowerCommand(
   if (namedScene) return runScene(namedScene);
 
   const cameraCommand = parseCameraCommand(text);
-  const command = cameraCommand ?? parsePowerCommand(text);
+  const doorCommand = cameraCommand ? null : parseDoorCommand(text);
+  const command = cameraCommand ?? doorCommand ?? parsePowerCommand(text);
   if (!command) return null;
+  if (doorCommand) return runDoorCommand(doorCommand);
 
   const cameras = findCameras(command.name);
   let group = cameras.length ? cameras : findDeviceGroup(command.name) as unknown as PowerDevice[];

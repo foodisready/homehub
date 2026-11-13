@@ -131,6 +131,47 @@ describe('chat commands', () => {
     assert.equal(commands.formatDuration(150), '2 hours 30 minutes');
   });
 
+  describe('garage doors', () => {
+    before(async () => {
+      const { getDriver } = await import('../drivers/registry');
+      getDriver('meross').setPower = async (ip: string, state: boolean) => { calls.push({ ip, state }); };
+      db.prepare("INSERT INTO devices (alias, ip, driver_type, nicknames, room) VALUES ('Garage Left', '10.0.0.40', 'meross', '[\"Garage doors\"]', 'Garage')").run();
+      db.prepare("INSERT INTO devices (alias, ip, room) VALUES ('Garage light', '10.0.0.41', 'Garage')").run();
+    });
+    after(() => { db.prepare("DELETE FROM devices WHERE alias IN ('Garage Left', 'Garage light')").run(); });
+
+    it('closes the garage door without the model', async () => {
+      // From the Pi, 2026-11-13: "Close garage door" went to the model, which picked a camera.
+      const result = await commands.runPowerCommand('Close garage door');
+      assert.equal(result?.response, 'Closing Garage Left.');
+      assert.deepEqual(calls, [{ ip: '10.0.0.40', state: false }]);
+    });
+
+    it('closes it by its room, and nothing else in the room', async () => {
+      const result = await commands.runPowerCommand('close the garage');
+      assert.equal(result?.response, 'Closing Garage Left.');
+      assert.deepEqual(calls, [{ ip: '10.0.0.40', state: false }]);
+    });
+
+    it('never opens it: that stays on the dashboard', async () => {
+      assert.equal((await commands.runPowerCommand('open the garage door'))?.response, commands.DOOR_OPEN_REFUSED);
+      assert.equal((await commands.runPowerCommand('open the garage'))?.response, commands.DOOR_OPEN_REFUSED);
+      assert.match((await commands.runPowerCommand('turn on garage left'))!.response, /protected/);
+      assert.deepEqual(calls, []);
+    });
+
+    it('reads shut as close', async () => {
+      await commands.runPowerCommand('shut the garage door');
+      assert.deepEqual(calls, [{ ip: '10.0.0.40', state: false }]);
+    });
+
+    it('leaves open or close of anything else to the model', async () => {
+      assert.equal(await commands.runPowerCommand('close the kitchen lights'), null);
+      assert.equal(await commands.runPowerCommand('open the garage light'), null);
+      assert.deepEqual(calls, []);
+    });
+  });
+
   describe('runPowerCommand', () => {
     it('turns a device on with a timer and no model', async () => {
       const result = await commands.runPowerCommand('turn on my office lamp and leave it on for an hour');

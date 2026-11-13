@@ -92,7 +92,7 @@ If Discover doesn't find it, HomeHub tells you which openers on your Meross acco
 
 HomeHub keeps only the key that Meross returns, not your password, plus a sign-in token it uses to read device names. The opener is then controlled over your home network, without the internet. The key works for every Meross device on that account.
 
-Garage doors are always protected. The dashboard shows **Open** or **Closed** and asks you to confirm, and Chat and voice can't switch them. While the door is closing, it still shows **Open** until it's all the way down, which takes about 25 seconds to update.
+Garage doors are always protected. The dashboard shows **Open** or **Closed** and asks you to confirm. Chat and voice can close one ("close the garage door", "đóng cửa ga-ra") but never open it, since opening one by mistake leaves the house open. While the door is closing, it still shows **Open** until it's all the way down, which takes about 25 seconds to update.
 
 ### Matter devices
 
@@ -374,7 +374,7 @@ A light on a keep-on timer stays on, and protected devices can't be used. If a s
 
 Marking a device as protected stops Chat, voice and AI assistants from switching it, and the dashboard asks you to confirm before switching it. Open **Settings → Devices**, select **Edit**, and tick **Don't let Chat or AI assistants switch this device**.
 
-Garage doors, devices with "valve" in their name, and devices used for automatic water shutoff are always protected. Protected devices can still be switched from their dashboard tile.
+Garage doors, devices with "valve" in their name, and devices used for automatic water shutoff are always protected. Protected devices can still be switched from their dashboard tile. Two safe directions are allowed by Chat and voice: closing a garage door, and resuming a paused camera.
 
 ## Backups
 

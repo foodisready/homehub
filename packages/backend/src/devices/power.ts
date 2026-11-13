@@ -113,6 +113,8 @@ const ALWAYS_PROTECTED_DRIVERS = new Set(['meross', 'wyze']);
 
 /** Protected devices that Chat, voice and AI assistants may still turn ON: resuming a camera is safe. */
 const ASSISTANT_MAY_TURN_ON = new Set(['wyze']);
+/** And ones they may still turn OFF: closing a garage door is safe, opening one isn't. */
+const ASSISTANT_MAY_TURN_OFF = new Set(['meross']);
 
 export function isProtectedDevice(
   device: Pick<PowerDevice, 'id' | 'alias' | 'is_protected'> & { driver_type?: string },
@@ -137,7 +139,8 @@ export function assistantMaySwitch(
   on: boolean,
 ): boolean {
   if (!isProtectedDevice(device)) return true;
-  return on && !!device.driver_type && ASSISTANT_MAY_TURN_ON.has(device.driver_type) && device.is_protected !== 1;
+  if (!device.driver_type || device.is_protected === 1) return false;
+  return (on ? ASSISTANT_MAY_TURN_ON : ASSISTANT_MAY_TURN_OFF).has(device.driver_type);
 }
 
 const unreachable = new Set<number>();
