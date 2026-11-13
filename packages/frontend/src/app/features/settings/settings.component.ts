@@ -234,6 +234,7 @@ const DRIVER_LABEL: Record<string, string> = {
     .discover-key { min-width:150px; }
     .discover-key input { font-size:0.8rem; padding:0.25rem 0.5rem; width:100%; }
     .discover-key-label { font-size:0.72rem; color:var(--text-muted); display:block; margin-bottom:2px; }
+    .discover-login-note { flex-basis:100%; margin:0.2rem 0 0; font-size:0.78rem; color:var(--text-muted); }
     .discover-ip    { font-size:0.78rem; color:var(--text-muted); white-space:nowrap; }
     .discover-model { font-size:0.72rem; color:var(--text-muted); white-space:nowrap; }
     .discover-footer { display:flex; align-items:center; justify-content:space-between; margin-top:0.5rem; }
@@ -450,6 +451,15 @@ const DRIVER_LABEL: Record<string, string> = {
                       @if (d.needsLogin && d.driverType === 'meross') {
                         <span class="discover-key-label">Sign in under Integrations → Meross, then Discover again</span>
                       } @else if (d.needsLogin) {
+                        @if (d.driverType === 'kasa') {
+                          <p class="discover-login-note">
+                            @if (kasaUsername) {
+                              Your saved TP-Link login didn't work on this plug. Enter the current password for the account it was set up with in the Kasa app; it replaces the saved login for every plug.
+                            } @else {
+                              This plug needs the TP-Link login it was set up with in the Kasa app. It's saved for every plug that needs one.
+                            }
+                          </p>
+                        }
                         <div class="discover-key">
                           <span class="discover-key-label">{{ d.driverType === 'kasa' ? 'TP-Link email' : 'Username' }}</span>
                           <input type="text" [(ngModel)]="d.pendingUser" autocomplete="off" />
@@ -1091,7 +1101,7 @@ export class SettingsComponent implements OnInit, OnDestroy {
   switchingId = signal<number | null>(null);
   private stopWatchingDevices?: () => void;
   private stopWatchingOnline?: () => void;
-  private kasaUsername = '';
+  protected kasaUsername = '';
   deviceErr = signal(false);
 
   // User editing
@@ -1616,7 +1626,12 @@ export class SettingsComponent implements OnInit, OnDestroy {
         const existingIps = new Set(this._devices().map((d) => d.ip));
         const newDevices  = found
           .filter((f) => !f.moved && !existingIps.has(f.ip))
-          .map((f) => ({ ...f, pendingAlias: f.alias && f.alias !== f.ip ? f.alias : '' }));
+          .map((f) => ({
+            ...f,
+            pendingAlias: f.alias && f.alias !== f.ip ? f.alias : '',
+            // A Kasa plug that refused the saved login: start from the saved email, so only the password is typed.
+            ...(f.needsLogin && f.driverType === 'kasa' && this.kasaUsername ? { pendingUser: this.kasaUsername } : {}),
+          }));
         this._movedDevices.set(moved);
         if (moved.length === 0 && newDevices.length === 0) {
           this.discoverMsg.set(`Found ${found.length} device(s) — all already registered.`);
