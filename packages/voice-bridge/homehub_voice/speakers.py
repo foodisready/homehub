@@ -13,7 +13,7 @@ from aioesphomeapi.model import VoiceAssistantEventType as E
 
 from .config import Speaker
 from .endpoint import MAX_S, Endpointer, loudness
-from .pipeline import Answer
+from .pipeline import Answer, wake_language
 
 log = logging.getLogger('homehub-voice')
 
@@ -82,7 +82,7 @@ class SpeakerLink:
     def __init__(
         self,
         speaker: Speaker,
-        answer: Callable[[bytes, bool, str | None], Answer],
+        answer: Callable[[bytes, bool, str | None, str | None], Answer],
         speak: Callable[[str, str, str], str],
         listed: bool,
         on_change: Callable[[], None] = lambda: None,
@@ -100,8 +100,8 @@ class SpeakerLink:
         self.connected = False
         self.usable = True  # False once it turns out not to be a speaker
         self.on_change = on_change
-        # The device this speaker was just asked "on or off?" about, and when.
-        self.asked: tuple[str, float] | None = None
+        # The device this speaker was just asked "on or off?" about, when, and in which language.
+        self.asked: tuple[str, float, str] | None = None
 
     def _set_connected(self, value: bool) -> None:
         if value != self.connected:
@@ -195,9 +195,12 @@ class SpeakerLink:
                     log.info('%s #%d (%s): another speaker heard the same command louder, so it answers', self.name, run.n, run.wake or 'no wake word')
                     return
                 # A question asked lately is answered by this command, or forgotten.
-                asked = self.asked[0] if self.asked and time.monotonic() - self.asked[1] <= FOLLOW_UP_S else None
+                recent = self.asked if self.asked and time.monotonic() - self.asked[1] <= FOLLOW_UP_S else None
                 self.asked = None
-                a = await loop.run_in_executor(None, self.answer, bytes(run.listen.audio), run.listen.spoke, asked)
+                asked = recent[0] if recent else None
+                # The answer to a question is in the question's language; otherwise the wake word's, if it says.
+                prefer = recent[2] if recent else wake_language(run.wake)
+                a = await loop.run_in_executor(None, self.answer, bytes(run.listen.audio), run.listen.spoke, asked, prefer)
                 # No words at all: most often the wake word heard in a noise or a conversation, so the
                 # speaker goes quiet instead of saying "Sorry, I didn't hear anything" to nobody.
                 if not a.heard.strip(' 。，.,!?！？') and not a.handled:
@@ -214,7 +217,7 @@ class SpeakerLink:
                 url = await loop.run_in_executor(None, self.speak, a.reply, self.speaker.host, a.lang)
                 event(E.VOICE_ASSISTANT_TTS_END, {'url': url})
                 if follow_up:
-                    self.asked = (follow_up, time.monotonic())
+                    self.asked = (follow_up, time.monotonic(), a.lang if isinstance(getattr(a, 'lang', None), str) else 'en')
                 passes = getattr(a, 'passes', 0)
                 log.info(
                     '%s #%d (%s) heard %r -> %r (%s; speech %.1fs of which voiced %.1fs, loudness %.3f-%.3f, recognise %.2fs%s, HomeHub %.2fs, reply ready %.2fs after speech ended)',

@@ -93,6 +93,12 @@ class ReadingTest(unittest.TestCase):
         self.assertEqual(read('BẮT ĐÈN BẾP'), ('ask', 'đèn bếp'))
         self.assertTrue(vi.is_vietnamese('BẮT ĐÈN BẾP', NAMES, SCENES, GROUPS))
 
+    def test_a_final_c_for_t_is_still_the_verb(self):
+        # From a tablet across the room, 2026-11-13: "bật đèn nhà bếp" heard as "BẬC ĐÈN NHÀ BẾP".
+        self.assertEqual(read('BẬC ĐÈN NHÀ BẾP'), ('on', 'đèn nhà bếp'))
+        self.assertEqual(read('TẮC ĐÈN BẾP'), ('off', 'đèn bếp'))
+        self.assertEqual(vi.verb_alone('BẬC'), 'on')
+
     def test_a_word_more_or_less_is_another_room(self):
         names = ['đèn phòng ngủ lớn', 'đèn bếp']
         self.assertIsNone(vi.parse('tắt đèn phòng ngủ', names, [], [[n] for n in names]))
@@ -283,6 +289,48 @@ class PipelineTest(unittest.TestCase):
         hub.sent.clear()
         c = answer(b'\0' * 32000, True, FakeWhisper(), hub, None, asked=a.asked, vi_ears=FakeVietnamese('NHÀ BẾP'))
         self.assertEqual(hub.sent, ['turn on đèn nhà bếp for 30 minutes'])
+
+    def test_light_heard_as_lien_asks_which(self):
+        # From the tablet, 2026-11-13: "mở đèn văn phòng mười phút" heard as "MỞ LIỀN MƯỜI PHÚT".
+        hub = FakeHomeHub()
+        a = answer(b'\0' * 32000, True, FakeWhisper(), hub, None, vi_ears=FakeVietnamese('MỞ LIỀN MƯỜI PHÚT'))
+        self.assertEqual((a.reply, hub.sent), ('Mở đèn nào?', []))
+        b = answer(b'\0' * 32000, True, FakeWhisper(), hub, None, asked=a.asked, vi_ears=FakeVietnamese('VĂN PHÒNG'))
+        self.assertEqual(hub.sent, ['turn on đèn văn phòng for 10 minutes'])
+        # Only words that sound like "đèn": "mở tiền" is not a light.
+        self.assertIsNone(vi.parse('MỞ TIỀN', NAMES, SCENES, GROUPS))
+
+    def test_woken_in_vietnamese_is_answered_in_vietnamese(self):
+        # From the tablet, 2026-11-13: woken with "Xin chào", the words unclear, and answered in Cantonese.
+        hub = FakeHomeHub(handled=False)
+        yue = FakeCantonese('yue', '梅福。')
+        a = answer(b'\0' * 32000, True, FakeWhisper(), hub, yue, vi_ears=FakeVietnamese('MỞ ĐÈN DÂN PHỤC'), prefer='vi')
+        self.assertEqual((a.lang, a.reply), ('vi', vi.NOT_UNDERSTOOD))
+        b = answer(b'\0' * 32000, True, FakeWhisper(), hub, yue, vi_ears=FakeVietnamese('DÂN PHỤC'), prefer='vi')
+        self.assertEqual(b.lang, 'vi')
+        # Without the Vietnamese wake word, it's Cantonese's to answer, as before.
+        c = answer(b'\0' * 32000, True, FakeWhisper(), hub, yue, vi_ears=FakeVietnamese('DÂN PHỤC'))
+        self.assertEqual(c.lang, 'yue')
+        # English after "Xin chào" still works, when SenseVoice is sure it's English.
+        hub = FakeHomeHub()
+        d = answer(b'\0' * 32000, True, FakeWhisper(), hub, FakeCantonese('en', 'Turn on the kitchen lights.'),
+                   vi_ears=FakeVietnamese('TÂN ƠN ĐỜ KÍT CHEN'), prefer='vi')
+        self.assertEqual((d.lang, hub.sent), ('en', ['Turn on the kitchen lights.']))
+        # Nothing heard at all is not answered in Vietnamese for the sake of it.
+        e = answer(b'\0' * 32000, True, FakeWhisper(''), FakeHomeHub(), None, vi_ears=FakeVietnamese(''), prefer='vi')
+        self.assertEqual(e.lang, 'en')
+
+    def test_answer_to_a_vietnamese_question_stays_vietnamese(self):
+        # "Bật hay tắt đèn nhà bếp?", then "bật" taken for Cantonese "千就".
+        hub = FakeHomeHub()
+        yue = FakeCantonese('yue', '千就。')
+        a = answer(b'\0' * 32000, True, FakeWhisper(), hub, yue, asked='đèn nhà bếp', vi_ears=FakeVietnamese('BẬC'), prefer='vi')
+        self.assertEqual((a.reply, hub.sent), ('Đã bật đèn nhà bếp.', ['turn on đèn nhà bếp']))
+        # A Cantonese question's answer isn't read as Vietnamese.
+        hub = FakeHomeHub()
+        b = answer(b'\0' * 32000, True, FakeWhisper(), hub, FakeCantonese('yue', '開。'), asked='廚房燈',
+                   vi_ears=FakeVietnamese('KHAI'), prefer='yue')
+        self.assertEqual((b.lang, hub.sent), ('yue', ['turn on 廚房燈']))
 
     def test_full_command_with_how_long(self):
         self.assertEqual(vi.parse('MỞ ĐÈN VÀ PEP BA MƯƠI PHÚT', NAMES, SCENES, GROUPS).homehub_text, 'turn on đèn nhà bếp for 30 minutes')

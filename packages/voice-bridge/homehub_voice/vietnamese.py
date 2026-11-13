@@ -26,9 +26,11 @@ from dataclasses import dataclass
 ON_VERBS = {'bật': 'bật', 'mở': 'mở'}
 OFF_VERBS = {'tắt': 'tắt', 'đóng': 'đóng'}
 # Heard for "bật" or "tắt" but with the wrong accent or letter: could be either, so ask.
-UNSURE_VERBS = {'bắt', 'bất', 'bậc', 'bặt', 'bạt', 'bát', 'tất', 'tặt', 'tạt', 'tát', 'tắc', 'tác'}
-# The same verb with an accent misheard, where only one verb sounds like it ("mỡ" for "mở").
-NEAR_VERBS = {'mỡ': 'mở', 'mơ': 'mở', 'mổ': 'mở', 'mỏ': 'mở', 'đông': 'đóng', 'đồng': 'đóng', 'đong': 'đóng'}
+UNSURE_VERBS = {'bắt', 'bất', 'bặt', 'bạt', 'bát', 'tất', 'tặt', 'tạt', 'tát', 'tác'}
+# The same verb with an accent misheard, where only one verb sounds like it ("mỡ" for "mở"). A final
+# c for t, with the tone right, is only ever the one verb: a tablet across the room gave "bậc đèn".
+NEAR_VERBS = {'mỡ': 'mở', 'mơ': 'mở', 'mổ': 'mở', 'mỏ': 'mở', 'đông': 'đóng', 'đồng': 'đóng', 'đong': 'đóng',
+              'bậc': 'bật', 'tắc': 'tắt'}
 # Before the verb: "làm ơn", "hãy", "giúp tôi".
 POLITE = [('làm', 'ơn'), ('xin',), ('hãy',), ('giúp', 'tôi'), ('giúp', 'em'), ('giúp', 'con'), ('giúp',)]
 # Between the verb and the name: "tắt hết đèn", "bật giúp đèn", "bật cho tôi đèn".
@@ -210,6 +212,12 @@ def _aligned(heard: list[str], name: list[str]) -> float:
     return max(0.0, best[n][m] / max(n, m))
 
 
+def _sounds_like_den(word: str) -> bool:
+    """"đèn", or a word speech recognition writes for it from far away: "nền", "liền"."""
+    initial, rhyme = _split(plain(word))
+    return rhyme == 'en' or (rhyme == 'ien' and initial in ('d', 'l', 'n'))
+
+
 def _core(s: str) -> str:
     """The name without a leading "đèn", "cửa" or "cái", which every light or door shares. A first
     word that rhymes with "đèn" counts as it: speech recognition wrote "nền nhà bếp" for "đèn nhà bếp"."""
@@ -295,9 +303,10 @@ def parse(text: str, names: list[str], scenes: list[str] | None = None,
     ws, minutes = take_duration(words(text))
     action, verb, rest = read_verb(ws)
     rest = _tidy_name(rest)
-    if action in ('on', 'off') and [plain(w) for w in rest] in (['den'], ['cua']):
+    if action in ('on', 'off') and len(rest) == 1 and (plain(rest[0]) == 'cua' or _sounds_like_den(rest[0])):
         # "Bật đèn" with the name lost, often cut off or said too quietly: ask which.
-        return Command('which', rest[0], 1.0, minutes if action == 'on' else None, verb or ('bật' if action == 'on' else 'tắt'))
+        kind = 'cửa' if plain(rest[0]) == 'cua' else 'đèn'
+        return Command('which', kind, 1.0, minutes if action == 'on' else None, verb or ('bật' if action == 'on' else 'tắt'))
     if action and rest:
         name, score, runner = best_name(' '.join(rest), usable, groups)
         if name and score >= MATCH and score - runner >= MARGIN:

@@ -69,20 +69,28 @@ ON_OR_OFF = re.compile(r'^\s*(?:(?:turn|switch)\s+(?:it\s+|them\s+)?)?(on|off)(?
 CANTONESE = {'yue', 'zh'}
 
 
+def wake_language(wake: str) -> str | None:
+    """The language a wake word is in, when it says: "Xin chào" is Vietnamese."""
+    return 'vi' if 'xin chao' in vi.plain(wake or '') else None
+
+
 def answer(audio: bytes, spoke: bool, listener: Transcriber, homehub: Commander,
            ears: CantoneseEars | None = None, asked: str | None = None,
-           vi_ears: VietnameseEars | None = None) -> Answer:
-    """asked: the device HomeHub just asked "on or off?" about, if any, so "on" alone answers it."""
+           vi_ears: VietnameseEars | None = None, prefer: str | None = None) -> Answer:
+    """asked: the device HomeHub just asked "on or off?" about, if any, so "on" alone answers it.
+    prefer: the language the speaker was woken in ("Xin chào"), or the question being answered
+    was asked in. Misheard words in it are answered in it, not taken for another language."""
     if not spoke:
         return Answer('', NOTHING_HEARD, False)
     t0 = time.monotonic()
     which = asked if asked and asked.startswith(vi.WHICH_PREFIX) else None
     if which:
         asked = None   # not a device's name: English and Cantonese have nothing to answer
-    if vi_ears is not None:
+    heard_vi = ''
+    if vi_ears is not None and (prefer != 'yue' or which):
         # First, since SenseVoice takes most Vietnamese for Cantonese. It takes about a third of a
         # second on a Pi, and what it writes for English or Cantonese is never a Vietnamese command.
-        heard = vi_ears.transcribe(audio)
+        heard = heard_vi = vi_ears.transcribe(audio)
         if which and has_words(heard):
             command = vi.answer_which(which, heard, homehub.names, getattr(homehub, 'groups', None))
             if command is not None:
@@ -90,9 +98,15 @@ def answer(audio: bytes, spoke: bool, listener: Transcriber, homehub: Commander,
         if vi.is_vietnamese(heard, homehub.names, getattr(homehub, 'scenes', homehub.names),
                             getattr(homehub, 'groups', None), asked):
             return answer_vietnamese(heard, homehub, t0, asked)
+    # Woken in Vietnamese, or answering a Vietnamese question, but the words weren't clear: answer
+    # in Vietnamese ("Xin lỗi, tôi không hiểu"), not in the Cantonese SenseVoice would guess. Only
+    # words SenseVoice is sure are English go on, for someone who said "Xin chào" then English.
+    in_vietnamese = (prefer == 'vi' or which) and has_words(heard_vi)
     quick = ''
     if ears is not None:
         lang, quick = ears.hear(audio)
+        if in_vietnamese and lang != 'en':
+            return answer_vietnamese(heard_vi, homehub, t0, asked)
         if lang in CANTONESE:
             return answer_cantonese(audio, ears, homehub, t0, asked, quick)
     # English. SenseVoice has already heard the words, in about a second; Whisper takes about ten
@@ -104,6 +118,8 @@ def answer(audio: bytes, spoke: bool, listener: Transcriber, homehub: Commander,
             first = english(text, homehub, asked, retry=True)
             if first[1] is None or first[1].handled:
                 return finish(first, time.monotonic() - t0)
+    if in_vietnamese:
+        return answer_vietnamese(heard_vi, homehub, t0, asked)
     text = listener.transcribe(audio, homehub.names)
     if not text.strip(' .,!?'):
         return Answer('', NOT_CAUGHT, False, time.monotonic() - t0)

@@ -261,7 +261,7 @@ class SpeakerLinkTest(unittest.IsolatedAsyncioTestCase):
     async def test_one_command(self):
         heard = []
 
-        def answer_fn(audio, spoke, asked=None):
+        def answer_fn(audio, spoke, asked=None, prefer=None):
             heard.append((len(audio), spoke))
             return mock.Mock(heard='turn on office lamp', reply='Office Lamp is on.', handled=True, stt_s=0.1, homehub_s=0.1, lang='en', asked=None)
 
@@ -289,9 +289,9 @@ class SpeakerLinkTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('continue_conversation', dict(c.events)['VOICE_ASSISTANT_INTENT_END'])
         link.task.cancel()
 
-    async def say(self, c, n):
+    async def say(self, c, n, wake=None):
         c.events.clear()
-        await c.handlers['handle_start'](f'conv{n}', 0, None, None)
+        await c.handlers['handle_start'](f'conv{n}', 0, None, wake)
         for ch in chunks(tone(0.5, False) + tone(1, True) + tone(2, False)):
             await c.handlers['handle_audio'](ch, None)
         for _ in range(200):
@@ -299,12 +299,27 @@ class SpeakerLinkTest(unittest.IsolatedAsyncioTestCase):
             if c.events and c.events[-1][0] == 'VOICE_ASSISTANT_RUN_END':
                 return dict(c.events)
 
+    async def test_a_vietnamese_wake_word_asks_for_vietnamese(self):
+        langs = []
+
+        def answer_fn(audio, spoke, asked=None, prefer=None):
+            langs.append(prefer)
+            return mock.Mock(heard='bật đèn bếp', reply='Đã bật đèn bếp.', handled=True, stt_s=0, homehub_s=0, lang='vi', asked=None)
+
+        link, c = await self.connected_link(answer_fn)
+        await self.say(c, 1, 'Xin Chào')
+        await self.say(c, 2, 'Okay Nabu')
+        await self.say(c, 3)
+        self.assertEqual(langs, ['vi', None, None])
+        link.task.cancel()
+
     async def test_a_question_keeps_listening_and_its_answer_gets_the_name(self):
         from homehub_voice import speakers
-        given = []
+        given, langs = [], []
 
-        def answer_fn(audio, spoke, asked=None):
+        def answer_fn(audio, spoke, asked=None, prefer=None):
             given.append(asked)
+            langs.append(prefer)
             if asked is None:   # the light's name alone: ask
                 return mock.Mock(heard='廚房燈', reply='你想開定熄廚房燈？', handled=False, stt_s=0, homehub_s=0, lang='yue', asked='廚房燈')
             return mock.Mock(heard='開', reply='開咗廚房燈。', handled=True, stt_s=0, homehub_s=0, lang='yue', asked=None)
@@ -314,18 +329,19 @@ class SpeakerLinkTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(first['VOICE_ASSISTANT_INTENT_END'].get('continue_conversation'), '1')
         second = await self.say(c, 2)
         self.assertEqual(given, [None, '廚房燈'])   # the follow-up knows what was asked
+        self.assertEqual(langs, [None, 'yue'], 'and in which language')
         self.assertNotIn('continue_conversation', second['VOICE_ASSISTANT_INTENT_END'])
         await self.say(c, 3)   # so it asks again
         self.assertEqual(given[-1], None, 'answered once, then forgotten')
 
         # Too late: the question is forgotten.
-        link.asked = (link.asked[0], link.asked[1] - speakers.FOLLOW_UP_S - 1)
+        link.asked = (link.asked[0], link.asked[1] - speakers.FOLLOW_UP_S - 1, link.asked[2])
         await self.say(c, 4)
         self.assertEqual(given[-1], None)
         link.task.cancel()
 
     async def test_woken_by_a_noise_it_stays_quiet(self):
-        def answer_fn(audio, spoke, asked=None):
+        def answer_fn(audio, spoke, asked=None, prefer=None):
             return mock.Mock(heard='', reply="Sorry, I didn't catch that.", handled=False, stt_s=0, homehub_s=0, lang='en', asked=None)
 
         link, c = await self.connected_link(answer_fn)
@@ -336,7 +352,7 @@ class SpeakerLinkTest(unittest.IsolatedAsyncioTestCase):
         link.task.cancel()
 
     async def test_failure_still_ends_run(self):
-        def boom(audio, spoke, asked=None):
+        def boom(audio, spoke, asked=None, prefer=None):
             raise RuntimeError('whisper crashed')
 
         link, c = await self.connected_link(boom)
@@ -356,7 +372,7 @@ class SpeakerLinkTest(unittest.IsolatedAsyncioTestCase):
 
         answered = []
 
-        def answer_fn(audio, spoke, asked=None):
+        def answer_fn(audio, spoke, asked=None, prefer=None):
             answered.append(len(audio))
             return mock.Mock(heard='turn on office lamp', reply='Office Lamp is on.', handled=True, stt_s=0, homehub_s=0, lang='en', asked=None)
 
