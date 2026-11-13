@@ -317,13 +317,13 @@ Matter devices store `ip` as `matter:<node>:<endpoint>`, and `driverConfig` as `
 ---
 
 ### `GET /api/kasa/login` — `admin` only
-Returns `{ "username": string | null }`. The password is never returned.
+Returns `{ "username": string | null, "count": number }`: the newest login's email, and how many logins are kept. The password is never returned.
 
 ### `PUT /api/kasa/login` — `admin` only
-Body: `{ "username": string, "password": string }`. Checks the login on a plug, then saves it for every Kasa plug that needs a login. Returns `{ username, verified }`, where `verified` is false if no plug answered. Returns `422` with `KASA_LOGIN_REJECTED` if a plug refuses it, and nothing is saved. HomeHub stores hashes of the login, not the password.
+Body: `{ "username": string, "password": string, "ip"?: string }`. Checks the login on the plug at `ip` (only an address HomeHub knows as a plug that needs a login), or else on each such plug until one accepts it, then saves it as the newest. Up to four older logins are kept and still tried, newest first, because plugs keep the account password they last synced and can disagree. Returns `{ username, verified }`, where `verified` is false if no plug answered. Returns `422` with `KASA_LOGIN_REJECTED` if the plug (or every plug that answered) refuses it, and nothing is saved. HomeHub stores hashes of the logins, not the passwords. When connecting, it also tries the logins a plug not yet linked to an account uses.
 
 ### `DELETE /api/kasa/login` — `admin` only
-Forgets the saved login.
+Forgets every saved login.
 
 ### `/api/motion` — `admin` only
 Motion rules turn a light off after a room has had no motion for `offAfterMinutes`, and turn it on when motion starts if `turnOnWithMotion` is true. A rule does nothing until its sensor first reports.

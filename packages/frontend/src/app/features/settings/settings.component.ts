@@ -455,7 +455,7 @@ const DRIVER_LABEL: Record<string, string> = {
                         @if (d.driverType === 'kasa') {
                           <p class="discover-login-note">
                             @if (kasaUsername) {
-                              Your saved TP-Link login didn't work on this plug. Enter the current password for the account it was set up with in the Kasa app; it replaces the saved login for every plug.
+                              Your saved TP-Link logins didn't work on this plug. Enter the password this plug's Kasa account has; it's checked on this plug and added to the saved ones, so your other plugs keep working.
                             } @else {
                               This plug needs the TP-Link login it was set up with in the Kasa app. It's saved for every plug that needs one.
                             }
@@ -1441,9 +1441,10 @@ export class SettingsComponent implements OnInit, OnDestroy {
   }
 
   /** The plug checks the login before it's saved. Only hashes of it are stored. */
-  private saveKasaLogin(username: string, password: string, onSaved: () => void, onFailed: (message: string) => void): void {
+  private saveKasaLogin(username: string, password: string, ip: string, onSaved: () => void, onFailed: (message: string) => void): void {
     this.kasaLoginSaving.set(true);
-    this.http.put<{ username: string; verified: boolean }>('/api/kasa/login', { username, password }).subscribe({
+    // Checked on this plug: plugs can hold different passwords for the same account.
+    this.http.put<{ username: string; verified: boolean }>('/api/kasa/login', { username, password, ip }).subscribe({
       next: (login) => {
         this.kasaLoginSaving.set(false);
         this.kasaUsername = login.username;
@@ -1458,7 +1459,7 @@ export class SettingsComponent implements OnInit, OnDestroy {
 
   saveEditedKasaLogin(): void {
     this.kasaLoginMsg.set('');
-    this.saveKasaLogin(this.editKasaUser.trim(), this.editKasaPass, () => {
+    this.saveKasaLogin(this.editKasaUser.trim(), this.editKasaPass, this.editIp.trim(), () => {
       this.editKasaPass = '';
       this.kasaLoginMsg.set('Login saved');
       this.kasaLoginErr.set(false);
@@ -1469,7 +1470,7 @@ export class SettingsComponent implements OnInit, OnDestroy {
   }
 
   saveDiscoveredKasaLogin(d: DiscoveredDevice): void {
-    this.saveKasaLogin(d.pendingUser?.trim() ?? '', d.pendingPass ?? '', () => this.discover(), (message) => {
+    this.saveKasaLogin(d.pendingUser?.trim() ?? '', d.pendingPass ?? '', d.ip, () => this.discover(), (message) => {
       this.discoverMsg.set(message);
       this.discoverErr.set(true);
     });

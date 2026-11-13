@@ -177,9 +177,13 @@ describe('KLAP plugs', () => {
   it('reports a wrong password as a login failure', async () => {
     const other = new FakePlug();
     const otherHost = await other.start();
+    clearLogin();
     saveLogin(makeLogin(USERNAME, 'wrong'));
-    await assert.rejects(getSysInfo(otherHost), KlapAuthError);
-    other.server.close();
+    try {
+      await assert.rejects(getSysInfo(otherHost), KlapAuthError);
+    } finally {
+      other.server.close();
+    }
   });
 
   it('reaches a plug not yet linked to an account, with TP-Link\'s setup login', async () => {
@@ -210,6 +214,33 @@ describe('KLAP plugs', () => {
     const freshHost = await fresh.start();
     await assert.rejects(checkLogin(freshHost, makeLogin(USERNAME, PASSWORD)), KlapAuthError);
     fresh.server.close();
+  });
+
+  it('keeps older logins, so plugs on an older password keep working', async () => {
+    const older = new FakePlug();
+    const newer = new FakePlug();
+    newer.password = 'newer-password';
+    const olderHost = await older.start();
+    const newerHost = await newer.start();
+    saveLogin(makeLogin(USERNAME, PASSWORD));
+    saveLogin(makeLogin(USERNAME, 'newer-password'));   // the newest, but the older plug holds the first
+    assert.equal(savedUsername(), USERNAME);
+    await setPower(olderHost, true);
+    await setPower(newerHost, true);
+    assert.equal(older.relay, 1);
+    assert.equal(newer.relay, 1);
+    assert.equal(older.handshakes, 1, 'one handshake tests every saved login');
+    older.server.close();
+    newer.server.close();
+  });
+
+  it('keeps a few logins, without repeats', async () => {
+    const { savedLoginCount } = await import('./klap');
+    clearLogin();
+    for (const p of ['a', 'b', 'a', 'c', 'd', 'e', 'f']) saveLogin(makeLogin(USERNAME, p));
+    assert.equal(savedLoginCount(), 5);
+    clearLogin();
+    assert.equal(savedLoginCount(), 0);
   });
 
   it('reports a missing login, after trying the setup logins', async () => {
@@ -246,6 +277,7 @@ describe('KLAP plugs', () => {
 
   it('forgets an open session when the login changes', async () => {
     await getSysInfo(host);
+    clearLogin();   // a new login alone keeps the old one too: forget it first
     saveLogin(makeLogin(USERNAME, 'wrong'));
     await assert.rejects(getSysInfo(host), KlapAuthError);
   });
@@ -302,7 +334,29 @@ describe('/api/kasa/login', () => {
   it('shows the email but never the password', async () => {
     await put({ username: USERNAME, password: PASSWORD });
     const body = await (await fetch(`${baseUrl}/login`)).text();
-    assert.equal(body, JSON.stringify({ username: USERNAME }));
+    assert.equal(body, JSON.stringify({ username: USERNAME, count: 1 }));
+  });
+
+  it('checks a login on the plug it is for, not the first that answers', async () => {
+    // From the Pi, 2026-11-13: the household's plugs held two passwords for one account, and
+    // Save login on a new plug was checked on another one, which refused it.
+    const other = new FakePlug();
+    other.password = 'newer-password';
+    const otherHost = await other.start();
+    getDb().prepare("INSERT INTO devices (alias, ip, driver_type, driver_config) VALUES ('Newer plug', ?, 'kasa', ?)")
+      .run(otherHost, JSON.stringify({ protocol: 'klap' }));
+    const response = await put({ username: USERNAME, password: 'newer-password', ip: otherHost });
+    assert.equal(response.status, 200);
+    // Without saying which plug, it's accepted if any plug takes it.
+    assert.equal((await put({ username: USERNAME, password: 'newer-password' })).status, 200);
+    assert.equal((await put({ username: USERNAME, password: 'neither' })).status, 422);
+    getDb().prepare("DELETE FROM devices WHERE alias = 'Newer plug'").run();
+    other.server.close();
+  });
+
+  it('never checks an address that is not a known plug', async () => {
+    const response = await put({ username: USERNAME, password: PASSWORD, ip: '203.0.113.9:80' });
+    assert.equal(response.status, 200, 'checked on the known plug instead');
   });
 
   it('forgets the login', async () => {

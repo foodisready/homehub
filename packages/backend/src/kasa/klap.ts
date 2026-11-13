@@ -159,18 +159,47 @@ const DEFAULT_LOGINS: KasaLogin[] = [
   makeLogin('kasa@tp-link.net', 'kasaSetup'),
 ];
 
+// Logins that worked before the newest one. Plugs keep the account password they last synced,
+// so in one home some may hold an older password than others: every one that worked is tried.
+const OLDER_KEY = 'kasa_logins_older';
+const KEEP_OLDER = 4;
+
+const sameLogin = (a: KasaLogin, b: KasaLogin) => a.username === b.username && a.hashes[2].equals(b.hashes[2]);
+
+interface StoredLogin { username: string; v1: string; v2: string }
+const toStored = (l: KasaLogin): StoredLogin => ({ username: l.username, v1: l.hashes[1].toString('hex'), v2: l.hashes[2].toString('hex') });
+const fromStored = (l: StoredLogin): KasaLogin => ({ username: l.username, hashes: { 1: Buffer.from(l.v1, 'hex'), 2: Buffer.from(l.v2, 'hex') } });
+
+function loadOlder(): KasaLogin[] {
+  const row = getDb().prepare('SELECT value FROM settings WHERE key = ?').get(OLDER_KEY) as { value: string } | undefined;
+  try {
+    const list = row ? JSON.parse(row.value) as StoredLogin[] : [];
+    return Array.isArray(list) ? list.filter((l) => l && l.username !== undefined && l.v1 && l.v2).map(fromStored) : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Saves a login as the newest. The one it replaces is kept and still tried, unless it's the same. */
 export function saveLogin(login: KasaLogin): void {
   const upsert = getDb().prepare(
     'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
   );
+  const previous = loadLogin();
+  const older = [...(previous ? [previous] : []), ...loadOlder()]
+    .filter((l, i, all) => !sameLogin(l, login) && all.findIndex((m) => sameLogin(m, l)) === i)
+    .slice(0, KEEP_OLDER);
   upsert.run(USERNAME_KEY, login.username);
   for (const { version } of HASHING) upsert.run(hashKey(version), login.hashes[version].toString('hex'));
+  upsert.run(OLDER_KEY, JSON.stringify(older.map(toStored)));
   sessions.clear();
 }
 
+/** Forgets every saved login. */
 export function clearLogin(): void {
   const remove = getDb().prepare('DELETE FROM settings WHERE key = ?');
   remove.run(USERNAME_KEY);
+  remove.run(OLDER_KEY);
   for (const { version } of HASHING) remove.run(hashKey(version));
   sessions.clear();
 }
@@ -183,6 +212,17 @@ function loadLogin(): KasaLogin | null {
   const v2 = read(hashKey(2));
   if (!username || !v1 || !v2) return null;
   return { username, hashes: { 1: Buffer.from(v1, 'hex'), 2: Buffer.from(v2, 'hex') } };
+}
+
+/** The newest login, then older ones that worked. */
+function loadLogins(): KasaLogin[] {
+  const newest = loadLogin();
+  return newest ? [newest, ...loadOlder()] : [];
+}
+
+/** How many logins are kept, the newest included: for Settings to say so. */
+export function savedLoginCount(): number {
+  return loadLogins().length;
 }
 
 export function savedUsername(): string | null {
@@ -233,12 +273,13 @@ const queues = new Map<string, Promise<unknown>>();
 async function exchange(host: string, command: string): Promise<string> {
   let session = sessions.get(host);
   if (!session || Date.now() >= session.expiresAt) {
-    const login = loadLogin();
-    // The saved login first, then the ones a plug not yet linked to an account uses.
+    const logins = loadLogins();
+    // Every saved login, newest first, then the ones a plug not yet linked to an account uses.
+    // One handshake tests them all: the plug's reply shows which, if any, it holds.
     try {
-      session = await connect(host, login ? [login, ...DEFAULT_LOGINS] : DEFAULT_LOGINS);
+      session = await connect(host, [...logins, ...DEFAULT_LOGINS]);
     } catch (err) {
-      if (!login && err instanceof KlapAuthError) throw new KlapAuthError(host, 'no TP-Link login is saved');
+      if (!logins.length && err instanceof KlapAuthError) throw new KlapAuthError(host, 'no TP-Link login is saved');
       throw err;
     }
     sessions.set(host, session);
