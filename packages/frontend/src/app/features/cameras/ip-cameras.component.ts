@@ -6,10 +6,15 @@ import { SocketService } from '../../core/socket/socket.service';
 import { CamerasStateService } from '../../core/services/cameras-state.service';
 import { AuthImgComponent } from './auth-img.component';
 import { LiveViewComponent } from './live-view.component';
+import { NO_FILTER, brandShown, cameraMatches, type CameraFilter } from './camera-filter';
 import { SecretInputDirective } from '../../shared/secret-input/secret-input.directive';
 
 export interface IpSnapshot { id: number; deviceId: number | null; camera: string; cameraName: string; trigger: 'motion' | 'manual' | 'doorbell'; sizeBytes: number; takenAt: string }
 type MotionState = 'off' | 'unsupported' | 'standby' | 'connecting' | 'watching' | 'error';
+/** What a search can find an IP camera by. */
+export const ipWords = (c: IpCamera): (string | null)[] =>
+  [c.name, c.maker, c.model, c.host, c.onvif ? 'onvif' : 'rtsp'];
+
 export interface IpCamera {
   id: number; name: string; key: string; host: string; maker: string | null; model: string | null;
   onvif: boolean; canPan: boolean; username: string; hasPassword: boolean;
@@ -77,12 +82,12 @@ interface IpInfo { relay: { state: 'ready' } | { state: 'unreachable'; detail: s
   `],
   template: `
     @if (info(); as r) {
-      @if (view() === 'cameras') {
+      @if (view() === 'cameras' && brandShown(filter(), 'ip')) {
         <!-- On the Cameras tab: what needs attention, and the cameras themselves. -->
         @if (r.relay?.state === 'unreachable') {
           <div class="note"><span>Live video from IP cameras needs the camera relay. {{ $any(r.relay).detail }}</span></div>
         }
-        @for (c of r.cameras; track c.id) {
+        @for (c of shown(); track c.id) {
           <div class="card cam">
             <app-auth-img [src]="'/api/ip-cameras/' + c.id + '/live.jpg'" [refreshSeconds]="20" [alt]="c.name"
                           failedText="No picture right now" (click)="live.set(c)" role="button" [attr.aria-label]="'Watch ' + c.name + ' live'" />
@@ -215,9 +220,14 @@ export class IpCamerasComponent implements OnInit, OnDestroy {
   readonly camerasChange = output<IpCamera[]>();
   /** Which part to show: the cameras (Cameras tab), adding them (Setup tab), or nothing (Snapshots tab). */
   readonly view = input<'cameras' | 'setup' | 'none'>('cameras');
+  /** The search and brand chosen on the Cameras tab. */
+  readonly filter = input<CameraFilter>(NO_FILTER);
+  readonly brandShown = brandShown;
 
   readonly isAdmin = computed(() => this.auth.user()?.role === 'admin');
   readonly info = signal<IpInfo | null>(null);
+  /** The cameras the filter keeps, on the Cameras tab. */
+  readonly shown = computed(() => (this.info()?.cameras ?? []).filter((c) => cameraMatches(this.filter(), 'ip', ipWords(c))));
   readonly formOpen = signal(false);
   readonly byRtsp = signal(false);
   readonly searching = signal(false);

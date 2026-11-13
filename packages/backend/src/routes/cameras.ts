@@ -11,7 +11,7 @@ import { cameraDevices, lastMotionFor, liveCameras } from '../cameras/watch';
 import { camerasElsewhere, elsewhereHint, localNetworks, noPictureHint, pictureHealth } from '../cameras/picture-status';
 import { clearPowerCache } from '../drivers/WyzeDriver';
 import { canPan, isMoving, ptz, PTZ_ACTIONS, type PtzAction } from '../cameras/ptz';
-import { signedIn as ringSignedIn } from '../ring/ring';
+import { addedCameras as ringCameras, signedIn as ringSignedIn } from '../ring/ring';
 import { cameraCount as ipCameraCount } from '../ipcam/ipcam';
 
 /**
@@ -95,8 +95,21 @@ camerasRouter.put('/settings', requireAdmin, (req: Request, res: Response) => {
   }
 });
 
-// GET /api/cameras/snapshots?deviceId=&camera=&before=&limit=
+// GET /api/cameras/summary — how many cameras of each kind, and the newest snapshot, for the Dashboard
+camerasRouter.get('/summary', (_req: Request, res: Response) => {
+  const enabled = snaps.getSettings().enabled;
+  res.json({
+    enabled,
+    wyze: cameraDevices().length,
+    ring: ringCameras().length,
+    ip: ipCameraCount(),
+    latest: enabled ? snaps.listSnapshots({ limit: 1 })[0] ?? null : null,
+  });
+});
+
+// GET /api/cameras/snapshots?deviceId=&camera=&brand=&before=&limit=
 // camera is a camera's key, such as ring-123, for cameras that aren't devices.
+// brand is wyze, ring or ip.
 camerasRouter.get('/snapshots', (req: Request, res: Response) => {
   const num = (v: unknown) => (v === undefined || v === '' ? undefined : Number(v));
   const deviceId = num(req.query.deviceId);
@@ -109,7 +122,11 @@ camerasRouter.get('/snapshots', (req: Request, res: Response) => {
   if (camera !== undefined && !/^[A-Za-z0-9._-]{1,100}$/.test(camera)) {
     return res.status(400).json({ error: 'Bad camera', code: 'VALIDATION_ERROR' });
   }
-  res.json(snaps.listSnapshots({ deviceId, camera, before, limit }));
+  const brand = req.query.brand === undefined || req.query.brand === '' ? undefined : req.query.brand;
+  if (brand !== undefined && !snaps.CAMERA_BRANDS.includes(brand as snaps.CameraBrand)) {
+    return res.status(400).json({ error: 'brand must be wyze, ring or ip', code: 'VALIDATION_ERROR' });
+  }
+  res.json(snaps.listSnapshots({ deviceId, camera, brand: brand as snaps.CameraBrand | undefined, before, limit }));
 });
 
 // GET /api/cameras/snapshots/:id/image

@@ -157,12 +157,29 @@ export function snapshotFile(id: number): string | null {
   return full.startsWith(root + path.sep) && fs.existsSync(full) ? full : null;
 }
 
-/** Newest first. `before` is a snapshot id, for paging. `camera` is a camera's key, such as ring-123. */
-export function listSnapshots(opts: { deviceId?: number; camera?: string; before?: number; limit?: number } = {}): Snapshot[] {
+export const CAMERA_BRANDS = ['wyze', 'ring', 'ip'] as const;
+export type CameraBrand = typeof CAMERA_BRANDS[number];
+
+/**
+ * Which kind of camera a snapshot came from, by its key: Ring keys start
+ * ring-, IP camera keys ipcam-, and Wyze snapshots belong to a device.
+ */
+const BRAND_SQL: Record<CameraBrand, string> = {
+  ring: "(device_id IS NULL AND camera LIKE 'ring-%')",
+  ip: "(device_id IS NULL AND camera LIKE 'ipcam-%')",
+  wyze: "(device_id IS NOT NULL OR (camera NOT LIKE 'ring-%' AND camera NOT LIKE 'ipcam-%'))",
+};
+
+/**
+ * Newest first. `before` is a snapshot id, for paging. `camera` is a camera's
+ * key, such as ring-123. `brand` keeps one kind of camera.
+ */
+export function listSnapshots(opts: { deviceId?: number; camera?: string; brand?: CameraBrand; before?: number; limit?: number } = {}): Snapshot[] {
   const where: string[] = [];
   const args: unknown[] = [];
   if (opts.deviceId !== undefined) { where.push('device_id = ?'); args.push(opts.deviceId); }
   if (opts.camera !== undefined) { where.push('camera = ?'); args.push(opts.camera); }
+  if (opts.brand !== undefined) where.push(BRAND_SQL[opts.brand]);
   if (opts.before !== undefined) { where.push('id < ?'); args.push(opts.before); }
   const limit = Math.min(Math.max(opts.limit ?? 60, 1), 200);
   const rows = getDb().prepare(

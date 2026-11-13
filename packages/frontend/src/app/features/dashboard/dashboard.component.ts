@@ -8,6 +8,7 @@ import { DeviceRowComponent, OverrideRequest } from './device-row/device-row.com
 import { DeviceFilterComponent, matchesDevice, type DeviceFilter } from '../../shared/device-filter/device-filter.component';
 import { SystemStatusComponent } from './system-status.component';
 import { HomeSetupNoticeComponent } from './home-setup-notice.component';
+import { CamerasCardComponent } from './cameras-card.component';
 import { Device } from '../../shared/models/device.model';
 
 const COLLAPSED_KEY = 'homehub.dashboard.collapsed';
@@ -43,7 +44,7 @@ function changed(d: Device, state: boolean): Device['lastChange'] {
 @Component({
   selector: 'app-dashboard',
   standalone: true,
-  imports: [DeviceRowComponent, DeviceFilterComponent, SystemStatusComponent, HomeSetupNoticeComponent, DecimalPipe],
+  imports: [DeviceRowComponent, DeviceFilterComponent, SystemStatusComponent, HomeSetupNoticeComponent, CamerasCardComponent, DecimalPipe],
   styles: [`
     .topbar {
       display: flex;
@@ -108,6 +109,8 @@ function changed(d: Device, state: boolean): Device['lastChange'] {
       <!-- HomeHub self-update card (shows when an upstream release is available) -->
       <app-system-status />
       <app-home-setup-notice />
+      <!-- Every camera, Ring and IP included, which aren't device rows -->
+      <app-cameras-card />
 
       @if (loading()) {
         <div class="loading">Loading devices…</div>

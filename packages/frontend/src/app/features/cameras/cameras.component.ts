@@ -7,8 +7,9 @@ import { SocketService } from '../../core/socket/socket.service';
 import { CamerasStateService } from '../../core/services/cameras-state.service';
 import { AuthImgComponent } from './auth-img.component';
 import { LiveViewComponent } from './live-view.component';
-import { RingCamerasComponent, type RingCamera } from './ring-cameras.component';
-import { IpCamerasComponent, type IpCamera } from './ip-cameras.component';
+import { RingCamerasComponent, ringWords, type RingCamera } from './ring-cameras.component';
+import { IpCamerasComponent, ipWords, type IpCamera } from './ip-cameras.component';
+import { BRANDS, BRAND_LABEL, brandShown, cameraMatches, type BrandChoice, type CameraBrand, type CameraFilter } from './camera-filter';
 import { SnapshotSwiperComponent } from './snapshot-swiper.component';
 import { MAX_SHARE, canShareFiles, shareOrSave, snapshotFileName } from './snapshot-share';
 import { SecretInputDirective } from '../../shared/secret-input/secret-input.directive';
@@ -102,6 +103,15 @@ const SEEN_KEY = 'homehub.cameras.seenSnapshot';
     .chips { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-bottom: 0.75rem; }
     .chip { background: transparent; border: 1px solid var(--border); border-radius: 999px; color: var(--text-muted); font-size: 0.8rem; padding: 0.3rem 0.8rem; }
     .chip.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+    .find { margin-bottom: 0.85rem; }
+    .find .chips { margin-bottom: 0; }
+    .search { position: relative; margin-bottom: 0.6rem; }
+    .search input { width: 100%; padding-right: 2.4rem; }
+    .clear {
+      position: absolute; right: 0.3rem; top: 50%; transform: translateY(-50%);
+      width: 2rem; height: 2rem; padding: 0; background: transparent; color: var(--text-muted);
+    }
+    .chips.brands { margin-bottom: 0.5rem; }
     .day { font-size: 0.8rem; font-weight: 600; color: var(--text-muted); margin: 1rem 0 0.4rem; }
     .shots { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(46%, 170px), 1fr)); gap: 0.5rem; }
     .shot { position: relative; padding: 0; background: none; border-radius: 8px; overflow: hidden; text-align: left; }
@@ -176,9 +186,31 @@ const SEEN_KEY = 'homehub.cameras.seenSnapshot';
             }
           </div>
 
+          <!-- Search and brand, when there's more than one camera to look through. -->
+          @if (tab() === 'cameras' && total() > 1) {
+            <div class="find">
+              <div class="search">
+                <input class="own-clear" type="search" [ngModel]="search()" (ngModelChange)="search.set($event)"
+                       placeholder="Search cameras" aria-label="Search cameras" autocomplete="off" />
+                @if (search()) {
+                  <button class="clear" type="button" aria-label="Clear search" (click)="search.set('')">✕</button>
+                }
+              </div>
+              @if (brandChips(); as chips) {
+                <div class="chips" role="group" aria-label="Show cameras by brand">
+                  @for (o of chips; track o.value) {
+                    <button class="chip" type="button" [class.active]="brand() === o.value" [attr.aria-pressed]="brand() === o.value"
+                            (click)="setBrand(o.value)">{{ o.label }} {{ o.count }}</button>
+                  }
+                </div>
+              }
+            </div>
+          }
+
           <!-- Every camera, Wyze, Ring and IP, in one grid; on Setup, each kind's account and adding. -->
           <div [class]="tab() === 'setup' ? 'stack' : 'grid'">
             @if (tab() === 'cameras') {
+             @if (brandShown(filter(), 'wyze')) {
               @switch (b.state) {
                 @case ('standby') {
                   <div class="note info"><span>This HomeHub is a backup or development server, so it leaves Wyze cameras and Ring to the active one.</span></div>
@@ -209,8 +241,9 @@ const SEEN_KEY = 'homehub.cameras.seenSnapshot';
                   <button class="btn-sm ghost" type="button" (click)="setTab('setup')">Add</button>
                 </div>
               }
+             }
 
-              @for (c of cameras(); track c.deviceId) {
+              @for (c of shownCameras(); track c.deviceId) {
                 <div class="card cam">
                   <app-auth-img [src]="'/api/cameras/' + c.deviceId + '/live.jpg?cached=1'" (result)="thumbResult(c, $event)" [refreshSeconds]="c.watching === false ? 0 : 20"
                                 [alt]="c.name" [failedText]="c.watching === false ? 'Paused' : c.otherNetwork ? 'On another network' : c.streaming ? 'No picture right now' : 'Not connected to this camera yet'"
@@ -254,6 +287,13 @@ const SEEN_KEY = 'homehub.cameras.seenSnapshot';
                 </div>
               }
               @if (cameraMsg()) { <p class="msg err span">{{ cameraMsg() }}</p> }
+              @if (loaded() && total() && !matching()) {
+                <div class="empty span">
+                  <strong>No cameras match</strong>
+                  <p class="muted">{{ search().trim() ? 'Nothing matches “' + search().trim() + '”' : 'None of these cameras are here' }}{{ brand() !== 'all' ? ' among ' + brandLabel(brand()) + '.' : '.' }}</p>
+                  <button class="btn-sm ghost" type="button" (click)="clearFind()">Show all cameras</button>
+                </div>
+              }
               @if (loaded() && !total()) {
                 <div class="empty span">
                   <strong>No cameras yet</strong>
@@ -358,9 +398,9 @@ const SEEN_KEY = 'homehub.cameras.seenSnapshot';
               </section>
             }
 
-            <app-ring-cameras [view]="childView()" (openSetup)="setTab('setup')"
+            <app-ring-cameras [view]="childView()" [filter]="filter()" (openSetup)="setTab('setup')"
                               (openSnapshot)="openShot($any($event))" (camerasChange)="ringCams.set($event); ringLoaded.set(true)" />
-            <app-ip-cameras [view]="childView()" (camerasChange)="ipCams.set($event); ipLoaded.set(true)" />
+            <app-ip-cameras [view]="childView()" [filter]="filter()" (camerasChange)="ipCams.set($event); ipLoaded.set(true)" />
 
             @if (tab() === 'setup' && settings(); as st) {
               <section class="card source">
@@ -394,17 +434,31 @@ const SEEN_KEY = 'homehub.cameras.seenSnapshot';
           </div>
 
           @if (tab() === 'snapshots') {
+            @if (brandChips(); as chips) {
+              <div class="chips brands" role="group" aria-label="Show snapshots by brand">
+                @for (o of chips; track o.value) {
+                  <button class="chip" type="button" [class.active]="brand() === o.value" [attr.aria-pressed]="brand() === o.value"
+                          (click)="setBrand(o.value)">{{ o.label }} {{ o.count }}</button>
+                }
+              </div>
+            }
             @if (total() > 1) {
               <div class="chips" role="group" aria-label="Filter snapshots by camera">
-                <button class="chip" type="button" [class.active]="filterId() === null && filterCamera() === null" (click)="setFilter(null)">All</button>
-                @for (c of cameras(); track c.deviceId) {
-                  <button class="chip" type="button" [class.active]="filterId() === c.deviceId" (click)="setFilter(c.deviceId)">{{ c.name }}</button>
+                <button class="chip" type="button" [class.active]="filterId() === null && filterCamera() === null" (click)="setFilter(null)">{{ brand() === 'all' ? 'All' : 'All ' + brandLabel(brand()) }}</button>
+                @if (brandShown(filter(), 'wyze')) {
+                  @for (c of cameras(); track c.deviceId) {
+                    <button class="chip" type="button" [class.active]="filterId() === c.deviceId" (click)="setFilter(c.deviceId)">{{ c.name }}</button>
+                  }
                 }
-                @for (c of ringCams(); track c.id) {
-                  <button class="chip" type="button" [class.active]="filterCamera() === c.key" (click)="setCameraFilter(c.key)">{{ c.label }}</button>
+                @if (brandShown(filter(), 'ring')) {
+                  @for (c of ringCams(); track c.id) {
+                    <button class="chip" type="button" [class.active]="filterCamera() === c.key" (click)="setCameraFilter(c.key)">{{ c.label }}</button>
+                  }
                 }
-                @for (c of ipCams(); track c.id) {
-                  <button class="chip" type="button" [class.active]="filterCamera() === c.key" (click)="setCameraFilter(c.key)">{{ c.name }}</button>
+                @if (brandShown(filter(), 'ip')) {
+                  @for (c of ipCams(); track c.id) {
+                    <button class="chip" type="button" [class.active]="filterCamera() === c.key" (click)="setCameraFilter(c.key)">{{ c.name }}</button>
+                  }
                 }
               </div>
             }
@@ -498,7 +552,7 @@ export class CamerasComponent implements OnInit, OnDestroy {
   /** Snapshots saved since this browser last looked at the Snapshots tab. */
   readonly newShots = computed(() => {
     const seen = this.seenId();
-    if (seen === null || this.tab() === 'snapshots' || this.filterId() !== null || this.filterCamera() !== null) return '';
+    if (seen === null || this.tab() === 'snapshots' || this.filterId() !== null || this.filterCamera() !== null || this.brand() !== 'all') return '';
     const n = this.snapshots().filter((s) => s.id > seen).length;
     return n === 0 ? '' : n >= PAGE ? `${PAGE}+` : String(n);
   });
@@ -517,6 +571,65 @@ export class CamerasComponent implements OnInit, OnDestroy {
   readonly ringCams = signal<RingCamera[]>([]);
   readonly ipCams = signal<IpCamera[]>([]);
   readonly settings = signal<Settings | null>(null);
+
+  // ── Search and brand ──────────────────────────────────────────
+  readonly brandShown = brandShown;
+  readonly search = signal('');
+  private readonly chosenBrand = signal<BrandChoice>('all');
+  private readonly brandCounts = computed<Record<CameraBrand, number>>(() =>
+    ({ wyze: this.cameras().length, ring: this.ringCams().length, ip: this.ipCams().length }));
+  /** The brand chosen, or all once its last camera is gone. */
+  readonly brand = computed<BrandChoice>(() => {
+    const b = this.chosenBrand();
+    return b !== 'all' && this.brandCounts()[b] > 0 ? b : 'all';
+  });
+  readonly filter = computed<CameraFilter>(() => ({ search: this.search(), brand: this.brand() }));
+  /** Brand buttons, only when there's more than one brand to choose between. */
+  readonly brandChips = computed(() => {
+    const counts = this.brandCounts();
+    const brands = BRANDS.filter((b) => counts[b] > 0);
+    if (brands.length < 2) return null;
+    return [
+      { value: 'all' as BrandChoice, label: 'All', count: this.total() },
+      ...brands.map((b) => ({ value: b as BrandChoice, label: BRAND_LABEL[b], count: counts[b] })),
+    ];
+  });
+  readonly shownCameras = computed(() => this.cameras().filter((c) => cameraMatches(this.filter(), 'wyze', [c.name, c.room, c.model, c.cam])));
+  /** How many cameras of every kind the search and brand keep. */
+  readonly matching = computed(() => {
+    const f = this.filter();
+    return this.shownCameras().length
+      + this.ringCams().filter((c) => cameraMatches(f, 'ring', ringWords(c))).length
+      + this.ipCams().filter((c) => cameraMatches(f, 'ip', ipWords(c))).length;
+  });
+
+  brandLabel(b: BrandChoice): string { return b === 'all' ? 'all cameras' : BRAND_LABEL[b]; }
+
+  /** A brand, for the Cameras tab and the snapshots alike; a camera picked on Snapshots is let go. */
+  setBrand(b: BrandChoice): void {
+    if (b === this.brand()) return;
+    this.chosenBrand.set(b);
+    this.filterId.set(null);
+    this.filterCamera.set(null);
+    this.stopSelecting();
+    this.loadSnapshots();
+  }
+
+  clearFind(): void {
+    this.search.set('');
+    this.setBrand('all');
+  }
+
+  /** Pressing "/" on the Cameras tab jumps to search, unless someone is already typing. */
+  @HostListener('document:keydown', ['$event'])
+  focusSearch(event: KeyboardEvent): void {
+    const target = event.target as HTMLElement;
+    if (event.key !== '/' || this.tab() !== 'cameras' || this.live() || this.shot() || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return;
+    const box = document.querySelector<HTMLInputElement>('input[aria-label="Search cameras"]');
+    if (!box) return;
+    event.preventDefault();
+    box.focus();
+  }
 
   readonly busy = signal(false);
   readonly busyId = signal<number | null>(null);
@@ -574,7 +687,7 @@ export class CamerasComponent implements OnInit, OnDestroy {
 
   /** On the Snapshots tab, everything loaded counts as seen. */
   private markSeen(): void {
-    if (this.tab() !== 'snapshots' || this.filterId() !== null || this.filterCamera() !== null) return;
+    if (this.tab() !== 'snapshots' || this.filterId() !== null || this.filterCamera() !== null || this.brand() !== 'all') return;
     const newest = this.snapshots()[0]?.id;
     if (newest === undefined || (this.seenId() ?? 0) >= newest) return;
     this.seenId.set(newest);
@@ -639,7 +752,8 @@ export class CamerasComponent implements OnInit, OnDestroy {
   private filterQuery(): string {
     const id = this.filterId();
     const cam = this.filterCamera();
-    return id !== null ? `&deviceId=${id}` : cam !== null ? `&camera=${encodeURIComponent(cam)}` : '';
+    const brand = this.brand();
+    return id !== null ? `&deviceId=${id}` : cam !== null ? `&camera=${encodeURIComponent(cam)}` : brand !== 'all' ? `&brand=${brand}` : '';
   }
 
   private loadSnapshots(): void {

@@ -5,7 +5,8 @@ import { FormsModule } from '@angular/forms';
 import { AuthService } from '../../core/auth/auth.service';
 import { SystemService } from '../../core/services/system.service';
 import { SocketService } from '../../core/socket/socket.service';
-import { DeviceFilterComponent, matchesDevice, type DeviceFilter } from '../../shared/device-filter/device-filter.component';
+import { DeviceFilterComponent, brandOf, matchesDevice, type DeviceFilter } from '../../shared/device-filter/device-filter.component';
+import { CamerasStateService } from '../../core/services/cameras-state.service';
 import { Device } from '../../shared/models/device.model';
 import { BackupsComponent } from './backups.component';
 import { BackupSyncComponent } from './backup-sync.component';
@@ -259,7 +260,7 @@ const DRIVER_LABEL: Record<string, string> = {
           <div class="card">
             @if (devices().length > 0) {
               <app-device-filter style="margin-bottom:0.75rem" [devices]="devices()"
-                                 [(search)]="deviceSearch" [(filter)]="deviceFilter" />
+                                 [(search)]="deviceSearch" [(filter)]="deviceFilter" [showBrands]="true" [(brand)]="deviceBrand" />
             }
             @for (group of deviceGroups(); track group.name) {
               @if (group.name) {
@@ -385,6 +386,13 @@ const DRIVER_LABEL: Record<string, string> = {
 
             @if (devices().length === 0) {
               <p style="color:var(--text-muted);font-size:0.85rem;padding:0.5rem 0">No devices registered. Use Discover to find devices on your network.</p>
+            }
+
+            @if (otherCameras(); as other) {
+              <!-- Ring and IP cameras have nothing to switch, so they live on the Cameras page, not here. -->
+              <p style="color:var(--text-muted);font-size:0.82rem;padding:0.5rem 0 0">
+                Also on the <a routerLink="/cameras" [queryParams]="isAdmin() ? { tab: 'setup' } : null">Cameras page</a>: {{ other }}.
+              </p>
             }
 
             @if (isAdmin() && !automations.readOnly()) {
@@ -1027,12 +1035,12 @@ export class SettingsComponent implements OnInit, OnDestroy {
   }
 
   isGroupOpen(name: string): boolean {
-    if (this.deviceSearch().trim() || this.deviceFilter() !== 'all') return true;
+    if (this.deviceSearch().trim() || this.deviceFilter() !== 'all' || this.activeBrand() !== 'all') return true;
     return this.groupState()[name] ?? name === 'Unassigned';
   }
 
   toggleGroup(name: string): void {
-    if (this.deviceSearch().trim() || this.deviceFilter() !== 'all') return;   // results always show
+    if (this.deviceSearch().trim() || this.deviceFilter() !== 'all' || this.activeBrand() !== 'all') return;   // results always show
     this.groupState.update((state) => ({ ...state, [name]: !this.isGroupOpen(name) }));
     try { localStorage.setItem(SettingsComponent.GROUPS_KEY, JSON.stringify(this.groupState())); } catch { /* private window */ }
   }
@@ -1068,6 +1076,23 @@ export class SettingsComponent implements OnInit, OnDestroy {
   editRoom = '';
   deviceSearch = signal('');
   deviceFilter = signal<DeviceFilter>('all');
+  deviceBrand = signal('all');
+  /** The brand chosen, or all once none of its devices is left. */
+  readonly activeBrand = computed(() => {
+    const b = this.deviceBrand();
+    return b !== 'all' && this.devices().some((d) => brandOf(d) === b) ? b : 'all';
+  });
+  private readonly camerasState = inject(CamerasStateService);
+  private readonly cameraSummary = signal<{ ring: number; ip: number } | null>(null);
+  /** "2 Ring cameras and 1 IP camera": not devices, so the list says where they are rather than seem to miss them. */
+  readonly otherCameras = computed(() => {
+    const c = this.cameraSummary();
+    if (!c || !this.camerasState.visible()) return '';
+    const parts: string[] = [];
+    if (c.ring) parts.push(`${c.ring} Ring camera${c.ring === 1 ? '' : 's'}`);
+    if (c.ip) parts.push(`${c.ip} IP camera${c.ip === 1 ? '' : 's'}`);
+    return parts.join(' and ');
+  });
   editProtected = false;
   editAuthUser  = '';
   editAuthPass  = '';
@@ -1082,7 +1107,7 @@ export class SettingsComponent implements OnInit, OnDestroy {
   editTuyaVersion  = '3.3';
   deviceMsg = signal('');
   readonly filteredDevices = computed(() =>
-    this.devices().filter((d) => matchesDevice(d, this.deviceSearch(), this.deviceFilter())));
+    this.devices().filter((d) => matchesDevice(d, this.deviceSearch(), this.deviceFilter(), this.activeBrand())));
   /**
    * Devices by room, like the dashboard, but Unassigned comes first: here it's
    * the list of devices still to set up. Offline devices stay in their room,
@@ -1249,6 +1274,10 @@ export class SettingsComponent implements OnInit, OnDestroy {
     // The dashboard's "time zone not set" notice links to /settings?section=home.
     const section = this.route.snapshot.queryParamMap.get('section');
     if (section) this.toggleSection(section, true);
+    this.http.get<{ enabled: boolean; ring: number; ip: number }>('/api/cameras/summary').subscribe({
+      next: (c) => this.cameraSummary.set(c.enabled ? c : null),
+      error: () => undefined,
+    });
     this.stopWatchingDevices = this.socket.onDeviceState((event) => {
       this._devices.update((list) => list.map((d) => d.id === event.id ? { ...d, state: event.state } : d));
     });

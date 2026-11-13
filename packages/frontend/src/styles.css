@@ -92,3 +92,6 @@ input.secret {
   background-repeat: no-repeat; background-position: right 0.7rem center; background-size: 1.15rem;
 }
 input.secret.shown { -webkit-text-security: none; text-security: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2 12s3.6-7 10-7c2 0 3.8.7 5.3 1.7M22 12s-3.6 7-10 7c-2 0-3.8-.7-5.3-1.7'/%3E%3Cpath d='M3 3l18 18'/%3E%3Ccircle cx='12' cy='12' r='3'/%3E%3C/svg%3E"); }
+
+/* Search boxes with their own ✕ button: hide the browser's, so there's one. */
+input.own-clear::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; display: none; }

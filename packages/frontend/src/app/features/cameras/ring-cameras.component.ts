@@ -6,9 +6,14 @@ import { SocketService } from '../../core/socket/socket.service';
 import { CamerasStateService } from '../../core/services/cameras-state.service';
 import { AuthImgComponent } from './auth-img.component';
 import { RingLiveComponent } from './ring-live.component';
+import { NO_FILTER, brandShown, cameraMatches, type CameraFilter } from './camera-filter';
 import { SecretInputDirective } from '../../shared/secret-input/secret-input.directive';
 
 export interface RingSnapshot { id: number; deviceId: number | null; camera: string; cameraName: string; trigger: 'motion' | 'manual' | 'doorbell'; sizeBytes: number; takenAt: string }
+/** What a search can find a Ring camera by. */
+export const ringWords = (c: RingCamera): (string | null)[] =>
+  [c.name, c.label, c.home, c.model, c.isDoorbell ? 'doorbell' : 'camera', c.offline ? 'offline' : null];
+
 export interface RingCamera {
   id: number; name: string; home: string | null;
   /** The name, with its home when another camera here has the same name. */
@@ -85,7 +90,7 @@ interface AccountCamera { id: number; name: string; home: string | null; model: 
   `],
   template: `
     @if (info(); as r) {
-      @if (view() === 'cameras') {
+      @if (view() === 'cameras' && brandShown(filter(), 'ring')) {
         <!-- On the Cameras tab: only what needs attention, and the cameras themselves. -->
         @if (r.state === 'expired') {
           <div class="note">
@@ -103,7 +108,7 @@ interface AccountCamera { id: number; name: string; home: string | null; model: 
           </div>
         }
 
-        @for (c of r.cameras; track c.id) {
+        @for (c of shown(); track c.id) {
           <div class="card cam">
             @if (c.latestSnapshot; as s) {
               <app-auth-img [src]="'/api/cameras/snapshots/' + s.id + '/image'" [alt]="c.name" (click)="openSnapshot.emit(s)"
@@ -263,6 +268,11 @@ export class RingCamerasComponent implements OnInit, OnDestroy {
   readonly camerasChange = output<RingCamera[]>();
   /** Which part to show: the cameras (Cameras tab), the Ring account (Setup tab), or nothing (Snapshots tab). */
   readonly view = input<'cameras' | 'setup' | 'none'>('cameras');
+  /** The search and brand chosen on the Cameras tab. */
+  readonly filter = input<CameraFilter>(NO_FILTER);
+  readonly brandShown = brandShown;
+  /** The cameras the filter keeps, on the Cameras tab. */
+  readonly shown = computed(() => (this.info()?.cameras ?? []).filter((c) => cameraMatches(this.filter(), 'ring', ringWords(c))));
   /** Something needs doing on the Setup tab, such as signing in again. */
   readonly openSetup = output<void>();
 

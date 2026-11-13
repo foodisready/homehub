@@ -480,6 +480,35 @@ describe('Wyze cameras', () => {
     });
 
 
+    it('lists the snapshots from one kind of camera', async () => {
+      const id = addCamera('Front Door', 'front_door', '192.168.1.40');
+      const jpeg = Buffer.from('jpeg');
+      const wyze = await snaps.capture({ id, alias: 'Front Door', cam: 'front_door' }, 'manual', new Date(), jpeg);
+      const ring = await snaps.capture({ id: null, alias: 'Doorbell', cam: 'ring-7' }, 'doorbell', new Date(), jpeg);
+      const ip = await snaps.capture({ id: null, alias: 'Garage', cam: 'ipcam-3' }, 'motion', new Date(), jpeg);
+      const ids = async (q: string) => ((await (await api('GET', `/snapshots${q}`)).json()) as { id: number }[]).map((s) => s.id);
+      assert.deepEqual(await ids(''), [ip.id, ring.id, wyze.id]);
+      assert.deepEqual(await ids('?brand=wyze'), [wyze.id]);
+      assert.deepEqual(await ids('?brand=ring'), [ring.id]);
+      assert.deepEqual(await ids('?brand=ip'), [ip.id]);
+      assert.equal((await api('GET', '/snapshots?brand=nest')).status, 400);
+    });
+
+    it('sums up the cameras and the newest snapshot for the Dashboard', async () => {
+      addCamera('Front Door', 'front_door', '192.168.1.40');
+      const ring = await snaps.capture({ id: null, alias: 'Doorbell', cam: 'ring-7' }, 'doorbell', new Date(), Buffer.from('jpeg'));
+      const res = await api('GET', '/summary', undefined, 'user');
+      assert.equal(res.status, 200);
+      const body = await res.json() as { enabled: boolean; wyze: number; ring: number; ip: number; latest: { id: number } | null };
+      assert.equal(body.enabled, true);
+      assert.equal(body.wyze, 1);
+      assert.equal(body.ring, 0);
+      assert.equal(body.ip, 0);
+      assert.equal(body.latest?.id, ring.id);
+      snaps.saveSettings({ enabled: false });
+      assert.equal(((await (await api('GET', '/summary')).json()) as { latest: unknown }).latest, null);
+    });
+
     it('validates settings', () => {
       assert.deepEqual(snaps.saveSettings({ keepDays: 7, notify: true }), { enabled: true, motionSnapshots: true, notify: true, keepDays: 7, cooldownSeconds: 30 });
       assert.throws(() => snaps.saveSettings({ enabled: 1 as never }), /enabled/);
