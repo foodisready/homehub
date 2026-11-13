@@ -95,3 +95,24 @@ input.secret.shown { -webkit-text-security: none; text-security: none; backgroun
 
 /* Search boxes with their own ✕ button: hide the browser's, so there's one. */
 input.own-clear::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; display: none; }
+
+/* ── Popup editor (Settings → Devices → Edit) ───────────────── */
+.popup-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; padding: 1rem; z-index: 100; }
+.popup-card { width: 100%; max-width: 560px; max-height: 100%; overflow-y: auto; overscroll-behavior: contain; padding-bottom: 0; }
+.popup-card:focus { outline: none; }
+.popup-card .form-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.25rem; }
+.popup-card .form-head h2 { font-size: 1.15rem; font-weight: 700; margin: 0 0 0.15rem; overflow-wrap: anywhere; }
+.popup-card .close { flex: none; display: grid; place-items: center; width: 36px; height: 36px; padding: 0; border-radius: 50%; background: transparent; border: none; color: var(--text-muted); cursor: pointer; }
+.popup-card .close:hover { background: var(--bg); color: var(--text); }
+.popup-card label.f { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.75rem; font-weight: 600; color: var(--text-muted); }
+/* Save stays in view while the form scrolls. */
+.popup-card .form-foot {
+  position: sticky; bottom: 0; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
+  margin: 0.75rem -1.5rem 0; padding: 0.75rem 1.5rem; background: var(--surface); border-top: 1px solid var(--border);
+}
+.popup-card .form-foot button { min-height: 40px; padding: 0 1.25rem; }
+/* Phones: a sheet from the bottom, the width of the screen. */
+@media (max-width: 599px) {
+  .popup-overlay { padding: 0; align-items: flex-end; }
+  .popup-card { max-width: none; max-height: 92vh; border-radius: var(--radius) var(--radius) 0 0; }
+}

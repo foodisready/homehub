@@ -1,4 +1,4 @@
-import { Component, OnInit, signal, computed, OnDestroy, viewChild, inject } from '@angular/core';
+import { Component, OnInit, signal, computed, OnDestroy, viewChild, inject, effect, ElementRef } from '@angular/core';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
@@ -180,6 +180,8 @@ const DRIVER_LABEL: Record<string, string> = {
       width:100%;
     }
     .edit-row.single { grid-template-columns:1fr; }
+
+    @media (max-width: 599px) { .dev-edit .edit-row { grid-template-columns:1fr; } }
     .edit-row input { font-size:0.85rem; padding:0.4rem 0.7rem; }
 
     .pass-wrap { position:relative; display:flex; align-items:center; }
@@ -274,15 +276,33 @@ const DRIVER_LABEL: Record<string, string> = {
             @for (d of (!group.name || isGroupOpen(group.name) ? group.devices : []); track d.id) {
               <div class="row-item">
                 @if (editingDeviceId() === d.id) {
-                  <div style="flex:1; width:100%">
+                  <!-- A popup, so it's clear which device is being edited: inline, the form
+                       sat under the row above it and read as that device's. -->
+                  <div class="popup-overlay" (keydown.escape)="cancelDeviceEdit()">
+                  <div #devEdit class="card popup-card dev-edit" role="dialog" aria-modal="true" aria-labelledby="dev-edit-title" tabindex="-1">
+                    <div class="form-head">
+                      <div>
+                        <h2 id="dev-edit-title">{{ d.alias }}</h2>
+                        <span class="row-meta">{{ driverLabel(d.driverType) }}{{ d.driverType === 'matter' ? '' : ' · ' + d.ip }}{{ d.room ? ' · ' + d.room : '' }}</span>
+                      </div>
+                      <button type="button" class="close" (click)="cancelDeviceEdit()" aria-label="Close without saving">
+                        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>
+                      </button>
+                    </div>
                     <div class="edit-row">
-                      <input type="text" [(ngModel)]="editAlias" placeholder="Alias" />
+                      <label class="f">Name
+                        <input type="text" [(ngModel)]="editAlias" placeholder="Name" />
+                      </label>
                       @if (d.driverType !== 'matter') {
-                        <input type="text" [(ngModel)]="editIp"    placeholder="IP address" />
+                        <label class="f">IP address
+                          <input type="text" [(ngModel)]="editIp"    placeholder="IP address" />
+                        </label>
                       }
                     </div>
                     <div class="edit-row" style="margin-top:0.4rem">
-                      <input type="text" [(ngModel)]="editRoom" placeholder="Room" list="device-rooms" autocomplete="off" aria-label="Room" />
+                      <label class="f">Room
+                        <input type="text" [(ngModel)]="editRoom" placeholder="Room" list="device-rooms" autocomplete="off" />
+                      </label>
                       <datalist id="device-rooms">
                         @for (room of roomNames(); track room) { <option [value]="room"></option> }
                       </datalist>
@@ -348,13 +368,14 @@ const DRIVER_LABEL: Record<string, string> = {
                       </div>
                       <p style="font-size:0.75rem;color:var(--text-muted);margin:0.2rem 0 0">Leave Device ID and Local Key blank to keep existing values.</p>
                     }
-                    <div style="display:flex;gap:0.5rem;margin-top:0.4rem">
-                      <button class="btn-sm btn-primary" (click)="saveDevice(d.id, d.driverType)">Save</button>
-                      <button class="btn-sm btn-ghost" (click)="cancelDeviceEdit()">Cancel</button>
+                    <div class="form-foot">
+                      <button class="btn-primary" (click)="saveDevice(d.id, d.driverType)">Save</button>
+                      <button class="btn-ghost" (click)="cancelDeviceEdit()">Cancel</button>
                       @if (deviceMsg()) { <span class="msg" [class.ok]="!deviceErr()" [class.err]="deviceErr()">{{ deviceMsg() }}</span> }
                     </div>
                   </div>
-                } @else {
+                  </div>
+                }
                   <div class="row-label">
                     <span class="row-name">{{ d.alias }}</span>
                     <span class="row-meta row-sub">
@@ -377,7 +398,6 @@ const DRIVER_LABEL: Record<string, string> = {
                     <button class="btn-sm btn-ghost" (click)="startDeviceEdit(d)">Edit</button>
                     <button class="btn-sm btn-danger" (click)="deleteDevice(d.id, d.alias)">✕</button>
                   }
-                }
               </div>
             }
             }
@@ -1248,7 +1268,13 @@ export class SettingsComponent implements OnInit, OnDestroy {
   // kWh rate
   kwhRateDraft = localStorage.getItem('kwhRate') ?? '0.15';
 
-  constructor(readonly auth: AuthService, private http: HttpClient, private socket: SocketService, private system: SystemService) {}
+  private devEdit = viewChild<ElementRef<HTMLElement>>('devEdit');
+
+  constructor(readonly auth: AuthService, private http: HttpClient, private socket: SocketService, private system: SystemService) {
+    // Focus the device editor popup when it opens (not a field, so a phone keyboard
+    // doesn't cover it), so Esc closes it.
+    effect(() => this.devEdit()?.nativeElement.focus());
+  }
 
   switchDevice(device: Device): void {
     const on = !device.state;

@@ -32,7 +32,7 @@ export interface SuggestDevice {
   driverType?: string | null;
 }
 
-type Kind = 'place' | 'thing' | 'pos';
+type Kind = 'place' | 'thing' | 'pos' | 'mod';
 interface Word { en: string[]; kind: Kind; vi: string[]; yue: string }
 
 // Longest phrases are matched first, so "garage door" wins over "garage" and "door".
@@ -59,6 +59,11 @@ const WORDS: Word[] = [
   { en: ['garden', 'yard'], kind: 'place', vi: ['sân vườn'], yue: '花園' },
   { en: ['outdoor', 'outside'], kind: 'place', vi: ['ngoài trời'], yue: '室外' },
   { en: ['garage'], kind: 'place', vi: ['ga-ra', 'nhà xe'], yue: '車房' },
+  { en: ['kitchen counter', 'kitchen counters', 'kitchen countertop', 'kitchen counter top'], kind: 'place', vi: ['quầy bếp'], yue: '廚房枱面' },
+  { en: ['counter', 'counters', 'countertop', 'counter top'], kind: 'place', vi: ['quầy bếp'], yue: '枱面' },
+  { en: ['kitchen island', 'island'], kind: 'place', vi: ['đảo bếp'], yue: '廚房中島' },
+  { en: ['breakfast area', 'breakfast nook', 'breakfast room', 'breakfast'], kind: 'place', vi: ['góc ăn sáng'], yue: '早餐區' },
+  { en: ['media room', 'media'], kind: 'place', vi: ['phòng giải trí'], yue: '影音室' },
   { en: ['upstairs'], kind: 'place', vi: ['trên lầu'], yue: '樓上' },
   { en: ['downstairs'], kind: 'place', vi: ['dưới lầu'], yue: '樓下' },
   // Things
@@ -80,6 +85,10 @@ const WORDS: Word[] = [
   { en: ['tv', 'television'], kind: 'thing', vi: ['tivi'], yue: '電視' },
   { en: ['coffee maker', 'coffee machine'], kind: 'thing', vi: ['máy pha cà phê'], yue: '咖啡機' },
   { en: ['kettle'], kind: 'thing', vi: ['ấm đun nước'], yue: '水煲' },
+  // What kind of thing: "corner lamp", "little lamp"
+  { en: ['corner'], kind: 'mod', vi: ['góc'], yue: '角落' },
+  { en: ['little', 'small', 'mini'], kind: 'mod', vi: ['nhỏ'], yue: '細' },
+  { en: ['long', 'tall'], kind: 'mod', vi: ['dài'], yue: '長' },
   // Where in the place
   { en: ['left'], kind: 'pos', vi: ['bên trái'], yue: '左邊' },
   { en: ['right'], kind: 'pos', vi: ['bên phải'], yue: '右邊' },
@@ -88,9 +97,9 @@ const WORDS: Word[] = [
 const PHRASES = WORDS.flatMap((w) => w.en.map((en) => ({ en: en.split(' '), w })))
   .sort((a, b) => b.en.length - a.en.length);
 // Said or left out without changing the name.
-const FILLER = new Set(['the', 'my', 'our', 'a', 'main', 'big', 'small', 'smart', 'plug', 'switch', 'outlet', 'socket']);
+const FILLER = new Set(['the', 'my', 'our', 'a', 'main', 'big', 'smart', 'plug', 'switch', 'outlet', 'socket']);
 
-interface Reading { owner?: string; ownerRoom: boolean; place?: Word; thing?: Word; pos?: Word }
+interface Reading { owner?: string; ownerRoom: boolean; place?: Word; thing?: Word; pos?: Word; mod?: Word }
 
 /** An English name read into its parts, or null when it has a word not on the list. */
 export function readName(name: string): Reading | null {
@@ -125,7 +134,7 @@ export function learnOwners(devices: SuggestDevice[]): Map<string, string> {
     const english = [d.alias, ...d.nicknames].map(readName).filter((r): r is Reading => !!r?.owner);
     const chinese = d.nicknames.filter((n) => /\p{Script=Han}/u.test(n));
     for (const r of english) {
-      const tail = (r.ownerRoom ? '房' : '') + (r.place?.yue ?? '') + (r.thing?.yue ?? '');
+      const tail = (r.ownerRoom ? '房' : '') + (r.place?.yue ?? '') + (r.mod?.yue ?? '') + (r.thing?.yue ?? '');
       if (!tail) continue;
       for (const n of chinese) {
         if (n.endsWith(tail) && n.length > tail.length) owners.set(r.owner!.toLowerCase(), n.slice(0, -tail.length));
@@ -158,21 +167,21 @@ export function suggestNicknames(device: SuggestDevice, languages: SuggestLangua
     // From the room when the name has none: "Desk lamp" in the Office.
     if (r.thing && !r.place && !r.owner && device.room) {
       const room = readName(device.room);
-      if (room && !room.thing && !room.pos) { r.place = room.place; r.owner = room.owner; r.ownerRoom = room.ownerRoom; }
+      if (room && !room.thing && !room.pos && !room.mod) { r.place = room.place; r.owner = room.owner; r.ownerRoom = room.ownerRoom; }
     }
     if (!r.thing) continue;   // a place alone ("Kitchen") says nothing about what it is
 
     if (languages.includes('vi')) {
       for (const thing of r.thing.vi) {
         for (const place of r.place?.vi ?? ['']) {
-          let text = [thing, place, r.pos?.vi[0] ?? ''].filter(Boolean).join(' ');
+          let text = [thing, r.mod?.vi[0] ?? '', place, r.pos?.vi[0] ?? ''].filter(Boolean).join(' ');
           if (r.owner) text += r.place || !r.ownerRoom && r.thing.vi[0] !== 'đèn' ? ` ${r.owner}` : ` phòng ${r.owner}`;
           add({ text, lang: 'vi', from: name });
         }
       }
     }
     if (languages.includes('yue')) {
-      const rest = (r.pos?.yue ?? '') + (r.ownerRoom ? '房' : '') + (r.place?.yue ?? '') + r.thing.yue;
+      const rest = (r.pos?.yue ?? '') + (r.ownerRoom ? '房' : '') + (r.place?.yue ?? '') + (r.mod?.yue ?? '') + r.thing.yue;
       if (!r.owner) add({ text: rest, lang: 'yue', from: name });
       else {
         const chinese = owners.get(r.owner.toLowerCase());

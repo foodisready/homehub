@@ -13,6 +13,11 @@ const HOME: SuggestDevice[] = [
   { id: 8, alias: 'Woman statue', nicknames: [] },
   { id: 9, alias: 'Front Door', nicknames: [], driverType: 'wyze' },
   { id: 10, alias: 'Desk lamp', nicknames: [], room: 'Office' },
+  { id: 11, alias: 'Little breakfast lamp', nicknames: [], room: 'Breakfast area' },
+  { id: 12, alias: 'office corner lamp', nicknames: [] },
+  { id: 13, alias: 'Kitchen counter lights', nicknames: ['counter lights', 'countertop lights'] },
+  { id: 14, alias: 'Media long lamp', nicknames: [] },
+  { id: 15, alias: 'Kitchen Island camera', nicknames: [], driverType: 'wyze' },
 ];
 const owners = learnOwners(HOME);
 const texts = (id: number, langs: Array<'vi' | 'yue'> = ['vi', 'yue']) =>
@@ -33,6 +38,14 @@ describe('nickname suggestions', () => {
     assert.deepEqual(texts(5), ['đèn phòng khách']);
     assert.deepEqual(texts(2), ['đèn phòng làm việc', '書房燈']);
     assert.deepEqual(texts(10), ['đèn bàn phòng làm việc', 'đèn bàn văn phòng', '書房枱燈']);
+  });
+
+  it('knows counters, breakfast areas and media rooms, and corner, little and long lamps', () => {
+    assert.deepEqual(texts(11), ['đèn nhỏ góc ăn sáng', '早餐區細燈']);
+    assert.deepEqual(texts(12), ['đèn góc phòng làm việc', 'đèn góc văn phòng', '書房角落燈']);
+    assert.deepEqual(texts(13), ['đèn quầy bếp', '廚房枱面燈', '枱面燈']);
+    assert.deepEqual(texts(14), ['đèn dài phòng giải trí', '影音室長燈']);
+    assert.deepEqual(texts(15), []);
   });
 
   it('only in the languages asked for', () => {
