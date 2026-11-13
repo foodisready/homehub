@@ -13,7 +13,7 @@ import difflib
 import logging
 import re
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -78,6 +78,11 @@ def wake_language(wake: str) -> str | None:
 # Where SenseVoice listens while the Vietnamese model does: a Pi 4 has four cores, and each model
 # uses two, so the pair takes about 0.8 s instead of 1.05 s.
 _beside = ThreadPoolExecutor(1, thread_name_prefix='sensevoice')
+# Where SenseVoice's second pass, set to Cantonese, starts as soon as the Vietnamese model is done,
+# while the first pass still runs. 16 of 37 Cantonese test commands need it; for them the reply came
+# 0.4 s sooner on a Pi 4 (1.8 s to 1.4 s), and the rest were about as fast as before. For English the
+# result is thrown away.
+_second = ThreadPoolExecutor(1, thread_name_prefix='cantonese')
 
 # HomeHub's reply when a name fits several devices ("the lights"). Fine in Chat, but read out it's a
 # list of every light, so the speaker asks "Which light?" and listens for the answer instead.
@@ -124,11 +129,12 @@ def answer(audio: bytes, spoke: bool, listener: Transcriber, homehub: Commander,
     in_vietnamese = bool(prefer == 'vi' or which) and vi.has_vietnamese(heard_vi)
     quick = ''
     if ears is not None:
+        second = _second.submit(ears.transcribe, audio) if not in_vietnamese and not en_which else None
         lang, quick = hearing.result() if hearing is not None else ears.hear(audio)
         if in_vietnamese and lang != 'en':
             return answer_vietnamese(heard_vi, homehub, t0, asked)
         if lang in CANTONESE and not en_which:
-            return answer_cantonese(audio, ears, homehub, t0, asked, quick)
+            return answer_cantonese(audio, ears, homehub, t0, asked, quick, second)
     elif in_vietnamese:
         return answer_vietnamese(heard_vi, homehub, t0, asked)
     # English. SenseVoice has already heard the words, in about a second; Whisper takes about ten
@@ -225,7 +231,7 @@ SURE = 0.9
 
 
 def answer_cantonese(audio: bytes, ears: CantoneseEars, homehub: Commander, t0: float, asked: str | None = None,
-                     quick: str = '') -> Answer:
+                     quick: str = '', second: Future | None = None) -> Answer:
     scenes = getattr(homehub, 'scenes', homehub.names)
     command = yue.parse(quick, homehub.names, scenes) if quick else None
     passes = 1
@@ -233,7 +239,7 @@ def answer_cantonese(audio: bytes, ears: CantoneseEars, homehub: Commander, t0: 
         text = quick
     else:
         # Not sure, or a name alone, or an answer to a question: listen again, set to Cantonese.
-        text, passes = ears.transcribe(audio), 2
+        text, passes = (second.result() if second is not None else ears.transcribe(audio)), 2
         command = yue.parse(text, homehub.names, scenes)
     # 開 or 熄 alone, answering "你想開定熄廚房燈？".
     if asked and (command is None or command.action == 'ask'):

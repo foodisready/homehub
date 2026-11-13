@@ -693,3 +693,30 @@ class SeveralDevicesTest(unittest.TestCase):
         a = answer(b'\0' * 32000, True, self.NoWhisper(), Hub(), Cantonese(), vi_ears=viet)
         self.assertTrue(viet.saw_sensevoice_start)
         self.assertEqual(a.lang, 'yue')
+
+    def test_the_cantonese_pass_starts_before_the_first_pass_ends(self):
+        import threading
+        from homehub_voice.pipeline import answer
+        second_started = threading.Event()
+
+        class Cantonese:
+            def hear(self, audio):
+                self.overlapped = second_started.wait(2)
+                return 'yue', '嗯。'   # unclear: the Cantonese pass is needed
+
+            def transcribe(self, audio):
+                second_started.set()
+                return '開廚房燈。'
+
+        class Hub:
+            names = ['廚房燈']
+
+            def command(self, text, retry=False):
+                from homehub_voice.homehub import CommandResult
+                self.text = text
+                return CommandResult(True, 'ok')
+
+        ears, hub = Cantonese(), Hub()
+        a = answer(b'\0' * 32000, True, self.NoWhisper(), hub, ears, vi_ears=self.Ears('KHÔNG'))
+        self.assertTrue(ears.overlapped)
+        self.assertEqual((a.lang, a.passes, hub.text), ('yue', 2, 'turn on 廚房燈'))

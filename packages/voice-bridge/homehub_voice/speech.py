@@ -71,12 +71,13 @@ class SenseVoice:
             model=str(model), tokens=str(tokens), language=lang, use_itn=True, num_threads=threads)
         # "auto" tells the language; forcing Cantonese then hears the words better.
         self.auto, self.yue = make('auto'), make('yue')
-        self.lock = threading.Lock()
+        # One lock for each pass, so the Cantonese pass can run while the first is still listening.
+        self.locks = {id(self.auto): threading.Lock(), id(self.yue): threading.Lock()}
 
     def _run(self, rec, audio: bytes):
         s = rec.create_stream()
         s.accept_waveform(16000, _pcm(audio))
-        with self.lock:
+        with self.locks[id(rec)]:
             rec.decode_stream(s)
         return s.result
 
