@@ -149,6 +149,16 @@ export function makeLogin(username: string, password: string): KasaLogin {
   return { username, hashes: { 1: hashFor(1), 2: hashFor(2) } };
 }
 
+/**
+ * Logins a plug uses before it's linked to a TP-Link account: none at all, or TP-Link's
+ * published setup login. The same ones python-kasa tries. A plug set up in the Kasa app
+ * without signing in, or not yet synced with the account, answers to one of these.
+ */
+const DEFAULT_LOGINS: KasaLogin[] = [
+  makeLogin('', ''),
+  makeLogin('kasa@tp-link.net', 'kasaSetup'),
+];
+
 export function saveLogin(login: KasaLogin): void {
   const upsert = getDb().prepare(
     'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
@@ -181,10 +191,11 @@ export function savedUsername(): string | null {
 
 /** Tries a login on a plug without saving it. Throws KlapAuthError if it's refused. */
 export async function checkLogin(host: string, login: KasaLogin): Promise<void> {
-  await connect(host, login);
+  await connect(host, [login]);
 }
 
-async function connect(host: string, login: KasaLogin): Promise<Session> {
+/** Connects with the first of `logins` the plug accepts: one handshake shows which, if any. */
+async function connect(host: string, logins: KasaLogin[]): Promise<Session> {
   const localSeed = crypto.randomBytes(16);
 
   const first = await post(host, '/app/handshake1', localSeed);
@@ -194,8 +205,8 @@ async function connect(host: string, login: KasaLogin): Promise<Session> {
   const remoteSeed = first.body.subarray(0, 16);
   const serverProof = first.body.subarray(16);
 
-  const match = HASHING
-    .map((hashing) => ({ hashing, auth: login.hashes[hashing.version] }))
+  const match = logins
+    .flatMap((login) => HASHING.map((hashing) => ({ hashing, auth: login.hashes[hashing.version] })))
     .find(({ hashing, auth }) => hashing.firstProof(localSeed, remoteSeed, auth).equals(serverProof));
   if (!match) throw new KlapAuthError(host, 'the plug rejected the TP-Link login');
 
@@ -223,8 +234,13 @@ async function exchange(host: string, command: string): Promise<string> {
   let session = sessions.get(host);
   if (!session || Date.now() >= session.expiresAt) {
     const login = loadLogin();
-    if (!login) throw new KlapAuthError(host, 'no TP-Link login is saved');
-    session = await connect(host, login);
+    // The saved login first, then the ones a plug not yet linked to an account uses.
+    try {
+      session = await connect(host, login ? [login, ...DEFAULT_LOGINS] : DEFAULT_LOGINS);
+    } catch (err) {
+      if (!login && err instanceof KlapAuthError) throw new KlapAuthError(host, 'no TP-Link login is saved');
+      throw err;
+    }
     sessions.set(host, session);
   }
 

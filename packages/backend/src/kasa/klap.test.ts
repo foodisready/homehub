@@ -27,6 +27,9 @@ const PASSWORD = 'plug-password';
 /** A plug speaking KLAP, written from the protocol rather than from klap.ts. */
 class FakePlug {
   version: 1 | 2 = 2;
+  // The login the plug was set up with.
+  username = USERNAME;
+  password = PASSWORD;
   relay = 0;
   commands: unknown[] = [];
   handshakes = 0;
@@ -36,8 +39,8 @@ class FakePlug {
 
   get auth(): Buffer {
     return this.version === 2
-      ? sha256(sha1(USERNAME), sha1(PASSWORD))
-      : md5(md5(Buffer.from(USERNAME)), md5(Buffer.from(PASSWORD)));
+      ? sha256(sha1(this.username), sha1(this.password))
+      : md5(md5(Buffer.from(this.username)), md5(Buffer.from(this.password)));
   }
 
   private handleRequest(session: { local: Buffer; remote: Buffer }, seq: number, body: Buffer): Buffer {
@@ -179,13 +182,53 @@ describe('KLAP plugs', () => {
     other.server.close();
   });
 
-  it('reports a missing login without contacting the plug', async () => {
+  it('reaches a plug not yet linked to an account, with TP-Link\'s setup login', async () => {
+    // From the Pi, 2026-11-13: a new EP10 refused the account login that another plug accepted.
+    const fresh = new FakePlug();
+    fresh.username = 'kasa@tp-link.net';
+    fresh.password = 'kasaSetup';
+    const freshHost = await fresh.start();
+    assert.equal((await getSysInfo(freshHost)).model, 'EP10(US)');
+    fresh.server.close();
+  });
+
+  it('reaches a plug with no login at all', async () => {
+    const fresh = new FakePlug();
+    fresh.username = '';
+    fresh.password = '';
+    fresh.version = 1;
+    const freshHost = await fresh.start();
+    await setPower(freshHost, true);
+    assert.equal(fresh.relay, 1);
+    fresh.server.close();
+  });
+
+  it('never saves a default login as the account\'s', async () => {
+    const fresh = new FakePlug();
+    fresh.username = 'kasa@tp-link.net';
+    fresh.password = 'kasaSetup';
+    const freshHost = await fresh.start();
+    await assert.rejects(checkLogin(freshHost, makeLogin(USERNAME, PASSWORD)), KlapAuthError);
+    fresh.server.close();
+  });
+
+  it('reports a missing login, after trying the setup logins', async () => {
     const other = new FakePlug();
     const otherHost = await other.start();
     clearLogin();
     await assert.rejects(getSysInfo(otherHost), /no TP-Link login/);
-    assert.equal(other.handshakes, 0);
+    assert.equal(other.handshakes, 1, 'one handshake shows whether a setup login works');
     other.server.close();
+  });
+
+  it('reaches a plug not yet linked to an account even with no login saved', async () => {
+    const fresh = new FakePlug();
+    fresh.username = 'kasa@tp-link.net';
+    fresh.password = 'kasaSetup';
+    const freshHost = await fresh.start();
+    clearLogin();
+    assert.equal((await getSysInfo(freshHost)).model, 'EP10(US)');
+    fresh.server.close();
   });
 
   it('stores hashes, never the password', () => {
