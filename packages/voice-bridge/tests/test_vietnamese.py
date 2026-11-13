@@ -320,6 +320,20 @@ class PipelineTest(unittest.TestCase):
         e = answer(b'\0' * 32000, True, FakeWhisper(''), FakeHomeHub(), None, vi_ears=FakeVietnamese(''), prefer='vi')
         self.assertEqual(e.lang, 'en')
 
+    def test_english_after_xin_chao_is_still_english(self):
+        # From the tablet, 2026-11-13: "Xin chào" is said before English too, and the Vietnamese model
+        # writes English as letters with no Vietnamese accents. Whisper still gets its turn.
+        class Hub(FakeHomeHub):
+            def command(self, text, retry=False):
+                self.sent.append(text)
+                return CommandResult(text.startswith('Turn on kitchen'), 'Done.')
+        hub = Hub()
+        whisper = FakeWhisper('Turn on kitchen lights for 15 minutes.')
+        a = answer(b'\0' * 32000, True, whisper, hub, FakeCantonese('en', 'Croun cution like fodyfi menes.'),
+                   vi_ears=FakeVietnamese('CROUN CUTION LIKE FODYFI MENES'), prefer='vi')
+        self.assertEqual((a.lang, whisper.calls), ('en', 1))
+        self.assertIn('Turn on kitchen lights for 15 minutes.', hub.sent)
+
     def test_answer_to_a_vietnamese_question_stays_vietnamese(self):
         # "Bật hay tắt đèn nhà bếp?", then "bật" taken for Cantonese "千就".
         hub = FakeHomeHub()

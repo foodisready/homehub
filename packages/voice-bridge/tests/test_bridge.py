@@ -612,3 +612,84 @@ class ProgressTest(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class SeveralDevicesTest(unittest.TestCase):
+    """"Turn on the lights" fits every light: the speaker asks which, rather than reading them all out."""
+
+    class Hub:
+        names = ['Kitchen lights', 'Kitchen counter lights', 'Living room lamps']
+
+        def __init__(self):
+            self.sent = []
+
+        def command(self, text, retry=False):
+            from homehub_voice.homehub import CommandResult
+            self.sent.append(text)
+            if text.lower().rstrip('.').endswith(('the lights', 'lights for 10 minutes')) and 'kitchen' not in text.lower():
+                return CommandResult(True, 'Which one do you mean: "Kitchen lights", "Kitchen counter lights", "Living room lamps"?')
+            return CommandResult(True, f'Done: {text}')
+
+    class Ears:
+        def __init__(self, text):
+            self.text = text
+
+        def hear(self, audio):
+            return 'en', self.text
+
+        def transcribe(self, audio):
+            return self.text
+
+    class NoWhisper:
+        def transcribe(self, audio, names):
+            raise AssertionError('Whisper not needed')
+
+    def test_asks_which_light_then_takes_the_name(self):
+        from homehub_voice.pipeline import answer
+        hub = self.Hub()
+        a = answer(b'\0' * 32000, True, self.NoWhisper(), hub, self.Ears('Turn on the lights for 10 minutes.'))
+        self.assertEqual((a.reply, a.handled), ('Which light?', False))
+        self.assertTrue(a.asked.startswith('en-which:'))
+        b = answer(b'\0' * 32000, True, self.NoWhisper(), hub, self.Ears('The kitchen.'), asked=a.asked, prefer='en')
+        self.assertEqual(hub.sent[-1], 'turn on The kitchen for 10 minutes')
+        self.assertTrue(b.handled)
+        # Or the whole command again.
+        c = answer(b'\0' * 32000, True, self.NoWhisper(), hub, self.Ears('Turn off kitchen lights.'), asked=a.asked, prefer='en')
+        self.assertEqual(hub.sent[-1], 'Turn off kitchen lights.')
+
+    def test_the_question_names_the_kind(self):
+        from homehub_voice.pipeline import which_asked
+        self.assertEqual(which_asked('Turn off the lamps')[0], 'Which lamp?')
+        self.assertEqual(which_asked('turn on the lights for 5 minutes')[0], 'Which light?')
+        self.assertEqual(which_asked('turn them off')[0], 'Which one?')
+
+    def test_cantonese_is_not_held_up_by_the_vietnamese_model(self):
+        # Both listen at once: SenseVoice doesn't wait for the Vietnamese model to finish.
+        import threading
+        from homehub_voice.pipeline import answer
+        started = threading.Event()
+
+        class SlowVietnamese:
+            def transcribe(self, audio):
+                self.saw_sensevoice_start = started.wait(2)
+                return 'KHÔNG RÕ'
+
+        class Cantonese:
+            def hear(self, audio):
+                started.set()
+                return 'yue', '開廚房燈。'
+
+            def transcribe(self, audio):
+                return '開廚房燈。'
+
+        class Hub:
+            names = ['廚房燈']
+
+            def command(self, text, retry=False):
+                from homehub_voice.homehub import CommandResult
+                return CommandResult(True, 'ok')
+
+        viet = SlowVietnamese()
+        a = answer(b'\0' * 32000, True, self.NoWhisper(), Hub(), Cantonese(), vi_ears=viet)
+        self.assertTrue(viet.saw_sensevoice_start)
+        self.assertEqual(a.lang, 'yue')

@@ -13,6 +13,7 @@ import difflib
 import logging
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -74,20 +75,38 @@ def wake_language(wake: str) -> str | None:
     return 'vi' if 'xin chao' in vi.plain(wake or '') else None
 
 
+# Where SenseVoice listens while the Vietnamese model does: a Pi 4 has four cores, and each model
+# uses two, so the pair takes about 0.8 s instead of 1.05 s.
+_beside = ThreadPoolExecutor(1, thread_name_prefix='sensevoice')
+
+# HomeHub's reply when a name fits several devices ("the lights"). Fine in Chat, but read out it's a
+# list of every light, so the speaker asks "Which light?" and listens for the answer instead.
+SEVERAL = re.compile(r'^Which one do you mean: ')
+# The follow-up after "Which light?": the verb and how long, until the name comes.
+EN_WHICH_PREFIX = 'en-which:'
+FOR_HOW_LONG = re.compile(r'\s+for\s+\S.*$', re.I)
+
+
 def answer(audio: bytes, spoke: bool, listener: Transcriber, homehub: Commander,
            ears: CantoneseEars | None = None, asked: str | None = None,
            vi_ears: VietnameseEars | None = None, prefer: str | None = None) -> Answer:
     """asked: the device HomeHub just asked "on or off?" about, if any, so "on" alone answers it.
     prefer: the language the speaker was woken in ("Xin chào"), or the question being answered
-    was asked in. Misheard words in it are answered in it, not taken for another language."""
+    was asked in. Misheard Vietnamese is answered in Vietnamese, not taken for Cantonese."""
     if not spoke:
         return Answer('', NOTHING_HEARD, False)
     t0 = time.monotonic()
     which = asked if asked and asked.startswith(vi.WHICH_PREFIX) else None
-    if which:
-        asked = None   # not a device's name: English and Cantonese have nothing to answer
+    en_which = asked if asked and asked.startswith(EN_WHICH_PREFIX) else None
+    if which or en_which:
+        asked = None   # not a device's name: nothing else has an "on or off?" to answer
+    if en_which:
+        prefer = 'en'
+    use_vi = vi_ears is not None and (prefer not in ('yue', 'en') or which)
+    # SenseVoice starts at the same time as the Vietnamese model, which is usually done first.
+    hearing = _beside.submit(ears.hear, audio) if ears is not None and use_vi else None
     heard_vi = ''
-    if vi_ears is not None and (prefer != 'yue' or which):
+    if use_vi:
         # First, since SenseVoice takes most Vietnamese for Cantonese. It takes about a third of a
         # second on a Pi, and what it writes for English or Cantonese is never a Vietnamese command.
         heard = heard_vi = vi_ears.transcribe(audio)
@@ -98,32 +117,58 @@ def answer(audio: bytes, spoke: bool, listener: Transcriber, homehub: Commander,
         if vi.is_vietnamese(heard, homehub.names, getattr(homehub, 'scenes', homehub.names),
                             getattr(homehub, 'groups', None), asked):
             return answer_vietnamese(heard, homehub, t0, asked)
-    # Woken in Vietnamese, or answering a Vietnamese question, but the words weren't clear: answer
-    # in Vietnamese ("Xin lỗi, tôi không hiểu"), not in the Cantonese SenseVoice would guess. Only
-    # words SenseVoice is sure are English go on, for someone who said "Xin chào" then English.
-    in_vietnamese = (prefer == 'vi' or which) and has_words(heard_vi)
+    # Woken in Vietnamese, or answering a Vietnamese question, and the Vietnamese model heard
+    # Vietnamese words, but not a command: answer in Vietnamese ("Xin lỗi, tôi không hiểu"), not in
+    # the Cantonese SenseVoice would guess. English, which the Vietnamese model writes without
+    # Vietnamese letters ("CROUN CUTION"), goes on as English: "Xin chào" is said before English too.
+    in_vietnamese = bool(prefer == 'vi' or which) and vi.has_vietnamese(heard_vi)
     quick = ''
     if ears is not None:
-        lang, quick = ears.hear(audio)
+        lang, quick = hearing.result() if hearing is not None else ears.hear(audio)
         if in_vietnamese and lang != 'en':
             return answer_vietnamese(heard_vi, homehub, t0, asked)
-        if lang in CANTONESE:
+        if lang in CANTONESE and not en_which:
             return answer_cantonese(audio, ears, homehub, t0, asked, quick)
+    elif in_vietnamese:
+        return answer_vietnamese(heard_vi, homehub, t0, asked)
     # English. SenseVoice has already heard the words, in about a second; Whisper takes about ten
     # on a Pi, but knows the home's device names. So try SenseVoice's words first, and ask Whisper
     # only if HomeHub doesn't understand them.
     if quick.strip(' .,!?'):
+        quick = completed(quick, en_which)
         # As heard, then with the device's name spelled as HomeHub knows it ("my office la" → "My office lamp").
         for text in dict.fromkeys([quick, closest_name(quick, homehub.names)]):
             first = english(text, homehub, asked, retry=True)
             if first[1] is None or first[1].handled:
                 return finish(first, time.monotonic() - t0)
-    if in_vietnamese:
-        return answer_vietnamese(heard_vi, homehub, t0, asked)
     text = listener.transcribe(audio, homehub.names)
     if not text.strip(' .,!?'):
         return Answer('', NOT_CAUGHT, False, time.monotonic() - t0)
-    return finish(english(text, homehub, asked), time.monotonic() - t0)
+    return finish(english(completed(text, en_which), homehub, asked), time.monotonic() - t0)
+
+
+def which_asked(sent: str) -> tuple[str, str | None]:
+    """For a command whose name fits several devices: the question to ask ("Which light?"), and
+    what to remember for the answer. None when the command can't be read back."""
+    m = SWITCH.match(sent)
+    if not m:
+        return 'Which one?', None
+    name = m.group(2)
+    how_long = FOR_HOW_LONG.search(name)
+    name = FOR_HOW_LONG.sub('', name).strip()
+    last = name.split()[-1].lower() if name.split() else ''
+    kind = last[:-1] if last.endswith('s') and not last.endswith('ss') else last
+    question = f'Which {kind}?' if kind.isalpha() and kind not in ('them', 'it', 'all', 'everything') else 'Which one?'
+    return question, f'{EN_WHICH_PREFIX}{m.group(1).lower()}|{how_long.group(0) if how_long else ""}'
+
+
+def completed(text: str, en_which: str | None) -> str:
+    """The answer to "Which light?" ("the kitchen") made the command first asked for
+    ("turn on the kitchen for 10 minutes"). A whole command again is taken as it is."""
+    if not en_which or SWITCH.match(text):
+        return text
+    verb, _, how_long = en_which[len(EN_WHICH_PREFIX):].partition('|')
+    return f'{verb} {text.strip(" .,!?")}{how_long}'
 
 
 # "Turn on my office la.": a verb, then a name.
@@ -166,6 +211,10 @@ def finish(sent: tuple[str, CommandResult | None, float], total_s: float) -> Ans
     heard, res, homehub_s = sent
     if res is None:
         return Answer(heard, NO_HOMEHUB, False, total_s - homehub_s, homehub_s)
+    if SEVERAL.match(res.response or ''):
+        # "Turn on the lights" fits several: ask which, rather than read out every light's name.
+        question, follow_up = which_asked(heard.split(' → ')[-1])
+        return Answer(heard, question, False, total_s - homehub_s, homehub_s, asked=follow_up)
     return Answer(heard, res.response or NOT_CAUGHT, res.handled, total_s - homehub_s, homehub_s)
 
 
