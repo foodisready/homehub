@@ -313,6 +313,44 @@ class SpeakerLinkTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(langs, ['vi', None, None])
         link.task.cancel()
 
+    async def test_talk_that_never_stops_gets_no_reply(self):
+        # From the tablet, 2026-11-13: "Hey Woman" woken by a TV, then eight seconds of its talk,
+        # answered "I heard words, just not ones I know. Try again?".
+        handled = [False]
+
+        def answer_fn(audio, spoke, asked=None, prefer=None):
+            return mock.Mock(heard="I don't want to pay for your drink.", reply="Sorry, I didn't understand that.",
+                             handled=handled[0], stt_s=0, homehub_s=0, lang='en', asked=None)
+
+        async def talk(c, n):
+            c.events.clear()
+            await c.handlers['handle_start'](f'tv{n}', 0, None, 'Hey Woman')
+            for ch in chunks(tone(0.3, False) + tone(9, True)):
+                await c.handlers['handle_audio'](ch, None)
+            for _ in range(300):
+                await asyncio.sleep(0.01)
+                if c.events and c.events[-1][0] == 'VOICE_ASSISTANT_RUN_END':
+                    return dict(c.events)
+
+        link, c = await self.connected_link(answer_fn)
+        quiet = await talk(c, 1)
+        self.assertNotIn('VOICE_ASSISTANT_TTS_START', quiet)
+        # A command in it is still carried out, and said so.
+        handled[0] = True
+        done = await talk(c, 2)
+        self.assertIn('VOICE_ASSISTANT_TTS_START', done)
+        # An ordinary command that isn't understood still gets "Sorry".
+        handled[0] = False
+        short = await self.say(c, 3)
+        self.assertIn('VOICE_ASSISTANT_TTS_START', short)
+        link.task.cancel()
+
+    def test_background_talk(self):
+        from homehub_voice.speakers import background_talk
+        self.assertTrue(background_talk(8.0, 7.6))
+        self.assertFalse(background_talk(8.0, 5.2), 'someone pausing as they speak')
+        self.assertFalse(background_talk(3.5, 3.4), 'a command, however much of it is voiced')
+
     async def test_a_question_keeps_listening_and_its_answer_gets_the_name(self):
         from homehub_voice import speakers
         given, langs = [], []

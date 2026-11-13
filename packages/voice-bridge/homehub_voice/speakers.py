@@ -44,6 +44,15 @@ class Run:
         return loudness(bytes(self.listen.audio)) if self.listen.spoke else 0.0
 
 
+# Talk heard right up to the longest a command can be, nearly all of it voiced, is background talk.
+# A command is a second or two of speech; a TV that woke the speaker fills all eight seconds.
+BACKGROUND_VOICED = 0.75
+
+
+def background_talk(seconds: float, voiced: float) -> bool:
+    return seconds >= MAX_S - 0.25 and voiced >= BACKGROUND_VOICED * seconds
+
+
 # Runs are remembered this long, so a speaker that finishes listening late still sees who answered.
 REMEMBER_S = 30.0
 
@@ -103,6 +112,11 @@ class SpeakerLink:
         # The device this speaker was just asked "on or off?" about, when, and in which language.
         self.asked: tuple[str, float, str] | None = None
 
+    @property
+    def who(self) -> str:
+        """For the log: the name, and the address, since two speakers can share a name."""
+        return f'{self.name} [{self.speaker.label}]' if self.name != self.speaker.label else self.name
+
     def _set_connected(self, value: bool) -> None:
         if value != self.connected:
             self.connected = value
@@ -119,7 +133,7 @@ class SpeakerLink:
                 await self._session()
                 delay = 5.0
                 last_error = ''
-                log.info('%s disconnected; reconnecting', self.name)
+                log.info('%s disconnected; reconnecting', self.who)
             except StopTrying as e:
                 log.info('%s: %s', self.name, e)
                 self.usable = False
@@ -192,7 +206,7 @@ class SpeakerLink:
             event(E.VOICE_ASSISTANT_STT_VAD_END)
             try:
                 if not await self.one_answers.answers(run):
-                    log.info('%s #%d (%s): another speaker heard the same command louder, so it answers', self.name, run.n, run.wake or 'no wake word')
+                    log.info('%s #%d (%s): another speaker heard the same command louder, so it answers', self.who, run.n, run.wake or 'no wake word')
                     return
                 # A question asked lately is answered by this command, or forgotten.
                 recent = self.asked if self.asked and time.monotonic() - self.asked[1] <= FOLLOW_UP_S else None
@@ -205,9 +219,15 @@ class SpeakerLink:
                 # speaker goes quiet instead of saying "Sorry, I didn't hear anything" to nobody.
                 if not a.heard.strip(' 。，.,!?！？') and not a.handled:
                     log.info('%s #%d (%s) woke but heard no words, so it stays quiet (speech %.1fs, recognise %.2fs)',
-                             self.name, run.n, run.wake or 'no wake word', run.listen.seconds, a.stt_s)
+                             self.who, run.n, run.wake or 'no wake word', run.listen.seconds, a.stt_s)
                     return
                 follow_up = a.asked if isinstance(getattr(a, 'asked', None), str) else None
+                # Talk that never stopped until the speaker gave up listening, and wasn't a command: a TV
+                # or a conversation that sounded like the wake word, not someone speaking to it.
+                if not a.handled and not follow_up and background_talk(run.listen.seconds, run.listen.voiced):
+                    log.info('%s #%d (%s) heard %r in %.1fs of talk that didn\'t stop, most likely a TV or a conversation, so it stays quiet',
+                             self.who, run.n, run.wake or 'no wake word', a.heard, run.listen.seconds)
+                    return
                 event(E.VOICE_ASSISTANT_STT_END, {'text': a.heard or ' '})
                 event(E.VOICE_ASSISTANT_INTENT_START)
                 # A question: the speaker listens again after the reply, with no wake word.
@@ -221,12 +241,12 @@ class SpeakerLink:
                 passes = getattr(a, 'passes', 0)
                 log.info(
                     '%s #%d (%s) heard %r -> %r (%s; speech %.1fs of which voiced %.1fs, loudness %.3f-%.3f, recognise %.2fs%s, HomeHub %.2fs, reply ready %.2fs after speech ended)',
-                    self.name, run.n, run.wake or 'no wake word', a.heard, a.reply, 'done' if a.handled else 'not handled',
+                    self.who, run.n, run.wake or 'no wake word', a.heard, a.reply, 'done' if a.handled else 'not handled',
                     run.listen.seconds, run.listen.voiced, min(run.listen.floor, run.listen.peak), run.listen.peak, a.stt_s, {1: ' in 1 pass', 2: ' in 2 passes'}.get(passes, '') if isinstance(passes, int) else '',
                     a.homehub_s, time.monotonic() - t_end,
                 )
             except Exception as e:  # noqa: BLE001 — the speaker must always hear the run end
-                log.exception('%s #%d failed', self.name, run.n)
+                log.exception('%s #%d failed', self.who, run.n)
                 event(E.VOICE_ASSISTANT_ERROR, {'code': 'bridge-error', 'message': str(e)[:200]})
             finally:
                 event(E.VOICE_ASSISTANT_RUN_END)
