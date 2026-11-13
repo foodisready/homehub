@@ -550,6 +550,11 @@ describe('Wyze cameras', () => {
       assert.equal(Date.parse(snap.takenAt), Math.floor((now - 20_000) / 1000) * 1000);
       assert.deepEqual(wyze.eventRequests[0].device_id_list, [FRONT]);
       assert.equal(watch.lastMotionFor(id), new Date(now - 20_000).toISOString());
+
+      // Renamed afterwards: its older pictures show the new name.
+      db.prepare('UPDATE devices SET alias = ? WHERE id = ?').run('Living room camera', id);
+      assert.equal(snaps.listSnapshots()[0].cameraName, 'Living room camera');
+      assert.equal(snaps.latestFor(id)?.cameraName, 'Living room camera');
     });
 
     it("uses a frame from the bridge when Wyze's picture won't download", async () => {

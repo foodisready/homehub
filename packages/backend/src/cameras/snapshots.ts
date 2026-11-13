@@ -97,8 +97,18 @@ interface SnapshotRow {
   file: string; trigger: 'motion' | 'manual'; detail: string | null; size_bytes: number; taken_at: string;
 }
 
-const toSnapshot = (r: SnapshotRow): Snapshot => ({
-  id: r.id, deviceId: r.device_id, camera: r.camera, cameraName: r.camera_name,
+/**
+ * Snapshots with their camera's name as it is now, so renaming a camera renames its
+ * older pictures too. Ring's names come from the Ring app, so they keep the saved one.
+ */
+const SELECT_SNAPSHOTS = `SELECT s.*, COALESCE(
+    (SELECT alias FROM devices WHERE devices.id = s.device_id),
+    (SELECT name FROM ip_cameras WHERE 'ipcam-' || ip_cameras.id = s.camera),
+    s.camera_name) AS current_name
+  FROM camera_snapshots s`;
+
+const toSnapshot = (r: SnapshotRow & { current_name?: string }): Snapshot => ({
+  id: r.id, deviceId: r.device_id, camera: r.camera, cameraName: r.current_name ?? r.camera_name,
   trigger: r.detail === 'doorbell' ? 'doorbell' : r.trigger, sizeBytes: r.size_bytes, takenAt: r.taken_at.replace(' ', 'T') + 'Z',
 });
 
@@ -183,19 +193,19 @@ export function listSnapshots(opts: { deviceId?: number; camera?: string; brand?
   if (opts.before !== undefined) { where.push('id < ?'); args.push(opts.before); }
   const limit = Math.min(Math.max(opts.limit ?? 60, 1), 200);
   const rows = getDb().prepare(
-    `SELECT * FROM camera_snapshots ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY id DESC LIMIT ?`,
+    `${SELECT_SNAPSHOTS} ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY id DESC LIMIT ?`,
   ).all(...args, limit) as SnapshotRow[];
   return rows.map(toSnapshot);
 }
 
 export function latestFor(deviceId: number): Snapshot | null {
-  const row = getDb().prepare('SELECT * FROM camera_snapshots WHERE device_id = ? ORDER BY id DESC LIMIT 1').get(deviceId) as SnapshotRow | undefined;
+  const row = getDb().prepare(`${SELECT_SNAPSHOTS} WHERE device_id = ? ORDER BY id DESC LIMIT 1`).get(deviceId) as SnapshotRow | undefined;
   return row ? toSnapshot(row) : null;
 }
 
 /** The newest snapshot from a camera, by its key, such as ring-123. */
 export function latestForCamera(camera: string): Snapshot | null {
-  const row = getDb().prepare('SELECT * FROM camera_snapshots WHERE camera = ? ORDER BY id DESC LIMIT 1').get(camera) as SnapshotRow | undefined;
+  const row = getDb().prepare(`${SELECT_SNAPSHOTS} WHERE camera = ? ORDER BY id DESC LIMIT 1`).get(camera) as SnapshotRow | undefined;
   return row ? toSnapshot(row) : null;
 }
 

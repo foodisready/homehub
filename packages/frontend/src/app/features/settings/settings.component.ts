@@ -24,6 +24,7 @@ import { VoiceRepliesComponent } from './voice-replies.component';
 import { VoiceControlComponent } from './voice-control.component';
 import { AutomationsService } from '../../core/services/automations.service';
 import { SecretInputDirective } from '../../shared/secret-input/secret-input.directive';
+import { NicknameChipsComponent, type NicknameSuggestion } from '../../shared/nickname-chips/nickname-chips.component';
 
 interface ChatStats {
   total: number;
@@ -76,7 +77,7 @@ const DRIVER_LABEL: Record<string, string> = {
 @Component({
   selector: 'app-settings',
   standalone: true,
-  imports: [SecretInputDirective, FormsModule, RouterLink, InviteQrComponent, MatterPairComponent, DeviceFilterComponent, BackupsComponent, BackupSyncComponent, ServerRoleComponent, MerossLoginComponent, OtherNetworksComponent, HomeSettingsComponent, AiConnectionComponent, CamerasToggleComponent, TeachCommandsComponent, VoiceRepliesComponent, VoiceControlComponent],
+  imports: [SecretInputDirective, NicknameChipsComponent, FormsModule, RouterLink, InviteQrComponent, MatterPairComponent, DeviceFilterComponent, BackupsComponent, BackupSyncComponent, ServerRoleComponent, MerossLoginComponent, OtherNetworksComponent, HomeSettingsComponent, AiConnectionComponent, CamerasToggleComponent, TeachCommandsComponent, VoiceRepliesComponent, VoiceControlComponent],
   styles: [`
     .topbar { display:flex; align-items:center; justify-content:space-between; margin-bottom:1.5rem; }
     .topbar h1 { font-size:1.4rem; font-weight:700; }
@@ -285,8 +286,9 @@ const DRIVER_LABEL: Record<string, string> = {
                       <datalist id="device-rooms">
                         @for (room of roomNames(); track room) { <option [value]="room"></option> }
                       </datalist>
-                      <input type="text" [(ngModel)]="editNicknames" placeholder="Nicknames for Chat, separated by commas" autocomplete="off" />
                     </div>
+                    <app-nickname-chips [(nicknames)]="editNicknames" [suggestions]="nicknameSuggestions()[d.id] ?? []"
+                                        [others]="otherDevices(d.id)" />
                     <p style="font-size:0.75rem;color:var(--text-muted);margin:0.2rem 0 0">Give several devices the same nickname to switch them together by Chat or voice.</p>
                     <label style="display:flex;align-items:center;gap:0.4rem;margin-top:0.4rem;font-size:0.85rem">
                       <input type="checkbox" style="width:auto" [(ngModel)]="editProtected" />
@@ -821,7 +823,7 @@ const DRIVER_LABEL: Record<string, string> = {
             <span class="chev">{{ isSectionOpen('voice') ? '▾' : '▸' }}</span> Voice control
           </button>
           @if (isSectionOpen('voice')) {
-            <div class="card"><app-voice-control /></div>
+            <div class="card"><app-voice-control (nicknamesChanged)="reloadDevices()" /></div>
           }
         </div>
       }
@@ -1072,7 +1074,9 @@ export class SettingsComponent implements OnInit, OnDestroy {
   editingDeviceId = signal<number | null>(null);
   editAlias    = '';
   editIp       = '';
-  editNicknames = '';
+  editNicknames: string[] = [];
+  /** Vietnamese and Cantonese nicknames HomeHub offers, by device id. */
+  nicknameSuggestions = signal<Partial<Record<number, NicknameSuggestion[]>>>({});
   editRoom = '';
   deviceSearch = signal('');
   deviceFilter = signal<DeviceFilter>('all');
@@ -1429,11 +1433,20 @@ export class SettingsComponent implements OnInit, OnDestroy {
     return d.model && d.model !== 'Matter device' ? `Matter · ${d.model}` : 'Matter';
   }
 
+  /** The other devices' names, so the nickname editor can say which nicknames are shared. */
+  otherDevices(id: number): Array<{ alias: string; nicknames: string[] }> {
+    return this.devices().filter((x) => x.id !== id);
+  }
+
   startDeviceEdit(d: Device): void {
     this.editingDeviceId.set(d.id);
     this.editAlias    = d.alias;
     this.editIp       = d.ip;
-    this.editNicknames = d.nicknames.join(', ');
+    this.editNicknames = [...d.nicknames];
+    this.http.get<{ suggestions: Record<number, NicknameSuggestion[]> }>('/api/devices/nickname-suggestions').subscribe({
+      next: (r) => this.nicknameSuggestions.set(r.suggestions ?? {}),
+      error: () => this.nicknameSuggestions.set({}),   // only the suggestions are missing
+    });
     this.editRoom = d.room ?? '';
     this.editProtected = d.isProtected;
     // Pre-fill credentials if already stored
@@ -1510,7 +1523,7 @@ export class SettingsComponent implements OnInit, OnDestroy {
     const payload: Record<string, unknown> = {
       alias:     this.editAlias,
       ip:        this.editIp,
-      nicknames: this.editNicknames.split(','),
+      nicknames: this.editNicknames,
       room:      this.editRoom,
     };
     if (this.editProtected !== device?.isProtected) payload['isProtected'] = this.editProtected;

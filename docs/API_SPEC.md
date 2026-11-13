@@ -130,6 +130,27 @@ Returns all configured devices with current state.
 
 ---
 
+### `GET /api/devices/nickname-suggestions`
+Vietnamese and Cantonese nicknames HomeHub suggests for each device, in the languages ticked in Settings → Voice control, made from the device's English names with a built-in word list. Names a device already has are left out. Nothing is saved: add them with `PATCH /api/devices/:id`.
+
+`needsName` marks a Cantonese one that needs a person's Chinese name in front of `text`. A person's Chinese name is learnt from nicknames already given (卓希房燈 on "Brenden's room lights").
+
+**Response 200**
+```json
+{
+  "languages": ["yue", "vi"],
+  "suggestions": {
+    "4": [
+      { "text": "đèn bếp", "lang": "vi", "from": "Kitchen lights" },
+      { "text": "đèn nhà bếp", "lang": "vi", "from": "Kitchen lights" }
+    ],
+    "6": [{ "text": "床頭燈", "lang": "yue", "from": "Ethan's bedside lamp", "needsName": "Ethan" }]
+  }
+}
+```
+
+---
+
 ### `GET /api/devices/:id`
 `:id` is device alias (e.g. `living-room-lamp`) or numeric id.
 

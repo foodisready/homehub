@@ -282,7 +282,11 @@ You can also use rooms in Chat and voice, such as "turn off the living room".
 
 ## Names and groups
 
-Open **Settings → Devices** and select **Edit** to add nicknames, separated by commas. HomeHub recognizes them in Chat and voice commands.
+Open **Settings → Devices** and select **Edit** to add nicknames. Type one and press **Add** or Enter; each becomes a tag, marked EN, VI or 粵 for its language. Select **✕** on a tag to remove it (**Undo** brings it back), and **Save** to keep the changes. HomeHub recognizes nicknames in Chat and voice commands. A tag with a dashed edge is shared with another device, named under the tags.
+
+With Vietnamese or Cantonese ticked in **Settings → Voice control**, HomeHub suggests nicknames in those languages under the tags, made from the device's English names: "Kitchen lights" gets đèn bếp and đèn nhà bếp. Tap one to add it. For a person's room, Cantonese needs their Chinese name: tap the suggestion, type the name in front of it, such as 以信 before 房燈, and press **Add**. HomeHub then uses that name in its other suggestions. Names it doesn't know the words for, such as "Woman statue", get no suggestions.
+
+To add suggestions for every device at once, open **Settings → Voice control** and select **Review** under **Suggested nicknames**. They're all ticked: tap any that aren't right to untick them, then select **Add**. Ones you untick aren't suggested there again.
 
 To switch several devices together, give them the same nickname. If two plugs both have the nickname `living room lights`, then "turn off living room lights" switches both.
 

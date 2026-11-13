@@ -11,6 +11,8 @@ import { emitDeviceState } from '../socket';
 import { logger } from '../logger';
 import { cancelPowerTimer, clearOverride, isProtectedDevice, notifyPowerOff, setOverride } from '../devices/power';
 import { requireAdmin } from '../middleware/auth';
+import { getVoiceSettings } from '../system/voice-bridge';
+import { learnOwners, suggestNicknames, type NicknameSuggestion, type SuggestLanguage } from '../nlp/nickname-suggest';
 import { keepSecrets, withoutSecrets } from '../devices/secrets';
 import { lastChanges, recordPower, type LastChange } from '../activity/activity';
 import { pendingAutoOff, type AutoOff } from '../devices/auto-off';
@@ -123,6 +125,23 @@ devicesRouter.get('/', (_req: Request, res: Response) => {
 // GET /api/devices/auto-off — { [deviceId]: AutoOff } for devices that will turn themselves off
 devicesRouter.get('/auto-off', (_req: Request, res: Response) => {
   res.json(Object.fromEntries(pendingAutoOff()));
+});
+
+// GET /api/devices/nickname-suggestions
+// Vietnamese and Cantonese nicknames to offer for each device, in the languages ticked in
+// Settings → Voice control: { languages, suggestions: { [deviceId]: [{ text, lang, from, needsName? }] } }.
+devicesRouter.get('/nickname-suggestions', (_req: Request, res: Response) => {
+  const languages = getVoiceSettings().languages.filter((l): l is SuggestLanguage => l === 'vi' || l === 'yue');
+  const devices = (getDb().prepare('SELECT id, alias, nicknames, room, driver_type FROM devices').all() as
+    Array<{ id: number; alias: string; nicknames: string | null; room: string | null; driver_type: string | null }>)
+    .map((d) => ({ id: d.id, alias: d.alias, room: d.room, driverType: d.driver_type, nicknames: d.nicknames ? JSON.parse(d.nicknames) as string[] : [] }));
+  const owners = learnOwners(devices);
+  const suggestions: Record<number, NicknameSuggestion[]> = {};
+  for (const d of devices) {
+    const list = suggestNicknames(d, languages, owners);
+    if (list.length) suggestions[d.id] = list;
+  }
+  res.json({ languages, suggestions });
 });
 
 // GET /api/devices/:id

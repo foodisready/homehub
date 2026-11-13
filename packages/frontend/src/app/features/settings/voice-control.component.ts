@@ -1,7 +1,8 @@
-import { Component, OnDestroy, OnInit, computed, inject, signal } from '@angular/core';
+import { Component, OnDestroy, OnInit, computed, inject, output, signal } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
 import { AutomationsService } from '../../core/services/automations.service';
+import { NicknameReviewComponent } from './nickname-review.component';
 
 interface BridgeStatus {
   state: 'off' | 'starting' | 'running'; kind: 'docker' | 'service' | null; version: string | null;
@@ -23,7 +24,7 @@ const POLL_MS = 5_000;
 @Component({
   selector: 'app-voice-control',
   standalone: true,
-  imports: [FormsModule],
+  imports: [FormsModule, NicknameReviewComponent],
   styles: [`
     .intro { font-size:0.82rem; color:var(--text-muted); margin:0 0 0.8rem; line-height:1.45; }
     .check { display:flex; align-items:flex-start; gap:0.55rem; font-size:0.9rem; color:var(--text); margin:0 0 0.55rem; cursor:pointer; }
@@ -85,6 +86,10 @@ const POLL_MS = 5_000;
         <span class="dot" [class.ok]="status().tone === 'ok'" [class.busy]="status().tone === 'busy'"></span>
         <span>{{ status().text }} @if (status().command) { <code>{{ status().command }}</code> }</span>
       </div>
+
+      @if (otherLanguages().length) {
+        <app-nickname-review [languages]="otherLanguages()" (changed)="nicknamesChanged.emit()" />
+      }
     } @else if (loadError()) {
       <p class="msg err">{{ loadError() }}</p>
     }
@@ -101,6 +106,10 @@ export class VoiceControlComponent implements OnInit, OnDestroy {
   readonly message = signal('');
   readonly failed = signal(false);
   private readonly saved = signal<VoiceSettings | null>(null);
+  /** Vietnamese or Cantonese, saved: their nicknames can be suggested. */
+  readonly otherLanguages = computed(() => (this.saved()?.languages ?? []).filter((l) => l !== 'en'), { equal: (a, b) => a.join() === b.join() });
+  /** Nicknames were added from the suggestions. */
+  readonly nicknamesChanged = output<void>();
   enabled = false;
   cantonese = false;
   vietnamese = false;
