@@ -21,6 +21,9 @@ export function nameLang(name: string): NameLang {
 export const LANG_TAG: Record<NameLang, string> = { en: 'EN', vi: 'VI', yue: '粵' };
 export const LANG_NAME: Record<NameLang, string> = { en: 'English', vi: 'Tiếng Việt', yue: '廣東話' };
 
+/** Lower case without accents, one letter for one: "Đèn" → "den". */
+const fold = (s: string) => [...s.normalize('NFC')].map((c) => c.normalize('NFD').replace(/\p{M}/gu, '').replace(/[đĐ]/, 'd').toLowerCase().slice(0, 1) || c).join('');
+
 const key = (s: string) => s.normalize('NFC').toLowerCase().replace(/[\s-]+/g, ' ').trim();
 
 /**
@@ -70,10 +73,18 @@ const key = (s: string) => s.normalize('NFC').toLowerCase().replace(/[\s-]+/g, '
       }
 
       <div class="add-row">
-        <input #box type="text" [value]="draft()" (input)="draft.set(box.value)" (keydown)="onKey($event)" (paste)="onPaste($event)"
-               (blur)="commit()" [placeholder]="placeholder()" autocomplete="off" autocapitalize="off" enterkeyhint="done"
-               aria-label="Add a nickname" />
-        <button type="button" class="add btn-primary" (click)="commit(); box.focus()" [disabled]="!draft().trim()">Add</button>
+        <div class="field">
+          @if (ghost(); as g) {
+            <span class="ghost" aria-hidden="true"><span class="typed">{{ draft() }}</span>{{ g.rest }}</span>
+          }
+          <input #box type="text" [value]="draft()" (input)="onInput(box)" (keydown)="onKey($event)" (paste)="onPaste($event)"
+                 (blur)="commit()" [placeholder]="placeholder()" autocomplete="off" autocapitalize="off" enterkeyhint="done"
+                 [attr.lang]="next() ? (next()!.lang === 'yue' ? 'zh-HK' : 'vi') : null"
+                 [attr.aria-label]="next() ? 'Add a nickname. Tab adds ' + nextLabel() : 'Add a nickname'" />
+          @if (next()) {<kbd class="key" aria-hidden="true">Tab</kbd>}
+        </div>
+        <button type="button" class="add btn-primary" (click)="addClicked(); box.focus()" [disabled]="!draft().trim() && !next()"
+                [attr.aria-label]="!draft().trim() && next() ? 'Add ' + nextLabel() : null">Add</button>
       </div>
       @if (namePrompt(); as who) {
         <p class="note">Type {{ who }}'s name in Chinese in front, then press Add.</p>
@@ -138,7 +149,22 @@ const key = (s: string) => s.normalize('NFC').toLowerCase().replace(/[\s-]+/g, '
     }
     .remove:hover, .remove:focus-visible { background: color-mix(in srgb, var(--red) 25%, transparent); color: var(--text); }
     .add-row { display: flex; gap: 0.4rem; }
-    .add-row input { flex: 1; min-width: 0; font-size: 1rem; min-height: 40px; }
+    .field { position: relative; flex: 1; min-width: 0; background: var(--bg); border-radius: var(--radius); }
+    .field input { position: relative; width: 100%; font-size: 1rem; line-height: 1.25; min-height: 40px; background: transparent; padding-right: 3.2rem; }
+    /* The rest of a suggestion, shown after what's typed. */
+    .ghost {
+      position: absolute; inset: 0; display: flex; align-items: center; overflow: hidden; pointer-events: none;
+      padding: 0 calc(3.2rem + 1px) 0 calc(0.9rem + 1px); font-size: 1rem; line-height: 1.25; white-space: pre;
+      color: var(--text-muted); opacity: 0.8;
+    }
+    .ghost .typed { color: transparent; }
+    .key {
+      position: absolute; right: 0.5rem; top: 50%; transform: translateY(-50%); pointer-events: none;
+      padding: 0.05rem 0.35rem; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px;
+      font-family: inherit; font-size: 0.65rem; font-weight: 600; line-height: 1.4; color: var(--text-muted); background: var(--surface);
+    }
+    /* Phones have no Tab key: the Add button takes the suggestion instead. */
+    @media (hover: none) { .key { display: none; } .field input { padding-right: 0.9rem; } .ghost { padding-right: calc(0.9rem + 1px); } }
     .add { flex: none; min-height: 40px; padding: 0 1rem; }
     .add:disabled { opacity: 0.45; cursor: default; }
     .suggest {
@@ -192,7 +218,30 @@ export class NicknameChipsComponent {
     return [...byDevice].map(([device, names]) => ({ device, names }));
   });
 
-  placeholder = computed(() => this.nicknames().length ? 'Add another nickname' : 'Add a nickname, such as đèn bếp or 廚房燈');
+  /** The suggestion Tab (or Add, with nothing typed) takes: one whose start is typed, or the next one. */
+  next = computed<NicknameSuggestion | null>(() => {
+    const typed = this.draft();
+    if (typed.trim()) return this.ghost()?.s ?? null;
+    if (this.namePrompt()) return null;
+    return this.plain()[0] ?? this.offered()[0] ?? null;
+  });
+  nextLabel = computed(() => { const s = this.next(); return s ? (s.needsName ? `${s.needsName} + ${s.text}` : s.text) : ''; });
+
+  /** A suggestion that starts with what's typed, accents left out (den → đèn bếp), and the rest of it to show. */
+  ghost = computed<{ s: NicknameSuggestion; rest: string } | null>(() => {
+    const typed = this.draft();
+    if (!typed.trim() || this.overflowing()) return null;
+    const t = fold(typed);
+    const s = this.plain().find((p) => p.text.length > typed.length && fold(p.text.slice(0, typed.length)) === t);
+    return s ? { s, rest: s.text.slice(typed.length) } : null;
+  });
+  private overflowing = signal(false);
+
+  placeholder = computed(() => {
+    const s = this.next();
+    if (s) return s.needsName ? `${s.needsName}’s Chinese name + ${s.text}` : s.text;
+    return this.nicknames().length ? 'Add another nickname' : 'Add a nickname, such as đèn bếp or 廚房燈';
+  });
 
   sharedWith(name: string, others = this.others()): string[] {
     const k = key(name);
@@ -226,8 +275,32 @@ export class NicknameChipsComponent {
     this.namePrompt.set(null);
   }
 
+  onInput(el: HTMLInputElement): void {
+    this.draft.set(el.value);
+    this.overflowing.set(el.scrollWidth > el.clientWidth);
+    if (!el.value) this.namePrompt.set(null);
+  }
+
+  /** Tab, or Add with nothing typed: take the suggestion shown in the box. */
+  private accept(): boolean {
+    const s = this.next();
+    if (!s) return false;
+    if (s.needsName) { this.take(s); return true; }
+    this.add([s.text]);
+    this.draft.set('');
+    this.box().nativeElement.value = '';
+    return true;
+  }
+
+  addClicked(): void {
+    if (!this.draft().trim()) this.accept();
+    else this.commit();
+  }
+
   onKey(e: KeyboardEvent): void {
-    if (e.key === 'Enter' || e.key === ',' || e.key === '，') {
+    if (e.key === 'Tab' && !e.shiftKey && !e.isComposing) {
+      if (this.accept()) e.preventDefault();   // with nothing to take, Tab moves on as usual
+    } else if (e.key === 'Enter' || e.key === ',' || e.key === '，') {
       e.preventDefault();
       this.commit();
     } else if (e.key === 'Backspace' && !this.draft() && this.nicknames().length) {
