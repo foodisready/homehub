@@ -243,6 +243,8 @@ Set up a timer in Chat by adding a time, such as "turn on my office lamp for an 
 
 Ask what's on, such as "which devices are on?", "which lights are off?" or "is the kitchen light on?", in Chat or by voice. HomeHub answers these itself, straight away, from the states the dashboard shows. Cameras are left out of the lists. Anything HomeHub can't answer itself goes to the AI model, which runs on the HomeHub computer and can take a minute on an older one. Under each reply, Chat shows who answered, **HomeHub** or **the AI model**, and how long it took.
 
+Ask the time, the date or the weather the same way: "what time is it?", "what's the date?", "what's the weather?", "what's the weather tomorrow?" or "will it rain today?". By voice you can ask in Vietnamese ("Mấy giờ rồi?", "Thời tiết hôm nay thế nào?", "Ngày mai có mưa không?") or Cantonese ("幾點呀？", "今日天氣點？", "聽日會唔會落雨？"), and the answer comes in the same language. The weather needs your home's location in **Settings → Home**. It comes from Open-Meteo, a free weather service: only the location leaves the house, rounded to about a kilometre, and at most every ten minutes. Temperatures are in °F in the United States and °C elsewhere; set `TEMPERATURE_UNIT=C` or `F` in `.env` to choose.
+
 When something will turn a device off by itself, its dashboard row says when and why, and the timer icon turns blue:
 
 - **"Off at 9:12 PM · in 8 min · no motion":** a motion rule, counting down since the room emptied. Moving resets it.
@@ -475,7 +477,7 @@ Motion sensors report to one HomeHub only, the one they were last connected to o
 The guided setup asks for your town and sets both for you. To change them later, open **Settings → Home**, or select **Run the guided setup again** there.
 
 - **Time zone:** clock-time schedules, timers and every time HomeHub shows use it. **Use** sets it to the time zone of the phone or computer you're using.
-- **Location:** sunrise and sunset schedules use it. In Google Maps, right-click your home and select the numbers at the top, then paste both into the first box. On an `https` address, such as through Tailscale, **Use this device's location** fills them in.
+- **Location:** sunrise and sunset schedules use it, and so does the weather. In Google Maps, right-click your home and select the numbers at the top, then paste both into the first box. On an `https` address, such as through Tailscale, **Use this device's location** fills them in.
 
 After you save, the page shows today's sunrise and sunset, so you can check they look right. Schedules change straight away, without a restart.
 

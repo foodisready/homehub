@@ -74,7 +74,7 @@ Responsibilities:
 
 - Exposes plug controls as MCP tools over StreamableHTTP transport
 - Allows external AI agents (Claude Desktop, Cursor, custom bots) to control the hub
-- Tool registry: `list_devices`, `set_power_state`, `get_energy_metrics`, `get_all_states`, `create_schedule`, `get_sunrise_sunset`
+- Tool registry: `list_devices`, `set_power_state`, `get_energy_metrics`, `get_all_states`, `create_schedule`, `get_sunrise_sunset`, `get_weather` (Open-Meteo, `home/weather.ts`). The time, the date and the weather are also answered by rules in `nlp/questions.ts`, before any model
 
 ### `scheduler` — Node.js v24
 

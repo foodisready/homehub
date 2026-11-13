@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from . import cantonese as yue
+from . import questions
 from . import vietnamese as vi
 from .homehub import CommandResult, HomeHubError
 
@@ -119,6 +120,10 @@ def answer(audio: bytes, spoke: bool, listener: Transcriber, homehub: Commander,
             command = vi.answer_which(which, heard, homehub.names, getattr(homehub, 'groups', None))
             if command is not None:
                 return send_vietnamese(heard, command, homehub, t0)
+        kind = questions.vi_kind(heard) if not which else None
+        if kind:
+            # "Mấy giờ rồi?", "thời tiết hôm nay thế nào?"
+            return answer_question(heard, kind, 'vi', homehub, t0)
         if vi.is_vietnamese(heard, homehub.names, getattr(homehub, 'scenes', homehub.names),
                             getattr(homehub, 'groups', None), asked):
             return answer_vietnamese(heard, homehub, t0, asked)
@@ -233,6 +238,10 @@ SURE = 0.9
 def answer_cantonese(audio: bytes, ears: CantoneseEars, homehub: Commander, t0: float, asked: str | None = None,
                      quick: str = '', second: Future | None = None) -> Answer:
     scenes = getattr(homehub, 'scenes', homehub.names)
+    kind = questions.yue_kind(quick)
+    if kind:
+        # 幾點呀？ 今日天氣點？
+        return answer_question(quick, kind, 'yue', homehub, t0, passes=1)
     command = yue.parse(quick, homehub.names, scenes) if quick else None
     passes = 1
     if command is not None and command.action in ('on', 'off', 'scene') and command.score >= SURE:
@@ -241,6 +250,9 @@ def answer_cantonese(audio: bytes, ears: CantoneseEars, homehub: Commander, t0: 
         # Not sure, or a name alone, or an answer to a question: listen again, set to Cantonese.
         text, passes = (second.result() if second is not None else ears.transcribe(audio)), 2
         command = yue.parse(text, homehub.names, scenes)
+        kind = questions.yue_kind(text) if command is None else None
+        if kind:
+            return answer_question(text, kind, 'yue', homehub, t0, passes=2)
     # 開 or 熄 alone, answering "你想開定熄廚房燈？".
     if asked and (command is None or command.action == 'ask'):
         verb = yue.verb_alone(text)
@@ -261,6 +273,23 @@ def answer_cantonese(audio: bytes, ears: CantoneseEars, homehub: Commander, t0: 
     reply = yue.reply(command, res.handled, res.response, res.failed)
     return Answer(heard, reply, bool(act) and res.handled, t1 - t0, time.monotonic() - t1, lang='yue',
                   asked=command.name if command and command.action == 'ask' else None, passes=passes)
+
+
+def answer_question(heard: str, kind: str, lang: str, homehub: Commander, t0: float, passes: int = 0) -> Answer:
+    """The time, the date or the weather, asked in Vietnamese or Cantonese: HomeHub is asked in English,
+    and its numbers are said in the language that was spoken."""
+    t1 = time.monotonic()
+    send = questions.ENGLISH[kind]
+    try:
+        res = homehub.command(send)
+    except HomeHubError as e:
+        log.warning('%s', e)
+        return Answer(heard, vi.NO_HOMEHUB if lang == 'vi' else yue.NO_HOMEHUB, False, t1 - t0,
+                      time.monotonic() - t1, lang=lang, passes=passes)
+    say = questions.vi_reply if lang == 'vi' else questions.yue_reply
+    reply = say(kind, res.info if res.handled else None)
+    return Answer(f'{heard} → {send}', reply, res.handled and res.info is not None, t1 - t0,
+                  time.monotonic() - t1, lang=lang, passes=passes)
 
 
 def has_words(text: str) -> bool:

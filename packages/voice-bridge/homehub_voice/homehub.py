@@ -21,6 +21,8 @@ class CommandResult:
     response: str
     # Devices HomeHub couldn't switch, from its list of actions.
     failed: list[str] = field(default_factory=list)
+    # The time or the weather, with its numbers, for a question answered in Vietnamese or Cantonese.
+    info: dict | None = None
 
 
 class HomeHub:
@@ -91,4 +93,6 @@ class HomeHub:
         res = self._call('/command', {'text': text, **({'retry': True} if retry else {})})
         failed = [str((a.get('args') or {}).get('alias', '')) for a in res.get('actions') or []
                   if isinstance(a, dict) and isinstance(a.get('result'), dict) and a['result'].get('error')]
-        return CommandResult(bool(res.get('handled')), str(res.get('response') or ''), failed)
+        info = next((a['result'] for a in res.get('actions') or [] if isinstance(a, dict)
+                     and a.get('tool') in ('get_time', 'get_weather') and isinstance(a.get('result'), dict)), None)
+        return CommandResult(bool(res.get('handled')), str(res.get('response') or ''), failed, info)

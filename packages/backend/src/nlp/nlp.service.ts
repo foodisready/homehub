@@ -4,6 +4,8 @@ import { getDb } from '../db';
 import os from 'node:os';
 import { getCachedState } from '../kasa/device.cache';
 import { answerStatusQuestion } from './status';
+import { answerQuestion } from './questions';
+import { describeWeather, getWeather, WeatherError } from '../home/weather';
 import { getDriver } from '../drivers/registry';
 import { applyPower, assistantMaySwitch, type PowerDevice } from '../devices/power';
 import { logger } from '../logger';
@@ -140,6 +142,14 @@ export const TOOLS: OllamaTool[] = [
           date: { type: 'string', description: 'ISO date string YYYY-MM-DD (optional, defaults to today)' },
         },
       },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_weather',
+      description: "The weather outside the home: now, today's high, low and chance of rain, and tomorrow's",
+      parameters: { type: 'object', properties: {} },
     },
   },
 ];
@@ -297,6 +307,15 @@ async function executeTool(name: string, args: Record<string, unknown>, userMess
         solarNoon:  t.solarNoon.toISOString(),
         goldenHour: t.goldenHour.toISOString(),
       };
+    }
+
+    case 'get_weather': {
+      try {
+        const w = await getWeather();
+        return { ...w, now: { ...w.now, conditions: describeWeather(w.now.code) }, temperatureUnit: w.unit === 'F' ? 'Fahrenheit' : 'Celsius' };
+      } catch (err: any) {
+        return { error: err instanceof WeatherError ? err.message : "The weather isn't available right now." };
+      }
     }
 
     default:
@@ -514,7 +533,7 @@ export async function resolveTools(
 type Handled = { response: string; actions: ActionTaken[] };
 
 const byRules = async (text: string): Promise<Handled | null> =>
-  await runPowerCommand(text) ?? answerStatusQuestion(text);
+  await runPowerCommand(text) ?? answerStatusQuestion(text) ?? await answerQuestion(text);
 
 /**
  * The rules didn't understand it: a small model says it again plainly
