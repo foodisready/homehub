@@ -6,6 +6,7 @@ import { SocketService } from '../../core/socket/socket.service';
 import { CamerasStateService } from '../../core/services/cameras-state.service';
 import { AuthImgComponent } from './auth-img.component';
 import { RingLiveComponent } from './ring-live.component';
+import { SecretInputDirective } from '../../shared/secret-input/secret-input.directive';
 
 export interface RingSnapshot { id: number; deviceId: number | null; camera: string; cameraName: string; trigger: 'motion' | 'manual' | 'doorbell'; sizeBytes: number; takenAt: string }
 export interface RingCamera {
@@ -30,7 +31,7 @@ interface AccountCamera { id: number; name: string; home: string | null; model: 
 @Component({
   selector: 'app-ring-cameras',
   standalone: true,
-  imports: [FormsModule, AuthImgComponent, RingLiveComponent],
+  imports: [SecretInputDirective, FormsModule, AuthImgComponent, RingLiveComponent],
   styleUrls: ['./camera-layout.css'],
   styles: [`
     h2 { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); margin: 1.75rem 0 0.75rem; }

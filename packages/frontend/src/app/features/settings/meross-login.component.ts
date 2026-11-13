@@ -1,6 +1,7 @@
 import { Component, OnInit, effect, inject, input, output, signal } from '@angular/core';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
+import { SecretInputDirective } from '../../shared/secret-input/secret-input.directive';
 
 interface MerossLogin { email: string | null; signedIn: boolean; hasNames?: boolean; rejectedBy?: string[] }
 
@@ -8,7 +9,7 @@ interface MerossLogin { email: string | null; signedIn: boolean; hasNames?: bool
 @Component({
   selector: 'app-meross-login',
   standalone: true,
-  imports: [FormsModule],
+  imports: [SecretInputDirective, FormsModule],
   styles: [`
     .head { display:flex; align-items:center; gap:1rem; padding:0.65rem 0; cursor:pointer; background:none; border:none;
             width:100%; text-align:left; color:var(--text); font:inherit; }

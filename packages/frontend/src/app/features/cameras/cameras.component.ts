@@ -11,6 +11,7 @@ import { RingCamerasComponent, type RingCamera } from './ring-cameras.component'
 import { IpCamerasComponent, type IpCamera } from './ip-cameras.component';
 import { SnapshotSwiperComponent } from './snapshot-swiper.component';
 import { MAX_SHARE, canShareFiles, shareOrSave, snapshotFileName } from './snapshot-share';
+import { SecretInputDirective } from '../../shared/secret-input/secret-input.directive';
 
 type BridgeState =
   | { state: 'not-configured' } | { state: 'off' } | { state: 'unreachable'; detail: string } | { state: 'signed-out' }
@@ -51,7 +52,7 @@ const SEEN_KEY = 'homehub.cameras.seenSnapshot';
 @Component({
   selector: 'app-cameras',
   standalone: true,
-  imports: [FormsModule, AuthImgComponent, LiveViewComponent, RingCamerasComponent, IpCamerasComponent, SnapshotSwiperComponent],
+  imports: [SecretInputDirective, FormsModule, AuthImgComponent, LiveViewComponent, RingCamerasComponent, IpCamerasComponent, SnapshotSwiperComponent],
   styleUrls: ['./camera-layout.css', './snapshot-viewer.css'],
   styles: [`
     h1 { font-size: 1.4rem; font-weight: 700; margin-bottom: 1rem; }

@@ -6,6 +6,7 @@ import { SocketService } from '../../core/socket/socket.service';
 import { CamerasStateService } from '../../core/services/cameras-state.service';
 import { AuthImgComponent } from './auth-img.component';
 import { LiveViewComponent } from './live-view.component';
+import { SecretInputDirective } from '../../shared/secret-input/secret-input.directive';
 
 export interface IpSnapshot { id: number; deviceId: number | null; camera: string; cameraName: string; trigger: 'motion' | 'manual' | 'doorbell'; sizeBytes: number; takenAt: string }
 type MotionState = 'off' | 'unsupported' | 'standby' | 'connecting' | 'watching' | 'error';
@@ -27,7 +28,7 @@ interface IpInfo { relay: { state: 'ready' } | { state: 'unreachable'; detail: s
 @Component({
   selector: 'app-ip-cameras',
   standalone: true,
-  imports: [FormsModule, AuthImgComponent, LiveViewComponent],
+  imports: [SecretInputDirective, FormsModule, AuthImgComponent, LiveViewComponent],
   styleUrls: ['./camera-layout.css'],
   styles: [`
     h2 { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); margin: 1.75rem 0 0.75rem; }

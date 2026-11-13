@@ -22,6 +22,7 @@ import { TeachCommandsComponent } from './teach-commands.component';
 import { VoiceRepliesComponent } from './voice-replies.component';
 import { VoiceControlComponent } from './voice-control.component';
 import { AutomationsService } from '../../core/services/automations.service';
+import { SecretInputDirective } from '../../shared/secret-input/secret-input.directive';
 
 interface ChatStats {
   total: number;
@@ -74,7 +75,7 @@ const DRIVER_LABEL: Record<string, string> = {
 @Component({
   selector: 'app-settings',
   standalone: true,
-  imports: [FormsModule, RouterLink, InviteQrComponent, MatterPairComponent, DeviceFilterComponent, BackupsComponent, BackupSyncComponent, ServerRoleComponent, MerossLoginComponent, OtherNetworksComponent, HomeSettingsComponent, AiConnectionComponent, CamerasToggleComponent, TeachCommandsComponent, VoiceRepliesComponent, VoiceControlComponent],
+  imports: [SecretInputDirective, FormsModule, RouterLink, InviteQrComponent, MatterPairComponent, DeviceFilterComponent, BackupsComponent, BackupSyncComponent, ServerRoleComponent, MerossLoginComponent, OtherNetworksComponent, HomeSettingsComponent, AiConnectionComponent, CamerasToggleComponent, TeachCommandsComponent, VoiceRepliesComponent, VoiceControlComponent],
   styles: [`
     .topbar { display:flex; align-items:center; justify-content:space-between; margin-bottom:1.5rem; }
     .topbar h1 { font-size:1.4rem; font-weight:700; }

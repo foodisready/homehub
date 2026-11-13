@@ -4,6 +4,7 @@ import { HttpClient } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
 import { SocketService } from '../../core/socket/socket.service';
 import type { Device } from '../../shared/models/device.model';
+import { SecretInputDirective } from '../../shared/secret-input/secret-input.directive';
 
 interface MotionRule {
   id:              number;
@@ -51,7 +52,7 @@ interface FoundSensor { ip: string; name: string; model: string; needsLogin: boo
 @Component({
   selector: 'app-motion-rules',
   standalone: true,
-  imports: [DatePipe, FormsModule],
+  imports: [SecretInputDirective, DatePipe, FormsModule],
   styles: [`
     .title { font-size: 1.1rem; font-weight: 700; margin: 2rem 0 0.25rem; }
     .sub { color: var(--text-muted); font-size: 0.85rem; margin-bottom: 0.75rem; }
