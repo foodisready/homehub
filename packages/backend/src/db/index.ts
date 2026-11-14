@@ -384,6 +384,20 @@ function migrate(db: Database.Database): void {
     );
   `);
 
+  // ── Thermostats: each one's comfort range and limits, in °C ──
+  // comfort: where the home should be when people are in and awake, for advice and the card.
+  // allowed: the most that Chat, voice, schedules and scenes may ever set, for nights and time away too.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS thermostats (
+      device_id     INTEGER PRIMARY KEY REFERENCES devices(id) ON DELETE CASCADE,
+      comfort_low   REAL    NOT NULL,
+      comfort_high  REAL    NOT NULL,
+      allowed_low   REAL    NOT NULL,
+      allowed_high  REAL    NOT NULL,
+      last_mode     TEXT
+    );
+  `);
+
   // ── Family invites: a QR code that lets someone make their own login ──
   // Only a hash of the code is kept, so a copy of the DB can't be used to join.
   db.exec(`

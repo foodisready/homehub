@@ -36,12 +36,22 @@ async function wireReports(): Promise<void> {
   used = true;
   if (wired) return;
   wired = true;
-  const { onMatterSwitch } = await matter();
+  const { onMatterSwitch, onThermostatChange } = await matter();
   // A device reported a change (from HomeHub, a wall switch, or another app): read it into
   // HomeHub's state the same way a poll would, so activity records its cause.
   onMatterSwitch((nodeId, endpoint) => {
     const row = matterRows().find((r) => { const c = configOf(r); return c.nodeId === nodeId && c.endpoint === endpoint; });
     if (row) pollDeviceNow(row.id).catch(() => undefined);
+  });
+  // A thermostat's temperature, target, mode or running state changed: tell open pages, and
+  // read its on/off (mode off or not) as for any device.
+  onThermostatChange((nodeId, endpoint) => {
+    void import('../thermostat/thermostat').then(({ thermostatIdFor, refresh }) => {
+      const id = thermostatIdFor(nodeId, endpoint);
+      if (id === null) return;
+      void refresh(id);
+      pollDeviceNow(id).catch(() => undefined);
+    });
   });
 }
 
@@ -79,7 +89,7 @@ export async function addMatterDevice(code: string): Promise<{ id: number; alias
   for (const ep of endpoints) {
     let alias = ep.name;
     for (let n = 2; taken(alias); n++) alias = `${ep.name} ${n}`;
-    const config = JSON.stringify({ nodeId: ep.nodeId, endpoint: ep.endpoint, vendor: ep.vendor, product: ep.product });
+    const config = JSON.stringify({ nodeId: ep.nodeId, endpoint: ep.endpoint, vendor: ep.vendor, product: ep.product, kind: ep.kind });
     const result = insert.run(alias, matterAddress(ep.nodeId, ep.endpoint), modelOf(ep), config);
     if (result.changes) created.push({ id: Number(result.lastInsertRowid), alias });
   }

@@ -1,7 +1,8 @@
 import type { DeviceDriver, DiscoveredDevice, EnergyMetrics } from './DeviceDriver';
 
 /**
- * Matter plugs, lights and switches. Each switchable part of a Matter device
+ * Matter plugs, lights, switches and thermostats. A thermostat is "on" when
+ * its mode isn't off, and turning it on goes back to its last mode. Each switchable part of a Matter device
  * is its own HomeHub device. Matter devices have no fixed IP address to store,
  * so the ip column holds "matter:<node>:<endpoint>", which keeps it unique.
  *
@@ -26,11 +27,21 @@ export class MatterDriver implements DeviceDriver {
 
   async setPower(ip: string, on: boolean, config?: Record<string, unknown>): Promise<void> {
     const t = target(ip, config);
-    await (await matter()).setOnOff(t.nodeId, t.endpoint, on);
+    const m = await matter();
+    if (config?.['kind'] === 'thermostat') {
+      const { resumeMode, thermostatIdFor } = await import('../thermostat/thermostat');
+      const now = await m.readThermostat(t.nodeId, t.endpoint);
+      if (!on) return m.setThermostat(t.nodeId, t.endpoint, { mode: 'off' });
+      if (now.mode !== 'off') return;   // already heating, cooling or in auto
+      const id = thermostatIdFor(t.nodeId, t.endpoint);
+      return m.setThermostat(t.nodeId, t.endpoint, { mode: id === null ? 'heat' : resumeMode(id, now.modes) });
+    }
+    await m.setOnOff(t.nodeId, t.endpoint, on);
   }
 
   async getPower(ip: string, config?: Record<string, unknown>): Promise<boolean> {
     const t = target(ip, config);
+    if (config?.['kind'] === 'thermostat') return (await (await matter()).readThermostat(t.nodeId, t.endpoint)).mode !== 'off';
     return (await matter()).getOnOff(t.nodeId, t.endpoint);
   }
 

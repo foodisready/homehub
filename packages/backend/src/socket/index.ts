@@ -39,6 +39,11 @@ export function getIo(): Server {
   return _io;
 }
 
+/** A thermostat's temperatures, mode or running state changed. `view` is what GET /api/thermostats/:id returns. */
+export function emitThermostatState(view: object): void {
+  _io?.emit('thermostat:state', view);
+}
+
 export function emitDeviceState(
   deviceId: number,
   alias: string,

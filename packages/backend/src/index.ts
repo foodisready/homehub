@@ -65,6 +65,7 @@ import { applyHomeTimezone } from './home/home-settings';
 import { homeSettingsRouter } from './routes/home-settings';
 import { setupRouter } from './routes/setup';
 import { matterRouter } from './routes/matter';
+import { thermostatsRouter } from './routes/thermostats';
 import { startMatter, stopMatter } from './matter/service';
 import { noteRunningVersion } from './system/updater';
 import { initSocket } from './socket';
@@ -138,6 +139,7 @@ app.use('/api/activity',               activityRouter);
 app.use('/api/home-settings',          homeSettingsRouter);
 app.use('/api/setup',                  setupRouter);
 app.use('/api/matter',                 requireAdmin, matterRouter);
+app.use('/api/thermostats',            thermostatsRouter);
 
 // ── Global error handler ───────────────────────────────────────
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {

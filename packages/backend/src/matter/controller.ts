@@ -1,7 +1,7 @@
 import path from 'path';
 import { Environment, Logger, LogLevel, StorageService, version as matterVersion } from '@matter/main';
 import { ManualPairingCodeCodec, QrPairingCodeCodec, NodeId } from '@matter/main/types';
-import { OnOff, GeneralCommissioning, BridgedDeviceBasicInformation, BasicInformation } from '@matter/main/clusters';
+import { OnOff, GeneralCommissioning, BridgedDeviceBasicInformation, BasicInformation, Thermostat } from '@matter/main/clusters';
 import { CommissioningController } from '@project-chip/matter.js';
 import { NodeStates } from '@project-chip/matter.js/device';
 import type { PairedNode, Endpoint } from '@project-chip/matter.js/device';
@@ -28,6 +28,8 @@ export interface MatterEndpoint {
   name: string;
   vendor: string;
   product: string;
+  /** What it is: something switched on and off, or a thermostat. */
+  kind: 'switch' | 'thermostat';
 }
 
 export class MatterError extends Error {
@@ -40,9 +42,16 @@ let controller: CommissioningController | null = null;
 let starting: Promise<CommissioningController> | null = null;
 let pairing = false;
 const listeners = new Set<Listener>();
+const thermostatListeners = new Set<(nodeId: string, endpoint: number) => void>();
 const nodes = new Map<string, PairedNode>();
 /** Nodes whose connection is starting, so two callers share it. */
 const connecting = new Map<string, Promise<PairedNode>>();
+
+/** Told whenever a thermostat reports a change: its temperature, a target, its mode or whether it's running. */
+export function onThermostatChange(listener: (nodeId: string, endpoint: number) => void): () => void {
+  thermostatListeners.add(listener);
+  return () => thermostatListeners.delete(listener);
+}
 
 /** Told whenever a Matter device reports being switched, by anything. */
 export function onMatterSwitch(listener: Listener): () => void {
@@ -129,6 +138,9 @@ export async function connectNode(nodeId: string): Promise<PairedNode> {
         if (data.path.clusterId === OnOff.Cluster.id && data.path.attributeName === 'onOff') {
           for (const l of listeners) l(nodeId, Number(data.path.endpointId), data.value === true);
         }
+        if (data.path.clusterId === Thermostat.Cluster.id) {
+          for (const l of thermostatListeners) l(nodeId, Number(data.path.endpointId));
+        }
       },
     });
     nodes.set(nodeId, node);
@@ -140,7 +152,7 @@ export async function connectNode(nodeId: string): Promise<PairedNode> {
   return promise;
 }
 
-/** Each part of a device that can be switched on and off: a plug, a light, each outlet of a strip, each device behind a bridge. */
+/** Each part of a device HomeHub can use: a plug, a light, each outlet of a strip, each device behind a bridge, a thermostat. */
 async function switchableEndpoints(node: PairedNode): Promise<MatterEndpoint[]> {
   const info = node.basicInformation;
   const base = { nodeId: String(node.nodeId), vendor: info?.vendorName ?? '', product: info?.productName ?? '' };
@@ -148,11 +160,12 @@ async function switchableEndpoints(node: PairedNode): Promise<MatterEndpoint[]> 
 
   const found: MatterEndpoint[] = [];
   const walk = async (ep: Endpoint) => {
-    if (ep.getClusterClient(OnOff.Cluster) && ep.number !== undefined) {
+    const thermostat = !!ep.getClusterClient(Thermostat.Cluster);
+    if ((thermostat || ep.getClusterClient(OnOff.Cluster)) && ep.number !== undefined) {
       // A device behind a bridge has its own name.
       const bridged = ep.getClusterClient(BridgedDeviceBasicInformation.Cluster);
       const own = bridged ? await bridged.getNodeLabelAttribute(false).catch(() => undefined) : undefined;
-      found.push({ ...base, endpoint: Number(ep.number), name: (own || deviceName).trim() });
+      found.push({ ...base, endpoint: Number(ep.number), name: (own || deviceName).trim(), kind: thermostat ? 'thermostat' : 'switch' });
     }
     for (const child of ep.getChildEndpoints()) await walk(child);
   };
@@ -237,7 +250,7 @@ export async function pairDevice(code: string): Promise<MatterEndpoint[]> {
     if (!endpoints.length) {
       // Nothing HomeHub can switch (a sensor, say): don't keep it.
       await removeNode(String(nodeId)).catch(() => undefined);
-      throw new MatterError('That device was added, but it has nothing HomeHub can switch on and off yet, so it was removed again.', 422);
+      throw new MatterError('That device was added, but it has nothing HomeHub can use yet, so it was removed again.', 422);
     }
     return endpoints;
   } finally {
@@ -289,6 +302,100 @@ export async function setOnOff(nodeId: string, endpoint: number, on: boolean): P
 export async function getOnOff(nodeId: string, endpoint: number): Promise<boolean> {
   const client = await onOffClient(nodeId, endpoint, 3_000);
   return (await client.getOnOffAttribute(false)) === true;
+}
+
+// ── Thermostats ─────────────────────────────────────────────────
+// Matter gives temperatures in hundredths of a degree Celsius.
+
+export type ThermostatMode = 'off' | 'heat' | 'cool' | 'auto';
+const MODE_OF: Record<number, ThermostatMode> = {
+  [Thermostat.SystemMode.Off]: 'off', [Thermostat.SystemMode.Heat]: 'heat',
+  [Thermostat.SystemMode.Cool]: 'cool', [Thermostat.SystemMode.Auto]: 'auto',
+};
+const SYSTEM_MODE: Record<ThermostatMode, Thermostat.SystemMode> = {
+  off: Thermostat.SystemMode.Off, heat: Thermostat.SystemMode.Heat,
+  cool: Thermostat.SystemMode.Cool, auto: Thermostat.SystemMode.Auto,
+};
+
+/** What a thermostat reports, in °C. null where it doesn't say. */
+export interface ThermostatReading {
+  temperature: number | null;
+  heat: number | null;
+  cool: number | null;
+  /** 'other' for a mode HomeHub doesn't offer, such as emergency heat or fan only. */
+  mode: ThermostatMode | 'other';
+  modes: ThermostatMode[];
+  /** What it's doing now, if it says. */
+  running: 'heating' | 'cooling' | 'fan' | 'idle' | null;
+  heatLimits: [number, number] | null;
+  coolLimits: [number, number] | null;
+  /** How far apart the heating and cooling targets must stay in auto, in °C. */
+  deadband: number;
+}
+
+const c100 = (v: unknown): number | null => (typeof v === 'number' ? v / 100 : null);
+
+async function thermostatClient(nodeId: string, endpoint: number, waitMs: number) {
+  const node = await connectNode(nodeId);
+  if (!(await waitConnected(node, waitMs))) throw new MatterError('The thermostat isn’t connected.', 503);
+  const client = findEndpoint(node, endpoint)?.getClusterClient(Thermostat.Complete);
+  if (!client) throw new MatterError(`Part ${endpoint} of that device isn’t a thermostat.`, 404);
+  return client;
+}
+
+/** The last values the thermostat reported. The live subscription keeps them current. */
+export async function readThermostat(nodeId: string, endpoint: number): Promise<ThermostatReading> {
+  const t = await thermostatClient(nodeId, endpoint, 3_000);
+  // Optional parts of the cluster aren't there on every thermostat: a missing one reads as null.
+  const get = async (name: string): Promise<unknown> => {
+    const fn = (t as unknown as Record<string, (fresh: boolean) => Promise<unknown>>)[`get${name}Attribute`];
+    try { return fn ? await fn.call(t, false) : undefined; } catch { return undefined; }
+  };
+  const features = (t as unknown as { supportedFeatures?: { heating?: boolean; cooling?: boolean; autoMode?: boolean } }).supportedFeatures ?? {};
+  const [local, heat, cool, mode, relay, minH, maxH, minC, maxC, dead] = await Promise.all([
+    get('LocalTemperature'), get('OccupiedHeatingSetpoint'), get('OccupiedCoolingSetpoint'), get('SystemMode'),
+    get('ThermostatRunningState'), get('AbsMinHeatSetpointLimit'), get('AbsMaxHeatSetpointLimit'),
+    get('AbsMinCoolSetpointLimit'), get('AbsMaxCoolSetpointLimit'), get('MinSetpointDeadBand'),
+  ]);
+  const r = relay as { heat?: boolean; cool?: boolean; fan?: boolean; heatStage2?: boolean; coolStage2?: boolean } | undefined;
+  const running = r === undefined || r === null ? null
+    : r.heat || r.heatStage2 ? 'heating' : r.cool || r.coolStage2 ? 'cooling' : r.fan ? 'fan' : 'idle';
+  const modes: ThermostatMode[] = ['off'];
+  if (features.heating) modes.push('heat');
+  if (features.cooling) modes.push('cool');
+  if (features.autoMode) modes.push('auto');
+  return {
+    temperature: c100(local),
+    heat: features.heating ? c100(heat) : null,
+    cool: features.cooling ? c100(cool) : null,
+    mode: typeof mode === 'number' && MODE_OF[mode] ? MODE_OF[mode] : 'other',
+    modes,
+    running,
+    heatLimits: features.heating ? [c100(minH) ?? 7, c100(maxH) ?? 30] : null,
+    coolLimits: features.cooling ? [c100(minC) ?? 16, c100(maxC) ?? 32] : null,
+    // Matter gives the deadband in tenths of a degree; 2.5 °C if it doesn't say.
+    deadband: typeof dead === 'number' ? dead / 10 : 2.5,
+  };
+}
+
+/** Changes the mode and targets (in °C). A target the thermostat doesn't have is an error. */
+export async function setThermostat(nodeId: string, endpoint: number, change: { mode?: ThermostatMode; heat?: number; cool?: number }): Promise<void> {
+  const t = await thermostatClient(nodeId, endpoint, 10_000);
+  const write = t as unknown as {
+    setSystemModeAttribute(v: number): Promise<void>;
+    setOccupiedHeatingSetpointAttribute?(v: number): Promise<void>;
+    setOccupiedCoolingSetpointAttribute?(v: number): Promise<void>;
+  };
+  // Targets first: a new mode then starts from them.
+  if (change.heat !== undefined) {
+    if (!write.setOccupiedHeatingSetpointAttribute) throw new MatterError('That thermostat doesn’t heat.', 400);
+    await write.setOccupiedHeatingSetpointAttribute(Math.round(change.heat * 100));
+  }
+  if (change.cool !== undefined) {
+    if (!write.setOccupiedCoolingSetpointAttribute) throw new MatterError('That thermostat doesn’t cool.', 400);
+    await write.setOccupiedCoolingSetpointAttribute(Math.round(change.cool * 100));
+  }
+  if (change.mode !== undefined) await write.setSystemModeAttribute(SYSTEM_MODE[change.mode]);
 }
 
 /** Unpairs a device: it forgets HomeHub, and HomeHub forgets it. Other apps keep it. */
