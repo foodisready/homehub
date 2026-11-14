@@ -107,14 +107,22 @@ async def main() -> int:
 
     restart = False
 
+    async def names_changed(names_version: object) -> None:
+        if names_version and names_version != homehub.names_version:
+            count = len(homehub.names)
+            await asyncio.get_running_loop().run_in_executor(None, homehub.refresh_names)
+            log.info('names changed in HomeHub: now %d (were %d)', len(homehub.names), count)
+
     async def settings_changed() -> bool:
-        """A quick look at the voice settings, between check-ins."""
+        """A quick look at the voice settings, between check-ins. A new nickname is fetched straight away."""
         if not config_version:
             return False
         try:
             res = await asyncio.get_running_loop().run_in_executor(None, homehub.config)
         except HomeHubError:
             return False
+        # HomeHub before v0.1.79 doesn't say, so names wait for the next check-in.
+        await names_changed(res.get('namesVersion'))
         return bool(res.get('version')) and res['version'] != config_version
 
     async def report() -> None:
@@ -148,10 +156,7 @@ async def main() -> int:
                     restart = True
                     stop.set()
                     return
-                if res.get('namesVersion') and res['namesVersion'] != homehub.names_version:
-                    count = len(homehub.names)
-                    await asyncio.get_running_loop().run_in_executor(None, homehub.refresh_names)
-                    log.info('names changed in HomeHub: now %d (were %d)', len(homehub.names), count)
+                await names_changed(res.get('namesVersion'))
                 if failing:
                     log.info('checking in with HomeHub again')
                 failing = False

@@ -58,8 +58,9 @@ internalRouter.get('/voice/device-names', (_req: Request, res: Response) => {
 // GET /internal/voice/config
 // Voice on or off, and its languages, as chosen in Settings → Voice control.
 // The bridge that comes with HomeHub waits until voice is on.
+// It asks every 10 seconds, so namesVersion lets a new nickname work by voice straight away.
 internalRouter.get('/voice/config', (_req: Request, res: Response) => {
-  res.json(voiceConfig());
+  res.json({ ...voiceConfig(), namesVersion: voiceNames().version });
 });
 
 // POST /internal/voice/status  { version?, speakers: [{ name, address, connected }] }

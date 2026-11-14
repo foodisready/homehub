@@ -13,8 +13,10 @@ const RELOAD_KEY = 'homehub-chunk-reload';
  * has the old main file, so opening a page it hasn't loaded yet (Settings,
  * say) asks for a file that no longer exists and fails. This notices the new
  * release, by comparing the main file the server now names with the one this
- * tab loaded, and makes the next navigation a full page load. If a page's
- * file is missing anyway, it reloads that page once.
+ * tab loaded, and makes the next navigation a full page load. A tab that
+ * comes back to the front (a phone picked up again) reloads straight away,
+ * unless something is being edited. If a page's file is missing anyway, it
+ * reloads that page once.
  */
 @Injectable({ providedIn: 'root' })
 export class AppUpdateService {
@@ -38,25 +40,40 @@ export class AppUpdateService {
         this.reloadOnce(event.url);
       }
     });
-    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') this.check(); });
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') this.check(true); });
     window.addEventListener('online', () => this.check());
     setInterval(() => this.check(), CHECK_EVERY_MS);
     // A reload that worked: allow another one later.
     setTimeout(() => sessionStorage.removeItem(RELOAD_KEY), 10_000);
   }
 
-  /** Asks the server which main file it serves now. */
-  check(): void {
-    if (!this.loaded || this.stale || this.checking) return;
+  /** Asks the server which main file it serves now. returning: the tab just came back to the front. */
+  check(returning = false): void {
+    if (!this.loaded || this.checking) return;
+    if (this.stale) { if (returning) this.reloadIfIdle(); return; }
     this.checking = true;
     fetch('/', { cache: 'no-store' })
       .then((r) => (r.ok ? r.text() : ''))
       .then((html) => {
         const now = AppUpdateService.mainFile(html);
-        if (now && now !== this.loaded) this.stale = true;
+        if (now && now !== this.loaded) {
+          this.stale = true;
+          if (returning) this.reloadIfIdle();
+        }
       })
       .catch(() => undefined)   // offline or restarting: try again later
       .finally(() => { this.checking = false; });
+  }
+
+  /** Nothing open to lose: no popup or dialog, and no box being typed in. */
+  static idle(doc: Document = document): boolean {
+    const active = doc.activeElement;
+    const typing = !!active && active.matches('input, textarea, select, [contenteditable="true"]');
+    return !typing && !doc.querySelector('.popup-overlay, [role="dialog"], [role="alertdialog"]');
+  }
+
+  private reloadIfIdle(): void {
+    if (AppUpdateService.idle()) window.location.reload();
   }
 
   private reloadOnce(url: string): void {

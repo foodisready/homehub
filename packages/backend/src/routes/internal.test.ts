@@ -320,6 +320,8 @@ describe('/internal/voice', () => {
     const changed = await checkIn();
     assert.notEqual(changed.namesVersion, first.namesVersion, 'a new nickname changes it');
     assert.ok((await names()).names.includes('寫字樓燈'));
+    const config = await (await fetch(`${baseUrl}/internal/voice/config`, { headers: key })).json() as { namesVersion: string };
+    assert.equal(config.namesVersion, changed.namesVersion, 'the 10-second settings check says so too, so a new nickname works straight away');
 
     vb.requestBridgeRestart();
     assert.equal(vb.bridgeRestartState(), 'asked');
