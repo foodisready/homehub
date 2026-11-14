@@ -100,6 +100,45 @@ class ReadingTest(unittest.TestCase):
         self.assertEqual(yue.parse('晚安', [], ['晚安']).homehub_text, 'run 晚安')
 
 
+class ExactSoundsTest(unittest.TestCase):
+    """The household's names, as on the Pi on 14 November: a name that has more of the heard sounds
+    exactly, for another device, means nothing is clearly closest, so nothing is guessed."""
+    NAMES = ['卓希房燈', '着氣燈', '寫字樓燈', '文房燈', '書房燈', '辦公室燈', '廚房燈', '客廳燈', '客廳房燈', '走廊燈',
+             '卓希枱燈', '早餐區細燈', '早餐燈仔', '主人房燈', '亞娘床頭燈', '卓軒房邊燈', '卓軒床邊燈']
+    GROUPS = [['卓希房燈', '着氣燈'], ['寫字樓燈', '文房燈', '書房燈', '辦公室燈'], ['客廳燈', '客廳房燈'],
+              ['早餐區細燈', '早餐燈仔'], ['主人房燈', '亞娘床頭燈'], ['卓軒房邊燈', '卓軒床邊燈']]
+
+    def read(self, text):
+        c = yue.parse(text, self.NAMES, [], self.GROUPS)
+        return (c.action, c.name) if c else None
+
+    def test_ethans_light_is_never_brendens(self):
+        # 卓軒 is exactly in Ethan's 卓軒房邊燈; 着氣燈 (Brenden's) only sounds as close.
+        for text in ('開卓軒燈', '熄卓軒燈', '熄桌軒燈'):
+            with self.subTest(text=text):
+                self.assertIsNone(self.read(text))
+        self.assertIsNone(self.read('開卓房燈'), 'not 廚房燈: 卓 is exactly in 卓希房燈')
+
+    def test_two_of_brendens_lights_is_asked_not_guessed(self):
+        # His room lamps (卓希房燈, 着氣燈) or his desk lamp (卓希枱燈)?
+        self.assertIsNone(self.read('開卓希燈'))
+
+    def test_names_of_one_device_dont_stand_in_each_others_way(self):
+        self.assertEqual(self.read('開着氣燈'), ('on', '着氣燈'))
+        self.assertEqual(self.read('熄着氣房燈'), ('off', '卓希房燈'), '着氣 and 卓希房: one set of lamps')
+
+    def test_the_households_recordings_still_work(self):
+        # What SenseVoice wrote for the household's recordings, right before and after.
+        for text, want in [('关着 k房灯。', '卓希房燈'), ('着有龙灯。', '走廊燈'), ('识写住路灯。', '寫字樓燈'),
+                           ('着私房灯。', '書房燈'), ('关民房灯。', '文房燈'), ('关主人房灯。', '主人房燈'), ('熄卓 k房灯。', '卓希房燈')]:
+            with self.subTest(text=text):
+                self.assertEqual(self.read(text)[1], want)
+
+    def test_exact_counts_sounds_in_order(self):
+        self.assertEqual(yue.exact(('coek', 'hin', 'dang'), ('coek', 'hin', 'fong', 'bin', 'dang')), 3)
+        self.assertEqual(yue.exact(('coek', 'hin', 'dang'), ('zoek', 'hei', 'dang')), 1)
+
+
 class DurationTest(unittest.TestCase):
     """開文房燈十分鐘: on, then off again after a while, as "turn on ... for 10 minutes"."""
 

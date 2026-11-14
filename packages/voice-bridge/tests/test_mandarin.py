@@ -63,6 +63,12 @@ class ReadingTest(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertIsNone(read(text))
 
+    def test_a_name_with_more_exact_sounds_for_another_device_means_no_guess(self):
+        names = ['卓希房燈', '着氣燈', '卓軒房邊燈']
+        groups = [['卓希房燈', '着氣燈']]
+        c = zh.parse('打开卓轩灯', names, [], groups)
+        self.assertIsNone(c, '卓轩 is exactly in 卓軒房邊燈: not 着氣燈')
+
     def test_verb_alone(self):
         self.assertEqual(zh.verb_alone('开'), 'on')
         self.assertEqual(zh.verb_alone('打开吧'), 'on')

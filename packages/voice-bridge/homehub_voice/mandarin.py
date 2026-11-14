@@ -81,8 +81,8 @@ def similar(a: str, b: str) -> float:
     return 0.0
 
 
-def best_name(heard: tuple[str, ...], names: list[str]) -> tuple[str | None, float, float]:
-    return yue.best_name(heard, names, syllables, similar)
+def best_name(heard: tuple[str, ...], names: list[str], groups: list[list[str]] | None = None) -> tuple[str | None, float, float]:
+    return yue.best_name(heard, names, syllables, similar, groups)
 
 
 def _strip_start(s: tuple[str, ...], options: list[tuple[str, ...]]) -> tuple[tuple[str, ...], bool]:
@@ -134,7 +134,7 @@ def verb_alone(text: str) -> str | None:
     return None
 
 
-def parse(text: str, names: list[str], scenes: list[str] | None = None) -> Command | None:
+def parse(text: str, names: list[str], scenes: list[str] | None = None, groups: list[list[str]] | None = None) -> Command | None:
     """Reads a Mandarin command against the home's Chinese names. None when unsure."""
     chinese = [n for n in names if has_chinese(n)]
     text, minutes = yue.take_duration(text)
@@ -145,19 +145,19 @@ def parse(text: str, names: list[str], scenes: list[str] | None = None) -> Comma
         s = s[:half]
     action, rest = read_verb(s)
     if action and rest:
-        name, score, runner = best_name(_trim(rest), chinese)
+        name, score, runner = best_name(_trim(rest), chinese, groups)
         if name and score >= MATCH and score - runner >= MARGIN:
             if minutes and action == 'off':
                 return None   # "off for ten minutes" isn't something HomeHub does: don't guess
             return Command(action, name, round(score, 2), minutes if action == 'on' else None)
     s = rest if action is None else s   # without 把
     scene_names = [n for n in (scenes or []) if has_chinese(n)]
-    name, score, runner = best_name(s, scene_names)
+    name, score, runner = best_name(s, scene_names, groups)
     if name and score >= SCENE_MATCH and score - runner >= MARGIN:
         return Command('scene', name, round(score, 2))
     # A device's name alone: its verb was lost, often cut off after the wake word.
     devices = [n for n in chinese if n not in scene_names]
-    name, score, runner = best_name(s, devices)
+    name, score, runner = best_name(s, devices, groups)
     if name and score >= SCENE_MATCH and score - runner >= MARGIN:
         return Command('ask', name, round(score, 2))
     return None

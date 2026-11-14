@@ -251,10 +251,32 @@ def shortened(heard: tuple[str, ...], name: tuple[str, ...]) -> float:
     return SHORTENED if any(name[:i] + name[i + 1:] == heard for i in range(1, len(name) - 1)) else 0.0
 
 
+def exact(heard: tuple[str, ...], name: tuple[str, ...]) -> int:
+    """How many of the heard sounds are in the name exactly, in order (the longest common subsequence)."""
+    prev = [0] * (len(name) + 1)
+    for h in heard:
+        cur = [0]
+        for j, n in enumerate(name):
+            cur.append(prev[j] + 1 if h == n else max(prev[j + 1], cur[j]))
+        prev = cur
+    return prev[-1]
+
+
+def same_device(a: str, b: str, groups: list[list[str]] | None) -> bool:
+    """Two names for one device (or one set of devices): 卓希房燈 and 着氣燈 are both Brenden's lamps."""
+    return bool(groups) and any(a in g and b in g for g in groups)
+
+
 def best_name(heard: tuple[str, ...], names: list[str], sound: Callable[[str], tuple[str, ...]] | None = None,
-              like: Callable[[str, str], float] | None = None) -> tuple[str | None, float, float]:
+              like: Callable[[str, str], float] | None = None, groups: list[list[str]] | None = None) -> tuple[str | None, float, float]:
     """The closest name, its score, and the score of the closest that sounds different.
-    sound and like: a language's syllables and how alike two sound; Cantonese's by default."""
+    sound and like: a language's syllables and how alike two sound; Cantonese's by default.
+
+    A name that has more of the heard sounds exactly than the closest one does, for another
+    device, counts as a runner-up as close as the top: then nothing is clearly closest, and
+    nothing is guessed. 開卓軒燈 sounds as close to 着氣燈 (Brenden's) as anything, but 卓軒
+    is exactly in 卓軒房邊燈 (Ethan's): switching Brenden's lamp would be a wrong guess. Two
+    or more exact sounds count; one, often 燈, says nothing."""
     sound = sound or syllables
     scored = sorted(((max(match(heard, sound(n), like), shortened(heard, sound(n))), n) for n in names), reverse=True)
     if not scored:
@@ -266,10 +288,16 @@ def best_name(heard: tuple[str, ...], names: list[str], sound: Callable[[str], t
         # close isn't a reason to doubt it (卓轩房灯: 卓軒房邊燈, not 卓希房燈); one that every
         # sound is in too, exactly or shortened, is.
         others = [(sc, n) for sc, n in others if sc >= SHORTENED]
-    return top, top_score, next((sc for sc, _ in others), 0.0)
+    runner = next((sc for sc, _ in others), 0.0)
+    if top_score != SHORTENED:
+        mine = exact(heard, sound(top))
+        if any(sound(n) != sound(top) and not same_device(n, top, groups) and (e := exact(heard, sound(n))) >= 2 and e > mine
+               for n in names):
+            runner = top_score
+    return top, top_score, runner
 
 
-def parse(text: str, names: list[str], scenes: list[str] | None = None) -> Command | None:
+def parse(text: str, names: list[str], scenes: list[str] | None = None, groups: list[list[str]] | None = None) -> Command | None:
     """Reads a Cantonese command against the home's Cantonese names. None when unsure."""
     cantonese = [n for n in names if has_chinese(n)]
     text, minutes = take_duration(text)
@@ -282,13 +310,13 @@ def parse(text: str, names: list[str], scenes: list[str] | None = None) -> Comma
         s = s[:half]
     action, rest = read_verb(s)
     if action and rest:
-        name, score, runner = best_name(rest, cantonese)
+        name, score, runner = best_name(rest, cantonese, groups=groups)
         # The verb heard twice: 熄熄卓希房燈. Only taken as a repeat if that matches a name better,
         # since a name can start with a verb's sound: 着着氣燈 is 着 and then 着氣燈.
         again, repeated = read_verb(rest)
         verb = s[len(s) - len(rest) - (len(rest) - len(repeated)): len(s) - len(rest)]   # the first verb's sounds
         if again == action and repeated and rest[: len(rest) - len(repeated)] == verb:
-            alt = best_name(repeated, cantonese)
+            alt = best_name(repeated, cantonese, groups=groups)
             if alt[0] and alt[1] - alt[2] > score - runner and alt[1] > score:
                 name, score, runner = alt
         if name and score >= MATCH and score - runner >= MARGIN:
@@ -297,12 +325,12 @@ def parse(text: str, names: list[str], scenes: list[str] | None = None) -> Comma
             return Command(action, name, round(score, 2), minutes if action == 'on' else None)
         # Not a verb after all, but the start of a name heard alone: 卓希房燈 starts like 着.
     scene_names = [n for n in (scenes or []) if has_chinese(n)]
-    name, score, runner = best_name(s, scene_names)
+    name, score, runner = best_name(s, scene_names, groups=groups)
     if name and score >= SCENE_MATCH and score - runner >= MARGIN:
         return Command('scene', name, round(score, 2))
     # A device's name alone: its 開 or 熄 was lost, often cut off after the wake word.
     devices = [n for n in cantonese if n not in scene_names]
-    name, score, runner = best_name(s, devices)
+    name, score, runner = best_name(s, devices, groups=groups)
     if name and score >= SCENE_MATCH and score - runner >= MARGIN:
         return Command('ask', name, round(score, 2))
     return None

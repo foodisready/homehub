@@ -317,14 +317,15 @@ def read_chinese(way: Chinese, audio: bytes, ears: CantoneseEars, homehub: Comma
     if kind:
         # 幾點呀？ 今日天氣點？ 现在几点？
         return Reading(quick, None, kind, 1)
-    command = way.parse(quick, homehub.names, scenes) if quick else None
+    groups = getattr(homehub, 'groups', None)
+    command = way.parse(quick, homehub.names, scenes, groups) if quick else None
     passes = 1
     if command is not None and command.action in ('on', 'off', 'scene') and command.score >= SURE:
         text = quick
     else:
         # Not sure, or a name alone, or an answer to a question: listen again, set to the language.
         text, passes = (second.result() if second is not None else heard_again(ears, audio, way.lang)), 2
-        command = way.parse(text, homehub.names, scenes)
+        command = way.parse(text, homehub.names, scenes, groups)
         kind = way.kind(text) if command is None else None
         if kind:
             return Reading(text, None, kind, 2)
@@ -377,7 +378,7 @@ def answer_chinese(audio: bytes, ears: CantoneseEars, homehub: Commander, t0: fl
     if quick:
         scenes = getattr(homehub, 'scenes', homehub.names)
         sure = [(c.score, -order.index(lang), lang, c) for lang in order
-                if (c := WAYS[lang].parse(quick, homehub.names, scenes)) is not None and c.action != 'ask' and c.score >= SURE]
+                if (c := WAYS[lang].parse(quick, homehub.names, scenes, getattr(homehub, 'groups', None))) is not None and c.action != 'ask' and c.score >= SURE]
         if sure:
             _, _, lang, command = max(sure, key=lambda x: (x[0], x[1]))
             return send_chinese(WAYS[lang], Reading(quick, command, None, 1), homehub, t0)
