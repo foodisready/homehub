@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, OnDestroy, OnInit, computed, inject, input, signal } from '@angular/core';
+import { RouterLink } from '@angular/router';
 import { MODE_NAME, ThermostatService, shown, step, toC, type ThermostatMode, type ThermostatView } from './thermostat.service';
 
 /**
@@ -10,6 +11,7 @@ import { MODE_NAME, ThermostatService, shown, step, toC, type ThermostatMode, ty
   selector: 'app-thermostat-control',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [RouterLink],
   styles: [`
     .t { display: flex; flex-direction: column; gap: 0.7rem; }
     .now { display: flex; align-items: baseline; gap: 0.6rem; }
@@ -59,6 +61,7 @@ import { MODE_NAME, ThermostatService, shown, step, toC, type ThermostatMode, ty
           }
         }
         @if (error()) { <p class="note err" role="alert">{{ error() }}</p> }
+        <a class="note" [routerLink]="['/energy']" [queryParams]="{ thermostat: t.id }">History and running hours</a>
       </div>
     } @else {
       <p class="note">Loading…</p>

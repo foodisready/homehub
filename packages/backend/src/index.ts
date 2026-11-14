@@ -167,6 +167,11 @@ httpServer.listen(PORT, async () => {
   startLocalName();          // answer for homehub.local (or <name>-backup.local) on the home network
   noteRunningVersion();   // remember the version before this one, to go back to
   startMatter().catch(() => undefined);   // connect to Matter devices, if there are any
+  // Thermostat history: samples every 5 minutes, outdoor temperatures hourly, once there's a thermostat.
+  void import('./thermostat/history').then(async ({ startHistory }) => {
+    const { listThermostats } = await import('./thermostat/thermostat');
+    startHistory(listThermostats);
+  });
 
   // Daily DB backup: run once at startup, then every 24 hours
   runBackup();

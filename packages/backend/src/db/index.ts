@@ -398,6 +398,35 @@ function migrate(db: Database.Database): void {
     );
   `);
 
+  // ── Thermostat history ──
+  // samples: every 5 minutes, for the day chart. runs: each time heating or cooling ran,
+  // from the thermostat's own reports, for running hours. outdoor_hours: the outdoor
+  // temperature each hour of the home's local time, for degree-days.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS thermostat_samples (
+      device_id   INTEGER NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+      at          TEXT    NOT NULL,
+      temperature REAL,
+      heat        REAL,
+      cool        REAL,
+      mode        TEXT,
+      running     TEXT,
+      PRIMARY KEY (device_id, at)
+    );
+    CREATE TABLE IF NOT EXISTS thermostat_runs (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      device_id   INTEGER NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+      kind        TEXT    NOT NULL,
+      started_at  TEXT    NOT NULL,
+      ended_at    TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_thermostat_runs ON thermostat_runs(device_id, started_at);
+    CREATE TABLE IF NOT EXISTS outdoor_hours (
+      hour    TEXT PRIMARY KEY,
+      temp_c  REAL NOT NULL
+    );
+  `);
+
   // ── Family invites: a QR code that lets someone make their own login ──
   // Only a hash of the code is kept, so a copy of the DB can't be used to join.
   db.exec(`

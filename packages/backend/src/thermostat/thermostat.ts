@@ -3,6 +3,7 @@ import { logger } from '../logger';
 import { emitThermostatState } from '../socket';
 import { temperatureUnit, type TemperatureUnit } from '../home/weather';
 import type { ThermostatMode, ThermostatReading } from '../matter/controller';
+import { noteRunning } from './history';
 
 /**
  * Matter thermostats, each a HomeHub device (driver_config.kind 'thermostat').
@@ -104,6 +105,8 @@ export async function getThermostat(id: number): Promise<ThermostatView> {
     const reading = await (await matter()).readThermostat(c.nodeId!, c.endpoint!);
     const view: ThermostatView = { ...reading, ...base, online: true };
     if (reading.mode !== 'off' && reading.mode !== 'other') rememberMode(id, reading.mode);
+    // Every report passes through here, so a run starts and ends when the thermostat says.
+    noteRunning(id, reading.running);
     last.set(id, view);
     return view;
   } catch (err) {

@@ -121,6 +121,18 @@ To set its temperature ranges, an administrator opens the thermostat with **Edit
 
 Matter thermostats share only the basics with other apps: temperatures, mode and targets. Features of the thermostat's own app, such as Nest's Eco mode and learning, stay in that app.
 
+#### Heating and cooling history
+
+The **Energy** page has a **Heating and cooling** card for each thermostat; **History and running hours** on the thermostat's card goes straight to it. HomeHub records it from the moment the thermostat is added:
+
+- **This month so far**, **today**, and how this month compares with last month **for the weather**. A colder month needs more heating, so the comparison is in hours per degree-day: how much it ran for how cold (or hot) it was. Mild months, when there's too little to compare, say so.
+- **By month**: heating and cooling hours for the last 12 months. **For the weather** shows hours per 100 degree-days instead, so a cold January and a mild March compare fairly. Hover over or tap a month for its numbers, or select **Table** to see them all. A month before HomeHub had the thermostat says **Not recorded**.
+- **Temperatures**: one day's inside temperature, target and outside temperature, with shading while it heated or cooled. Move along the chart to read the values at any time, and use **‹** and **›** for other days. A gap in a line means HomeHub wasn't recording then.
+
+Running hours come from the thermostat's own reports of starting and stopping. A thermostat that doesn't report when it's running can't have its hours counted, and the card says so; its temperatures are still recorded. Outside temperatures and degree-days need your home's location in **Settings → Home**. Degree-days are counted from 65 °F, the usual base for homes. Days and times are always your home's, even on a phone somewhere else.
+
+HomeHub keeps 5-minute temperatures for 400 days, and running hours and outdoor temperatures for as long as it runs.
+
 HomeHub keeps its Matter pairings in its database, so backups include them and a restore brings them back. Keep backups private: they hold HomeHub's Matter keys.
 
 ## Cameras

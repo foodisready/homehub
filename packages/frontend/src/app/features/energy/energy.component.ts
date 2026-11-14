@@ -1,4 +1,6 @@
-import { Component, OnInit, signal, computed } from '@angular/core';
+import { Component, OnInit, signal, computed, inject } from '@angular/core';
+import { ActivatedRoute } from '@angular/router';
+import { ThermostatHistoryComponent } from './thermostat-history.component';
 import { HttpClient } from '@angular/common/http';
 import { DecimalPipe } from '@angular/common';
 import { Device } from '../../shared/models/device.model';
@@ -109,7 +111,7 @@ function xLabels(readings: EnergyReading[], range: Range): { label: string; x: n
 @Component({
   selector: 'app-energy',
   standalone: true,
-  imports: [DecimalPipe],
+  imports: [DecimalPipe, ThermostatHistoryComponent],
   styles: [`
     .topbar {
       display: flex;
@@ -188,6 +190,8 @@ function xLabels(readings: EnergyReading[], range: Range): { label: string; x: n
     .no-emeter p { margin-top: 0.5rem; font-size: 0.9rem; }
 
     .loading { text-align: center; padding: 2rem; color: var(--text-muted); }
+    h2 { font-size: 0.8rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted); margin: 0 0 0.75rem; }
+    .thermostats { display: flex; flex-direction: column; gap: 1.25rem; margin-bottom: 2rem; }
   `],
   template: `
     <div class="page">
@@ -198,6 +202,17 @@ function xLabels(readings: EnergyReading[], range: Range): { label: string; x: n
         </div>
       </div>
 
+      @if (thermostats().length) {
+        <h2>Heating and cooling</h2>
+        <div class="thermostats">
+          @for (t of thermostats(); track t.id) {
+            <div class="card" [id]="'thermostat-' + t.id"><app-thermostat-history [deviceId]="t.id" [alias]="t.alias" /></div>
+          }
+        </div>
+        @if (emeterDevices().length) { <h2>Plugs</h2> }
+      }
+
+      @if (!thermostats().length || emeterDevices().length) {
       <!-- Range selector -->
       <div class="range-tabs">
         @for (r of ranges; track r.value) {
@@ -282,6 +297,7 @@ function xLabels(readings: EnergyReading[], range: Range): { label: string; x: n
           }
         </div>
       }
+      }
 
     </div>
   `,
@@ -308,6 +324,8 @@ export class EnergyComponent implements OnInit {
   readonly histories     = this._histories.asReadonly();
 
   readonly emeterDevices = computed(() => this._allDevices().filter((d) => d.hasEmeter));
+  readonly thermostats   = computed(() => this._allDevices().filter((d) => d.driverConfig?.['kind'] === 'thermostat'));
+  private readonly route = inject(ActivatedRoute);
   readonly currentTotal  = computed(() =>
     this._allDevices().reduce((sum, d) => sum + (d.wattage ?? 0), 0)
   );
@@ -343,6 +361,9 @@ export class EnergyComponent implements OnInit {
     this.http.get<Device[]>('/api/devices').subscribe({
       next: (devices) => {
         this._allDevices.set(devices);
+        // From a thermostat's History link: bring its card into view.
+        const wanted = this.route.snapshot.queryParamMap.get('thermostat');
+        if (wanted) setTimeout(() => document.getElementById(`thermostat-${wanted}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 300);
         const emeter = devices.filter((d) => d.hasEmeter);
         if (emeter.length === 0) { this._loading.set(false); return; }
         this.loadHistories(emeter);
