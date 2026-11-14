@@ -378,6 +378,41 @@ class SpeakerLinkTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(given[-1], None)
         link.task.cancel()
 
+    async def test_not_understood_listens_once_more_in_the_same_language(self):
+        # From the tablet, 2026-11-14: 熄阿亮床头灯 not understood, then said again,
+        # and the Vietnamese wake word answered "Xin lỗi, tôi không hiểu".
+        from homehub_voice import speakers
+        langs, handled = [], [False]
+
+        def answer_fn(audio, spoke, asked=None, prefer=None):
+            langs.append(prefer)
+            return mock.Mock(heard='熄阿亮床头灯', reply='唔好意思，我聽唔明。' if not handled[0] else '熄咗亞娘床頭燈。',
+                             handled=handled[0], stt_s=0, homehub_s=0, lang='yue', asked=None)
+
+        link, c = await self.connected_link(answer_fn)
+        first = await self.say(c, 1, '老友')
+        self.assertEqual(first['VOICE_ASSISTANT_INTENT_END'].get('continue_conversation'), '1')
+        second = await self.say(c, 2)   # no wake word
+        self.assertEqual(langs, [None, 'yue'], 'the second try is in Cantonese too')
+        self.assertNotIn('continue_conversation', second['VOICE_ASSISTANT_INTENT_END'], 'only one more try')
+
+        # Understood on the second try: done, nothing more.
+        await self.say(c, 3, '老友')
+        handled[0] = True
+        done = await self.say(c, 4)
+        self.assertNotIn('continue_conversation', done['VOICE_ASSISTANT_INTENT_END'])
+
+        # A new wake word picks its own language, and a late second try is a fresh start.
+        handled[0] = False
+        await self.say(c, 5, '老友')
+        await self.say(c, 6, 'Xin Chào')
+        self.assertEqual(langs[-1], 'vi')
+        await self.say(c, 7, '老友')
+        link.again = (link.again[0] - speakers.FOLLOW_UP_S - 1, link.again[1])
+        await self.say(c, 8)
+        self.assertEqual(langs[-1], None)
+        link.task.cancel()
+
     async def test_woken_by_a_noise_it_stays_quiet(self):
         def answer_fn(audio, spoke, asked=None, prefer=None):
             return mock.Mock(heard='', reply="Sorry, I didn't catch that.", handled=False, stt_s=0, homehub_s=0, lang='en', asked=None)

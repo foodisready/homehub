@@ -111,6 +111,8 @@ class SpeakerLink:
         self.on_change = on_change
         # The device this speaker was just asked "on or off?" about, when, and in which language.
         self.asked: tuple[str, float, str] | None = None
+        # When a command wasn't understood, and in which language: the speaker listens once more, with no wake word.
+        self.again: tuple[float, str] | None = None
 
     @property
     def who(self) -> str:
@@ -212,8 +214,11 @@ class SpeakerLink:
                 recent = self.asked if self.asked and time.monotonic() - self.asked[1] <= FOLLOW_UP_S else None
                 self.asked = None
                 asked = recent[0] if recent else None
-                # The answer to a question is in the question's language; otherwise the wake word's, if it says.
-                prefer = recent[2] if recent else wake_language(run.wake)
+                again = self.again if self.again and time.monotonic() - self.again[0] <= FOLLOW_UP_S else None
+                self.again = None
+                # The answer to a question is in the question's language; otherwise the wake word's, if it says;
+                # a second try with no wake word is in the first try's language.
+                prefer = recent[2] if recent else wake_language(run.wake) or (again[1] if again else None)
                 a = await loop.run_in_executor(None, self.answer, bytes(run.listen.audio), run.listen.spoke, asked, prefer)
                 # No words at all: most often the wake word heard in a noise or a conversation, so the
                 # speaker goes quiet instead of saying "Sorry, I didn't hear anything" to nobody.
@@ -228,16 +233,21 @@ class SpeakerLink:
                     log.info('%s #%d (%s) heard %r in %.1fs of talk that didn\'t stop, most likely a TV or a conversation, so it stays quiet',
                              self.who, run.n, run.wake or 'no wake word', a.heard, run.listen.seconds)
                     return
+                # Not understood: one more try, with no wake word. Only one, so a misheard TV can't keep it listening.
+                try_again = not a.handled and not follow_up and not again
                 event(E.VOICE_ASSISTANT_STT_END, {'text': a.heard or ' '})
                 event(E.VOICE_ASSISTANT_INTENT_START)
                 # A question: the speaker listens again after the reply, with no wake word.
                 event(E.VOICE_ASSISTANT_INTENT_END, {'conversation_id': run.conversation,
-                                                     **({'continue_conversation': '1'} if follow_up else {})})
+                                                     **({'continue_conversation': '1'} if follow_up or try_again else {})})
                 event(E.VOICE_ASSISTANT_TTS_START, {'text': a.reply})
                 url = await loop.run_in_executor(None, self.speak, a.reply, self.speaker.host, a.lang)
                 event(E.VOICE_ASSISTANT_TTS_END, {'url': url})
+                lang = a.lang if isinstance(getattr(a, 'lang', None), str) else 'en'
                 if follow_up:
-                    self.asked = (follow_up, time.monotonic(), a.lang if isinstance(getattr(a, 'lang', None), str) else 'en')
+                    self.asked = (follow_up, time.monotonic(), lang)
+                if try_again:
+                    self.again = (time.monotonic(), lang)
                 passes = getattr(a, 'passes', 0)
                 log.info(
                     '%s #%d (%s) heard %r -> %r (%s; speech %.1fs of which voiced %.1fs, loudness %.3f-%.3f, recognise %.2fs%s, HomeHub %.2fs, reply ready %.2fs after speech ended)',
