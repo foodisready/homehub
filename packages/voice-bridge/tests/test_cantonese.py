@@ -63,6 +63,14 @@ class ReadingTest(unittest.TestCase):
         self.assertIsNone(yue.parse('開早餐燈', names))
         self.assertIsNone(yue.parse('開餐區細燈', names))
         self.assertIsNone(yue.parse('開早餐區細', names))
+        # Brothers' lights, 卓軒 and 卓希: 卓轩房灯 is every sound of 卓軒房邊燈 with 邊 left
+        # out, and only close to 卓希房燈. From the Pi's log, 2026-11-14.
+        brothers = NAMES + ['卓軒房邊燈']
+        self.assertEqual(yue.parse('熄卓轩房灯。', brothers).name, '卓軒房邊燈')
+        self.assertEqual(yue.parse('熄桌轩坊边灯。', brothers).name, '卓軒房邊燈')
+        self.assertEqual(yue.parse('熄卓希房燈', brothers).name, '卓希房燈')
+        # Not from a four-word name: 卓房燈 could be either brother's.
+        self.assertEqual(yue.shortened(yue.syllables('卓房燈'), yue.syllables('卓希房燈')), 0.0)
         # Two long names that both shorten to what was heard: never guessed between.
         self.assertIsNone(yue.parse('開早餐細燈', names + ['早餐角細燈']))
 

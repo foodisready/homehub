@@ -237,12 +237,12 @@ SHORTENED = 0.9
 def shortened(heard: tuple[str, ...], name: tuple[str, ...]) -> float:
     """SHORTENED when the heard syllables are the name with one word from its middle left out, else 0.
 
-    Only from names of four or more syllables, and only when every other sound is the
-    same: a word left out and a word misheard together is too far to guess. The first
+    Only from names of five or more syllables (卓希房燈 shortened to 卓房燈 would lose half
+    a person's name), and only when every other sound is the same: a word left out and a word misheard together is too far to guess. The first
     and last words stay, since they say whose and what (卓希…燈). Below an exact match,
     so a name that really is the shorter one (客廳燈 next to 客廳房燈) wins.
     """
-    if len(name) < 4 or len(heard) != len(name) - 1:
+    if len(name) < 5 or len(heard) != len(name) - 1:
         return 0.0
     return SHORTENED if any(name[:i] + name[i + 1:] == heard for i in range(1, len(name) - 1)) else 0.0
 
@@ -253,8 +253,13 @@ def best_name(heard: tuple[str, ...], names: list[str]) -> tuple[str | None, flo
     if not scored:
         return None, 0.0, 0.0
     top_score, top = scored[0]
-    runner = next((sc for sc, n in scored[1:] if syllables(n) != syllables(top)), 0.0)
-    return top, top_score, runner
+    others = [(sc, n) for sc, n in scored[1:] if syllables(n) != syllables(top)]
+    if top_score == SHORTENED and match(heard, syllables(top)) < SHORTENED:
+        # Every sound heard is in this name, a word left out. Another name that only sounds
+        # close isn't a reason to doubt it (卓轩房灯: 卓軒房邊燈, not 卓希房燈); one that every
+        # sound is in too, exactly or shortened, is.
+        others = [(sc, n) for sc, n in others if sc >= SHORTENED]
+    return top, top_score, next((sc for sc, _ in others), 0.0)
 
 
 def parse(text: str, names: list[str], scenes: list[str] | None = None) -> Command | None:
