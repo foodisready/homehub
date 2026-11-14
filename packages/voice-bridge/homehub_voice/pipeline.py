@@ -71,9 +71,23 @@ ON_OR_OFF = re.compile(r'^\s*(?:(?:turn|switch)\s+(?:it\s+|them\s+)?)?(on|off)(?
 CANTONESE = {'yue', 'zh'}
 
 
-def wake_language(wake: str) -> str | None:
-    """The language a wake word is in, when it says: "Xin chào" is Vietnamese."""
-    return 'vi' if 'xin chao' in vi.plain(wake or '') else None
+# The Chinese languages voice can listen in. Mandarin ('zh') would join Cantonese here.
+CHINESE = ('yue',)
+
+
+def wake_language(wake: str, languages: list[str] | None = None) -> str | None:
+    """The language a wake word is in, from how its name is written: Chinese characters (老友) are
+    the Chinese language that's on, Vietnamese letters (Xin Chào) are Vietnamese. None when it
+    doesn't say (Hey Jarvis), or when it could be more than one: Cantonese and Mandarin are both
+    written in Chinese characters. languages: the ones that are on; None means any."""
+    wake = wake or ''
+    on = lambda lang: languages is None or lang in languages  # noqa: E731
+    if vi.is_chinese(wake):
+        chinese = [lang for lang in CHINESE if on(lang)]
+        return chinese[0] if len(chinese) == 1 else None
+    if (vi.has_vietnamese(wake) or 'xin chao' in vi.plain(wake)) and on('vi'):
+        return 'vi'
+    return None
 
 
 # Where SenseVoice listens while the Vietnamese model does: a Pi 4 has four cores, and each model

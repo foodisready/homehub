@@ -96,8 +96,10 @@ class SpeakerLink:
         listed: bool,
         on_change: Callable[[], None] = lambda: None,
         one_answers: OneAnswers | None = None,
+        languages: list[str] | None = None,
     ) -> None:
         self.speaker = speaker
+        self.languages = languages  # the ones that are on, so a wake word's language is one of them
         self.one_answers = one_answers or OneAnswers()
         self.answer = answer
         self.speak = speak  # (text, speaker host, language) -> URL of the spoken reply
@@ -218,7 +220,7 @@ class SpeakerLink:
                 self.again = None
                 # The answer to a question is in the question's language; otherwise the wake word's, if it says;
                 # a second try with no wake word is in the first try's language.
-                prefer = recent[2] if recent else wake_language(run.wake) or (again[1] if again else None)
+                prefer = recent[2] if recent else wake_language(run.wake, self.languages) or (again[1] if again else None)
                 a = await loop.run_in_executor(None, self.answer, bytes(run.listen.audio), run.listen.spoke, asked, prefer)
                 # No words at all: most often the wake word heard in a noise or a conversation, so the
                 # speaker goes quiet instead of saying "Sorry, I didn't hear anything" to nobody.

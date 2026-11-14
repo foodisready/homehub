@@ -92,7 +92,7 @@ async def main() -> int:
         conf.speakers,
         lambda s, listed: SpeakerLink(
             s, lambda audio, spoke, asked=None, prefer=None: answer(audio, spoke, listener, homehub, ears, asked, vi_ears, prefer), speak, listed,
-            on_change=lambda: speakers.changed.set(), one_answers=one_answers,
+            on_change=lambda: speakers.changed.set(), one_answers=one_answers, languages=languages,
         ),
         conf.discover,
     )
