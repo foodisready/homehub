@@ -51,6 +51,21 @@ class ReadingTest(unittest.TestCase):
         # 着 then a name that starts with 着: not a repeated verb.
         self.assertEqual(yue.parse('着着氣燈', NAMES + ['着氣燈']).name, '着氣燈')
 
+    def test_a_long_name_with_a_word_left_out(self):
+        names = NAMES + ['早餐區細燈', '客廳燈', '客廳房燈']
+        self.assertEqual(yue.parse('開早餐細燈', names).name, '早餐區細燈')
+        self.assertEqual(yue.parse('熄早餐區燈', names).name, '早餐區細燈')
+        self.assertEqual(yue.parse('开早餐区细灯', names).name, '早餐區細燈')
+        self.assertEqual(yue.parse('早餐細燈', names).action, 'ask')
+        # A name that really is the shorter one wins.
+        self.assertEqual(yue.parse('開客廳燈', names).name, '客廳燈')
+        # Not two words, nor the first or last, nor a word left out and another misheard.
+        self.assertIsNone(yue.parse('開早餐燈', names))
+        self.assertIsNone(yue.parse('開餐區細燈', names))
+        self.assertIsNone(yue.parse('開早餐區細', names))
+        # Two long names that both shorten to what was heard: never guessed between.
+        self.assertIsNone(yue.parse('開早餐細燈', names + ['早餐角細燈']))
+
     def test_two_names_that_sound_alike_are_never_guessed_between(self):
         # 卓k房灯 next to 卓希房燈 made every 卓希房燈 command fail: remove one of them.
         self.assertIsNone(yue.parse('開卓希房燈', NAMES + ['卓k房灯']))

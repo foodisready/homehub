@@ -230,9 +230,26 @@ def verb_alone(text: str) -> str | None:
     return None
 
 
+# A long name said with one word left out: 早餐細燈 or 早餐區燈 for 早餐區細燈.
+SHORTENED = 0.9
+
+
+def shortened(heard: tuple[str, ...], name: tuple[str, ...]) -> float:
+    """SHORTENED when the heard syllables are the name with one word from its middle left out, else 0.
+
+    Only from names of four or more syllables, and only when every other sound is the
+    same: a word left out and a word misheard together is too far to guess. The first
+    and last words stay, since they say whose and what (卓希…燈). Below an exact match,
+    so a name that really is the shorter one (客廳燈 next to 客廳房燈) wins.
+    """
+    if len(name) < 4 or len(heard) != len(name) - 1:
+        return 0.0
+    return SHORTENED if any(name[:i] + name[i + 1:] == heard for i in range(1, len(name) - 1)) else 0.0
+
+
 def best_name(heard: tuple[str, ...], names: list[str]) -> tuple[str | None, float, float]:
     """The closest name, its score, and the score of the closest that sounds different."""
-    scored = sorted(((match(heard, syllables(n)), n) for n in names), reverse=True)
+    scored = sorted(((max(match(heard, syllables(n)), shortened(heard, syllables(n))), n) for n in names), reverse=True)
     if not scored:
         return None, 0.0, 0.0
     top_score, top = scored[0]
