@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, computed, effect, inject, input, output, signal, untracked } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { forkJoin } from 'rxjs';
-import { SUGGEST_HTML_LANG, SUGGEST_TAG, type NicknameSuggestion } from '../../shared/nickname-chips/nickname-chips.component';
+import { SUGGEST_HTML_LANG, SUGGEST_TAG, type NicknameSuggestion, type SuggestLang } from '../../shared/nickname-chips/nickname-chips.component';
 
 const DISMISSED_KEY = 'homehub.nicknameSuggestions.dismissed';
 
@@ -17,10 +17,13 @@ interface DeviceNames { id: number; alias: string; nicknames: string[] }
 interface Pending { device: DeviceNames; items: NicknameSuggestion[]; owners: string[] }
 
 /**
- * Settings → Voice control: the Vietnamese and Cantonese nicknames HomeHub
+ * Settings → Voice control: the Vietnamese, Cantonese and Mandarin nicknames HomeHub
  * suggests for every device at once, ticked to start with. Untick any that
  * aren't right, then add the rest with one button.
  */
+const ORDER: SuggestLang[] = ['vi', 'yue', 'zh'];
+const LANG_WORD: Record<SuggestLang, string> = { vi: 'Vietnamese', yue: 'Cantonese', zh: 'Mandarin' };
+
 @Component({
   selector: 'app-nickname-review',
   standalone: true,
@@ -165,8 +168,10 @@ export class NicknameReviewComponent {
 
   readonly summary = computed(() => {
     const p = this.pending();
-    const langs = [...new Set(p.flatMap((x) => x.items.map((s) => s.lang)))];
-    const words = langs.map((l) => (l === 'vi' ? 'Vietnamese' : 'Cantonese')).join(' and ');
+    const found = new Set(p.flatMap((x) => x.items.map((s) => s.lang)));
+    const langs = ORDER.filter((l) => found.has(l));
+    const names = langs.map((l) => LANG_WORD[l]);
+    const words = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names.join('');
     return `${words} nicknames for ${p.length} ${p.length === 1 ? 'device' : 'devices'}, so voice commands in ${langs.length > 1 ? 'those languages' : 'that language'} find them.`;
   });
 
@@ -194,9 +199,9 @@ export class NicknameReviewComponent {
     });
   }
 
-  /** Vietnamese first, then Cantonese. */
+  /** Vietnamese first, then Cantonese, then Mandarin. */
   plainItems(p: Pending): NicknameSuggestion[] {
-    return p.items.filter((s) => !s.needsName).sort((a, b) => (a.lang === b.lang ? 0 : a.lang === 'vi' ? -1 : 1));
+    return p.items.filter((s) => !s.needsName).sort((a, b) => ORDER.indexOf(a.lang) - ORDER.indexOf(b.lang));
   }
   templates(p: Pending, who: string): NicknameSuggestion[] { return p.items.filter((s) => s.needsName === who); }
   readonly htmlLangs = SUGGEST_HTML_LANG;

@@ -180,12 +180,13 @@ export function suggestNicknames(device: SuggestDevice, languages: SuggestLangua
     if (!r) continue;
     // "Garage Left", on a garage door opener: a door.
     if (!r.thing && device.driverType === 'meross') r.thing = GARAGE;
-    if (r.thing === GARAGE && r.place?.en[0] === 'garage') r.place = undefined;
     // From the room when the name has none: "Desk lamp" in the Office.
     if (r.thing && !r.place && !r.owner && device.room) {
       const room = readName(device.room);
       if (room && !room.thing && !room.pos && !room.mod) { r.place = room.place; r.owner = room.owner; r.ownerRoom = room.ownerRoom; }
     }
+    // A garage door already says garage, from its name or its room: 車房門, not 車房車房門.
+    if (r.thing === GARAGE && r.place?.en[0] === 'garage') r.place = undefined;
     if (!r.thing) continue;   // a place alone ("Kitchen") says nothing about what it is
 
     if (languages.includes('vi')) {

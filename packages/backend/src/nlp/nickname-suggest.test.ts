@@ -77,6 +77,10 @@ describe('nickname suggestions', () => {
 
   it('calls a garage opener a garage door, and skips cameras and unknown words', () => {
     assert.deepEqual(texts(7), ['cửa ga-ra bên trái', 'cửa nhà xe bên trái', '左邊車房門', 'cửa ga-ra', 'cửa nhà xe', '車房門']);
+    // In a room called Garage, still not "garage garage door".
+    const inGarage = { id: 16, alias: 'Garage Left', nicknames: [], room: 'Garage', driverType: 'meross' };
+    assert.deepEqual(suggestNicknames(inGarage, ['vi', 'yue', 'zh']).map((s) => s.text),
+      ['cửa ga-ra bên trái', 'cửa nhà xe bên trái', '左邊車房門', '左边车库门']);
     assert.deepEqual(texts(8), []);
     assert.deepEqual(texts(9), []);
   });
