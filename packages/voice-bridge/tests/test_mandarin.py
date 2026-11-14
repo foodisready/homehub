@@ -230,6 +230,15 @@ class PipelineTest(unittest.TestCase):
                 self.assertEqual(len(h.sent), 1, 'listed once')
                 self.assertEqual((a.lang, a.handled, a.unsure), (label, False, True))
 
+    def test_both_on_a_miss_goes_by_the_reading_with_a_verb(self):
+        # From the household's recordings: 關主人房燈, for a room with no light, labelled Mandarin.
+        # Set to Mandarin, SenseVoice wrote 换检防单; set to Cantonese, 關主人房燈.
+        h = HomeHub()
+        ears = Ears('zh', '换检防单', {'zh': '换检防单', 'yue': '關主人房燈'}, chinese=('yue', 'zh'))
+        a = answer(b'x', True, Listener(), h, ears)
+        self.assertEqual(h.sent, ['關主人房燈'], 'listed as Cantonese, for Teach')
+        self.assertEqual((a.lang, a.reply, a.unsure), ('yue', '唔好意思，我聽唔明。', True))
+
     def test_one_language_a_miss_is_sure(self):
         a = answer(b'x', True, Listener(), HomeHub(), Ears('zh', '今天吃什么'))
         self.assertFalse(a.unsure)

@@ -269,6 +269,7 @@ class Chinese:
     """How one Chinese language is read and answered."""
     lang: str
     parse: Callable
+    has_verb: Callable[[str], bool]   # starts with an on or off word: a command, if not one understood
     kind: Callable                 # which question it asks, if one
     verb_alone: Callable
     reply: Callable
@@ -278,9 +279,9 @@ class Chinese:
 
 
 WAYS = {
-    'yue': Chinese('yue', yue.parse, questions.yue_kind, yue.verb_alone, yue.reply, yue.traditional,
+    'yue': Chinese('yue', yue.parse, lambda t: yue.read_verb(yue.syllables(t))[0] is not None, questions.yue_kind, yue.verb_alone, yue.reply, yue.traditional,
                    yue.NOT_UNDERSTOOD, yue.NO_HOMEHUB),
-    'zh': Chinese('zh', zh.parse, questions.zh_kind, zh.verb_alone, zh.reply, zh.plain,
+    'zh': Chinese('zh', zh.parse, lambda t: zh.read_verb(zh.syllables(t))[0] is not None, questions.zh_kind, zh.verb_alone, zh.reply, zh.plain,
                   zh.NOT_UNDERSTOOD, zh.NO_HOMEHUB),
 }
 
@@ -388,7 +389,14 @@ def answer_chinese(audio: bytes, ears: CantoneseEars, homehub: Commander, t0: fl
     other = read_chinese(WAYS[order[1]], audio, ears, homehub, asked, quick, pass_for(order[1]))
     if other.understood:
         return send_chinese(WAYS[order[1]], other, homehub, t0)
-    a = send_chinese(WAYS[order[0]], first, homehub, t0)
+    # Neither understood it. The reading with an on or off word in it is more likely the language
+    # spoken, and its words more use in the list of missed commands: 關主人房燈 heard as Cantonese,
+    # not 换检防单 heard as Mandarin. The label decides if both or neither have one.
+    if WAYS[order[1]].has_verb(other.text) and not WAYS[order[0]].has_verb(first.text):
+        lang, reading = order[1], other
+    else:
+        lang, reading = order[0], first
+    a = send_chinese(WAYS[lang], reading, homehub, t0)
     a.unsure = True
     return a
 
