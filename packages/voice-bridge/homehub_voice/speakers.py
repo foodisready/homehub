@@ -113,8 +113,8 @@ class SpeakerLink:
         self.on_change = on_change
         # The device this speaker was just asked "on or off?" about, when, and in which language.
         self.asked: tuple[str, float, str] | None = None
-        # When a command wasn't understood, and in which language: the speaker listens once more, with no wake word.
-        self.again: tuple[float, str] | None = None
+        # When a command wasn't understood, and in which language (None: unsure): the speaker listens once more, with no wake word.
+        self.again: tuple[float, str | None] | None = None
 
     @property
     def who(self) -> str:
@@ -249,12 +249,16 @@ class SpeakerLink:
                 if follow_up:
                     self.asked = (follow_up, time.monotonic(), lang)
                 if try_again:
-                    self.again = (time.monotonic(), lang)
+                    # A guess between Cantonese and Mandarin isn't held to: the next try reads both again.
+                    self.again = (time.monotonic(), None if getattr(a, 'unsure', False) is True else lang)
                 passes = getattr(a, 'passes', 0)
+                label = getattr(a, 'label', '')
+                how = ({1: ' in 1 pass', 2: ' in 2 passes'}.get(passes, '') if isinstance(passes, int) else '')
+                how += f' labelled {label}' if isinstance(label, str) and label else ''
                 log.info(
                     '%s #%d (%s) heard %r -> %r (%s; speech %.1fs of which voiced %.1fs, loudness %.3f-%.3f, recognise %.2fs%s, HomeHub %.2fs, reply ready %.2fs after speech ended)',
                     self.who, run.n, run.wake or 'no wake word', a.heard, a.reply, 'done' if a.handled else 'not handled',
-                    run.listen.seconds, run.listen.voiced, min(run.listen.floor, run.listen.peak), run.listen.peak, a.stt_s, {1: ' in 1 pass', 2: ' in 2 passes'}.get(passes, '') if isinstance(passes, int) else '',
+                    run.listen.seconds, run.listen.voiced, min(run.listen.floor, run.listen.peak), run.listen.peak, a.stt_s, how,
                     a.homehub_s, time.monotonic() - t_end,
                 )
             except Exception as e:  # noqa: BLE001 — the speaker must always hear the run end

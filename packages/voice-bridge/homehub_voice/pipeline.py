@@ -65,6 +65,11 @@ class Answer:
     asked: str | None = None
     # How many times SenseVoice listened to a Cantonese command: once if the first was clear.
     passes: int = 0
+    # The language SenseVoice's first pass said it was ('yue', 'zh'), for the log.
+    label: str = ''
+    # Not understood, with Cantonese and Mandarin both on: `lang` was a guess, so another try
+    # shouldn't be held to it.
+    unsure: bool = False
 
 
 # "On", "off", "turn it on", "switch it off, please": an answer to "on or off?".
@@ -161,7 +166,9 @@ def answer(audio: bytes, spoke: bool, listener: Transcriber, homehub: Commander,
         if in_vietnamese and lang != 'en':
             return answer_vietnamese(heard_vi, homehub, t0, asked)
         if lang in CANTONESE and not en_which:
-            return answer_chinese(audio, ears, homehub, t0, asked, quick, second, prefer)
+            a = answer_chinese(audio, ears, homehub, t0, asked, quick, second, prefer, lang)
+            a.label = lang
+            return a
     elif in_vietnamese:
         return answer_vietnamese(heard_vi, homehub, t0, asked)
     # English. SenseVoice has already heard the words, in about a second; Whisper takes about ten
@@ -355,28 +362,35 @@ def answer_cantonese(audio: bytes, ears: CantoneseEars, homehub: Commander, t0: 
 
 
 def answer_chinese(audio: bytes, ears: CantoneseEars, homehub: Commander, t0: float, asked: str | None,
-                   quick: str, second: Future | None, prefer: str | None) -> Answer:
+                   quick: str, second: Future | None, prefer: str | None, label: str = '') -> Answer:
     """Cantonese or Mandarin. With one of them on, or a hint (the wake word, or the question being
-    answered), that one. With both on and no hint: Mandarin when the first pass is clearly a Mandarin
-    command; otherwise Cantonese, as SenseVoice often labels Cantonese as Mandarin, and Mandarin
-    if Cantonese doesn't understand it."""
+    answered), that one. With both on and no hint, SenseVoice's label (`label`) and the words decide:
+    a first pass that's clearly a command in one language, and not as clearly in the other, is that
+    language. 打开厨房灯 reads as well in both, since 打开 is said in both, so then the label decides.
+    Otherwise the labelled language is read first, with a second pass, and the other if it misses."""
     chinese = chinese_on(ears)
     if len(chinese) == 1 or prefer in chinese:
         way = WAYS[prefer if prefer in chinese else chinese[0]]
         return send_chinese(way, read_chinese(way, audio, ears, homehub, asked, quick, second), homehub, t0)
-    scenes = getattr(homehub, 'scenes', homehub.names)
+    order = ['zh', 'yue'] if label == 'zh' else ['yue', 'zh']
     if quick:
-        m = zh.parse(quick, homehub.names, scenes)
-        c = yue.parse(quick, homehub.names, scenes)
-        if m is not None and m.action != 'ask' and m.score >= SURE and (c is None or m.score > c.score):
-            return send_chinese(WAYS['zh'], Reading(quick, m, None, 1), homehub, t0)
-    first = read_chinese(WAYS['yue'], audio, ears, homehub, asked, quick, second)
+        scenes = getattr(homehub, 'scenes', homehub.names)
+        sure = [(c.score, -order.index(lang), lang, c) for lang in order
+                if (c := WAYS[lang].parse(quick, homehub.names, scenes)) is not None and c.action != 'ask' and c.score >= SURE]
+        if sure:
+            _, _, lang, command = max(sure, key=lambda x: (x[0], x[1]))
+            return send_chinese(WAYS[lang], Reading(quick, command, None, 1), homehub, t0)
+    # The early second pass was set to the first language that's on; another is heard here.
+    pass_for = lambda lang: second if lang == chinese[0] else None  # noqa: E731
+    first = read_chinese(WAYS[order[0]], audio, ears, homehub, asked, quick, pass_for(order[0]))
     if first.understood or (first.command is not None and first.command.action == 'ask'):
-        return send_chinese(WAYS['yue'], first, homehub, t0)
-    other = read_chinese(WAYS['zh'], audio, ears, homehub, asked, quick, None)
+        return send_chinese(WAYS[order[0]], first, homehub, t0)
+    other = read_chinese(WAYS[order[1]], audio, ears, homehub, asked, quick, pass_for(order[1]))
     if other.understood:
-        return send_chinese(WAYS['zh'], other, homehub, t0)
-    return send_chinese(WAYS['yue'], first, homehub, t0)
+        return send_chinese(WAYS[order[1]], other, homehub, t0)
+    a = send_chinese(WAYS[order[0]], first, homehub, t0)
+    a.unsure = True
+    return a
 
 
 def answer_question(heard: str, kind: str, lang: str, homehub: Commander, t0: float, passes: int = 0) -> Answer:

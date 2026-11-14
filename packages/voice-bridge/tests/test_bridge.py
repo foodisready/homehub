@@ -429,6 +429,22 @@ class SpeakerLinkTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(langs[-1], None)
         link.task.cancel()
 
+    async def test_a_guessed_language_is_not_held_to_on_the_second_try(self):
+        # Cantonese and Mandarin both on, and neither understood: the reply's language was a guess.
+        langs = []
+
+        def answer_fn(audio, spoke, asked=None, prefer=None):
+            langs.append(prefer)
+            return mock.Mock(heard='今日食乜嘢', reply='唔好意思，我聽唔明。', handled=False, stt_s=0, homehub_s=0,
+                             lang='yue', asked=None, unsure=True, label='zh', passes=2)
+
+        link, c = await self.connected_link(answer_fn)
+        first = await self.say(c, 1, '老友')
+        self.assertEqual(first['VOICE_ASSISTANT_INTENT_END'].get('continue_conversation'), '1')
+        await self.say(c, 2)
+        self.assertEqual(langs, [None, None])
+        link.task.cancel()
+
     async def test_woken_by_a_noise_it_stays_quiet(self):
         def answer_fn(audio, spoke, asked=None, prefer=None):
             return mock.Mock(heard='', reply="Sorry, I didn't catch that.", handled=False, stt_s=0, homehub_s=0, lang='en', asked=None)

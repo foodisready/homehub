@@ -204,18 +204,35 @@ class PipelineTest(unittest.TestCase):
         self.assertEqual(h.sent, ['turn off 客廳燈'])
         self.assertEqual((a.lang, a.reply), ('yue', '熄咗客廳燈。'))
 
-    def test_both_on_a_command_cantonese_misses_is_tried_as_mandarin(self):
+    def test_both_on_said_alike_in_both_the_label_decides(self):
+        # 打开 is said in Cantonese too: 打开厨房灯 reads as well in both.
         h = HomeHub()
-        ears = Ears('zh', '把客厅。', {'yue': '把客厅。', 'zh': '把客厅灯关掉吧。'}, chinese=('yue', 'zh'))
-        a = answer(b'x', True, Listener(), h, ears)
-        self.assertEqual(h.sent, ['turn off 客廳燈'], 'and the Cantonese miss is never listed')
-        self.assertEqual((a.lang, ears.passes), ('zh', ['yue', 'zh']))
+        a = answer(b'x', True, Listener(), h, Ears('zh', '打开厨房灯。', chinese=('yue', 'zh')))
+        self.assertEqual((h.sent, a.lang, a.label), (['turn on 廚房燈'], 'zh', 'zh'))
+        a = answer(b'x', True, Listener(), h, Ears('yue', '打开厨房灯。', chinese=('yue', 'zh')))
+        self.assertEqual((a.lang, a.label), ('yue', 'yue'))
 
-    def test_both_on_a_miss_is_answered_in_cantonese(self):
-        h = HomeHub()
-        a = answer(b'x', True, Listener(), h, Ears('zh', '今日食乜嘢', chinese=('yue', 'zh')))
-        self.assertEqual(len(h.sent), 1)
-        self.assertEqual((a.lang, a.handled), ('yue', False))
+    def test_both_on_unsure_reads_the_labelled_language_first_then_the_other(self):
+        for label, first in (('zh', 'zh'), ('yue', 'yue')):
+            with self.subTest(label=label):
+                h = HomeHub()
+                ears = Ears(label, '把客厅。', {'yue': '把客厅。', 'zh': '把客厅灯关掉吧。'}, chinese=('yue', 'zh'))
+                a = answer(b'x', True, Listener(), h, ears)
+                self.assertEqual(h.sent, ['turn off 客廳燈'], 'and a miss in the first language is never listed')
+                self.assertEqual(a.lang, 'zh')
+                self.assertIn('zh', ears.passes)
+
+    def test_both_on_a_miss_is_answered_in_the_labelled_language_and_is_unsure(self):
+        for label in ('yue', 'zh'):
+            with self.subTest(label=label):
+                h = HomeHub()
+                a = answer(b'x', True, Listener(), h, Ears(label, '今日食乜嘢', chinese=('yue', 'zh')))
+                self.assertEqual(len(h.sent), 1, 'listed once')
+                self.assertEqual((a.lang, a.handled, a.unsure), (label, False, True))
+
+    def test_one_language_a_miss_is_sure(self):
+        a = answer(b'x', True, Listener(), HomeHub(), Ears('zh', '今天吃什么'))
+        self.assertFalse(a.unsure)
 
     def test_both_on_a_hint_decides(self):
         h, ears = HomeHub(), Ears('yue', '开厨房灯。', chinese=('yue', 'zh'))
