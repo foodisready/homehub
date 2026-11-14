@@ -16,7 +16,7 @@ HomeHub controls devices directly over your home network. All of them are switch
 | **Wyze** | Cameras, such as Cam v2, v3 and Pan v3 | Needs the camera bridge and a Wyze API key. See [Cameras](#cameras) |
 | **Ring** | Doorbells and cameras: doorbell presses, motion, snapshots and live view | Through your Ring account. See [Ring doorbells and cameras](#ring-doorbells-and-cameras) |
 | **IP cameras** | Reolink, Amcrest and other cameras with ONVIF or RTSP: live video, snapshots, motion snapshots and turning | Local, no cloud. See [IP cameras](#ip-cameras-reolink-amcrest-and-others) |
-| **Any Matter brand** | Plugs, lights, switches and power strips (on and off) | Shared from Google Home, Apple Home, Alexa or SmartThings. See [Matter devices](#matter-devices) |
+| **Any Matter brand** | Plugs, lights, switches and power strips (on and off), and thermostats | Shared from Google Home, Apple Home, Alexa or SmartThings. See [Matter devices](#matter-devices) |
 
 Zigbee devices aren't supported. "Works with Google or Alexa" on a box doesn't mean it works with HomeHub, but the **Matter** logo does.
 
@@ -107,6 +107,19 @@ Each part that switches on and off becomes its own device: a plug is one, and a 
 Deleting a Matter device from HomeHub also unpairs it from HomeHub. It stays in your other apps.
 
 Thread devices work too, as long as you have a Thread border router, such as a Google Nest Hub, an Apple TV or HomePod, or an Echo 4th generation.
+
+### Thermostats
+
+A thermostat with the Matter logo, such as a Google Nest Thermostat, is added the same way, with **+ Add a Matter device**. It becomes one device. On **Home**, its row shows the room's temperature and what it's doing, such as "70° · Heating to 72°". Select it to see the temperature in large type, choose **Off**, **Heat**, **Cool** or **Auto**, and set the target with **−** and **+**. In **Auto** there are two targets: it heats below the first and cools above the second. Taps in a row are sent together once you stop. Changes made on the thermostat or in another app show up straight away. Temperatures are in °F or °C, depending on your home's time zone.
+
+The switch on the row turns the thermostat off, and on again in the mode it was in. Schedules, scenes and timers can do the same.
+
+To set its temperature ranges, an administrator opens the thermostat with **Edit** in **Settings → Devices**:
+
+- **Comfortable**, 68–76 °F at first: where you like it when you're home and awake. The thermostat's card points out a target outside it, and HomeHub's savings advice will keep to it.
+- **Never beyond**, 60–82 °F at first: the furthest Chat, voice, schedules and scenes can ever set it, at night and while you're out too. You can still go further on the thermostat itself or with **−** and **+**, within the thermostat's own limits.
+
+Matter thermostats share only the basics with other apps: temperatures, mode and targets. Features of the thermostat's own app, such as Nest's Eco mode and learning, stay in that app.
 
 HomeHub keeps its Matter pairings in its database, so backups include them and a restore brings them back. Keep backups private: they hold HomeHub's Matter keys.
 

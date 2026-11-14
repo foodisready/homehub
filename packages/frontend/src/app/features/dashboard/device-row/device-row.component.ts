@@ -4,13 +4,15 @@ import { DecimalPipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import type { Device } from '../../../shared/models/device.model';
 import { type ActivityEvent, actionWord, causeText, clock, when } from '../../../shared/activity/activity-text';
+import { ThermostatControlComponent } from '../../../shared/thermostat/thermostat-control.component';
+import { ThermostatService, summary } from '../../../shared/thermostat/thermostat.service';
 
 export interface OverrideRequest { device: Device; durationMinutes: number; }
 
 @Component({
   selector: 'app-device-row',
   standalone: true,
-  imports: [DecimalPipe, RouterLink],
+  imports: [DecimalPipe, RouterLink, ThermostatControlComponent],
   styles: [`
     :host { display: block; border-top: 1px solid var(--border); }
     :host(:first-child) { border-top: none; }
@@ -89,6 +91,7 @@ export interface OverrideRequest { device: Device; durationMinutes: number; }
 
     @if (open()) {
       <div class="panel">
+        @if (isThermostat()) { <app-thermostat-control [deviceId]="device().id" /> }
         <span class="panel-label">
           {{ device().model ?? device().driverType }}
           @if (device().hasEmeter && device().wattage != null) { · {{ device().wattage | number:'1.1-1' }} W }
@@ -137,6 +140,10 @@ export class DeviceRowComponent implements OnDestroy {
   readonly isDoor = computed(() => this.device().driverType === 'meross');
   /** Wyze cameras: "on" means watching, "off" paused. */
   readonly isCamera = computed(() => this.device().driverType === 'wyze');
+  /** Matter thermostats: "on" means heating, cooling or auto; the row also shows the temperatures. */
+  readonly isThermostat = computed(() => this.device().driverConfig?.['kind'] === 'thermostat');
+  private readonly thermostats = inject(ThermostatService);
+  private readonly watchThermostat = effect(() => { if (this.isThermostat()) untracked(() => this.thermostats.watch(this.device().id)); });
 
   /** Ticks while a turn-off is coming, so the countdown moves. */
   private readonly now = signal(Date.now());
@@ -193,6 +200,10 @@ export class DeviceRowComponent implements OnDestroy {
       const time = new Date(device.overrideUntil).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
       if (this.isDoor()) return `${device.overrideState ? 'Closes at' : 'Closed until'} ${time}`;
       return `${device.overrideState ? 'Off at' : 'Off until'} ${time}`;
+    }
+    if (this.isThermostat()) {
+      const t = this.thermostats.views().get(device.id);
+      return t ? summary(t) : '';
     }
     const since = this.since();
     if (this.isDoor()) return (device.state ? 'Open' : 'Closed') + (device.state && since ? ` since ${since}` : '');

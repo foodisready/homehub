@@ -88,6 +88,12 @@ export class SocketService implements OnDestroy {
     return () => this.socket?.off('device:state', callback);
   }
 
+  /** A thermostat's temperatures, mode or running state changed: the same shape as GET /api/thermostats/:id. */
+  onThermostatState(callback: (view: unknown) => void): () => void {
+    this.socket?.on('thermostat:state', callback);
+    return () => this.socket?.off('thermostat:state', callback);
+  }
+
   /** A motion sensor reported. */
   onMotion(callback: (event: { deviceId: number; occupied: boolean }) => void): () => void {
     this.socket?.on('motion', callback);

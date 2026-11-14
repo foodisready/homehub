@@ -190,7 +190,8 @@ export async function changeThermostat(id: number, change: { mode?: unknown; hea
   const c = configOf(row(id));
   await (await matter()).setThermostat(c.nodeId!, c.endpoint!, out);
   logger.info({ id, alias: now.alias, source, ...out }, 'Thermostat changed');
-  const view = await getThermostat(id);
+  // The thermostat confirms through the live subscription a moment later; until then, show what was set.
+  const view = { ...(await getThermostat(id)), ...out };
   emitThermostatState(view);
   return view;
 }

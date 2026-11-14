@@ -25,6 +25,7 @@ import { VoiceControlComponent } from './voice-control.component';
 import { AutomationsService } from '../../core/services/automations.service';
 import { SecretInputDirective } from '../../shared/secret-input/secret-input.directive';
 import { NicknameChipsComponent, type NicknameSuggestion } from '../../shared/nickname-chips/nickname-chips.component';
+import { ThermostatRangesComponent } from '../../shared/thermostat/thermostat-ranges.component';
 
 interface ChatStats {
   total: number;
@@ -77,7 +78,7 @@ const DRIVER_LABEL: Record<string, string> = {
 @Component({
   selector: 'app-settings',
   standalone: true,
-  imports: [SecretInputDirective, NicknameChipsComponent, FormsModule, RouterLink, InviteQrComponent, MatterPairComponent, DeviceFilterComponent, BackupsComponent, BackupSyncComponent, ServerRoleComponent, MerossLoginComponent, OtherNetworksComponent, HomeSettingsComponent, AiConnectionComponent, CamerasToggleComponent, TeachCommandsComponent, VoiceRepliesComponent, VoiceControlComponent],
+  imports: [SecretInputDirective, NicknameChipsComponent, ThermostatRangesComponent, FormsModule, RouterLink, InviteQrComponent, MatterPairComponent, DeviceFilterComponent, BackupsComponent, BackupSyncComponent, ServerRoleComponent, MerossLoginComponent, OtherNetworksComponent, HomeSettingsComponent, AiConnectionComponent, CamerasToggleComponent, TeachCommandsComponent, VoiceRepliesComponent, VoiceControlComponent],
   styles: [`
     .topbar { display:flex; align-items:center; justify-content:space-between; margin-bottom:1.5rem; }
     .topbar h1 { font-size:1.4rem; font-weight:700; }
@@ -315,6 +316,7 @@ const DRIVER_LABEL: Record<string, string> = {
                       Don't let Chat or AI assistants switch this device
                     </label>
                     <p style="font-size:0.75rem;color:var(--text-muted);margin:0.2rem 0 0">Valves, garage doors, cameras and automatic shutoff devices are always protected.</p>
+                    @if (d.driverConfig?.['kind'] === 'thermostat' && isAdmin()) { <app-thermostat-ranges [deviceId]="d.id" /> }
                     @if (d.driverType === 'shelly' || d.driverType === 'tuya') {
                       <div class="edit-row" style="margin-top:0.4rem">
                         <input type="text"     [(ngModel)]="editAuthUser" placeholder="Username (clear to remove the login)" autocomplete="off" aria-label="Username" />
@@ -1269,6 +1271,7 @@ export class SettingsComponent implements OnInit, OnDestroy {
   kwhRateDraft = localStorage.getItem('kwhRate') ?? '0.15';
 
   private devEdit = viewChild<ElementRef<HTMLElement>>('devEdit');
+  private thermostatRanges = viewChild(ThermostatRangesComponent);
 
   constructor(readonly auth: AuthService, private http: HttpClient, private socket: SocketService, private system: SystemService) {
     // Focus the device editor popup when it opens (not a field, so a phone keyboard
@@ -1580,6 +1583,19 @@ export class SettingsComponent implements OnInit, OnDestroy {
       payload['driverConfig'] = baseConfig;
     }
 
+    // A thermostat's temperature ranges first: if they don't fit, nothing is saved and it says why.
+    const ranges = this.thermostatRanges();
+    if (ranges) {
+      ranges.save().subscribe({
+        next: () => this.patchDevice(id, payload),
+        error: (err) => { this.deviceMsg.set(err.error?.error ?? 'The temperatures couldn’t be saved'); this.deviceErr.set(true); },
+      });
+      return;
+    }
+    this.patchDevice(id, payload);
+  }
+
+  private patchDevice(id: number, payload: Record<string, unknown>): void {
     this.http.patch<Device>(`/api/devices/${id}`, payload).subscribe({
       next: (updated) => {
         this._devices.update((list) => list.map((d) => d.id === id ? { ...d, ...updated } : d));
