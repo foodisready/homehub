@@ -20,7 +20,7 @@ let jb: typeof import('./json-backup');
 
 const db = () => getDb();
 const aliases = () => (db().prepare('SELECT alias FROM devices ORDER BY id').all() as { alias: string }[]).map((r) => r.alias);
-const TABLES = ['energy_readings', 'schedules', 'settings', 'devices', 'notification_preferences', 'push_subscriptions', 'users'];
+const TABLES = ['energy_readings', 'schedules', 'settings', 'thermostats', 'devices', 'notification_preferences', 'push_subscriptions', 'users'];
 const count = (sql: string) => (db().prepare(sql).get() as { n: number }).n;
 
 function seed(): void {
@@ -81,6 +81,20 @@ describe('JSON backups', () => {
     assert.equal(result.counts.devices, 2);
     const cfg = (db().prepare('SELECT driver_config c FROM devices WHERE id = 1').get() as { c: string }).c;
     assert.deepEqual(JSON.parse(cfg).auth.pass, 'shelly-pass');
+  });
+
+  it('restores what each device draws, the energy prices, and a thermostat’s ranges and system', () => {
+    db().prepare('UPDATE devices SET watts = 40 WHERE id = 1').run();
+    db().prepare("INSERT INTO settings (key, value) VALUES ('energy_prices', '{\"electricity\":0.32,\"gas\":1.8,\"currency\":\"USD\"}')").run();
+    db().prepare("INSERT INTO thermostats (device_id, comfort_low, comfort_high, allowed_low, allowed_high, heat_system, heat_size) VALUES (2, 20, 24, 16, 28, 'gas', 80000)").run();
+    const { name } = jb.createBackup();
+    db().prepare('UPDATE devices SET watts = NULL').run();
+    db().prepare('DELETE FROM thermostats').run();
+    db().prepare("DELETE FROM settings WHERE key = 'energy_prices'").run();
+    jb.restoreBackup(name);
+    assert.equal((db().prepare('SELECT watts FROM devices WHERE id = 1').get() as { watts: number }).watts, 40);
+    assert.deepEqual(db().prepare('SELECT device_id, comfort_low, heat_system, heat_size FROM thermostats').all(), [{ device_id: 2, comfort_low: 20, heat_system: 'gas', heat_size: 80000 }]);
+    assert.match((db().prepare("SELECT value FROM settings WHERE key = 'energy_prices'").get() as { value: string }).value, /0\.32/);
   });
 
   it("keeps the energy history of devices that are in the backup", () => {

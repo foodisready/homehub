@@ -395,7 +395,12 @@ export interface HvacUsage {
  * cost: what's known, added up; null with no price for something that used energy.
  * notCounted: devices and systems that ran but have nothing to estimate from yet (no wattage, no system).
  */
-export interface Totals { kwh: number; therms: number; cost: number | null; notCounted: number }
+export interface Totals {
+  kwh: number; therms: number; cost: number | null; notCounted: number;
+  /** Each fuel's cost, null when its price isn't set: electricity can be told without a gas price. */
+  electricityCost: number | null;
+  gasCost: number | null;
+}
 export interface MonthUsage {
   month: string; from: string; to: string; partial: boolean; days: number; daysInMonth: number;
   /** When HomeHub's history starts, if after the start of the month: the month is only counted from then. */
@@ -405,8 +410,13 @@ export interface MonthUsage {
   hvac: HvacUsage[];
   excluded: { id: number; alias: string; reason: string }[];
   totals: Totals;
-  /** The same number of days at the start of the month before, for a fair comparison of a month so far. */
-  previousSameDays: (Totals & { month: string; days: number }) | null;
+  /**
+   * The same number of days at the start of the month before, for a month so far. Only devices
+   * HomeHub recorded through both spans are in it, so it never compares something with nothing:
+   * `current` is those same devices this month. `heating`: heating or cooling is in it, which
+   * follows the weather.
+   */
+  previousSameDays: { month: string; days: number; previous: Totals; current: Totals; devices: number; heating: boolean } | null;
 }
 
 const r2 = (x: number) => Math.round(x * 100) / 100;
@@ -417,13 +427,14 @@ function costOf(kwh: number | null, therms: number | null, p: Prices): number | 
   return r2((kwh ?? 0) * (p.electricity ?? 0) + (therms ?? 0) * (p.gas ?? 0));
 }
 
-/** Everything between two local dates (to exclusive), cut at now. */
-function usageBetween(from: string, to: string, now: number): Pick<MonthUsage, 'devices' | 'hvac' | 'excluded' | 'totals'> {
+/** Everything between two local dates (to exclusive), cut at now; only the devices in `only`, if given. */
+function usageBetween(from: string, to: string, now: number, only?: Set<number>): Pick<MonthUsage, 'devices' | 'hvac' | 'excluded' | 'totals'> {
   const prices = getPrices();
-  const out: Pick<MonthUsage, 'devices' | 'hvac' | 'excluded' | 'totals'> = { devices: [], hvac: [], excluded: [], totals: { kwh: 0, therms: 0, cost: 0, notCounted: 0 } };
-  let cost = 0;
-  const totalCost = (c: number) => { cost += c; };
+  const out: Pick<MonthUsage, 'devices' | 'hvac' | 'excluded' | 'totals'> = {
+    devices: [], hvac: [], excluded: [], totals: { kwh: 0, therms: 0, cost: 0, notCounted: 0, electricityCost: null, gasCost: null },
+  };
   for (const d of devices()) {
+    if (only && !only.has(d.id)) continue;
     const reason = excludedReason(d);
     if (reason === 'thermostat') {
       const s = hvacSystem(d.id);
@@ -439,7 +450,6 @@ function usageBetween(from: string, to: string, now: number): Pick<MonthUsage, '
         out.hvac.push({ id: d.id, alias: d.alias, kind, hours: r2(hours), kwh, therms, cost: rowCost, system: kind === 'heating' ? s.heat : s.cool });
         if (kwh !== null) out.totals.kwh += kwh;
         if (therms !== null) out.totals.therms += therms;
-        if (rowCost !== null) totalCost(rowCost);
         if (!rate && hours > 0) out.totals.notCounted++;
       }
       continue;
@@ -453,12 +463,17 @@ function usageBetween(from: string, to: string, now: number): Pick<MonthUsage, '
       id: d.id, alias: d.alias, room: d.room, onHours: r2(t.on / 3600), knownHours: r2(t.known / 3600),
       kwh, cost, watts: w.watts, method: w.method, label: w.label, rough: w.rough,
     });
-    if (kwh !== null) { out.totals.kwh += kwh; if (cost !== null) totalCost(cost); }
+    if (kwh !== null) out.totals.kwh += kwh;
     else if (t.on > 0) out.totals.notCounted++;
   }
-  // No price for something that used energy: the cost can't be told at all.
-  const missingPrice = (out.totals.kwh > 0 && prices.electricity === null) || (out.totals.therms > 0 && prices.gas === null);
-  out.totals = { kwh: r2(out.totals.kwh), therms: r2(out.totals.therms), cost: missingPrice ? null : r2(cost), notCounted: out.totals.notCounted };
+  // Each fuel at its own price; the total only when both are known for what was used.
+  const kwh = r2(out.totals.kwh), therms = r2(out.totals.therms);
+  const electricityCost = prices.electricity === null ? (kwh > 0 ? null : 0) : r2(kwh * prices.electricity);
+  const gasCost = prices.gas === null ? (therms > 0 ? null : 0) : r2(therms * prices.gas);
+  out.totals = {
+    kwh, therms, notCounted: out.totals.notCounted, electricityCost, gasCost,
+    cost: electricityCost === null || gasCost === null ? null : r2(electricityCost + gasCost),
+  };
   out.devices.sort((a, b) => (b.kwh ?? -1) - (a.kwh ?? -1) || b.onHours - a.onHours);
   return out;
 }
@@ -476,19 +491,43 @@ export function monthUsage(month: string, now = Date.now()): MonthUsage {
   const u = usageBetween(from, next, now);
   const since = historyStart();
   let previousSameDays: MonthUsage['previousSameDays'] = null;
-  // Only against a span HomeHub has history for all of: otherwise the comparison is with nothing.
-  if (partial && days >= 1 && since !== null && since <= dayStart(dayKey(new Date(y, mo - 1, 1)))) {
-    // The same span of last month, to the hour: 14.5 days into November against October's first 14.5.
+  if (partial && days >= 1) {
+    // The same span of last month, to the hour: 14.5 days into November against October's first 14.5,
+    // for the devices HomeHub was recording through all of it.
     const pFrom = dayKey(new Date(y, mo - 1, 1));
-    const pMs = Math.min(dayStart(pFrom) + days * 86_400_000, dayStart(from));
-    const p = usageBetween(pFrom, from, pMs);
-    previousSameDays = { ...p.totals, month: pFrom.slice(0, 7), days: Math.round(days * 10) / 10 };
+    const both = new Set(devices().filter((d) => { const t = sourceStart(d); return t !== null && t <= dayStart(pFrom); }).map((d) => d.id));
+    if (both.size) {
+      const pMs = Math.min(dayStart(pFrom) + days * 86_400_000, dayStart(from));
+      const previous = usageBetween(pFrom, from, pMs, both);
+      const current = usageBetween(from, next, now, both);
+      previousSameDays = {
+        month: pFrom.slice(0, 7), days: Math.round(days * 10) / 10, previous: previous.totals, current: current.totals,
+        devices: both.size, heating: current.hvac.some((h) => h.kwh !== null) || previous.hvac.some((h) => h.kwh !== null),
+      };
+    }
   }
   return {
     month, from: iso(dayStart(from)), to: iso(end), partial, days: Math.round(days * 10) / 10, daysInMonth,
     recordedFrom: since !== null && since > dayStart(from) && since < end ? iso(since) : null,
     prices: getPrices(), ...u, previousSameDays,
   };
+}
+
+/** When HomeHub's history of one device begins: its first change, reading or summary; a thermostat's first run or sample. */
+function sourceStart(d: DeviceRow): number | null {
+  const db = getDb();
+  const times: (string | null)[] = excludedReason(d) === 'thermostat'
+    ? [
+      (db.prepare('SELECT MIN(started_at) AS t FROM thermostat_runs WHERE device_id = ?').get(d.id) as { t: string | null }).t,
+      (db.prepare('SELECT MIN(at) AS t FROM thermostat_samples WHERE device_id = ?').get(d.id) as { t: string | null }).t,
+    ]
+    : [
+      (db.prepare('SELECT MIN(at) AS t FROM device_events WHERE device_id = ?').get(d.id) as { t: string | null }).t,
+      (db.prepare('SELECT MIN(recorded_at) AS t FROM energy_readings WHERE device_id = ?').get(d.id) as { t: string | null }).t,
+    ];
+  const day = (db.prepare('SELECT MIN(day) AS d FROM device_energy_days WHERE device_id = ?').get(d.id) as { d: string | null }).d;
+  const all = [...times.filter((t): t is string => !!t).map(parseAt), ...(day ? [dayStart(day)] : [])];
+  return all.length ? Math.min(...all) : null;
 }
 
 /** When HomeHub's history begins: the first daily summary, on/off change or thermostat run. */
@@ -510,7 +549,7 @@ export function monthTotals(count = 12, now = Date.now()): (Totals & { month: st
     const start = new Date(today.getFullYear(), today.getMonth() - i, 1);
     const next = new Date(start.getFullYear(), start.getMonth() + 1, 1);
     const recorded = since < Math.min(next.getTime(), now);
-    const u = recorded ? usageBetween(dayKey(start), dayKey(next), now).totals : { kwh: 0, therms: 0, cost: 0, notCounted: 0 };
+    const u = recorded ? usageBetween(dayKey(start), dayKey(next), now).totals : { kwh: 0, therms: 0, cost: 0, notCounted: 0, electricityCost: 0, gasCost: 0 };
     out.push({ month: dayKey(start).slice(0, 7), recorded, ...u });
   }
   return out;

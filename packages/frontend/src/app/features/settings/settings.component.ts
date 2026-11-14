@@ -316,6 +316,20 @@ const DRIVER_LABEL: Record<string, string> = {
                       Don't let Chat or AI assistants switch this device
                     </label>
                     <p style="font-size:0.75rem;color:var(--text-muted);margin:0.2rem 0 0">Valves, garage doors, cameras and automatic shutoff devices are always protected.</p>
+                    @if (d.power && !d.power.excluded) {
+                      <label class="f" style="margin-top:0.6rem">Power when on
+                        @if (d.power.method === 'measured' && editWatts === null) {
+                          <span style="font-size:0.85rem;color:var(--text)">Measured: {{ d.power.watts ?? '–' }} W
+                            <button type="button" class="link" style="background:none;border:none;color:var(--accent);padding:0 0.3rem;font-size:0.8rem" (click)="editWatts = d.power.watts">Set instead</button></span>
+                        } @else {
+                          <span style="display:flex;align-items:center;gap:0.4rem">
+                            <input type="number" min="0" max="5000" step="1" style="width:6.5rem" [(ngModel)]="editWatts"
+                                   [placeholder]="d.power.method === 'typical' ? d.power.watts + ' (typical)' : 'watts'" aria-label="Power when on, in watts" /> W
+                          </span>
+                        }
+                      </label>
+                      <p style="font-size:0.75rem;color:var(--text-muted);margin:0.2rem 0 0">{{ powerHint(d) }}</p>
+                    }
                     @if (d.driverConfig?.['kind'] === 'thermostat' && isAdmin()) { <app-thermostat-ranges [deviceId]="d.id" /> }
                     @if (d.driverType === 'shelly' || d.driverType === 'tuya') {
                       <div class="edit-row" style="margin-top:0.4rem">
@@ -1120,6 +1134,8 @@ export class SettingsComponent implements OnInit, OnDestroy {
     return parts.join(' and ');
   });
   editProtected = false;
+  /** What the device draws when on, if a person set it; null: typical for its name, or measured. */
+  editWatts: number | null = null;
   editAuthUser  = '';
   editAuthPass  = '';
   showAuthPass  = false;
@@ -1478,6 +1494,7 @@ export class SettingsComponent implements OnInit, OnDestroy {
     });
     this.editRoom = d.room ?? '';
     this.editProtected = d.isProtected;
+    this.editWatts = d.power?.set ?? null;
     // Pre-fill credentials if already stored
     const auth = (d.driverConfig as any)?.auth;
     this.editAuthUser = auth?.user ?? '';
@@ -1556,6 +1573,9 @@ export class SettingsComponent implements OnInit, OnDestroy {
       room:      this.editRoom,
     };
     if (this.editProtected !== device?.isProtected) payload['isProtected'] = this.editProtected;
+    // Blank goes back to typical for its name, or measured.
+    const watts = this.editWatts === null || (this.editWatts as unknown) === '' ? null : Number(this.editWatts);
+    if (device?.power && !device.power.excluded && watts !== (device.power.set ?? null)) payload['watts'] = watts;
 
     // For Shelly/Tuya, merge auth into driverConfig
     if (driverType === 'shelly' || driverType === 'tuya') {
@@ -1605,6 +1625,16 @@ export class SettingsComponent implements OnInit, OnDestroy {
       },
       error: (err) => { this.deviceMsg.set(err.error?.error ?? 'Failed'); this.deviceErr.set(true); },
     });
+  }
+
+  /** Under the power box: where the number comes from, and what blank means. */
+  powerHint(d: Device): string {
+    const p = d.power;
+    if (!p) return '';
+    if (p.method === 'measured' && this.editWatts === null) return 'This device measures its own power, so its energy is measured, not estimated.';
+    if (p.method === 'typical') return `Blank uses ${p.watts} W, typical for ${p.label}. The bulb or the device's label says the real figure.`;
+    if (p.method === 'none' && this.editWatts === null) return "HomeHub doesn't know what this draws, so its energy isn't counted. An LED bulb is about 9 W; for a wall switch, add up its bulbs.";
+    return 'For the Energy page. Leave blank to go back to typical for its name.';
   }
 
   deleteDevice(id: number, alias: string): void {

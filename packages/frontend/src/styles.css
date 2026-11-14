@@ -53,6 +53,19 @@ input {
 }
 input:focus { border-color: var(--accent); }
 
+/* Dropdowns match the text boxes. A screen that sizes or styles its own still wins. */
+select {
+  font-family: inherit;
+  font-size: 0.9rem;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.45rem 0.6rem;
+  outline: none;
+}
+select:focus { border-color: var(--accent); }
+
 /* ── Utility ────────────────────────────────────────────────── */
 .btn-primary {
   background: var(--accent);

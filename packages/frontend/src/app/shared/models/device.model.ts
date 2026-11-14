@@ -32,4 +32,14 @@ export interface Device {
   nicknames:    string[];
   room:         string | null;
   isProtected:  boolean;
+  /** What it draws when on, for energy estimates. `excluded` says why it isn't counted at all. */
+  power?: {
+    excluded: 'camera' | 'garage door' | 'valve' | 'thermostat' | null;
+    watts: number | null;
+    method: 'set' | 'measured' | 'typical' | 'none';
+    label: string | null;
+    rough: boolean;
+    /** What a person set, or null. */
+    set: number | null;
+  };
 }

@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, ChangeDetectorRef, Component, OnInit, computed, effect, inject, input, signal, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { Observable, of } from 'rxjs';
+import { HttpClient } from '@angular/common/http';
+import { Observable, forkJoin, map, of } from 'rxjs';
 import { ThermostatService, shown, toC, type Ranges } from './thermostat.service';
 
 /**
@@ -20,6 +21,8 @@ import { ThermostatService, shown, toC, type Ranges } from './thermostat.service
     @media (max-width: 520px) { .r .what { width: 100%; font-weight: 500; } }
     .r input { width: 4.2rem; }
     p { font-size: 0.75rem; color: var(--text-muted); margin: 0.35rem 0 0; }
+    .r select { width: auto; }
+    .r input[aria-label="Heating size"] { width: 6.5rem; }
   `],
   template: `
     <fieldset>
@@ -37,6 +40,24 @@ import { ThermostatService, shown, toC, type Ranges } from './thermostat.service
       </div>
       <p>The furthest Chat, voice, schedules and scenes can set it, at night and while you're out too. You can still go further on the thermostat or its card.</p>
     </fieldset>
+    <fieldset>
+      <legend>Heating and cooling system</legend>
+      <div class="r">
+        <span class="what">Heating</span>
+        <select [(ngModel)]="heat" aria-label="Heating system">
+          <option value="">Not set</option><option value="gas">Gas furnace</option><option value="heat_pump">Heat pump</option><option value="electric">Electric heat</option>
+        </select>
+        @if (heat) { <input type="number" min="0" [(ngModel)]="heatSize" [placeholder]="heatDefault()" aria-label="Heating size" /> {{ heatUnit() }} }
+      </div>
+      <div class="r">
+        <span class="what">Cooling</span>
+        <select [(ngModel)]="cool" aria-label="Cooling system">
+          <option value="">None or not set</option><option value="ac">Central air</option><option value="heat_pump">Heat pump</option>
+        </select>
+        @if (cool) { <input type="number" min="0" step="0.5" [(ngModel)]="coolSize" [placeholder]="'3'" aria-label="Cooling size in tons" /> tons }
+      </div>
+      <p>For the Energy page's estimate of what heating and cooling cost, from its running hours. The size is on the unit's label: a furnace's input in BTU/h (often 40,000–100,000), a heat pump or air conditioner in tons (2–5; 36,000 BTU/h is 3 tons). Blank uses a typical size.</p>
+    </fieldset>
   `,
 })
 export class ThermostatRangesComponent implements OnInit {
@@ -46,6 +67,11 @@ export class ThermostatRangesComponent implements OnInit {
   readonly unit = computed(() => this.view()?.unit ?? 'F');
   readonly stepSize = computed(() => (this.unit() === 'F' ? 1 : 0.5));
   private readonly loaded = signal(false);
+  private readonly http = inject(HttpClient);
+  heat = ''; heatSize: number | null = null; cool = ''; coolSize: number | null = null;
+  private systemStart = '';
+  readonly heatUnit = () => (this.heat === 'gas' ? 'BTU/h' : this.heat === 'electric' ? 'kW' : 'tons');
+  readonly heatDefault = () => (this.heat === 'gas' ? '60000' : this.heat === 'electric' ? '10' : '3');
   private readonly cd = inject(ChangeDetectorRef);
   // The saved ranges arrive a moment after the popup opens: fill the boxes then, once.
   private readonly fillWhenLoaded = effect(() => {
@@ -57,7 +83,17 @@ export class ThermostatRangesComponent implements OnInit {
 
   ngOnInit(): void {
     this.svc.watch(this.deviceId());
+    this.http.get<{ heat: string | null; heatSize: number | null; cool: string | null; coolSize: number | null }>(`/api/thermostats/${this.deviceId()}/system`).subscribe({
+      next: (s) => {
+        [this.heat, this.heatSize, this.cool, this.coolSize] = [s.heat ?? '', s.heatSize, s.cool ?? '', s.coolSize];
+        this.systemStart = this.systemKey();
+        this.cd.markForCheck();
+      },
+      error: () => undefined,
+    });
   }
+
+  private systemKey(): string { return [this.heat, this.heatSize, this.cool, this.coolSize].join(','); }
 
   /** Copies the saved ranges into the boxes. */
   private fill(): void {
@@ -73,8 +109,16 @@ export class ThermostatRangesComponent implements OnInit {
 
   private key(): string { return [this.comfortLow, this.comfortHigh, this.allowedLow, this.allowedHigh].join(','); }
 
-  /** Saves if anything changed; the server says what's wrong if it doesn't fit. */
+  /** Saves what changed, ranges and system; the server says what's wrong if it doesn't fit. */
   save(): Observable<unknown> {
+    const num = (v: unknown) => (v === null || v === undefined || v === '' ? null : Number(v));
+    const system = this.systemKey() === this.systemStart ? of(null) : this.http.put(`/api/thermostats/${this.deviceId()}/system`, {
+      heat: this.heat || null, heatSize: this.heat ? num(this.heatSize) : null, cool: this.cool || null, coolSize: this.cool ? num(this.coolSize) : null,
+    });
+    return forkJoin([this.saveRanges(), system]).pipe(map(() => null));
+  }
+
+  private saveRanges(): Observable<unknown> {
     if (!this.loaded() || this.key() === this.start) return of(null);
     const u = this.unit();
     const ranges: Ranges = {

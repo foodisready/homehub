@@ -295,6 +295,32 @@ Filter by device or cause at the top. On the dashboard, a device that's on shows
 
 Activity is kept for 90 days. Administrators can change this at the bottom of the page, from 7 days to 2 years. JSON backups leave it out, since it's history.
 
+## Energy
+
+The **Energy** page shows where your electricity goes, a month at a time; **‹** and **›** at the top choose the month.
+
+- **The month in numbers:** electricity in kWh, gas in therms if you heat with gas, the cost once prices are set (with what the whole month will likely come to), and how this month compares with the same days of last month. The comparison only includes devices HomeHub recorded through both, so it never compares something with nothing.
+- **Where it goes:** each device, biggest first, with a sentence saying what stands out, such as "Heating is 98% of the estimated cost here." **Rooms** groups them by room. Under each, how many hours it was on and where its figure comes from.
+- **By month:** the last 12 months, in energy or cost. Tap a month to see it, or select **Table**.
+- **Heating and cooling:** each thermostat's running hours and temperatures. See [Heating and cooling history](#heating-and-cooling-history).
+- **Measured live:** power over time for plugs that measure it.
+
+**These are estimates, from how long each device was on and what it draws.** A device that measures its own power, such as some Kasa and Shelly models, is measured instead, and says so. HomeHub counts time on only while it was running and the device was online, so a lamp left on while HomeHub was off isn't counted as on. What a device draws comes from, in order:
+
+1. What you set: **Power when on** in **Settings → Devices → Edit**, or the box on the Energy page.
+2. What it measures, for a device that measures.
+3. Typical for what its name says it is: 9 W for an LED lamp, 1,500 W for a space heater. For something that switches itself on and off, such as a heater, kettle or dehumidifier, time on is the most it could have used, and it says so.
+
+A wall switch can control one bulb or twelve, and some names don't say what a device is, so those wait for you: they're listed under **Not counted yet** until you enter what they draw. The bulb or the device's label says; for a wall switch, add up its bulbs. Cameras, garage doors and water valves aren't counted: their time on doesn't say what they use.
+
+**Prices:** an administrator selects **Add your energy prices** and enters the price of electricity per kWh, and of gas per therm if you heat with gas. Dividing a bill's total by the kWh it charges for is close enough.
+
+**Heating and cooling** are usually the biggest part, and are estimated from the thermostat's running hours and the system's size. Set it in **Settings → Devices → Edit** on the thermostat, under **Heating and cooling system**: a gas furnace's size is its input in BTU/h, a heat pump or air conditioner's in tons, both on the unit's label. Left blank, a typical size is used.
+
+**It isn't your whole home.** The fridge, water heater and other appliances HomeHub doesn't control aren't included, and the page says so. An energy monitor in your electrical panel would show the real total; HomeHub doesn't support one yet.
+
+HomeHub keeps each device's daily hours and measured energy for as long as it runs, so months can be compared a year later, though Activity itself is kept for 90 days. Backups keep what devices draw, the prices and thermostat settings; the history itself is in the daily database backup.
+
 ## Rooms
 
 Rooms keep the dashboard short. Open **Settings → Devices**, select **Edit** on a device, and enter a room. Devices with no room appear under **Unassigned**.

@@ -155,6 +155,9 @@ describe('energy estimates', () => {
     assert.deepEqual(m.hvac.map((h) => [h.hours, h.kwh, h.therms, h.cost]), [[2, 1, 1.6, 2.7]], '2 h: 1 kWh of fan, 1.6 therms');
     assert.equal(m.totals.kwh, 1.09);
     assert.equal(m.totals.cost, Math.round((1.09 * 0.3 + 1.6 * 1.5) * 100) / 100);
+    u.savePrices({ electricity: 0.3, gas: null });
+    m = u.monthUsage('2026-11', now);
+    assert.deepEqual([m.totals.electricityCost, m.totals.gasCost, m.totals.cost], [0.33, null, null], 'no gas price: electricity still told');
     assert.equal(m.totals.notCounted, 1, 'only the statue now');
     assert.equal(m.devices[0].alias, 'Hall lamp', 'biggest first');
   });
@@ -173,7 +176,24 @@ describe('energy estimates', () => {
     assert.equal(m.previousSameDays, null, 'November itself was only recorded from the 3rd');
     m = u.monthUsage('2027-01', at(12 + 0, 5, 12));
     assert.equal(m.previousSameDays?.month, '2026-12');
-    assert.equal(m.previousSameDays?.kwh, Math.round(4 * 9 / 1000 * 100) / 100, 'December’s first 4.5 days: the 4 h on the 2nd');
+    assert.equal(m.previousSameDays?.previous.kwh, Math.round(4 * 9 / 1000 * 100) / 100, 'December’s first 4.5 days: the 4 h on the 2nd');
+    assert.equal(m.previousSameDays?.devices, 1);
+  });
+
+  it('leaves a device out of the comparison if HomeHub didn’t record it through both spans', () => {
+    // The household's case: a thermostat with a year of history, lamps only since this month.
+    const old = device('Old lamp');
+    const fresh = device('New lamp');
+    event(old, 'power', 1, at(9, 1, 0));
+    event(old, 'power', 0, at(9, 1, 1));
+    event(old, 'power', 1, at(10, 5, 0));
+    event(old, 'power', 0, at(10, 5, 1));
+    event(fresh, 'power', 1, at(10, 5, 0));               // first seen in November
+    event(fresh, 'power', 0, at(10, 5, 10));
+    const m = u.monthUsage('2026-11', at(10, 10, 12));
+    assert.equal(m.previousSameDays?.devices, 1, 'only the old lamp');
+    assert.equal(m.previousSameDays?.current.kwh, 0.01, 'its hour in November, not the new lamp’s ten');
+    assert.equal(m.totals.kwh, 0.1, 'the month itself counts both');
   });
 
   it('checks prices and wattages', () => {

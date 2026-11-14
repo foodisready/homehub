@@ -16,6 +16,8 @@ import { BackupError } from './backup-error';
 export const BACKUP_TABLES = [
   'users',
   'devices',
+  // A thermostat's comfort and allowed ranges and its heating and cooling system: settings, so kept.
+  'thermostats',
   'sensors',
   'scenes',
   'scene_actions',
@@ -73,7 +75,7 @@ function filePath(name: string): string {
   return path.join(backupDir(), name);
 }
 
-const pkOf = (table: string) => (table === 'settings' ? 'key' : 'id');
+const pkOf = (table: string) => (table === 'settings' ? 'key' : table === 'thermostats' ? 'device_id' : 'id');
 
 function columns(db: Database.Database, table: string): Set<string> {
   return new Set((db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((c) => c.name));
