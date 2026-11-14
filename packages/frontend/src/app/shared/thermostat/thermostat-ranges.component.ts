@@ -17,6 +17,7 @@ import { ThermostatService, shown, toC, type Ranges } from './thermostat.service
     legend { font-size: 0.8rem; font-weight: 600; padding: 0 0.3rem; }
     .r { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; font-size: 0.85rem; margin-top: 0.35rem; }
     .r .what { width: 9.5rem; }
+    @media (max-width: 520px) { .r .what { width: 100%; font-weight: 500; } }
     .r input { width: 4.2rem; }
     p { font-size: 0.75rem; color: var(--text-muted); margin: 0.35rem 0 0; }
   `],

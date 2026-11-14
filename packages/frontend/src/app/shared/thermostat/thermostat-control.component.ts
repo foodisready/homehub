@@ -30,6 +30,7 @@ import { MODE_NAME, ThermostatService, shown, step, toC, type ThermostatMode, ty
     .note { font-size: 0.78rem; color: var(--text-muted); margin: 0; }
     .note.warn { color: #fbbf24; }
     .note.err { color: var(--red); }
+    .history { font-size: 0.85rem; color: var(--accent); align-self: flex-start; padding: 0.2rem 0; }
   `],
   template: `
     @if (view(); as t) {
@@ -61,7 +62,7 @@ import { MODE_NAME, ThermostatService, shown, step, toC, type ThermostatMode, ty
           }
         }
         @if (error()) { <p class="note err" role="alert">{{ error() }}</p> }
-        <a class="note" [routerLink]="['/energy']" [queryParams]="{ thermostat: t.id }">History and running hours</a>
+        <a class="history" [routerLink]="['/energy']" [queryParams]="{ thermostat: t.id }">History and running hours ›</a>
       </div>
     } @else {
       <p class="note">Loading…</p>
