@@ -78,7 +78,7 @@ const key = (s: string) => s.normalize('NFC').toLowerCase().replace(/[\s-]+/g, '
             <span class="ghost" aria-hidden="true"><span class="typed">{{ draft() }}</span>{{ g.rest }}</span>
           }
           <input #box type="text" [value]="draft()" (input)="onInput(box)" (keydown)="onKey($event)" (paste)="onPaste($event)"
-                 (blur)="commit()" [placeholder]="placeholder()" autocomplete="off" autocapitalize="off" enterkeyhint="done"
+                 (focus)="focused.set(true)" (blur)="focused.set(false)" [placeholder]="placeholder()" autocomplete="off" autocapitalize="off" enterkeyhint="done"
                  [attr.lang]="next() ? (next()!.lang === 'yue' ? 'zh-HK' : 'vi') : null"
                  [attr.aria-label]="next() ? 'Add a nickname. Tab adds ' + nextLabel() : 'Add a nickname'" />
           @if (next()) {<kbd class="key" aria-hidden="true">Tab</kbd>}
@@ -86,6 +86,9 @@ const key = (s: string) => s.normalize('NFC').toLowerCase().replace(/[\s-]+/g, '
         <button type="button" class="add btn-primary" (click)="addClicked(); box.focus()" [disabled]="!draft().trim() && !next()"
                 [attr.aria-label]="!draft().trim() && next() ? 'Add ' + nextLabel() : null">Add</button>
       </div>
+      @if (!focused() && draft().trim() && !namePrompt()) {
+        <p class="note pending" role="status">“{{ draft().trim() }}” isn't added yet. Press <b>Add</b> to keep it.</p>
+      }
       @if (namePrompt(); as who) {
         <p class="note">Type {{ who }}'s name in Chinese in front, then press Add.</p>
       }
@@ -128,6 +131,7 @@ const key = (s: string) => s.normalize('NFC').toLowerCase().replace(/[\s-]+/g, '
     .note svg { margin-top: 0.2rem; }
     .note svg { flex: none; }
     .note b { color: var(--text); font-weight: 600; }
+    .note.pending { color: var(--amber, #f59e0b); }
     .tags { display: flex; flex-wrap: wrap; gap: 0.4rem; list-style: none; margin: 0; padding: 0; }
     .tag {
       display: inline-flex; align-items: center; gap: 0.4rem; max-width: 100%;
@@ -195,6 +199,8 @@ export class NicknameChipsComponent {
   others = input<Array<{ alias: string; nicknames: string[] }>>([]);
 
   draft = signal('');
+  /** Whether the box has focus. Leaving it doesn't add what's typed: only Add, Enter or Tab do. */
+  focused = signal(false);
   undo = signal<string | null>(null);
   namePrompt = signal<string | null>(null);
   private removedAt = -1;
