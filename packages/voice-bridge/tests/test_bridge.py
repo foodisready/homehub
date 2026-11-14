@@ -445,6 +445,30 @@ class SpeakerLinkTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(langs, [None, None])
         link.task.cancel()
 
+    async def test_talk_with_nothing_of_a_command_in_it_gets_no_reply(self):
+        def answer_fn(audio, spoke, asked=None, prefer=None):
+            return mock.Mock(heard="I don't want to pay for your drink.", reply="Sorry, I didn't understand that.",
+                             handled=False, stt_s=0, homehub_s=0, lang='en', asked=None, chatter=True)
+
+        link, c = await self.connected_link(answer_fn)
+        events = await self.say(c, 1, 'Hey Woman')
+        self.assertNotIn('VOICE_ASSISTANT_TTS_START', events)
+        self.assertIsNone(link.again, 'and no second try')
+        link.task.cancel()
+
+    async def test_it_doesnt_take_its_own_reply_for_a_command(self):
+        replies = iter([
+            mock.Mock(heard='熄卓', reply='唔好意思，我聽唔明。', handled=False, stt_s=0, homehub_s=0, lang='yue', asked=None, chatter=False),
+            mock.Mock(heard='唔好意思我听唔明', reply='唔好意思，我聽唔明。', handled=False, stt_s=0, homehub_s=0, lang='yue', asked=None, chatter=False),
+        ])
+
+        link, c = await self.connected_link(lambda *a, **k: next(replies))
+        first = await self.say(c, 1, '老友')
+        self.assertIn('VOICE_ASSISTANT_TTS_START', first, 'a real miss is answered')
+        second = await self.say(c, 2)
+        self.assertNotIn('VOICE_ASSISTANT_TTS_START', second, 'its own words, heard back')
+        link.task.cancel()
+
     async def test_woken_by_a_noise_it_stays_quiet(self):
         def answer_fn(audio, spoke, asked=None, prefer=None):
             return mock.Mock(heard='', reply="Sorry, I didn't catch that.", handled=False, stt_s=0, homehub_s=0, lang='en', asked=None)

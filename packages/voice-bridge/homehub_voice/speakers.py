@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import socket
 import time
 from dataclasses import dataclass, field
@@ -51,6 +52,21 @@ BACKGROUND_VOICED = 0.75
 
 def background_talk(seconds: float, voiced: float) -> bool:
     return seconds >= MAX_S - 0.25 and voiced >= BACKGROUND_VOICED * seconds
+
+
+# Its own reply, heard back within this long of saying it, isn't a command.
+ECHO_S = 30.0
+
+
+def own_words(heard: str, said: str) -> bool:
+    """Whether what was heard is the reply just said: 唔好意思我聽唔明 after 唔好意思，我聽唔明。
+    Compared without punctuation or spaces, Chinese in traditional characters, mostly the same."""
+    from difflib import SequenceMatcher
+    from .cantonese import has_chinese, traditional
+    norm = lambda t: re.sub(r"[\W_]+", '', traditional(t) if has_chinese(t) else t.lower())  # noqa: E731
+    h, s = norm(heard.split(' → ')[0]), norm(said)
+    # A word or two ("on", 開) can be in any reply: too short to tell an echo.
+    return len(h) >= 4 and bool(s) and (h in s or SequenceMatcher(None, h, s).ratio() >= 0.7)
 
 
 # Runs are remembered this long, so a speaker that finishes listening late still sees who answered.
@@ -113,6 +129,8 @@ class SpeakerLink:
         self.on_change = on_change
         # The device this speaker was just asked "on or off?" about, when, and in which language.
         self.asked: tuple[str, float, str] | None = None
+        # The last thing it said, and when: heard back straight after, it isn't a command.
+        self.said: tuple[str, float] | None = None
         # When a command wasn't understood, and in which language (None: unsure): the speaker listens once more, with no wake word.
         self.again: tuple[float, str | None] | None = None
 
@@ -235,6 +253,15 @@ class SpeakerLink:
                     log.info('%s #%d (%s) heard %r in %.1fs of talk that didn\'t stop, most likely a TV or a conversation, so it stays quiet',
                              self.who, run.n, run.wake or 'no wake word', a.heard, run.listen.seconds)
                     return
+                # Its own reply, heard back as it listened again: never a command.
+                if not a.handled and self.said and time.monotonic() - self.said[1] <= ECHO_S and own_words(a.heard, self.said[0]):
+                    log.info('%s #%d (%s) heard its own reply %r, so it stays quiet', self.who, run.n, run.wake or 'no wake word', a.heard)
+                    return
+                # A miss with nothing of a command in it: talk from a TV or the room.
+                if not follow_up and getattr(a, 'chatter', False) is True:
+                    log.info('%s #%d (%s) heard %r, nothing like a command, most likely a TV or a conversation, so it stays quiet',
+                             self.who, run.n, run.wake or 'no wake word', a.heard)
+                    return
                 # Not understood: one more try, with no wake word. Only one, so a misheard TV can't keep it listening.
                 try_again = not a.handled and not follow_up and not again
                 event(E.VOICE_ASSISTANT_STT_END, {'text': a.heard or ' '})
@@ -243,6 +270,7 @@ class SpeakerLink:
                 event(E.VOICE_ASSISTANT_INTENT_END, {'conversation_id': run.conversation,
                                                      **({'continue_conversation': '1'} if follow_up or try_again else {})})
                 event(E.VOICE_ASSISTANT_TTS_START, {'text': a.reply})
+                self.said = (a.reply, time.monotonic())
                 url = await loop.run_in_executor(None, self.speak, a.reply, self.speaker.host, a.lang)
                 event(E.VOICE_ASSISTANT_TTS_END, {'url': url})
                 lang = a.lang if isinstance(getattr(a, 'lang', None), str) else 'en'

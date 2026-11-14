@@ -360,6 +360,11 @@ services:
       target: production
     deploy:
       replicas: ${HOMEHUB_VOICE_BRIDGE:-1}
+    # First call on the CPU when the chat model is busy too, as after an update: someone is waiting
+    # for an answer. Shares only count when both want the CPU, so Chat is as fast as ever otherwise.
+    # Measured on a Pi 4 with the chat model writing: hearing a command took 1.09 s at the default
+    # 1024, 0.93 s at 4096 (0.88 s idle).
+    cpu_shares: 4096
     network_mode: host
     volumes:
       - voice-models:/models

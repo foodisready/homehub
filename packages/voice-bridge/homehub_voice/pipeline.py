@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from . import cantonese as yue
+from .chatter import looks_like_chatter
 from . import mandarin as zh
 from . import questions
 from . import vietnamese as vi
@@ -70,6 +71,9 @@ class Answer:
     # Not understood, with Cantonese and Mandarin both on: `lang` was a guess, so another try
     # shouldn't be held to it.
     unsure: bool = False
+    # Not understood, and nothing in it was a command: talk from a TV or a conversation, so the
+    # speaker says nothing (see chatter.py).
+    chatter: bool = False
 
 
 # "On", "off", "turn it on", "switch it off, please": an answer to "on or off?".
@@ -118,6 +122,16 @@ FOR_HOW_LONG = re.compile(r'\s+for\s+\S.*$', re.I)
 
 
 def answer(audio: bytes, spoke: bool, listener: Transcriber, homehub: Commander,
+           ears: CantoneseEars | None = None, asked: str | None = None,
+           vi_ears: VietnameseEars | None = None, prefer: str | None = None) -> Answer:
+    """What was heard and what to say back; a miss with nothing of a command in it is marked chatter."""
+    a = _answer(audio, spoke, listener, homehub, ears, asked, vi_ears, prefer)
+    if not a.handled and a.asked is None and not asked and looks_like_chatter(a.heard, list(getattr(homehub, 'names', []))):
+        a.chatter = True
+    return a
+
+
+def _answer(audio: bytes, spoke: bool, listener: Transcriber, homehub: Commander,
            ears: CantoneseEars | None = None, asked: str | None = None,
            vi_ears: VietnameseEars | None = None, prefer: str | None = None) -> Answer:
     """asked: the device HomeHub just asked "on or off?" about, if any, so "on" alone answers it.
