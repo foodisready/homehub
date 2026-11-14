@@ -46,7 +46,7 @@ if grep -q "en_US-lessac-medium.onnx" "$CONF/config.env"; then
 fi
 rm -f "$DATA/en_US-lessac-medium.onnx" "$DATA/en_US-lessac-medium.onnx.json"
 
-# Cantonese (LANGUAGES=en yue): SenseVoice to hear it, and a Cantonese voice to answer.
+# Cantonese (LANGUAGES=en yue) and Mandarin (zh): SenseVoice to hear them, and a voice for each to answer.
 MODELS="https://github.com/k2-fsa/sherpa-onnx/releases/download"
 fetch_model() {   # url, folder name in the archive, where to keep it, files to keep
   local url="$1" inside="$2" dest="$3"; shift 3
@@ -57,12 +57,24 @@ fetch_model() {   # url, folder name in the archive, where to keep it, files to 
   for f in "$@"; do mv "$tmp/$inside/$f" "$dest/"; done
   rm -rf "$tmp"
 }
-if grep -Eq '^LANGUAGES=.*\byue\b' "$CONF/config.env"; then
-  echo "== Cantonese: SenseVoice (downloads about 1 GB, keeps 230 MB) and a Cantonese voice (110 MB)"
+if grep -Eq '^LANGUAGES=.*\b(yue|zh)\b' "$CONF/config.env"; then
+  echo "== Cantonese or Mandarin: SenseVoice (downloads about 1 GB, keeps 230 MB)"
   fetch_model "$MODELS/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17.tar.bz2" \
     sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17 "$DATA/sensevoice" model.int8.onnx tokens.txt
+fi
+if grep -Eq '^LANGUAGES=.*\byue\b' "$CONF/config.env"; then
+  echo "== Cantonese: a Cantonese voice (110 MB)"
   fetch_model "$MODELS/tts-models/vits-cantonese-hf-xiaomaiiwn.tar.bz2" \
     vits-cantonese-hf-xiaomaiiwn "$DATA/cantonese-voice" vits-cantonese-hf-xiaomaiiwn.onnx lexicon.txt tokens.txt rule.fst
+fi
+if grep -Eq '^LANGUAGES=.*\bzh\b' "$CONF/config.env"; then
+  echo "== Mandarin: a Mandarin voice (60 MB)"
+  ZH_VOICE_URL="https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/zh/zh_CN/huayan/medium/zh_CN-huayan-medium.onnx"
+  if [ ! -s "$DATA/zh_CN-huayan-medium.onnx" ]; then
+    curl -fsSL -o "$DATA/zh_CN-huayan-medium.onnx.json" "$ZH_VOICE_URL.json"
+    curl -fsSL -o "$DATA/zh_CN-huayan-medium.onnx.part" "$ZH_VOICE_URL"
+    mv "$DATA/zh_CN-huayan-medium.onnx.part" "$DATA/zh_CN-huayan-medium.onnx"
+  fi
 fi
 # Vietnamese (LANGUAGES=en vi): a Zipformer model to hear it, and a Piper voice to answer.
 if grep -Eq '^LANGUAGES=.*\bvi\b' "$CONF/config.env"; then

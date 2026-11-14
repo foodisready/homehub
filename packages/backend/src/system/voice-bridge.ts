@@ -74,7 +74,7 @@ export function languagesPending(): boolean {
 
 // ── Voice settings, chosen in Settings → Voice control ──────────
 
-export const VOICE_LANGUAGES = ['en', 'yue', 'vi'] as const;
+export const VOICE_LANGUAGES = ['en', 'yue', 'vi', 'zh'] as const;
 export type VoiceLanguage = typeof VOICE_LANGUAGES[number];
 export interface VoiceSettings { enabled: boolean; languages: VoiceLanguage[] }
 

@@ -56,7 +56,7 @@ systemctl --user restart homehub-voice
 With Cantonese on, each command can be English or Cantonese, and is answered in the same language.
 
 1. In **Settings → Voice control**, tick **Cantonese** and save. The bridge downloads SenseVoice Small (about 1 GB, of which it keeps 230 MB) and a Cantonese voice (110 MB). For a bridge installed with install.sh, set `LANGUAGES=en yue` in its `config.env` and run `./install.sh` again instead.
-2. In HomeHub, give each device you want to use a Cantonese nickname, in **Settings → Devices**: for example 廚房燈 on the kitchen lights, or 寫字樓燈 and 書房燈 on the office lamp. Giving two devices the same nickname, such as 卓希房燈, switches both. You can also teach one from a missed command, in **Settings → Teach HomeHub**. The bridge picks up new nicknames within a minute.
+2. In HomeHub, give each device you want to use a Cantonese nickname, in **Settings → Devices**: for example 廚房燈 on the kitchen lights, or 寫字樓燈 and 書房燈 on the office lamp. Giving two devices the same nickname, such as 卓希房燈, switches both. You can also teach one from a missed command, in **Settings → Teach HomeHub**. The bridge picks up new nicknames within seconds.
 3. Say the verb, then the nickname: 開廚房燈, 着廚房燈, 關廚房燈, 熄廚房燈. 幫我 or 唔該 first, and 啦 or 呀 at the end, are fine. A scene with a Cantonese name runs by its name alone. A nickname of five or more words can be said with one word from the middle left out, 早餐細燈 or 早餐區燈 for 早餐區細燈, when every other sound is the same and no other nickname shortens the same way.
 4. To turn something on for a while, add how long: 開廚房燈十分鐘, 開廚房燈半個鐘, 開廚房燈個半鐘, 開廚房燈兩個鐘, 開廚房燈三個字 (fifteen minutes), or 開廚房燈，十分鐘後熄. Numbers can be spoken or digits. The bridge sends HomeHub "turn on 廚房燈 for 10 minutes", and answers 開咗廚房燈，十分鐘後熄。 A duration with 熄 isn't guessed at, since HomeHub has no "off for a while".
 
@@ -94,10 +94,22 @@ How it works: the Vietnamese model hears each command first, which takes about a
 
 The name is compared with your nicknames word by word, with accents left out, so "phong cách" still finds đèn phòng khách. A word more or less is another name, not a near miss: "đèn phòng ngủ" never switches đèn phòng ngủ lớn, and "ga" alone doesn't find ga-ra. The verb is read with its accents, since they tell bật (on) from tắt (off). Speech recognition sometimes writes "bắt" for either, so then the speaker asks "Bật hay tắt đèn bếp?" and switches nothing; answer "bật" or "tắt". If it hears only "bật đèn" (the name cut off or said too quietly), the speaker asks "Bật đèn nào?" and listens for the name: answer "nhà bếp", or say the whole command again. A first word that sounds like "đèn" ("nền nhà bếp") is taken as "đèn". A command that doesn't clearly match one nickname isn't guessed: the speaker says "Xin lỗi, tôi không hiểu", and HomeHub lists it with the commands it missed.
 
+## Mandarin
+
+With Mandarin on, each command can be Mandarin as well as English (and the other languages that are on), and is answered in Mandarin, in simplified characters.
+
+1. In **Settings → Voice control**, tick **Mandarin** and save. The bridge downloads SenseVoice Small, as for Cantonese (about 1 GB, of which it keeps 230 MB; nothing more if Cantonese is on), and a Mandarin voice (60 MB). For a bridge installed with install.sh, add `zh` to `LANGUAGES` in its `config.env` (for example `LANGUAGES=en zh`) and run `./install.sh` again instead.
+2. Give each device a Chinese nickname in **Settings → Devices**, such as 厨房灯. Simplified or traditional characters both work, and a Cantonese nickname such as 廚房燈 works for Mandarin too: a nickname is matched by how it sounds, using Pinyin with tones ignored.
+3. Say the verb, then the nickname: 打开厨房灯, 开厨房灯, 关掉厨房灯, 关闭厨房灯. Or the nickname first: 把厨房灯打开, 厨房灯关了. 请, 帮我 or 麻烦你 first, and 一下, 吧 or 了 after, are fine. A scene runs by its name alone.
+4. To turn something on for a while, add how long: 打开厨房灯十分钟, 开厨房灯半小时, 打开厨房灯一个半小时, 打开厨房灯，十分钟后关掉. The bridge answers 已打开厨房灯，十分钟后关掉。
+5. 现在几点？, 今天几号？, 今天天气怎么样？ and 明天会下雨吗？ are answered in Mandarin.
+
+With Cantonese and Mandarin both on, SenseVoice's label doesn't decide between them, because it often labels a short Cantonese command as Mandarin. A wake word named in Chinese characters doesn't decide either, since both are written that way. A command that clearly reads as Mandarin, such as 把客厅灯打开, is taken as Mandarin. Anything else is read as Cantonese first, then as Mandarin, heard again set to Mandarin, if Cantonese doesn't understand it, which takes about a second more. A command neither understands is answered in Cantonese.
+
 ## Not done yet
 
 - **Home Assistant Voice:** its firmware expects Home Assistant to set its encryption key, so whether the bridge can connect to one out of the box hasn't been tested.
-- Languages other than English, Cantonese and Vietnamese.
+- Languages other than English, Cantonese, Vietnamese and Mandarin.
 
 ## Credits
 
@@ -107,10 +119,11 @@ The bridge downloads these speech models when voice is turned on. They aren't pa
 |---|---|---|
 | Whisper `base.en`, as converted for faster-whisper | Hearing English | OpenAI; Systran (conversion). MIT |
 | Piper voice `en_US-ljspeech-medium` | Speaking English | Piper (Michael Hansen, Rhasspy), trained on the LJ Speech dataset by Keith Ito and Linda Johnson. Public domain dataset |
-| SenseVoice Small, as converted for sherpa-onnx (int8) | Telling the language apart, and hearing Cantonese | [SenseVoice](https://github.com/FunAudioLLM/SenseVoice) by Tongyi Lab, Alibaba Group; sherpa-onnx (conversion). [FunASR Model Open Source License](https://github.com/modelscope/FunASR/blob/main/MODEL_LICENSE) |
+| SenseVoice Small, as converted for sherpa-onnx (int8) | Telling the language apart, and hearing Cantonese and Mandarin | [SenseVoice](https://github.com/FunAudioLLM/SenseVoice) by Tongyi Lab, Alibaba Group; sherpa-onnx (conversion). [FunASR Model Open Source License](https://github.com/modelscope/FunASR/blob/main/MODEL_LICENSE) |
 | Zipformer Vietnamese (int8), as converted for sherpa-onnx | Hearing Vietnamese | [zzasdf/viet_iter3_pseudo_label](https://huggingface.co/zzasdf/viet_iter3_pseudo_label), trained on about 70,000 hours of Vietnamese; sherpa-onnx (conversion). Apache 2.0 |
 | Piper voice `vi_VN-vais1000-medium` | Speaking Vietnamese | Piper (Michael Hansen, Rhasspy), trained on the [VAIS-1000](https://ieee-dataport.org/documents/vais-1000-vietnamese-speech-synthesis-corpus) dataset (CC BY 4.0), fine-tuned from Piper's `en_US-lessac-medium` voice |
 | `vits-cantonese` | Speaking Cantonese | [xiaomaiiwn on Hugging Face](https://huggingface.co/xiaomaiiwn/vits-cantonese); sherpa-onnx (conversion). No license stated |
+| Piper voice `zh_CN-huayan-medium` | Speaking Mandarin | Piper (Michael Hansen, Rhasspy), trained on the [HuaYan_TTS](https://github.com/PlayVoice/HuaYan_TTS) dataset, fine-tuned from Piper's `en_US-lessac-medium` voice. Dataset license unknown |
 
 Until v0.1.25 the English voice was Piper's `en_US-lessac-medium`, whose recordings are licensed for research only. Updating removes it.
 

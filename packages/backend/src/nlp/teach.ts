@@ -28,20 +28,26 @@ export class TeachError extends Error {}
 const MAX_PHRASE = 60;
 
 const CHINESE = /[\u3400-\u9fff]/;
-// Cantonese: "please" first, a verb, the name, then a particle. The voice bridge writes traditional characters.
-const CANTONESE_POLITE = /^(?:幫我|帮我|唔該|唔该|請|请)/;
-const CANTONESE_VERB = /^(?:打開|打开|開|开|着|著|關閉|关闭|關|关|熄|閂|闩|鎖|锁)/;
-const CANTONESE_PARTICLES = /(?:啦|呀|吖|囉|啰|咧|喇|嘅|吓)+$/;
+// Cantonese and Mandarin: "please" first, a verb, the name, then a particle; or, in Mandarin, 把, the
+// name, then the verb (把客厅灯打开). The voice bridge writes Cantonese in traditional characters.
+const CHINESE_POLITE = /^(?:幫我|帮我|唔該|唔该|請|请|麻煩你|麻烦你|麻煩|麻烦|給我|给我)+/;
+const CHINESE_VERB = /^(?:打開|打开|開啟|开启|開|开|着|著|關閉|关闭|關掉|关掉|關上|关上|關|关|熄滅|熄灭|熄|閂|闩|鎖|锁)(?:一下)?/;
+const CHINESE_LAST_VERB = /(?:打開|打开|開啟|开启|開|开|關閉|关闭|關掉|关掉|關上|关上|關|关)(?:一下)?$/;
+const CHINESE_PARTICLES = /(?:啦|呀|吖|囉|啰|咧|喇|嘅|吓|吧|了|啊|呢|嘛)+$/;
 
-/** "唔該開主人房燈啦。" → 主人房燈, a device; "晚安" → a scene. */
-function suggestCantonese(text: string): { phrase: string; kind: 'device' | 'scene' } {
-  const words = text.replace(/[\s.,!?。，！？、：:；;「」"']/g, '').replace(CANTONESE_POLITE, '');
-  const name = words.replace(CANTONESE_VERB, '').replace(CANTONESE_PARTICLES, '');
-  return CANTONESE_VERB.test(words) && name ? { phrase: name, kind: 'device' } : { phrase: words.replace(CANTONESE_PARTICLES, ''), kind: 'scene' };
+/** "唔該開主人房燈啦。" or "把客厅灯打开吧" → a device's name; "晚安" → a scene. */
+function suggestChinese(text: string): { phrase: string; kind: 'device' | 'scene' } {
+  const words = text.replace(/[\s.,!?。，！？、：:；;「」"']/g, '').replace(CHINESE_POLITE, '');
+  const name = words.replace(CHINESE_VERB, '').replace(CHINESE_PARTICLES, '');
+  if (CHINESE_VERB.test(words) && name) return { phrase: name, kind: 'device' };
+  const led = words.replace(/^(?:把|將|将)/, '').replace(CHINESE_PARTICLES, '');
+  const last = led.replace(CHINESE_LAST_VERB, '');
+  if (last && last !== led) return { phrase: last, kind: 'device' };
+  return { phrase: words.replace(CHINESE_PARTICLES, ''), kind: 'scene' };
 }
 
 export function suggestPhrase(text: string): { phrase: string; kind: 'device' | 'scene' } {
-  if (CHINESE.test(text)) return suggestCantonese(text);
+  if (CHINESE.test(text)) return suggestChinese(text);
   const command = parsePowerCommand(text);
   if (command) return { phrase: command.name.replace(/^(?:the|my)\s+/, ''), kind: 'device' };
   const scene = cleanUp(text).replace(/^(?:(?:run|start|activate|trigger|set)\s+)?(?:the\s+)?(?:scene\s+)?/, '').replace(/\s+scene$/, '');

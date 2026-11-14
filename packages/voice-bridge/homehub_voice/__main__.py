@@ -60,18 +60,19 @@ async def main() -> int:
     for sig in (signal.SIGTERM, signal.SIGINT):
         loop.add_signal_handler(sig, stop.set)
 
-    cantonese, vietnamese, config_version = conf.cantonese, conf.vietnamese, None
+    cantonese, vietnamese, mandarin, config_version = conf.cantonese, conf.vietnamese, conf.mandarin, None
     if conf.managed:
         homehub.kind = 'docker'
         settings = await wait_until_on(homehub, stop)
         if settings is None:
             return 0
         languages = settings.get('languages', [])
-        cantonese, vietnamese, config_version = 'yue' in languages, 'vi' in languages, settings.get('version')
+        cantonese, vietnamese, mandarin = 'yue' in languages, 'vi' in languages, 'zh' in languages
+        config_version = settings.get('version')
 
-    languages = ['en'] + (['yue'] if cantonese else []) + (['vi'] if vietnamese else [])
+    languages = ['en'] + (['yue'] if cantonese else []) + (['vi'] if vietnamese else []) + (['zh'] if mandarin else [])
     try:
-        loaded = await while_reporting(homehub, 'starting', stop, lambda: load_models(conf, cantonese, vietnamese),
+        loaded = await while_reporting(homehub, 'starting', stop, lambda: load_models(conf, cantonese, vietnamese, mandarin),
                                        languages)
     except (FileNotFoundError, OSError) as e:   # OSError includes a download that failed
         log.error('%s', e)
@@ -177,16 +178,19 @@ async def main() -> int:
     return RESTART_EXIT if restart else 0
 
 
-def load_models(conf: cfg.Config, cantonese: bool, vietnamese: bool = False):
+def load_models(conf: cfg.Config, cantonese: bool, vietnamese: bool = False, mandarin: bool = False):
     """Downloads what's missing (only when the bridge comes with HomeHub) and loads it. Slow: run it in a thread."""
     from . import models
     from .speech import CantoneseVoice, Listener, SenseVoice, Speaker as Voice, VietnameseEars
 
     if conf.managed:
         models.piper_voice(conf.piper_voice)
-        if cantonese:
+        if cantonese or mandarin:
             models.sensevoice(conf.sensevoice_dir)
+        if cantonese:
             models.cantonese_voice(conf.cantonese_voice_dir)
+        if mandarin:
+            models.mandarin_voice(conf.mandarin_voice)
         if vietnamese:
             models.vietnamese(conf.vietnamese_dir)
             models.vietnamese_voice(conf.vietnamese_voice)
@@ -195,10 +199,16 @@ def load_models(conf: cfg.Config, cantonese: bool, vietnamese: bool = False):
     listener = Listener(conf.whisper_model, conf.language, conf.whisper_dir)
     voices = {'en': Voice(conf.piper_voice)}
     ears = None
+    chinese = (('yue',) if cantonese else ()) + (('zh',) if mandarin else ())
+    if chinese:
+        log.info('%s on: loading SenseVoice', ' and '.join({'yue': 'Cantonese', 'zh': 'Mandarin'}[c] for c in chinese))
+        ears = SenseVoice(conf.sensevoice_dir, chinese=chinese)
     if cantonese:
-        log.info('Cantonese on: loading SenseVoice and the Cantonese voice')
-        ears = SenseVoice(conf.sensevoice_dir)
+        log.info('loading the Cantonese voice')
         voices['yue'] = CantoneseVoice(conf.cantonese_voice_dir)
+    if mandarin:
+        log.info('loading the Mandarin voice')
+        voices['zh'] = Voice(conf.mandarin_voice)
     vi_ears = None
     if vietnamese:
         log.info('Vietnamese on: loading its speech model and voice')

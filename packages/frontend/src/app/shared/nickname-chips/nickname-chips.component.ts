@@ -3,23 +3,28 @@ import { ChangeDetectionStrategy, Component, ElementRef, computed, input, model,
 /** A nickname HomeHub offers for a device, from GET /api/devices/nickname-suggestions. */
 export interface NicknameSuggestion {
   text: string;
-  lang: 'vi' | 'yue';
+  lang: SuggestLang;
   from: string;
-  /** Cantonese with a person's Chinese name unknown: `text` is what follows it (房燈). */
+  /** Chinese with a person's Chinese name unknown: `text` is what follows it (房燈). */
   needsName?: string;
 }
 
-export type NameLang = 'en' | 'vi' | 'yue';
+export type SuggestLang = 'vi' | 'yue' | 'zh';
+export type NameLang = 'en' | 'vi' | 'han';
 
-/** Which language a name is in: Chinese characters are Cantonese, Vietnamese letters Vietnamese. */
+/** Which language a name is in. Chinese characters work in Cantonese and Mandarin alike: voice matches them by sound. */
 export function nameLang(name: string): NameLang {
-  if (/\p{Script=Han}/u.test(name)) return 'yue';
+  if (/\p{Script=Han}/u.test(name)) return 'han';
   if (/[^\x00-\x7f’]/.test(name)) return 'vi';
   return 'en';
 }
 
-export const LANG_TAG: Record<NameLang, string> = { en: 'EN', vi: 'VI', yue: '粵' };
-export const LANG_NAME: Record<NameLang, string> = { en: 'English', vi: 'Tiếng Việt', yue: '廣東話' };
+export const LANG_TAG: Record<NameLang, string> = { en: 'EN', vi: 'VI', han: '中' };
+export const LANG_NAME: Record<NameLang, string> = { en: 'English', vi: 'Tiếng Việt', han: '中文: Cantonese and Mandarin' };
+/** A suggestion group's heading, and its language for screen readers and fonts. */
+export const SUGGEST_NAME: Record<SuggestLang, string> = { vi: 'Tiếng Việt', yue: '廣東話', zh: '普通话' };
+export const SUGGEST_TAG: Record<SuggestLang, string> = { vi: 'VI', yue: '粵', zh: '普' };
+export const SUGGEST_HTML_LANG: Record<SuggestLang, string> = { vi: 'vi', yue: 'zh-HK', zh: 'zh-CN' };
 
 /** Lower case without accents, one letter for one: "Đèn" → "den". */
 const fold = (s: string) => [...s.normalize('NFC')].map((c) => c.normalize('NFD').replace(/\p{M}/gu, '').replace(/[đĐ]/, 'd').toLowerCase().slice(0, 1) || c).join('');
@@ -79,7 +84,7 @@ const key = (s: string) => s.normalize('NFC').toLowerCase().replace(/[\s-]+/g, '
           }
           <input #box type="text" [value]="draft()" (input)="onInput(box)" (keydown)="onKey($event)" (paste)="onPaste($event)"
                  (focus)="focused.set(true)" (blur)="focused.set(false)" [placeholder]="placeholder()" autocomplete="off" autocapitalize="off" enterkeyhint="done"
-                 [attr.lang]="next() ? (next()!.lang === 'yue' ? 'zh-HK' : 'vi') : null"
+                 [attr.lang]="next() ? htmlLangs[next()!.lang] : null"
                  [attr.aria-label]="next() ? 'Add a nickname. Tab adds ' + nextLabel() : 'Add a nickname'" />
           @if (next()) {<kbd class="key" aria-hidden="true">Tab</kbd>}
         </div>
@@ -108,7 +113,7 @@ const key = (s: string) => s.normalize('NFC').toLowerCase().replace(/[\s-]+/g, '
               <span class="group-name">{{ g.name }}</span>
               <div class="tags">
                 @for (s of g.items; track s.text + (s.needsName ?? '')) {
-                  <button type="button" class="tag offer" [attr.lang]="g.lang === 'yue' ? 'zh-HK' : 'vi'" (click)="take(s)"
+                  <button type="button" class="tag offer" [attr.lang]="htmlLangs[g.lang]" (click)="take(s)"
                           [attr.aria-label]="s.needsName ? 'Add ' + s.text + ' after ' + s.needsName + ' in Chinese' : 'Add ' + s.text"
                           [title]="'From “' + s.from + '”'">
                     <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>
@@ -211,8 +216,9 @@ export class NicknameChipsComponent {
   offered = computed(() => this.suggestions().filter((s) =>
     s.needsName ? !this.nicknames().some((n) => n.endsWith(s.text) && n !== s.text) : !this.have().has(key(s.text))));
   plain = computed(() => this.offered().filter((s) => !s.needsName));
-  groups = computed(() => (['vi', 'yue'] as const)
-    .map((lang) => ({ lang, name: LANG_NAME[lang], items: this.offered().filter((s) => s.lang === lang) }))
+  readonly htmlLangs = SUGGEST_HTML_LANG;
+  groups = computed(() => (['vi', 'yue', 'zh'] as const)
+    .map((lang) => ({ lang, name: SUGGEST_NAME[lang], items: this.offered().filter((s) => s.lang === lang) }))
     .filter((g) => g.items.length));
 
   /** The other devices that share a nickname with this one, and which nicknames. */
@@ -256,7 +262,7 @@ export class NicknameChipsComponent {
 
   tag(n: string): string { return LANG_TAG[nameLang(n)]; }
   langName(n: string): string { return LANG_NAME[nameLang(n)]; }
-  htmlLang(n: string): string | null { const l = nameLang(n); return l === 'yue' ? 'zh-HK' : l === 'vi' ? 'vi' : null; }
+  htmlLang(n: string): string | null { const l = nameLang(n); return l === 'han' ? 'zh' : l === 'vi' ? 'vi' : null; }
 
   private add(names: string[]): void {
     const list = [...this.nicknames()];

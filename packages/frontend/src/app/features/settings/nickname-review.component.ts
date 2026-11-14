@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, computed, effect, inject, input, output, signal, untracked } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { forkJoin } from 'rxjs';
-import { LANG_TAG, type NicknameSuggestion } from '../../shared/nickname-chips/nickname-chips.component';
+import { SUGGEST_HTML_LANG, SUGGEST_TAG, type NicknameSuggestion } from '../../shared/nickname-chips/nickname-chips.component';
 
 const DISMISSED_KEY = 'homehub.nicknameSuggestions.dismissed';
 
@@ -48,7 +48,7 @@ interface Pending { device: DeviceNames; items: NicknameSuggestion[]; owners: st
                   @for (s of plainItems(p); track s.text) {
                     <button type="button" class="tag" [class.on]="isOn(p.device.id, s.text)" role="checkbox"
                             [attr.aria-checked]="isOn(p.device.id, s.text)" (click)="toggle(p.device.id, s.text)"
-                            [attr.lang]="s.lang === 'yue' ? 'zh-HK' : 'vi'">
+                            [attr.lang]="htmlLangs[s.lang]">
                       <span class="box" aria-hidden="true">
                         @if (isOn(p.device.id, s.text)) {
                           <svg viewBox="0 0 24 24" width="12" height="12"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -199,7 +199,8 @@ export class NicknameReviewComponent {
     return p.items.filter((s) => !s.needsName).sort((a, b) => (a.lang === b.lang ? 0 : a.lang === 'vi' ? -1 : 1));
   }
   templates(p: Pending, who: string): NicknameSuggestion[] { return p.items.filter((s) => s.needsName === who); }
-  tag(s: NicknameSuggestion): string { return LANG_TAG[s.lang]; }
+  readonly htmlLangs = SUGGEST_HTML_LANG;
+  tag(s: NicknameSuggestion): string { return SUGGEST_TAG[s.lang]; }
 
   ownerName(id: number, who: string): string { return this.owners()[`${id}|${who}`] ?? ''; }
   named(id: number, s: NicknameSuggestion): string { return this.ownerName(id, s.needsName!).trim() + s.text; }

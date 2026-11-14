@@ -17,6 +17,7 @@ groups, cameras) still decide what happens.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from functools import lru_cache
 
@@ -78,7 +79,8 @@ _DURATIONS = [
     (re.compile(rf'(?P<n>{_NUM}){_GE}?字'), lambda n: n * 5),                         # 三個字: a 字 is 5 minutes
 ]
 # "...then off" after the duration: 十分鐘後熄, 十分鐘之後關燈.
-_THEN_OFF = re.compile(r'^(?:之後|之后|後|后|就)?(?:熄|關|关|閂|闩)?(?:返)?(?:燈|灯)?')
+# Mandarin says 十分钟后关掉 or 十分钟以后关闭.
+_THEN_OFF = re.compile(r'^(?:之後|之后|以後|以后|後|后|就)?(?:熄|關|关|閂|闩)?(?:返|掉|閉|闭|上)?(?:燈|灯)?')
 
 
 def _number(s: str) -> int | None:
@@ -179,8 +181,10 @@ def similar(a: str, b: str) -> float:
     return 0.0
 
 
-def match(heard: tuple[str, ...], name: tuple[str, ...]) -> float:
-    """How well the heard syllables sound like the name, aligned in order, from 0 to 1."""
+def match(heard: tuple[str, ...], name: tuple[str, ...], like: Callable[[str, str], float] | None = None) -> float:
+    """How well the heard syllables sound like the name, aligned in order, from 0 to 1.
+    like: how alike two syllables sound; Cantonese's by default, Mandarin's from mandarin.py."""
+    like = like or similar
     if not heard or not name:
         return 0.0
     n, m = len(heard), len(name)
@@ -189,7 +193,7 @@ def match(heard: tuple[str, ...], name: tuple[str, ...]) -> float:
     best = [[gap * (i + j) for j in range(m + 1)] for i in range(n + 1)]
     for i in range(1, n + 1):
         for j in range(1, m + 1):
-            best[i][j] = max(best[i - 1][j - 1] + similar(heard[i - 1], name[j - 1]),
+            best[i][j] = max(best[i - 1][j - 1] + like(heard[i - 1], name[j - 1]),
                              best[i - 1][j] + gap, best[i][j - 1] + gap)
     return max(0.0, best[n][m] / max(n, m))
 
@@ -247,14 +251,17 @@ def shortened(heard: tuple[str, ...], name: tuple[str, ...]) -> float:
     return SHORTENED if any(name[:i] + name[i + 1:] == heard for i in range(1, len(name) - 1)) else 0.0
 
 
-def best_name(heard: tuple[str, ...], names: list[str]) -> tuple[str | None, float, float]:
-    """The closest name, its score, and the score of the closest that sounds different."""
-    scored = sorted(((max(match(heard, syllables(n)), shortened(heard, syllables(n))), n) for n in names), reverse=True)
+def best_name(heard: tuple[str, ...], names: list[str], sound: Callable[[str], tuple[str, ...]] | None = None,
+              like: Callable[[str, str], float] | None = None) -> tuple[str | None, float, float]:
+    """The closest name, its score, and the score of the closest that sounds different.
+    sound and like: a language's syllables and how alike two sound; Cantonese's by default."""
+    sound = sound or syllables
+    scored = sorted(((max(match(heard, sound(n), like), shortened(heard, sound(n))), n) for n in names), reverse=True)
     if not scored:
         return None, 0.0, 0.0
     top_score, top = scored[0]
-    others = [(sc, n) for sc, n in scored[1:] if syllables(n) != syllables(top)]
-    if top_score == SHORTENED and match(heard, syllables(top)) < SHORTENED:
+    others = [(sc, n) for sc, n in scored[1:] if sound(n) != sound(top)]
+    if top_score == SHORTENED and match(heard, sound(top), like) < SHORTENED:
         # Every sound heard is in this name, a word left out. Another name that only sounds
         # close isn't a reason to doubt it (卓轩房灯: 卓軒房邊燈, not 卓希房燈); one that every
         # sound is in too, exactly or shortened, is.

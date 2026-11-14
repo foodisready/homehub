@@ -25,6 +25,7 @@ CANTONESE_VOICE = 'vits-cantonese-hf-xiaomaiiwn'
 VIETNAMESE = 'sherpa-onnx-zipformer-vi-int8-2025-04-20'
 VIETNAMESE_FILES = ['encoder-epoch-12-avg-8.int8.onnx', 'decoder-epoch-12-avg-8.onnx', 'joiner-epoch-12-avg-8.int8.onnx', 'tokens.txt']
 # VAIS-1000 (CC BY 4.0), fine-tuned by Piper from its English "lessac" voice.
+MANDARIN_VOICE = 'https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/zh/zh_CN/huayan/medium/zh_CN-huayan-medium.onnx'
 VIETNAMESE_VOICE = 'https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/vi/vi_VN/vais1000/medium/vi_VN-vais1000-medium.onnx'
 TIMEOUT_S = 60
 
@@ -103,8 +104,8 @@ def _archive(url: str, inside: str, dest: Path, keep: list[str]) -> None:
 
 def sensevoice(dest: Path) -> None:
     if not (dest / 'model.int8.onnx').exists():
-        log.info('downloading SenseVoice, for Cantonese (about 1 GB; keeps 230 MB)')
-        progress.start('Downloading the Cantonese speech model')
+        log.info('downloading SenseVoice, for Cantonese and Mandarin (about 1 GB; keeps 230 MB)')
+        progress.start('Downloading the Chinese speech model')
     _archive(f'{SHERPA}/asr-models/{SENSEVOICE}.tar.bz2', SENSEVOICE, dest, ['model.int8.onnx', 'tokens.txt'])
 
 
@@ -125,3 +126,7 @@ def vietnamese(dest: Path) -> None:
 
 def vietnamese_voice(path: Path) -> None:
     _piper(VIETNAMESE_VOICE, path, 'the Vietnamese voice')
+
+
+def mandarin_voice(path: Path) -> None:
+    _piper(MANDARIN_VOICE, path, 'the Mandarin voice')

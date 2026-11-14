@@ -346,21 +346,20 @@ class SpeakerLinkTest(unittest.IsolatedAsyncioTestCase):
         link.task.cancel()
 
     def test_wake_language_from_how_it_is_written(self):
-        from homehub_voice import pipeline
         from homehub_voice.pipeline import wake_language
-        self.assertEqual(wake_language('老友'), 'yue')
+        self.assertEqual(wake_language('老友', ['en', 'yue']), 'yue')
         self.assertEqual(wake_language('喂老友', ['en', 'yue', 'vi']), 'yue')
+        self.assertEqual(wake_language('你好', ['en', 'zh']), 'zh')
         self.assertEqual(wake_language('Xin Chào'), 'vi')
         self.assertEqual(wake_language('xin chao'), 'vi')
         self.assertEqual(wake_language('Chào bạn'), 'vi')
         for none in ('Hey Jarvis', 'Okay Nabu', 'Hey Woman', '', None):
             self.assertIsNone(wake_language(none), none)
         self.assertIsNone(wake_language('老友', ['en', 'vi']), 'Cantonese is off')
+        # With Cantonese and Mandarin both on, Chinese characters could be either.
+        self.assertIsNone(wake_language('老友', ['en', 'yue', 'zh']))
+        self.assertIsNone(wake_language('老友'))
         self.assertIsNone(wake_language('Xin Chào', ['en', 'yue']), 'Vietnamese is off')
-        # With Mandarin too, Chinese characters could be either, so no hint.
-        with mock.patch.object(pipeline, 'CHINESE', ('yue', 'zh')):
-            self.assertIsNone(wake_language('老友', ['en', 'yue', 'zh']))
-            self.assertEqual(wake_language('你好', ['en', 'zh']), 'zh')
 
     def test_background_talk(self):
         from homehub_voice.speakers import background_talk
@@ -410,7 +409,7 @@ class SpeakerLinkTest(unittest.IsolatedAsyncioTestCase):
         first = await self.say(c, 1, '老友')
         self.assertEqual(first['VOICE_ASSISTANT_INTENT_END'].get('continue_conversation'), '1')
         second = await self.say(c, 2)   # no wake word
-        self.assertEqual(langs, ['yue', 'yue'], 'woken in Cantonese, and the second try is in Cantonese too')
+        self.assertEqual(langs, [None, 'yue'], 'the second try is in the first one\'s language')
         self.assertNotIn('continue_conversation', second['VOICE_ASSISTANT_INTENT_END'], 'only one more try')
 
         # Understood on the second try: done, nothing more.

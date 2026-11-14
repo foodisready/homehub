@@ -125,6 +125,13 @@ describe('teaching missed commands', () => {
       ['关主人房灯。', '主人房灯', 'device'],
       ['晚安', '晚安', 'scene'],
       ['晚安呀', '晚安', 'scene'],
+      // Mandarin
+      ['打开一下客厅灯吧', '客厅灯', 'device'],
+      ['麻烦你关掉书房灯', '书房灯', 'device'],
+      ['把客厅灯打开', '客厅灯', 'device'],
+      ['把书房灯关了', '书房灯', 'device'],
+      ['客厅灯关一下', '客厅灯', 'device'],
+      ['晚安吧', '晚安', 'scene'],
     ] as const) {
       it(`suggests "${phrase}" from "${text}"`, () => {
         assert.deepEqual(teachMod.suggestPhrase(text), { phrase, kind });

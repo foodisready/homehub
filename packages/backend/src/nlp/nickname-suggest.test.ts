@@ -20,7 +20,7 @@ const HOME: SuggestDevice[] = [
   { id: 15, alias: 'Kitchen Island camera', nicknames: [], driverType: 'wyze' },
 ];
 const owners = learnOwners(HOME);
-const texts = (id: number, langs: Array<'vi' | 'yue'> = ['vi', 'yue']) =>
+const texts = (id: number, langs: Array<'vi' | 'yue' | 'zh'> = ['vi', 'yue']) =>
   suggestNicknames(HOME.find((d) => d.id === id)!, langs, owners).map((s) => (s.needsName ? `${s.needsName}?${s.text}` : s.text));
 
 describe('nickname suggestions', () => {
@@ -60,6 +60,19 @@ describe('nickname suggestions', () => {
 
   it("leaves a person's Chinese name to be typed when it isn't known", () => {
     assert.deepEqual(texts(4), ['đèn ngủ Ethan', 'Ethan?床頭燈', 'đèn phòng Ethan', 'Ethan?房燈']);
+  });
+
+  it('suggests Mandarin in simplified characters, unless the Cantonese name is the same words', () => {
+    // 厨房灯 is 廚房燈 in the other script: voice hears it either way.
+    assert.deepEqual(texts(3, ['zh']), []);
+    assert.deepEqual(texts(2, ['zh']), ['书房灯']);
+    assert.deepEqual(texts(2, ['yue', 'zh']), ['書房燈'], 'one of the two is enough');
+    assert.deepEqual(texts(10, ['zh']), ['书房台灯']);
+    assert.deepEqual(texts(7, ['zh']), ['左边车库门', '车库门']);
+    assert.deepEqual(texts(7, ['yue', 'zh']), ['左邊車房門', '左边车库门', '車房門', '车库门'], 'different words: both');
+    assert.deepEqual(texts(1, ['zh']), ['卓希左边床头灯', '卓希房间灯']);
+    assert.deepEqual(texts(4, ['zh']), ['Ethan?床头灯', 'Ethan?房间灯']);
+    assert.deepEqual(texts(11, ['zh']), ['早餐区小灯']);
   });
 
   it('calls a garage opener a garage door, and skips cameras and unknown words', () => {

@@ -1,4 +1,4 @@
-"""The time, the date and the weather, asked in Vietnamese or Cantonese.
+"""The time, the date and the weather, asked in Vietnamese, Cantonese or Mandarin.
 
 HomeHub answers these in English ("what time is it", "what's the weather"), with
 the numbers alongside; the reply is said here in the language that was spoken:
@@ -8,6 +8,7 @@ English questions need nothing from here: HomeHub's English reply is read out.
 from __future__ import annotations
 
 from . import cantonese as yue
+from . import mandarin as zh
 from . import vietnamese as vi
 
 # What HomeHub is asked for each question.
@@ -203,6 +204,81 @@ def yue_reply(kind: str, info: dict | None) -> str:
     t, now = info['today'], info['now']
     return (f'而家{unit}{yue_number(now["temperature"])}度，{cond(now["code"])}。'
             f'今日最高{yue_number(t["high"])}度，最低{yue_number(t["low"])}度。{rain(t)}')
+
+
+# ── Mandarin ────────────────────────────────────────────────────
+
+ZH_TIME = [('ji', 'dian')]                                                     # 几点
+ZH_DATE = [('ji', 'hao'), ('xing', 'qi', 'ji'), ('li', 'bai', 'ji')]            # 几号, 星期几, 礼拜几
+ZH_WEATHER = [('tian', 'qi'), ('ji', 'du'), ('wen', 'du'), ('re', 'bu', 're'), ('leng', 'bu', 'leng')]  # 天气 几度 温度 热不热 冷不冷
+ZH_RAIN = [('xia', 'yu')]                                                      # 下雨
+ZH_TOMORROW = [('ming', 'tian')]                                               # 明天
+
+
+def zh_kind(text: str) -> str | None:
+    """Which question a Mandarin sentence asks, by its sound, or None. A command is never one."""
+    if not text or not yue.has_chinese(text):
+        return None
+    s = zh.syllables(text)
+    if zh.read_verb(s)[0] is not None:
+        return None
+    if _has(s, ZH_TIME):
+        return 'time'
+    if _has(s, ZH_DATE):
+        return 'date'
+    return _weather_kind(_has(s, ZH_RAIN), _has(s, ZH_WEATHER), _has(s, ZH_TOMORROW))
+
+
+ZH_WEATHER_WORDS = {
+    'clear': '晴天', 'mostly clear': '大致晴朗', 'partly cloudy': '局部多云', 'cloudy': '多云', 'foggy': '有雾',
+    'drizzly': '有毛毛雨', 'light rain': '有小雨', 'rain': '有雨', 'heavy rain': '有大雨', 'freezing rain': '有冻雨',
+    'light snow': '有小雪', 'snow': '下雪', 'thunderstorms': '有雷暴',
+}
+
+
+def _zh_hour(hour: int, minute: int) -> str:
+    period = '凌晨' if hour < 6 else '早上' if hour < 12 else '中午' if hour < 13 else '下午' if hour < 18 else '晚上'
+    h = hour % 12 or 12
+    hs = '两' if h == 2 else zh.number(h)
+    if not minute:
+        return f'{period}{hs}点整'
+    if minute == 30:
+        return f'{period}{hs}点半'
+    return f'{period}{hs}点{"零" if minute < 10 else ""}{zh.number(minute)}分'
+
+
+def _zh_rain(day: dict, when: str) -> str:
+    n = zh.number(day['rain'])
+    if day['rain'] >= 60:
+        return f'会，{when}很可能下雨，概率百分之{n}。'
+    if day['rain'] >= 30:
+        return f'可能会，{when}下雨的概率是百分之{n}。'
+    return f'{when}不太会下雨，概率百分之{n}。'
+
+
+def zh_reply(kind: str, info: dict | None) -> str:
+    if not info:
+        return zh.NOT_UNDERSTOOD
+    if kind == 'time':
+        return f'现在是{_zh_hour(info["hour"], info["minute"])}。'
+    if kind == 'date':
+        return f'今天是{zh.number(info["month"])}月{zh.number(info["day"])}号，星期{YUE_WEEKDAYS[info["weekday"]]}。'
+    if info.get('error'):
+        return ('HomeHub还不知道你家在哪里，请在设置里选择位置。' if info.get('code') == 'NOT_LOCATED'
+                else '现在获取不到天气信息。')
+    unit = '华氏' if info.get('unit') == 'F' else ''
+    cond = lambda code: ZH_WEATHER_WORDS.get(describe(code), '天气多变')  # noqa: E731
+    if kind == 'rain-today':
+        return '是的，现在正在下雨。' if raining(info['now']['code']) else _zh_rain(info['today'], '今天')
+    if kind == 'rain-tomorrow':
+        return _zh_rain(info['tomorrow'], '明天')
+    rain = lambda d: f'下雨概率百分之{zh.number(d["rain"])}。' if d['rain'] >= 30 else ''  # noqa: E731
+    if kind == 'tomorrow':
+        t = info['tomorrow']
+        return f'明天{cond(t["code"])}，最高{unit}{zh.number(t["high"])}度，最低{zh.number(t["low"])}度。{rain(t)}'
+    t, now = info['today'], info['now']
+    return (f'现在{unit}{zh.number(now["temperature"])}度，{cond(now["code"])}。'
+            f'今天最高{zh.number(t["high"])}度，最低{zh.number(t["low"])}度。{rain(t)}')
 
 
 # ── Weather codes (WMO), as HomeHub's home/weather.ts reads them ────

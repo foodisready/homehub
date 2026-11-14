@@ -1,5 +1,5 @@
-"""Speech to text (Whisper; SenseVoice for Cantonese; Zipformer for Vietnamese) and text to speech
-(Piper, for English and Vietnamese; VITS for Cantonese)."""
+"""Speech to text (Whisper; SenseVoice for Cantonese and Mandarin; Zipformer for Vietnamese) and text
+to speech (Piper, for English, Vietnamese and Mandarin; VITS for Cantonese)."""
 from __future__ import annotations
 
 import threading
@@ -59,9 +59,9 @@ def _pcm(audio: bytes) -> np.ndarray:
 
 
 class SenseVoice:
-    """Cantonese speech to text, and which language a command is in (sherpa-onnx SenseVoice Small)."""
+    """Cantonese and Mandarin speech to text, and which language a command is in (sherpa-onnx SenseVoice Small)."""
 
-    def __init__(self, folder: Path, threads: int = 2) -> None:
+    def __init__(self, folder: Path, threads: int = 2, chinese: tuple[str, ...] = ('yue',)) -> None:
         import sherpa_onnx
 
         model, tokens = folder / 'model.int8.onnx', folder / 'tokens.txt'
@@ -69,10 +69,13 @@ class SenseVoice:
             raise FileNotFoundError(f'SenseVoice not found in {folder}: run install.sh with LANGUAGES=en yue')
         make = lambda lang: sherpa_onnx.OfflineRecognizer.from_sense_voice(  # noqa: E731
             model=str(model), tokens=str(tokens), language=lang, use_itn=True, num_threads=threads)
-        # "auto" tells the language; forcing Cantonese then hears the words better.
-        self.auto, self.yue = make('auto'), make('yue')
-        # One lock for each pass, so the Cantonese pass can run while the first is still listening.
-        self.locks = {id(self.auto): threading.Lock(), id(self.yue): threading.Lock()}
+        # "auto" tells the language; forcing Cantonese or Mandarin then hears the words better.
+        # chinese: the ones that are on, the first used when a pass doesn't say.
+        self.chinese = chinese
+        self.auto = make('auto')
+        self.forced = {lang: make(lang) for lang in chinese}
+        # One lock for each pass, so the second pass can run while the first is still listening.
+        self.locks = {id(r): threading.Lock() for r in (self.auto, *self.forced.values())}
 
     def _run(self, rec, audio: bytes):
         s = rec.create_stream()
@@ -90,8 +93,9 @@ class SenseVoice:
     def language(self, audio: bytes) -> str:
         return self.hear(audio)[0]
 
-    def transcribe(self, audio: bytes) -> str:
-        return self._run(self.yue, audio).text.strip()
+    def transcribe(self, audio: bytes, lang: str | None = None) -> str:
+        """The words, heard again set to one language: 'yue' or 'zh', the first that's on if not said."""
+        return self._run(self.forced.get(lang or '', self.forced[self.chinese[0]]), audio).text.strip()
 
 
 class VietnameseEars:

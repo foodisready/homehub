@@ -16,7 +16,7 @@ interface VoiceSettings { enabled: boolean; languages: string[]; bridge: BridgeS
 const POLL_MS = 5_000;
 
 /**
- * Settings → Voice control: turns voice on or off, and adds Cantonese or Vietnamese. The
+ * Settings → Voice control: turns voice on or off, and adds Cantonese, Vietnamese or Mandarin. The
  * voice bridge that comes with HomeHub waits until voice is on, downloads its
  * speech models the first time, and restarts by itself to apply a change.
  * Admin only.
@@ -75,6 +75,12 @@ const POLL_MS = 5_000;
             <small>Answered in Vietnamese. Needs Vietnamese nicknames on your devices, such as đèn bếp, and one for each way you say it, such as đèn nhà bếp. Adds about 150 MB.</small>
           </span>
         </label>
+        <label class="check">
+          <input type="checkbox" [(ngModel)]="mandarin" (ngModelChange)="dirty.set(true)" [disabled]="!enabled" />
+          <span>Mandarin 普通话
+            <small>Answered in Mandarin. Needs Chinese nicknames on your devices, such as 厨房灯; Cantonese ones work too. Adds about 300 MB, or 60 MB with Cantonese.</small>
+          </span>
+        </label>
       </div>
 
       <div class="bar">
@@ -106,13 +112,14 @@ export class VoiceControlComponent implements OnInit, OnDestroy {
   readonly message = signal('');
   readonly failed = signal(false);
   private readonly saved = signal<VoiceSettings | null>(null);
-  /** Vietnamese or Cantonese, saved: their nicknames can be suggested. */
+  /** Vietnamese, Cantonese or Mandarin, saved: their nicknames can be suggested. */
   readonly otherLanguages = computed(() => (this.saved()?.languages ?? []).filter((l) => l !== 'en'), { equal: (a, b) => a.join() === b.join() });
   /** Nicknames were added from the suggestions. */
   readonly nicknamesChanged = output<void>();
   enabled = false;
   cantonese = false;
   vietnamese = false;
+  mandarin = false;
   private timer?: ReturnType<typeof setInterval>;
 
   /** What the voice bridge is doing, in words. */
@@ -157,6 +164,7 @@ export class VoiceControlComponent implements OnInit, OnDestroy {
           this.enabled = s.enabled;
           this.cantonese = s.languages.includes('yue');
           this.vietnamese = s.languages.includes('vi');
+          this.mandarin = s.languages.includes('zh');
         }
         this.loaded.set(true);
       },
@@ -167,7 +175,7 @@ export class VoiceControlComponent implements OnInit, OnDestroy {
   save(): void {
     this.saving.set(true);
     this.message.set('');
-    const languages = ['en', ...(this.cantonese ? ['yue'] : []), ...(this.vietnamese ? ['vi'] : [])];
+    const languages = ['en', ...(this.cantonese ? ['yue'] : []), ...(this.vietnamese ? ['vi'] : []), ...(this.mandarin ? ['zh'] : [])];
     this.http.put<{ enabled: boolean; languages: string[] }>('/api/nlp/voice', { enabled: this.enabled, languages }).subscribe({
       next: (s) => {
         this.saving.set(false);

@@ -6,3 +6,4 @@ zeroconf>=0.150
 sherpa-onnx==2.0.1
 ToJyutping==3.2.0
 opencc-python-reimplemented==0.1.7
+pypinyin==0.55.0

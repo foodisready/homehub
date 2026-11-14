@@ -34,6 +34,9 @@ class Config:
     vietnamese: bool = False
     vietnamese_dir: Path = Path()
     vietnamese_voice: Path = Path()
+    # 'zh' adds Mandarin: heard by SenseVoice, as Cantonese is, and answered by a Piper voice.
+    mandarin: bool = False
+    mandarin_voice: Path = Path()
     # Comes with HomeHub (Docker): waits until voice is turned on in HomeHub's
     # Settings, takes its languages from there, and downloads its own models.
     managed: bool = False
@@ -94,9 +97,9 @@ def load(env: dict[str, str] | None = None) -> Config:
     managed = _flag(env.get('HOMEHUB_VOICE_MANAGED'), False)
     port = env.get('REPLY_PORT', '39500').strip()
     extra = {x.strip().lower() for x in env.get('LANGUAGES', '').replace(',', ' ').split()}
-    unknown = extra - {'en', 'yue', 'vi'}
+    unknown = extra - {'en', 'yue', 'vi', 'zh'}
     if unknown:
-        raise ConfigError(f'LANGUAGES: {", ".join(sorted(unknown))} isn\'t supported yet. Use en, yue (Cantonese) and vi (Vietnamese).')
+        raise ConfigError(f'LANGUAGES: {", ".join(sorted(unknown))} isn\'t supported yet. Use en, yue (Cantonese), vi (Vietnamese) and zh (Mandarin).')
     if not port.isdigit():
         raise ConfigError('REPLY_PORT must be a number')
 
@@ -118,4 +121,6 @@ def load(env: dict[str, str] | None = None) -> Config:
         vietnamese='vi' in extra,
         vietnamese_dir=Path(env.get('VIETNAMESE_DIR', '').strip() or data / 'vietnamese').expanduser(),
         vietnamese_voice=Path(env.get('VIETNAMESE_VOICE', '').strip() or data / 'vi_VN-vais1000-medium.onnx').expanduser(),
+        mandarin='zh' in extra,
+        mandarin_voice=Path(env.get('MANDARIN_VOICE', '').strip() or data / 'zh_CN-huayan-medium.onnx').expanduser(),
     )

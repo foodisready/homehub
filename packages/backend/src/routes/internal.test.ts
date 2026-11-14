@@ -298,6 +298,8 @@ describe('/internal/voice', () => {
     assert.notEqual(on.version, off.version);
     vb.setVoiceSettings({ enabled: true, languages: ['vi', 'yue'] });
     assert.deepEqual((await config()).languages, ['en', 'yue', 'vi'], 'Vietnamese too');
+    vb.setVoiceSettings({ enabled: true, languages: ['zh', 'yue'] });
+    assert.deepEqual((await config()).languages, ['en', 'yue', 'zh'], 'and Mandarin');
     assert.throws(() => vb.setVoiceSettings({ enabled: true, languages: ['es'] }), /languages/);
     assert.throws(() => vb.setVoiceSettings({ enabled: 'yes', languages: [] }), /enabled/);
     vb.setVoiceSettings({ enabled: false, languages: ['en'] });

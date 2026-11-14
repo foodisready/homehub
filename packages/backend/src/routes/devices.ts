@@ -131,7 +131,7 @@ devicesRouter.get('/auto-off', (_req: Request, res: Response) => {
 // Vietnamese and Cantonese nicknames to offer for each device, in the languages ticked in
 // Settings → Voice control: { languages, suggestions: { [deviceId]: [{ text, lang, from, needsName? }] } }.
 devicesRouter.get('/nickname-suggestions', (_req: Request, res: Response) => {
-  const languages = getVoiceSettings().languages.filter((l): l is SuggestLanguage => l === 'vi' || l === 'yue');
+  const languages = getVoiceSettings().languages.filter((l): l is SuggestLanguage => l === 'vi' || l === 'yue' || l === 'zh');
   const devices = (getDb().prepare('SELECT id, alias, nicknames, room, driver_type FROM devices').all() as
     Array<{ id: number; alias: string; nicknames: string | null; room: string | null; driver_type: string | null }>)
     .map((d) => ({ id: d.id, alias: d.alias, room: d.room, driverType: d.driver_type, nicknames: d.nicknames ? JSON.parse(d.nicknames) as string[] : [] }));
