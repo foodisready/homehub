@@ -3,6 +3,7 @@ import { requireAdmin } from '../middleware/auth';
 import { changeThermostat, getThermostat, listThermostats, saveRanges, ThermostatError } from '../thermostat/thermostat';
 import { day, months, reportsRunning } from '../thermostat/history';
 import { getHomeSettings } from '../home/home-settings';
+import { DEFAULT_SIZE, hvacSystem, saveHvacSystem } from '../energy/usage';
 
 /** Thermostats, mounted at /api/thermostats. Every temperature is °C; `unit` says how the home shows them. */
 export const thermostatsRouter = Router();
@@ -56,6 +57,22 @@ thermostatsRouter.get('/:id/day', async (req: Request, res: Response) => {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'date must be YYYY-MM-DD', code: 'VALIDATION_ERROR' });
     res.json({ ...day(t.id, date), unit: t.unit, timezone: getHomeSettings().timezone });
   } catch (err) { fail(res, err); }
+});
+
+// GET /api/thermostats/:id/system — the heating and cooling it runs, for estimates
+thermostatsRouter.get('/:id/system', async (req: Request, res: Response) => {
+  try { const t = await getThermostat(Number(req.params.id)); res.json({ ...hvacSystem(t.id), defaults: DEFAULT_SIZE }); } catch (err) { fail(res, err); }
+});
+
+// PUT /api/thermostats/:id/system  { heat, heatSize, cool, coolSize } — admin
+thermostatsRouter.put('/:id/system', requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const t = await getThermostat(Number(req.params.id));
+    res.json(saveHvacSystem(t.id, req.body));
+  } catch (err) {
+    if (err instanceof ThermostatError) return fail(res, err);
+    res.status(400).json({ error: (err as Error).message, code: 'VALIDATION_ERROR' });
+  }
 });
 
 // PUT /api/thermostats/:id/ranges  { comfort: { low, high }, allowed: { low, high } } — admin

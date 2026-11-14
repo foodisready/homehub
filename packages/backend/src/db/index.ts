@@ -149,6 +149,8 @@ function migrate(db: Database.Database): void {
   try { db.exec('ALTER TABLE devices ADD COLUMN is_protected INTEGER NOT NULL DEFAULT 0'); } catch {}
   try { db.exec('ALTER TABLE devices ADD COLUMN turned_on_at TEXT'); } catch {}
   try { db.exec("ALTER TABLE devices ADD COLUMN driver_type TEXT NOT NULL DEFAULT 'kasa'"); } catch {}
+  // What it draws when on, set by a person, for energy estimates. Null: typical for its name, or measured.
+  try { db.exec('ALTER TABLE devices ADD COLUMN watts REAL'); } catch {}
   try { db.exec('ALTER TABLE devices ADD COLUMN driver_config TEXT'); } catch {}
   try { db.exec('ALTER TABLE devices ADD COLUMN mac TEXT'); } catch {}
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_devices_mac ON devices(driver_type, mac) WHERE mac IS NOT NULL');
@@ -426,6 +428,31 @@ function migrate(db: Database.Database): void {
       temp_c  REAL NOT NULL
     );
   `);
+
+  // ── Energy ──
+  // homehub_uptime: when HomeHub was running, so time it wasn't watching isn't counted as on.
+  // device_energy_days: each device's hours on and measured energy per local day, kept for
+  // good: the activity they're made from is only kept for a while.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS homehub_uptime (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      started_at  TEXT NOT NULL,
+      last_seen   TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS device_energy_days (
+      device_id     INTEGER NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+      day           TEXT    NOT NULL,
+      on_seconds    REAL    NOT NULL,
+      known_seconds REAL    NOT NULL,
+      measured_wh   REAL,
+      PRIMARY KEY (device_id, day)
+    );
+  `);
+  // A thermostat's heating and cooling system, for estimating what its running hours cost.
+  try { db.exec('ALTER TABLE thermostats ADD COLUMN heat_system TEXT'); } catch {}
+  try { db.exec('ALTER TABLE thermostats ADD COLUMN heat_size REAL'); } catch {}
+  try { db.exec('ALTER TABLE thermostats ADD COLUMN cool_system TEXT'); } catch {}
+  try { db.exec('ALTER TABLE thermostats ADD COLUMN cool_size REAL'); } catch {}
 
   // ── Family invites: a QR code that lets someone make their own login ──
   // Only a hash of the code is kept, so a copy of the DB can't be used to join.

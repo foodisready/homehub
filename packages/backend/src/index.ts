@@ -65,6 +65,7 @@ import { applyHomeTimezone } from './home/home-settings';
 import { homeSettingsRouter } from './routes/home-settings';
 import { setupRouter } from './routes/setup';
 import { matterRouter } from './routes/matter';
+import { energyUsageRouter } from './routes/energy-usage';
 import { thermostatsRouter } from './routes/thermostats';
 import { startMatter, stopMatter } from './matter/service';
 import { noteRunningVersion } from './system/updater';
@@ -140,6 +141,7 @@ app.use('/api/home-settings',          homeSettingsRouter);
 app.use('/api/setup',                  setupRouter);
 app.use('/api/matter',                 requireAdmin, matterRouter);
 app.use('/api/thermostats',            thermostatsRouter);
+app.use('/api/energy',                 energyUsageRouter);
 
 // ── Global error handler ───────────────────────────────────────
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
@@ -167,6 +169,8 @@ httpServer.listen(PORT, async () => {
   startLocalName();          // answer for homehub.local (or <name>-backup.local) on the home network
   noteRunningVersion();   // remember the version before this one, to go back to
   startMatter().catch(() => undefined);   // connect to Matter devices, if there are any
+  // Energy: HomeHub's running times, and each device's daily hours on, for estimates.
+  void import('./energy/usage').then(({ startEnergy }) => startEnergy());
   // Thermostat history: samples every 5 minutes, outdoor temperatures hourly, once there's a thermostat.
   void import('./thermostat/history').then(async ({ startHistory }) => {
     const { listThermostats } = await import('./thermostat/thermostat');

@@ -12,6 +12,7 @@ import { logger } from '../logger';
 import { cancelPowerTimer, clearOverride, isProtectedDevice, notifyPowerOff, setOverride } from '../devices/power';
 import { requireAdmin } from '../middleware/auth';
 import { getVoiceSettings } from '../system/voice-bridge';
+import { excludedReason, setWatts, wattsFor } from '../energy/usage';
 import { learnOwners, suggestNicknames, type NicknameSuggestion, type SuggestLanguage } from '../nlp/nickname-suggest';
 import { keepSecrets, withoutSecrets } from '../devices/secrets';
 import { lastChanges, recordPower, type LastChange } from '../activity/activity';
@@ -70,6 +71,14 @@ interface DeviceRow {
   nicknames: string | null;
   room: string | null;
   is_protected: number;
+  watts: number | null;
+}
+
+/** What a device draws when on, and where that number comes from, or why it isn't counted at all. */
+function powerOf(device: DeviceRow) {
+  const excluded = excludedReason(device);
+  if (excluded) return { excluded, watts: null, method: 'none' as const, label: null, rough: false, set: null };
+  return { excluded: null, ...wattsFor({ ...device, created_at: device.created_at }), set: device.watts ?? null };
 }
 
 /** Blank means no room. Returns undefined for anything that isn't a room name. */
@@ -110,6 +119,8 @@ function mergeWithCache(
     lastChange:   changes.get(device.id) ?? null,
     /** When it will next turn itself off, and why, if it will. */
     autoOff:      autoOff.get(device.id) ?? null,
+    /** What it draws when on, for energy estimates; null `excluded` if it isn't a plug load. */
+    power:        powerOf(device),
   };
 }
 
@@ -339,6 +350,10 @@ devicesRouter.patch('/:id', requireAdmin, (req: Request, res: Response) => {
     .get(req.params.id, req.params.id) as DeviceRow | undefined;
   if (!device) return res.status(404).json({ error: 'Device not found', code: 'DEVICE_NOT_FOUND' });
 
+  const { watts } = req.body as { watts?: unknown };
+  if (watts !== undefined && watts !== null && (typeof watts !== 'number' || !Number.isFinite(watts) || watts < 0 || watts > 5000)) {
+    return res.status(400).json({ error: 'Power must be a number of watts from 0 to 5000, or blank', code: 'VALIDATION_ERROR' });
+  }
   const { alias, ip, icon, driverType, driverConfig, mac, nicknames, isProtected, room } = req.body as {
     alias?: string; ip?: string; icon?: string;
     driverType?: string; driverConfig?: Record<string, unknown> | null; mac?: string;
@@ -380,6 +395,8 @@ devicesRouter.patch('/:id', requireAdmin, (req: Request, res: Response) => {
     }
     throw err;
   }
+
+  if (watts !== undefined) setWatts(device.id, watts);
 
   const updated = db.prepare('SELECT * FROM devices WHERE id = ?').get(device.id) as DeviceRow;
   res.json(mergeWithCache(updated));
