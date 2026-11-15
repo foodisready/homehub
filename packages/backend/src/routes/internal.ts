@@ -1,4 +1,5 @@
 import { announcementDone, pendingAnnouncements } from '../family/reminders';
+import { cancel as cancelSos, openAlert as openSos, raise as raiseSos, reach as sosReach } from '../family/sos';
 import { Router, Request, Response } from 'express';
 import { reply } from '../nlp/replies';
 import { answerStatusQuestion } from '../nlp/status';
@@ -20,7 +21,7 @@ import { recordVoiceCommand } from '../nlp/command-log';
 import { withActivity } from '../activity/activity';
 import { issueTokens, serviceUser } from '../auth/auth.service';
 import { automationsPaused } from '../automation/pause';
-import { bridgeInstructions, recordBridgeReport, voiceConfig, voiceNames } from '../system/voice-bridge';
+import { VOICE_LANGUAGES, bridgeInstructions, recordBridgeReport, voiceConfig, voiceNames, type VoiceLanguage } from '../system/voice-bridge';
 import { cancelPowerTimer, setScheduleTimer } from '../devices/power';
 import { MAX_STAY_ON_MINUTES } from './schedules';
 
@@ -102,6 +103,28 @@ internalRouter.post('/voice/command', async (req: Request, res: Response) => {
   if (!handled) return res.json({ handled: false, response: reply('not_understood', {}), actions: [] });
 
   res.json({ handled: true, ...handled });
+});
+
+// POST /internal/voice/sos  { action: 'raise' | 'cancel', where?, lang?, heard? }
+// A call for help heard by a speaker, or "cancel" after one. The bridge says the reply in the
+// language it heard, from `state`: raised, already (one is going), cancelled, or nothing (no call
+// to cancel, so "cancel" wasn't meant for this).
+internalRouter.post('/voice/sos', async (req: Request, res: Response) => {
+  const { action, where, lang, heard } = (req.body ?? {}) as { action?: unknown; where?: unknown; lang?: unknown; heard?: unknown };
+  const str = (v: unknown) => (typeof v === 'string' ? v : null);
+  const language = (VOICE_LANGUAGES as readonly string[]).includes(str(lang) ?? '') ? (lang as VoiceLanguage) : null;
+  if (action === 'raise') {
+    const r = raiseSos({ via: 'voice', place: str(where), lang: language, heard: str(heard) });
+    // reach: how many phones, addresses and numbers can be told. With none, the speaker says to phone for help.
+    return res.json({ state: r.state, id: r.alert.id, who: r.alert.who, ackedBy: r.alert.ackedBy, reach: sosReach() });
+  }
+  if (action === 'cancel') {
+    const open = openSos();
+    if (!open) return res.json({ state: 'nothing' });
+    const a = await cancelSos(open.id, open.who);
+    return res.json({ state: 'cancelled', id: a.id, who: a.who, ackedBy: a.ackedBy });
+  }
+  res.status(400).json({ error: '`action` must be raise or cancel', code: 'VALIDATION_ERROR' });
 });
 
 // POST /internal/devices/:id/execute  { state: boolean, label?, stayOnMinutes? }

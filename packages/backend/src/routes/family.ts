@@ -7,6 +7,12 @@ import {
   audience, CheckinError, deleteCheckin, getCheckin, listCheckins, preview, readSettings, saveCheckin, sendTest,
 } from '../family/checkin';
 import {
+  acknowledge, addButton, cancel, deleteButton, getSosSettings, listButtons, openAlert, personName, raise, recentAlerts,
+  saveSosSettings, SosError, testSos, buttonPressed,
+} from '../family/sos';
+import { readTwilioConfig, twilioReady } from '../notifications/providers/sms';
+import { homeAddresses } from '../discovery/local-name';
+import {
   announce, announcementStatus, deleteReminder, getReminder, listReminders, ReminderError, saveReminder, voiceFor, type ReminderLanguage,
 } from '../family/reminders';
 
@@ -15,7 +21,7 @@ export const familyRouter = Router();
 
 const id = (req: Request) => Number(req.params['id']);
 const bad = (res: Response, err: unknown) => {
-  if (err instanceof CheckinError || err instanceof ReminderError) return res.status(400).json({ error: err.message, code: 'VALIDATION_ERROR' });
+  if (err instanceof CheckinError || err instanceof ReminderError || err instanceof SosError) return res.status(400).json({ error: err.message, code: 'VALIDATION_ERROR' });
   throw err;
 };
 
@@ -26,7 +32,7 @@ function speakers() {
 }
 
 // GET /api/family — everything the Family page shows
-familyRouter.get('/', (_req: Request, res: Response) => {
+familyRouter.get('/', (req: Request, res: Response) => {
   const db = getDb();
   res.json({
     checkins: listCheckins(),
@@ -38,7 +44,72 @@ familyRouter.get('/', (_req: Request, res: Response) => {
       .map((r) => ({ id: r.id, name: r.name, ring: r.ring_camera_id !== null })),
     hasFlowSensor: !!db.prepare("SELECT 1 FROM sensors WHERE type = 'flow' LIMIT 1").get(),
     timezone: getHomeSettings().timezone,
+    sos: sosView(req.user?.role === 'admin'),
   });
+});
+
+/** The SOS part of the Family page. Button addresses are only for admins: they work without a login. */
+function sosView(admin: boolean) {
+  const twilio = readTwilioConfig();
+  const hub = homeAddresses()[0]?.address ?? null;
+  const port = process.env.PORT || 3000;
+  return {
+    open: openAlert(),
+    recent: recentAlerts(5),
+    who: personName(),
+    settings: getSosSettings(),
+    texts: twilioReady(twilio) ? twilio.recipients.length : 0,
+    buttons: admin ? listButtons().map((b) => ({
+      id: b.id, name: b.name, lastUsedAt: b.lastUsedAt,
+      help: hub ? `http://${hub}:${port}/sos/${b.token}/help` : null,
+      cancel: hub ? `http://${hub}:${port}/sos/${b.token}/cancel` : null,
+    })) : [],
+  };
+}
+
+// ── SOS ─────────────────────────────────────────────────────────
+
+const userName = (req: Request) => req.user?.name ?? 'Someone';
+
+// POST /api/family/sos: a call for help from the app, by whoever is signed in.
+familyRouter.post('/sos', (req: Request, res: Response) => {
+  const r = raise({ via: 'app', place: userName(req) });
+  res.status(r.state === 'raised' ? 201 : 200).json({ state: r.state, alert: r.alert });
+});
+
+familyRouter.post('/sos/:id/ack', (req: Request, res: Response) => {
+  try { res.json(acknowledge(id(req), userName(req))); } catch (err) { bad(res, err); }
+});
+
+familyRouter.post('/sos/:id/cancel', async (req: Request, res: Response) => {
+  try { res.json(await cancel(id(req), userName(req))); } catch (err) { bad(res, err); }
+});
+
+familyRouter.put('/sos/settings', requireAdmin, (req: Request, res: Response) => {
+  try { res.json(saveSosSettings(req.body)); } catch (err) { bad(res, err); }
+});
+
+familyRouter.post('/sos/test', requireAdmin, async (req: Request, res: Response) => {
+  res.json(await testSos(userName(req)));
+});
+
+familyRouter.post('/sos/buttons', requireAdmin, (req: Request, res: Response) => {
+  try { addButton((req.body ?? {}).name); res.status(201).json(sosView(true).buttons); } catch (err) { bad(res, err); }
+});
+
+familyRouter.delete('/sos/buttons/:id', requireAdmin, (req: Request, res: Response) => {
+  if (!deleteButton(id(req))) return res.status(404).json({ error: 'Not found', code: 'NOT_FOUND' });
+  res.status(204).end();
+});
+
+/** Buttons can't log in, so the token in the address proves which button it is. Mounted at /sos. */
+export const sosButtonRouter = Router();
+
+sosButtonRouter.get('/:token/:what', async (req: Request, res: Response) => {
+  const what = req.params['what'];
+  if (what !== 'help' && what !== 'cancel') return res.status(404).end();
+  const ok = await buttonPressed(String(req.params['token']), what);
+  res.status(ok ? 204 : 404).end();
 });
 
 // ── Check-ins ───────────────────────────────────────────────────

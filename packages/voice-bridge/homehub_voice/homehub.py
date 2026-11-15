@@ -93,6 +93,10 @@ class HomeHub:
         """How saying a reminder went."""
         self._call(f'/announcements/{urllib.parse.quote(announcement_id)}', {'said': said, **({'error': error} if error else {})})
 
+    def sos(self, action: str, where: str, lang: str, heard: str) -> dict:
+        """A call for help ('raise') or 'cancel', heard by the speaker `where`. Returns HomeHub's answer: its state."""
+        return self._call('/family/sos', {'action': action, 'where': where, 'lang': lang, 'heard': heard})
+
     def command(self, text: str, retry: bool = False) -> CommandResult:
         """retry: if this isn't understood, the bridge will try again, so HomeHub doesn't list it as missed yet."""
         res = self._call('/command', {'text': text, **({'retry': True} if retry else {})})

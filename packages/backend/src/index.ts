@@ -67,7 +67,8 @@ import { homeSettingsRouter } from './routes/home-settings';
 import { setupRouter } from './routes/setup';
 import { matterRouter } from './routes/matter';
 import { energyUsageRouter } from './routes/energy-usage';
-import { familyRouter } from './routes/family';
+import { familyRouter, sosButtonRouter } from './routes/family';
+import { startSos } from './family/sos';
 import { startCheckins } from './family/checkin';
 import { startReminders } from './family/reminders';
 import { thermostatsRouter } from './routes/thermostats';
@@ -105,6 +106,7 @@ app.use('/firmware', firmwarePublicRouter);
 
 // ── Public motion events — sensors can't log in, so the URL's token is the auth.
 app.use('/motion', motionEventsRouter);
+app.use('/sos', sosButtonRouter);
 
 // ── A backup HomeHub fetching the active one's settings: the pairing code is the auth.
 app.use('/sync', backupSyncPublicRouter);
@@ -188,6 +190,7 @@ httpServer.listen(PORT, async () => {
   startBackupEmails();       // weekly and after-update backup emails, when turned on
   startCheckins();           // tell the family when there's no sign of someone by their check time
   startReminders();          // spoken reminders, said by the voice bridge
+  startSos();                // says a call for help again every few minutes until someone is on it
   whenCopied(() => {         // as after a restore by hand
     notifyScheduler();
     refreshDevices().catch((err) => logger.warn({ err }, 'Device refresh after backup sync failed'));

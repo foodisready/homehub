@@ -82,6 +82,11 @@ export const routes: Routes = [
     canActivate: [authGuard],
   },
   {
+    path: 'family/sos',
+    loadComponent: () => import('./features/family/sos-page.component').then((m) => m.SosPageComponent),
+    canActivate: [authGuard],
+  },
+  {
     path: 'family/card',
     loadComponent: () => import('./features/family/voice-card.component').then((m) => m.VoiceCardComponent),
     canActivate: [authGuard],

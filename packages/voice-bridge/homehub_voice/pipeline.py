@@ -22,6 +22,7 @@ from . import cantonese as yue
 from .chatter import looks_like_chatter
 from . import mandarin as zh
 from . import questions
+from . import sos
 from . import vietnamese as vi
 from .homehub import CommandResult, HomeHubError
 
@@ -123,9 +124,9 @@ FOR_HOW_LONG = re.compile(r'\s+for\s+\S.*$', re.I)
 
 def answer(audio: bytes, spoke: bool, listener: Transcriber, homehub: Commander,
            ears: CantoneseEars | None = None, asked: str | None = None,
-           vi_ears: VietnameseEars | None = None, prefer: str | None = None) -> Answer:
+           vi_ears: VietnameseEars | None = None, prefer: str | None = None, where: str = '') -> Answer:
     """What was heard and what to say back; a miss with nothing of a command in it is marked chatter."""
-    a = _answer(audio, spoke, listener, homehub, ears, asked, vi_ears, prefer)
+    a = _answer(audio, spoke, listener, homehub, ears, asked, vi_ears, prefer, where)
     if not a.handled and a.asked is None and not asked and looks_like_chatter(a.heard, list(getattr(homehub, 'names', []))):
         a.chatter = True
     return a
@@ -133,13 +134,15 @@ def answer(audio: bytes, spoke: bool, listener: Transcriber, homehub: Commander,
 
 def _answer(audio: bytes, spoke: bool, listener: Transcriber, homehub: Commander,
            ears: CantoneseEars | None = None, asked: str | None = None,
-           vi_ears: VietnameseEars | None = None, prefer: str | None = None) -> Answer:
+           vi_ears: VietnameseEars | None = None, prefer: str | None = None, where: str = '') -> Answer:
     """asked: the device HomeHub just asked "on or off?" about, if any, so "on" alone answers it.
     prefer: the language the speaker was woken in ("Xin chào"), or the question being answered
     was asked in. Misheard Vietnamese is answered in Vietnamese, not taken for Cantonese."""
     if not spoke:
         return Answer('', NOTHING_HEARD, False)
     t0 = time.monotonic()
+    if asked == sos.ASKED:
+        asked = None   # listening for "cancel" after a call for help: anything else is taken as usual
     which = asked if asked and asked.startswith(vi.WHICH_PREFIX) else None
     en_which = asked if asked and asked.startswith(EN_WHICH_PREFIX) else None
     if which or en_which:
@@ -154,6 +157,8 @@ def _answer(audio: bytes, spoke: bool, listener: Transcriber, homehub: Commander
         # First, since SenseVoice takes most Vietnamese for Cantonese. It takes about a third of a
         # second on a Pi, and what it writes for English or Cantonese is never a Vietnamese command.
         heard = heard_vi = vi_ears.transcribe(audio)
+        if (k := sos.kind(heard, 'vi')) and (a := answer_sos(k, heard, 'vi', homehub, t0, where)):
+            return a
         if which and has_words(heard):
             command = vi.answer_which(which, heard, homehub.names, getattr(homehub, 'groups', None))
             if command is not None:
@@ -180,7 +185,10 @@ def _answer(audio: bytes, spoke: bool, listener: Transcriber, homehub: Commander
         if in_vietnamese and lang != 'en':
             return answer_vietnamese(heard_vi, homehub, t0, asked)
         if lang in CANTONESE and not en_which:
-            a = answer_chinese(audio, ears, homehub, t0, asked, quick, second, prefer, lang)
+            order = tuple(dict.fromkeys(x for x in (prefer, lang, *chinese) if x in chinese))
+            if (found := sos.chinese_kind(quick, order)) and (a := answer_sos(found[0], quick, found[1], homehub, t0, where)):
+                return a
+            a = answer_chinese(audio, ears, homehub, t0, asked, quick, second, prefer, lang, where)
             a.label = lang
             return a
     elif in_vietnamese:
@@ -191,6 +199,8 @@ def _answer(audio: bytes, spoke: bool, listener: Transcriber, homehub: Commander
     if quick.strip(' .,!?'):
         quick = completed(quick, en_which)
         # As heard, then with the device's name spelled as HomeHub knows it ("my office la" → "My office lamp").
+        if (k := sos.kind(quick, 'en')) and (a := answer_sos(k, quick, 'en', homehub, t0, where)):
+            return a
         for text in dict.fromkeys([quick, closest_name(quick, homehub.names)]):
             first = english(text, homehub, asked, retry=True)
             if first[1] is None or first[1].handled:
@@ -198,6 +208,8 @@ def _answer(audio: bytes, spoke: bool, listener: Transcriber, homehub: Commander
     text = listener.transcribe(audio, homehub.names)
     if not text.strip(' .,!?'):
         return Answer('', NOT_CAUGHT, False, time.monotonic() - t0)
+    if (k := sos.kind(text, 'en')) and (a := answer_sos(k, text, 'en', homehub, t0, where)):
+        return a
     return finish(english(completed(text, en_which), homehub, asked), time.monotonic() - t0)
 
 
@@ -339,6 +351,8 @@ def read_chinese(way: Chinese, audio: bytes, ears: CantoneseEars, homehub: Comma
     else:
         # Not sure, or a name alone, or an answer to a question: listen again, set to the language.
         text, passes = (second.result() if second is not None else heard_again(ears, audio, way.lang)), 2
+        if k := sos.kind(text, way.lang):
+            return Reading(text, None, k, 2)
         command = way.parse(text, homehub.names, scenes, groups)
         kind = way.kind(text) if command is None else None
         if kind:
@@ -351,7 +365,10 @@ def read_chinese(way: Chinese, audio: bytes, ears: CantoneseEars, homehub: Comma
     return Reading(text, command, None, passes)
 
 
-def send_chinese(way: Chinese, r: Reading, homehub: Commander, t0: float) -> Answer:
+def send_chinese(way: Chinese, r: Reading, homehub: Commander, t0: float, where: str = '') -> Answer:
+    if r.kind in (sos.RAISE, sos.CANCEL):
+        a = answer_sos(r.kind, r.text, way.lang, homehub, t0, where)
+        return a or Answer(r.text, way.not_understood, False, time.monotonic() - t0, lang=way.lang, passes=r.passes)
     if r.kind:
         return answer_question(r.text, r.kind, way.lang, homehub, t0, passes=r.passes)
     text, command, passes = r.text, r.command, r.passes
@@ -378,7 +395,7 @@ def answer_cantonese(audio: bytes, ears: CantoneseEars, homehub: Commander, t0: 
 
 
 def answer_chinese(audio: bytes, ears: CantoneseEars, homehub: Commander, t0: float, asked: str | None,
-                   quick: str, second: Future | None, prefer: str | None, label: str = '') -> Answer:
+                   quick: str, second: Future | None, prefer: str | None, label: str = '', where: str = '') -> Answer:
     """Cantonese or Mandarin. With one of them on, or a hint (the wake word, or the question being
     answered), that one. With both on and no hint, SenseVoice's label (`label`) and the words decide:
     a first pass that's clearly a command in one language, and not as clearly in the other, is that
@@ -387,7 +404,7 @@ def answer_chinese(audio: bytes, ears: CantoneseEars, homehub: Commander, t0: fl
     chinese = chinese_on(ears)
     if len(chinese) == 1 or prefer in chinese:
         way = WAYS[prefer if prefer in chinese else chinese[0]]
-        return send_chinese(way, read_chinese(way, audio, ears, homehub, asked, quick, second), homehub, t0)
+        return send_chinese(way, read_chinese(way, audio, ears, homehub, asked, quick, second), homehub, t0, where)
     order = ['zh', 'yue'] if label == 'zh' else ['yue', 'zh']
     if quick:
         scenes = getattr(homehub, 'scenes', homehub.names)
@@ -395,15 +412,15 @@ def answer_chinese(audio: bytes, ears: CantoneseEars, homehub: Commander, t0: fl
                 if (c := WAYS[lang].parse(quick, homehub.names, scenes, getattr(homehub, 'groups', None))) is not None and c.action != 'ask' and c.score >= SURE]
         if sure:
             _, _, lang, command = max(sure, key=lambda x: (x[0], x[1]))
-            return send_chinese(WAYS[lang], Reading(quick, command, None, 1), homehub, t0)
+            return send_chinese(WAYS[lang], Reading(quick, command, None, 1), homehub, t0, where)
     # The early second pass was set to the first language that's on; another is heard here.
     pass_for = lambda lang: second if lang == chinese[0] else None  # noqa: E731
     first = read_chinese(WAYS[order[0]], audio, ears, homehub, asked, quick, pass_for(order[0]))
     if first.understood or (first.command is not None and first.command.action == 'ask'):
-        return send_chinese(WAYS[order[0]], first, homehub, t0)
+        return send_chinese(WAYS[order[0]], first, homehub, t0, where)
     other = read_chinese(WAYS[order[1]], audio, ears, homehub, asked, quick, pass_for(order[1]))
     if other.understood:
-        return send_chinese(WAYS[order[1]], other, homehub, t0)
+        return send_chinese(WAYS[order[1]], other, homehub, t0, where)
     # Neither understood it. The reading with an on or off word in it is more likely the language
     # spoken, and its words more use in the list of missed commands: 關主人房燈 heard as Cantonese,
     # not 换检防单 heard as Mandarin. The label decides if both or neither have one.
@@ -411,9 +428,20 @@ def answer_chinese(audio: bytes, ears: CantoneseEars, homehub: Commander, t0: fl
         lang, reading = order[1], other
     else:
         lang, reading = order[0], first
-    a = send_chinese(WAYS[lang], reading, homehub, t0)
+    a = send_chinese(WAYS[lang], reading, homehub, t0, where)
     a.unsure = True
     return a
+
+
+def answer_sos(k: str, heard: str, lang: str, homehub: Commander, t0: float, where: str) -> Answer | None:
+    """A call for help, or "cancel" after one: HomeHub tells the family. None for a "cancel" with
+    nothing to cancel, so it's heard as usual."""
+    t1 = time.monotonic()
+    r = sos.run(k, heard, lang, homehub, where)
+    if r is None:
+        return None
+    return Answer(f'{heard} → SOS {k}', r.reply, r.handled, t1 - t0, r.homehub_s, lang=lang,
+                  asked=sos.ASKED if r.listen else None)
 
 
 def answer_question(heard: str, kind: str, lang: str, homehub: Commander, t0: float, passes: int = 0) -> Answer:

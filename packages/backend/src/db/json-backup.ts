@@ -29,6 +29,7 @@ export const BACKUP_TABLES = [
   'push_subscriptions',
   'checkins',
   'reminders',
+  'sos_buttons',
 ] as const;
 type TableName = typeof BACKUP_TABLES[number];
 

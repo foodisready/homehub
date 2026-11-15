@@ -218,6 +218,10 @@ export function signsBetween(s: CheckinSettings, from: number, to: number, limit
     const names = new Map(rules.map((r) => [r.id, r.name]));
     for (const r of rows) out.push({ at: r.at, what: `motion: ${names.get(r.rule_id)}` });
   }
+  // A call for help shows they're up too; the SOS tells the family itself, so the check-in needn't.
+  const sos = db.prepare('SELECT started_at, via FROM sos_alerts WHERE started_at >= ? AND started_at < ? ORDER BY started_at LIMIT ?')
+    .all(new Date(from).toISOString(), new Date(to).toISOString(), limit) as { started_at: string; via: string }[];
+  for (const r of sos) out.push({ at: r.started_at, what: `a call for help (${r.via})` });
   return out.sort((a, b) => a.at.localeCompare(b.at)).slice(0, limit);
 }
 

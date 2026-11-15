@@ -513,5 +513,33 @@ function migrate(db: Database.Database): void {
       at       TEXT    NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_motion_seen_at ON motion_seen(at);
+
+    -- Calls for help (SOS): by voice, a button or the app. Times are ISO.
+    CREATE TABLE IF NOT EXISTS sos_alerts (
+      id             INTEGER PRIMARY KEY AUTOINCREMENT,
+      started_at     TEXT    NOT NULL,
+      via            TEXT    NOT NULL CHECK(via IN ('voice', 'button', 'app')),
+      place          TEXT,
+      who            TEXT,
+      lang           TEXT,
+      heard          TEXT,
+      rounds         INTEGER NOT NULL DEFAULT 0,
+      last_round_at  TEXT,
+      told           TEXT,
+      acked_at       TEXT,
+      acked_by       TEXT,
+      cancelled_at   TEXT,
+      cancelled_by   TEXT,
+      ended_at       TEXT
+    );
+
+    -- Buttons that call for help: a press visits /sos/<token>/help, a double press /sos/<token>/cancel.
+    CREATE TABLE IF NOT EXISTS sos_buttons (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      name        TEXT    NOT NULL,
+      token       TEXT    NOT NULL UNIQUE,
+      last_used_at TEXT,
+      created_at  TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    );
   `);
 }

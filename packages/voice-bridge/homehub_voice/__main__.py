@@ -89,14 +89,17 @@ async def main() -> int:
 
     speakers: Speakers
     one_answers = OneAnswers()   # so two speakers that hear the same command don't both answer
-    speakers = Speakers(
-        conf.speakers,
-        lambda s, listed: SpeakerLink(
-            s, lambda audio, spoke, asked=None, prefer=None: answer(audio, spoke, listener, homehub, ears, asked, vi_ears, prefer), speak, listed,
-            on_change=lambda: speakers.changed.set(), one_answers=one_answers, languages=languages,
-        ),
-        conf.discover,
-    )
+    def link(s, listed) -> SpeakerLink:
+        # The speaker's name goes with what it heard, so a call for help says where: "on Kitchen speaker".
+        made: list[SpeakerLink] = []
+        made.append(SpeakerLink(
+            s, lambda audio, spoke, asked=None, prefer=None: answer(audio, spoke, listener, homehub, ears, asked, vi_ears, prefer,
+                                                                 made[0].name if made else s.label),
+            speak, listed, on_change=lambda: speakers.changed.set(), one_answers=one_answers, languages=languages,
+        ))
+        return made[0]
+
+    speakers = Speakers(conf.speakers, link, conf.discover)
     if not conf.speakers and not conf.discover:
         log.error('No speakers: list them in SPEAKERS or turn DISCOVER on')
         return 2

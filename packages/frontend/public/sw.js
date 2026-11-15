@@ -21,13 +21,17 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('push', (event) => {
   if (!event.data) return;
   const { title, body, data } = event.data.json();
+  // A call for help stays on screen until it's dealt with, and buzzes longer.
+  const urgent = !!(data && data.urgent);
   event.waitUntil(
     self.registration.showNotification(title, {
       body,
       icon:  '/icons/icon.svg',
       badge: '/icons/icon.svg',
       data,
-      vibrate: [200, 100, 200],
+      vibrate: urgent ? [500, 200, 500, 200, 500] : [200, 100, 200],
+      requireInteraction: urgent,
+      ...(urgent ? { tag: 'homehub-sos', renotify: true } : {}),
     })
   );
 });

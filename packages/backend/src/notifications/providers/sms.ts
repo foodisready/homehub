@@ -21,7 +21,7 @@ import type { Notifier, NotificationPayload } from '../types';
 import { getDb } from '../../db';
 import { logger } from '../../logger';
 
-interface TwilioConfig {
+export interface TwilioConfig {
   accountSid:  string;
   authToken:   string;
   from:        string;
@@ -77,7 +77,7 @@ export class SmsNotifier implements Notifier {
   }
 }
 
-function readTwilioConfig(): TwilioConfig {
+export function readTwilioConfig(): TwilioConfig {
   const get = (key: string): string => {
     const row = getDb().prepare('SELECT value FROM settings WHERE key = ?').get(key) as
       { value: string } | undefined;
@@ -94,4 +94,40 @@ function readTwilioConfig(): TwilioConfig {
     from:       orEnv('twilio_from',        'TWILIO_FROM'),
     recipients: recipientsRaw.split(',').map((s) => s.trim()).filter(Boolean),
   };
+}
+
+/** Twilio is set up enough to send texts or make calls. */
+export const twilioReady = (cfg = readTwilioConfig()): boolean => !!(cfg.accountSid && cfg.authToken && cfg.from && cfg.recipients.length);
+
+const twilio = async (cfg: TwilioConfig, resource: 'Messages' | 'Calls', form: Record<string, string>): Promise<void> => {
+  const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(cfg.accountSid)}/${resource}.json`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Basic ${Buffer.from(`${cfg.accountSid}:${cfg.authToken}`).toString('base64')}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: new URLSearchParams(form).toString(),
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!res.ok) throw new Error(`Twilio ${res.status}: ${(await res.text()).slice(0, 200)}`);
+};
+
+/** A text to each number in the SMS list. Returns how many went. */
+export async function sendTexts(text: string, cfg = readTwilioConfig()): Promise<number> {
+  if (!twilioReady(cfg)) return 0;
+  const results = await Promise.allSettled(cfg.recipients.map((to) => twilio(cfg, 'Messages', { To: to, From: cfg.from, Body: text.slice(0, 480) })));
+  const failed = results.filter((r) => r.status === 'rejected') as PromiseRejectedResult[];
+  if (failed.length) logger.warn({ failed: failed.length, errors: failed.map((f) => String(f.reason)) }, 'Some texts failed');
+  return results.length - failed.length;
+}
+
+const xml = (s: string) => s.replace(/[<>&'"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' }[c]!));
+
+/**
+ * A phone call to one number that says `text` twice in Twilio's voice. The words go in the
+ * request (TwiML), so Twilio never has to reach HomeHub.
+ */
+export async function placeCall(to: string, text: string, cfg = readTwilioConfig()): Promise<void> {
+  const say = `<Say voice="Polly.Joanna">${xml(text)}</Say>`;
+  await twilio(cfg, 'Calls', { To: to, From: cfg.from, Twiml: `<Response>${say}<Pause length="1"/>${say}</Response>` });
 }

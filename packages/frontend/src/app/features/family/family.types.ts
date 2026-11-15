@@ -25,6 +25,34 @@ export interface Family {
   motionRules: { id: number; name: string; ring: boolean }[];
   hasFlowSensor: boolean;
   timezone: string;
+  sos: SosView;
+}
+
+export interface SosAlert {
+  id: number; startedAt: string; via: 'voice' | 'button' | 'app'; place: string | null; who: string;
+  lang: VoiceLanguage | null; heard: string | null; rounds: number; lastRoundAt: string | null;
+  told: { phones: number; emails: number; texts: number; calls: number } | null;
+  ackedAt: string | null; ackedBy: string | null; cancelledAt: string | null; cancelledBy: string | null; endedAt: string | null;
+}
+
+export interface SosButton { id: number; name: string; lastUsedAt: string | null; help: string | null; cancel: string | null }
+
+export interface SosView {
+  open: SosAlert | null;
+  recent: SosAlert[];
+  who: string;
+  settings: { who: string | null; calls: boolean };
+  /** Numbers texted (and called, if calls are on); 0 without Twilio. */
+  texts: number;
+  /** Admins only. */
+  buttons: SosButton[];
+}
+
+/** "by voice on Kitchen speaker", "with the Bedside button", "in the app (Mum)". */
+export function howText(a: Pick<SosAlert, 'via' | 'place'>): string {
+  if (a.via === 'voice') return a.place ? `by voice on ${a.place}` : 'by voice';
+  if (a.via === 'button') return a.place ? `with the ${a.place} button` : 'with a button';
+  return a.place ? `in the app (${a.place})` : 'in the app';
 }
 
 export interface Sign { at: string; what: string }

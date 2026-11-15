@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnDestroy, OnInit, computed, inject, signal } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
@@ -7,7 +7,10 @@ import { AuthService } from '../../core/auth/auth.service';
 import { PushService } from '../../core/services/push.service';
 import { CheckinEditorComponent } from './checkin-editor.component';
 import { RemindersComponent } from './reminders.component';
-import { clockText, daysText, errorText, timeIn, todayIn, type Checkin, type Family } from './family.types';
+import { HelpButtonComponent } from './help-button.component';
+import { SosAlertComponent } from './sos-alert.component';
+import { SosSettingsComponent } from './sos-settings.component';
+import { clockText, daysText, errorText, howText, timeIn, todayIn, type Checkin, type Family, type SosAlert } from './family.types';
 
 /** "A", "A and B", "A, B and C". */
 const listText = (names: string[]) => names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
@@ -23,7 +26,7 @@ type Tone = 'good' | 'bad' | 'warn' | 'plain';
 @Component({
   selector: 'app-family',
   standalone: true,
-  imports: [FormsModule, RouterLink, CheckinEditorComponent, RemindersComponent],
+  imports: [FormsModule, RouterLink, CheckinEditorComponent, RemindersComponent, HelpButtonComponent, SosAlertComponent, SosSettingsComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [`
     h1 { font-size: 1.4rem; font-weight: 700; margin: 0 0 0.3rem; }
@@ -52,6 +55,14 @@ type Tone = 'good' | 'bad' | 'warn' | 'plain';
     .privacy { font-size: 0.8rem; color: var(--text-muted); margin-top: 0.6rem; }
     .result { font-size: 0.85rem; color: var(--text-muted); }
     .intro ul { margin: 0.5rem 0 0.9rem 1.1rem; padding: 0; color: var(--text-muted); font-size: 0.9rem; line-height: 1.6; }
+    .sos-top { display: flex; gap: 1.25rem; align-items: center; justify-content: space-between; }
+    .sos-top > div { flex: 1 1 auto; }
+    .sos-top app-help-button { flex: none; }
+    @media (max-width: 599px) { .sos-top { flex-direction: column; align-items: stretch; } }
+    h3.sub { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin: 1.1rem 0 0.4rem; }
+    ul.recent { margin: 0; padding-left: 1.1rem; font-size: 0.88rem; color: var(--text-muted); line-height: 1.6; }
+    .settings-toggle { display: block; text-align: left; margin-top: 1rem; background: none; border: none; padding: 0.3rem 0; color: var(--text-muted); font-size: 0.88rem; }
+    .sos p { font-size: 0.92rem; }
     .print { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
     a.btn-primary { display: inline-flex; align-items: center; min-height: 38px; padding: 0 1rem; border-radius: var(--radius); text-decoration: none; }
   `],
@@ -61,6 +72,9 @@ type Tone = 'good' | 'bad' | 'warn' | 'plain';
       <p class="lead">For looking after someone at home: a daily check-in, reminders the speakers say in their language, and a card of voice commands for the fridge.</p>
 
       @if (data(); as d) {
+        @if (d.sos.open; as open) {
+          <div style="margin-top:1rem"><app-sos-alert [alert]="open" [timezone]="d.timezone" (changed)="load()" /></div>
+        }
         <h2>Daily check-in</h2>
         <div class="stack">
           @for (c of d.checkins; track c.id) {
@@ -133,6 +147,29 @@ type Tone = 'good' | 'bad' | 'warn' | 'plain';
           </div>
         </div>
 
+        <h2>Call for help</h2>
+        <div class="card sos">
+          <div class="sos-top">
+            <div>
+              <p>If {{ d.sos.who === 'Someone' ? 'someone at home' : d.sos.who }} needs help, they can say <b>救命</b>, <b>cứu tôi với</b> or <b>help me</b> to a speaker, press a button, or hold the button here. The family is told at once, again every 5 minutes until someone taps “I’m on it”, and the speaker tells them who’s coming.</p>
+              <p class="muted" style="margin-top:0.5rem">For their own phone or tablet, open <a routerLink="/family/sos">the button on its own page</a> and add it to the Home Screen. HomeHub doesn’t call 911 and isn’t a monitored service; if HomeHub or the Wi-Fi is down, it can’t send anything.</p>
+            </div>
+            @if (!d.sos.open) { <app-help-button (sent)="load()" /> }
+          </div>
+          @if (pastAlerts().length) {
+            <h3 class="sub">Recent</h3>
+            <ul class="recent">
+              @for (a of pastAlerts(); track a.id) { <li>{{ alertLine(a) }}</li> }
+            </ul>
+          }
+          @if (admin()) {
+            <button type="button" class="settings-toggle" (click)="sosSettings.set(!sosSettings())" [attr.aria-expanded]="sosSettings()">
+              {{ sosSettings() ? '▾' : '▸' }} Settings: name, texts and calls, buttons, test
+            </button>
+            @if (sosSettings()) { <div style="margin-top:0.8rem"><app-sos-settings [sos]="d.sos" (changed)="load()" /></div> }
+          }
+        </div>
+
         <h2>Spoken reminders</h2>
         <div class="card"><app-reminders [data]="d" (changed)="load()" /></div>
 
@@ -153,7 +190,7 @@ type Tone = 'good' | 'bad' | 'warn' | 'plain';
     </div>
   `,
 })
-export class FamilyComponent implements OnInit {
+export class FamilyComponent implements OnInit, OnDestroy {
   private readonly http = inject(HttpClient);
   private readonly auth = inject(AuthService);
   readonly push = inject(PushService);
@@ -174,7 +211,28 @@ export class FamilyComponent implements OnInit {
   readonly clock = clockText;
   readonly days = daysText;
 
-  ngOnInit(): void { this.load(); }
+  readonly sosSettings = signal(false);
+  private poll?: ReturnType<typeof setInterval>;
+
+  ngOnInit(): void {
+    this.load();
+    // A call for help shows up, and who's on it, without reloading the page.
+    this.poll = setInterval(() => {
+      if (document.visibilityState !== 'visible' || this.editing()) return;
+      this.http.get<Family>('/api/family').subscribe({ next: (f) => this.data.set(f), error: () => undefined });
+    }, 15_000);
+  }
+
+  ngOnDestroy(): void { clearInterval(this.poll); }
+
+  readonly pastAlerts = computed(() => (this.data()?.sos.recent ?? []).filter((a) => a.id !== this.data()?.sos.open?.id));
+
+  alertLine(a: SosAlert): string {
+    const tz = this.data()!.timezone;
+    const day = new Date(a.startedAt).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric', timeZone: tz });
+    const end = a.cancelledAt ? `cancelled by ${a.cancelledBy}` : a.ackedBy ? `${a.ackedBy} was on it` : a.endedAt ? 'nobody said they were on it' : 'going';
+    return `${day}, ${timeIn(a.startedAt, tz)}: ${howText(a)}; ${end}.`;
+  }
 
   load(): void {
     forkJoin({ family: this.http.get<Family>('/api/family'), devices: this.http.get<DeviceLite[]>('/api/devices') }).subscribe({
