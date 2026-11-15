@@ -66,6 +66,9 @@ import { homeSettingsRouter } from './routes/home-settings';
 import { setupRouter } from './routes/setup';
 import { matterRouter } from './routes/matter';
 import { energyUsageRouter } from './routes/energy-usage';
+import { familyRouter } from './routes/family';
+import { startCheckins } from './family/checkin';
+import { startReminders } from './family/reminders';
 import { thermostatsRouter } from './routes/thermostats';
 import { startMatter, stopMatter } from './matter/service';
 import { noteRunningVersion } from './system/updater';
@@ -142,6 +145,7 @@ app.use('/api/setup',                  setupRouter);
 app.use('/api/matter',                 requireAdmin, matterRouter);
 app.use('/api/thermostats',            thermostatsRouter);
 app.use('/api/energy',                 energyUsageRouter);
+app.use('/api/family',                 familyRouter);
 
 // ── Global error handler ───────────────────────────────────────
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
@@ -181,6 +185,8 @@ httpServer.listen(PORT, async () => {
   runBackup();
   setInterval(runBackup, 24 * 60 * 60 * 1000);
   startBackupEmails();       // weekly and after-update backup emails, when turned on
+  startCheckins();           // tell the family when there's no sign of someone by their check time
+  startReminders();          // spoken reminders, said by the voice bridge
   whenCopied(() => {         // as after a restore by hand
     notifyScheduler();
     refreshDevices().catch((err) => logger.warn({ err }, 'Device refresh after backup sync failed'));

@@ -52,7 +52,7 @@ export function stopUptime(): void { if (heartbeat) clearInterval(heartbeat); he
 
 /** Times HomeHub was running between two times. Before it first kept track, it counts as running. */
 export function upIntervals(from: number, to: number): [number, number][] {
-  const rows = getDb().prepare('SELECT started_at, last_seen FROM homehub_uptime ORDER BY id').all() as { started_at: string; last_seen: string }[];
+  const rows = getDb().prepare('SELECT started_at, last_seen FROM homehub_uptime ORDER BY started_at').all() as { started_at: string; last_seen: string }[];
   if (!rows.length) return [[from, to]];
   const out: [number, number][] = [];
   const first = Date.parse(rows[0].started_at);

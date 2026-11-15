@@ -29,6 +29,7 @@ const ICONS = {
   activity: 'M4 6h16M4 12h10M4 18h7M19 15v4l2.5 1.5',
   camera:   'M3 8a2 2 0 0 1 2-2h2l1.5-2h7L17 6h2a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM12 17a4 4 0 1 0 0-8 4 4 0 0 0 0 8z',
   health:   'M3 12h4l2-5 4 10 2-5h6',
+  family:   'M12 20s-7-4.4-9.2-8.6A5 5 0 0 1 12 6.3a5 5 0 0 1 9.2 5.1C19 15.6 12 20 12 20z',
   signOut:  'M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3',
 };
 
@@ -42,6 +43,7 @@ const MAIN: NavItem[] = [
 
 /** Under More on phones. */
 const MORE: NavItem[] = [
+  { path: '/family',        label: 'Family',   icon: ICONS.family },
   { path: '/activity',      label: 'Activity', icon: ICONS.activity },
   { path: '/cameras',       label: 'Cameras',  icon: ICONS.camera },
   { path: '/sensors',       label: 'Sensors',  icon: ICONS.sensors },

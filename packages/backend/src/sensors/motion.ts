@@ -70,10 +70,22 @@ export function recordMotion(token: string, occupied: boolean, now = new Date())
     'UPDATE motion_rules SET occupied = ?, last_motion_at = ? WHERE token = ?',
   ).run(occupied ? 1 : 0, now.toISOString(), token);
   if (result.changes > 0) {
-    const rule = getDb().prepare('SELECT device_id FROM motion_rules WHERE token = ?').get(token) as { device_id: number } | undefined;
-    if (rule) emitMotion(rule.device_id, occupied);
+    const rule = getDb().prepare('SELECT id, device_id FROM motion_rules WHERE token = ?').get(token) as { id: number; device_id: number } | undefined;
+    if (rule) {
+      emitMotion(rule.device_id, occupied);
+      if (occupied) noteMotionSeen(rule.id, now);
+    }
   }
   return result.changes > 0;
+}
+
+/** Keeps that someone moved, for a daily check-in: at most once every few minutes per sensor. */
+const MOTION_SEEN_EVERY_MS = 5 * 60_000;
+function noteMotionSeen(ruleId: number, now: Date): void {
+  const db = getDb();
+  const last = db.prepare('SELECT at FROM motion_seen WHERE rule_id = ? ORDER BY id DESC LIMIT 1').get(ruleId) as { at: string } | undefined;
+  if (last && now.getTime() - Date.parse(last.at) < MOTION_SEEN_EVERY_MS) return;
+  db.prepare('INSERT INTO motion_seen (rule_id, at) VALUES (?, ?)').run(ruleId, now.toISOString());
 }
 
 /** Records a sensor event and, if the rule asks for it, turns the light on. */

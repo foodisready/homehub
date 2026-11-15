@@ -11,6 +11,7 @@ from typing import Callable
 
 import aioesphomeapi as api
 from aioesphomeapi.model import VoiceAssistantEventType as E
+from aioesphomeapi.model import VoiceAssistantFeature
 
 from .config import Speaker
 from .endpoint import MAX_S, Endpointer, loudness
@@ -53,6 +54,11 @@ BACKGROUND_VOICED = 0.75
 def background_talk(seconds: float, voiced: float) -> bool:
     return seconds >= MAX_S - 0.25 and voiced >= BACKGROUND_VOICED * seconds
 
+
+# A reminder waits this long for a command being answered to finish, then is said anyway.
+ANNOUNCE_WAIT_S = 20.0
+# How long a speaker has to say a reminder.
+ANNOUNCE_TIMEOUT_S = 60.0
 
 # Its own reply, heard back within this long of saying it, isn't a command.
 ECHO_S = 30.0
@@ -133,6 +139,9 @@ class SpeakerLink:
         self.said: tuple[str, float] | None = None
         # When a command wasn't understood, and in which language (None: unsure): the speaker listens once more, with no wake word.
         self.again: tuple[float, str | None] | None = None
+        # The open connection, while connected, and whether the speaker can say things it wasn't asked.
+        self.client: api.APIClient | None = None
+        self.can_announce = False
 
     @property
     def who(self) -> str:
@@ -196,19 +205,45 @@ class SpeakerLink:
             self.name = info.friendly_name or info.name or self.speaker.label
             if not info.voice_assistant_feature_flags:
                 raise StopTrying('not a voice speaker, ignoring it')
+            self.can_announce = bool(info.voice_assistant_feature_flags & VoiceAssistantFeature.ANNOUNCE)
+            self.client = c
             self._subscribe(c)
             try:
                 await asyncio.wait_for(c.get_voice_assistant_configuration(5), 6)
             except Exception:  # noqa: BLE001 — older firmware doesn't support it
                 pass
-            log.info('%s connected (%s), listening', self.name, self.speaker.label)
+            log.info('%s connected (%s), listening%s', self.name, self.speaker.label, '' if self.can_announce else "; it can't say reminders")
             self._set_connected(True)
             await gone.wait()
         finally:
+            self.client = None
             self._set_connected(False)
             if self.run:
                 self.run.ended.set()
             await c.disconnect()
+
+    async def announce(self, text: str, lang: str) -> bool:
+        """Says something nobody asked for, such as a reminder. A command being answered finishes first."""
+        c = self.client
+        if not c or not self.connected or not self.can_announce:
+            return False
+        waited = 0.0
+        while self.run is not None and waited < ANNOUNCE_WAIT_S:
+            await asyncio.sleep(0.5)
+            waited += 0.5
+        loop = asyncio.get_running_loop()
+        url = await loop.run_in_executor(None, self.speak, text, self.speaker.host, lang)
+        self.said = (text, time.monotonic())   # heard back, it isn't a command
+        try:
+            done = await c.send_voice_assistant_announcement_await_response(url, ANNOUNCE_TIMEOUT_S, text)
+        except Exception as e:  # noqa: BLE001 — one speaker failing mustn't stop the others
+            log.warning('%s could not say %r: %s', self.who, text, e)
+            return False
+        if getattr(done, 'success', True) is False:
+            log.warning('%s did not say %r', self.who, text)
+            return False
+        log.info('%s said %r', self.who, text)
+        return True
 
     def _subscribe(self, c: api.APIClient) -> None:
         loop = asyncio.get_running_loop()
@@ -348,9 +383,21 @@ class Speakers:
     def status(self) -> list[dict]:
         """Speakers for HomeHub's Health page. Devices that turned out not to be speakers are left out."""
         return [
-            {'name': l.name, 'address': l.speaker.label, 'connected': l.connected}
+            {'name': l.name, 'address': l.speaker.label, 'connected': l.connected, 'announce': l.can_announce}
             for l in self.links.values() if l.usable
         ]
+
+    async def announce(self, text: str, lang: str) -> tuple[list[str], str]:
+        """Says it on every speaker that can. The names of those that did, or why none did."""
+        links = [l for l in self.links.values() if l.usable and l.connected]
+        able = [l for l in links if l.can_announce]
+        if not links:
+            return [], 'no speaker is connected'
+        if not able:
+            return [], f"{', '.join(l.name for l in links)} can't say reminders: update the speaker's app"
+        done = await asyncio.gather(*(l.announce(text, lang) for l in able))
+        said = [l.name for l, ok in zip(able, done) if ok]
+        return said, '' if said else 'the speaker didn’t say it'
 
     def add(self, speaker: Speaker, listed: bool) -> None:
         key = f'{resolve(speaker.host)}:{speaker.port}'

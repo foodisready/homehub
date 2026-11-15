@@ -1,3 +1,4 @@
+import { announcementDone, pendingAnnouncements } from '../family/reminders';
 import { Router, Request, Response } from 'express';
 import { reply } from '../nlp/replies';
 import { answerStatusQuestion } from '../nlp/status';
@@ -59,8 +60,16 @@ internalRouter.get('/voice/device-names', (_req: Request, res: Response) => {
 // Voice on or off, and its languages, as chosen in Settings → Voice control.
 // The bridge that comes with HomeHub waits until voice is on.
 // It asks every 10 seconds, so namesVersion lets a new nickname work by voice straight away.
+// announcements: reminders due now, for the bridge to say on its speakers. Not part of `version`,
+// which the bridge restarts for.
 internalRouter.get('/voice/config', (_req: Request, res: Response) => {
-  res.json({ ...voiceConfig(), namesVersion: voiceNames().version });
+  res.json({ ...voiceConfig(), namesVersion: voiceNames().version, announcements: pendingAnnouncements() });
+});
+
+// POST /internal/voice/announcements/:id  { said: [speaker names], error? } — how saying it went
+internalRouter.post('/voice/announcements/:id', (req: Request, res: Response) => {
+  if (!announcementDone(String(req.params['id']), req.body)) return res.status(404).json({ error: 'Not waiting to be said', code: 'NOT_FOUND' });
+  res.json({ ok: true });
 });
 
 // POST /internal/voice/status  { version?, speakers: [{ name, address, connected }] }

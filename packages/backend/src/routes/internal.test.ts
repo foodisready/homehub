@@ -284,7 +284,26 @@ describe('/internal/voice', () => {
     assert.equal((await post({ speakers: 'tablet' })).status, 400);
     assert.equal((await post({ version: '0.1', speakers: [{ name: 'Tablet', address: '10.9.0.20', connected: true }] })).status, 200);
     const { lastBridgeReport } = await import('../system/voice-bridge');
-    assert.deepEqual(lastBridgeReport()?.speakers, [{ name: 'Tablet', address: '10.9.0.20', connected: true }]);
+    // A bridge from before v0.1.85 doesn't say whether a speaker can announce.
+    assert.deepEqual(lastBridgeReport()?.speakers, [{ name: 'Tablet', address: '10.9.0.20', connected: true, announce: null }]);
+    await post({ version: '0.1.85', speakers: [{ name: 'Tablet', address: '10.9.0.20', connected: true, announce: true }] });
+    assert.equal(lastBridgeReport()?.speakers[0].announce, true);
+  });
+
+  it('hands the bridge reminders to say, and keeps how it went', async () => {
+    const r = await import('../family/reminders');
+    r.clearQueueForTests();
+    const id = r.announce('食藥喇', 'yue');
+    const config = await (await fetch(`${baseUrl}/internal/voice/config`, { headers: key })).json() as { announcements: { id: string; text: string; lang: string }[]; version: string };
+    assert.deepEqual(config.announcements, [{ id, text: '食藥喇', lang: 'yue' }]);
+    const done = (body: unknown) => fetch(`${baseUrl}/internal/voice/announcements/${id}`, { method: 'POST', headers: key, body: JSON.stringify(body) });
+    assert.equal((await done({ said: ['Tablet'] })).status, 200);
+    assert.equal(r.announcementStatus(id)?.state, 'said');
+    assert.equal((await done({ said: ['Tablet'] })).status, 404, 'only once');
+    const after = await (await fetch(`${baseUrl}/internal/voice/config`, { headers: key })).json() as { announcements: unknown[]; version: string };
+    assert.deepEqual(after.announcements, []);
+    // A reminder isn't a settings change: the bridge mustn't restart for it.
+    assert.equal(after.version, config.version);
   });
 
   it('gives the bridge its settings, and a new version when they change', async () => {

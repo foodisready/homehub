@@ -468,4 +468,50 @@ function migrate(db: Database.Database): void {
       created_at  TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
     );
   `);
+
+  // ── Family: daily check-ins and spoken reminders ───────────────
+  // Times are the home's local "HH:MM"; days are local weekdays, 0 = Sunday.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS checkins (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      name          TEXT    NOT NULL,
+      enabled       INTEGER NOT NULL DEFAULT 1,
+      from_time     TEXT    NOT NULL DEFAULT '05:00',
+      by_time       TEXT    NOT NULL DEFAULT '11:00',
+      days          TEXT    NOT NULL DEFAULT '0123456',
+      devices       TEXT,              -- JSON list of device ids that count; null: all
+      motion        TEXT,              -- JSON list of motion rule ids; null: all but Ring cameras
+      app_users     TEXT,              -- JSON list of user names whose app use counts; null: everyone
+      voice         INTEGER NOT NULL DEFAULT 1,
+      water         INTEGER NOT NULL DEFAULT 1,
+      paused_until  TEXT,              -- a local day, YYYY-MM-DD, last day paused
+      last_day      TEXT,              -- the local day last checked
+      last_result   TEXT,              -- ok | alerted | all-clear | missed
+      last_sign_at  TEXT,
+      last_sign     TEXT,
+      alerted_at    TEXT,
+      created_at    TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS reminders (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      text          TEXT    NOT NULL,
+      language      TEXT    NOT NULL DEFAULT 'auto',
+      at_time       TEXT    NOT NULL,
+      days          TEXT    NOT NULL DEFAULT '0123456',
+      enabled       INTEGER NOT NULL DEFAULT 1,
+      last_day      TEXT,
+      last_status   TEXT,
+      last_said_at  TEXT,
+      created_at    TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    );
+
+    -- Motion a sensor reported, so a check-in can count it: kept as long as Activity.
+    CREATE TABLE IF NOT EXISTS motion_seen (
+      id       INTEGER PRIMARY KEY AUTOINCREMENT,
+      rule_id  INTEGER NOT NULL,
+      at       TEXT    NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_motion_seen_at ON motion_seen(at);
+  `);
 }

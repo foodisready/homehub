@@ -12,6 +12,8 @@ export interface BridgeSpeaker {
   name: string;
   address: string;
   connected: boolean;
+  /** Whether it can say something it wasn't asked, such as a reminder; null from a bridge before v0.1.85. */
+  announce: boolean | null;
 }
 
 export interface BridgeReport {
@@ -125,7 +127,7 @@ export function recordBridgeReport(body: unknown, now = Date.now()): BridgeRepor
     const o = s as Record<string, unknown>;
     const address = str(o['address']);
     if (!address) return [];
-    return [{ name: str(o['name']) || address, address, connected: o['connected'] === true }];
+    return [{ name: str(o['name']) || address, address, connected: o['connected'] === true, announce: typeof o['announce'] === 'boolean' ? o['announce'] : null }];
   });
   const state = b['state'] === 'off' || b['state'] === 'starting' ? b['state'] : 'running';
   const id = str(b['id'], 40) || null;

@@ -129,3 +129,10 @@ input.own-clear::-webkit-search-cancel-button { -webkit-appearance: none; appear
   .popup-overlay { padding: 0; align-items: flex-end; }
   .popup-card { max-width: none; max-height: 92vh; border-radius: var(--radius) var(--radius) 0 0; }
 }
+
+/* ── Printing (the Family voice card) ───────────────────────── */
+@media print {
+  app-nav, .no-print { display: none !important; }
+  html, body { background: #fff !important; color: #000 !important; }
+  .page { padding: 0 !important; max-width: none !important; }
+}

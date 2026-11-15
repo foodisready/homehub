@@ -237,6 +237,10 @@ class FakeClient:
     def send_voice_assistant_event(self, kind, data):
         self.events.append((kind.name, data))
 
+    async def send_voice_assistant_announcement_await_response(self, media_id, timeout, text='', preannounce_media_id='', start_conversation=False):
+        self.events.append(('ANNOUNCE', {'url': media_id, 'text': text}))
+        return mock.Mock(success=True)
+
     async def disconnect(self):
         pass
 
@@ -565,6 +569,59 @@ class SpeakerLinkTest(unittest.IsolatedAsyncioTestCase):
         for link in links:
             link.task.cancel()
 
+    async def test_says_a_reminder_on_a_speaker_that_can(self):
+        FakeClient.voice_flags = 1 | 16   # voice assistant, announce
+        link, c = await self.connected_link(lambda *a: None)
+        self.assertTrue(link.can_announce)
+        self.assertTrue(await link.announce('食藥喇', 'yue'))
+        self.assertEqual(c.events[-1], ('ANNOUNCE', {'url': 'http://me/3.wav', 'text': '食藥喇'}))
+        # Heard back, it isn't a command.
+        self.assertEqual(link.said[0], '食藥喇')
+
+    async def test_a_speaker_that_cant_announce_is_not_asked(self):
+        link, c = await self.connected_link(lambda *a: None)
+        self.assertFalse(link.can_announce)
+        self.assertFalse(await link.announce('Pills', 'en'))
+        self.assertFalse(any(e[0] == 'ANNOUNCE' for e in c.events))
+
+    async def test_a_reminder_waits_for_a_command_being_answered(self):
+        from homehub_voice import speakers
+
+        FakeClient.voice_flags = 1 | 16
+        link, c = await self.connected_link(lambda *a: None)
+        link.run = speakers.Run(1, 'conv')
+        task = asyncio.create_task(link.announce('Pills', 'en'))
+        await asyncio.sleep(0.2)
+        self.assertFalse(any(e[0] == 'ANNOUNCE' for e in c.events))
+        link.run = None
+        self.assertTrue(await asyncio.wait_for(task, 2))
+
+    async def test_speakers_say_why_none_said_it(self):
+        from homehub_voice import speakers
+
+        made = []
+
+        def make(s, listed):
+            link = speakers.SpeakerLink(s, lambda a, sp: None, lambda t, h, lang='en': '', listed)
+            link.start = lambda: None
+            made.append(link)
+            return link
+
+        group = speakers.Speakers([], make, discover=False)
+        self.assertEqual(await group.announce('Pills', 'en'), ([], 'no speaker is connected'))
+        group.add(cfg.Speaker('10.0.0.5'), True)
+        made[0].connected = True
+        made[0].name = 'Kitchen'
+        said, why = await group.announce('Pills', 'en')
+        self.assertEqual(said, [])
+        self.assertIn("Kitchen can't say reminders", why)
+
+        async def yes(text, lang):
+            return True
+        made[0].can_announce = True
+        made[0].announce = yes
+        self.assertEqual(await group.announce('Pills', 'en'), (['Kitchen'], ''))
+
     async def test_not_a_speaker_is_left_alone(self):
         FakeClient.voice_flags = 0
         from homehub_voice import speakers
@@ -595,7 +652,7 @@ class SpeakerLinkTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(group.changed.is_set())
         made[0].connected = True
         made[1].usable = False
-        self.assertEqual(group.status(), [{'name': '10.0.0.5', 'address': '10.0.0.5', 'connected': True}])
+        self.assertEqual(group.status(), [{'name': '10.0.0.5', 'address': '10.0.0.5', 'connected': True, 'announce': False}])
 
 
 

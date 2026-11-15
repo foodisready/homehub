@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import logging
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 from dataclasses import dataclass, field
@@ -87,6 +88,10 @@ class HomeHub:
     def config(self) -> dict:
         """Voice on or off, and its languages, from HomeHub's Settings."""
         return self._call('/config')
+
+    def announced(self, announcement_id: str, said: list[str], error: str = '') -> None:
+        """How saying a reminder went."""
+        self._call(f'/announcements/{urllib.parse.quote(announcement_id)}', {'said': said, **({'error': error} if error else {})})
 
     def command(self, text: str, retry: bool = False) -> CommandResult:
         """retry: if this isn't understood, the bridge will try again, so HomeHub doesn't list it as missed yet."""

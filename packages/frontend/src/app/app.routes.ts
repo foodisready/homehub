@@ -77,6 +77,16 @@ export const routes: Routes = [
     canActivate: [authGuard],
   },
   {
+    path: 'family',
+    loadComponent: () => import('./features/family/family.component').then((m) => m.FamilyComponent),
+    canActivate: [authGuard],
+  },
+  {
+    path: 'family/card',
+    loadComponent: () => import('./features/family/voice-card.component').then((m) => m.VoiceCardComponent),
+    canActivate: [authGuard],
+  },
+  {
     path: 'health',
     loadComponent: () => import('./features/health/health.component').then((m) => m.HealthComponent),
     canActivate: [authGuard],

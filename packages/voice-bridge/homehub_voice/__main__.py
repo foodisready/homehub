@@ -124,7 +124,31 @@ async def main() -> int:
             return False
         # HomeHub before v0.1.79 doesn't say, so names wait for the next check-in.
         await names_changed(res.get('namesVersion'))
+        start_announcements(res.get('announcements'))
         return bool(res.get('version')) and res['version'] != config_version
+
+    # Reminders HomeHub wants said, by id: each said once, while the bridge goes on listening.
+    announcing: set[str] = set()
+
+    async def say_one(a: dict) -> None:
+        aid = str(a['id'])
+        try:
+            said, error = await speakers.announce(str(a.get('text') or ''), str(a.get('lang') or 'en'))
+            await asyncio.get_running_loop().run_in_executor(None, homehub.announced, aid, said, error)
+        except Exception as e:  # noqa: BLE001 — HomeHub gives up on it after two minutes
+            log.warning('reminder %r failed: %s', a.get('text'), e)
+        finally:
+            # Kept a while longer, so a slow answer to HomeHub can't have it said twice.
+            await asyncio.sleep(180)
+            announcing.discard(aid)
+
+    def start_announcements(items: object) -> None:
+        if not isinstance(items, list):
+            return
+        for a in items:
+            if isinstance(a, dict) and a.get('id') and a.get('text') and str(a['id']) not in announcing:
+                announcing.add(str(a['id']))
+                asyncio.create_task(say_one(a))
 
     async def report() -> None:
         nonlocal restart
