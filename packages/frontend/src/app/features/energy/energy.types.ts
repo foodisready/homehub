@@ -34,6 +34,17 @@ export interface Usage {
   months: MonthTotal[];
   thisMonth: string;
   timezone: string;
+  /** The panel monitor's measured month; null without one. */
+  panel: PanelMonth | null;
+}
+
+export type PanelRole = 'main' | 'circuit' | 'off';
+export interface PanelMonth { channels: { key: string; name: string; role: PanelRole; kwh: number }[]; wholeKwh: number | null; since: string | null }
+export interface PanelReading { key: string; watts: number | null; wh: number | null; volts: number | null }
+/** GET /api/energy/panel */
+export interface PanelView {
+  set: boolean; ip?: string; hasPassword?: boolean; error?: string | null; model?: string | null; profile?: string | null; at?: string | null;
+  problems?: string[]; channels?: (PanelReading & { name: string; role: PanelRole })[];
 }
 
 export const monthName = (m: string, style: 'long' | 'short' = 'long', year = false) =>

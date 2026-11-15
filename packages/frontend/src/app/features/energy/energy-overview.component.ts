@@ -39,7 +39,7 @@ const CURRENCIES = ['USD', 'CAD', 'GBP', 'EUR', 'AUD', 'HKD', 'CNY', 'VND', 'SGD
       <div class="tiles">
         <div class="tile">
           <div class="v">{{ kwh(u().totals.kwh) }}</div>
-          <div class="l">electricity {{ u().partial ? 'this month so far' : 'in ' + monthLong() }}</div>
+          <div class="l">{{ u().panel?.wholeKwh != null ? 'HomeHub’s devices, estimated,' : 'electricity' }} {{ u().partial ? 'this month so far' : 'in ' + monthLong() }}</div>
         </div>
         @if (u().totals.therms > 0) {
           <div class="tile"><div class="v">{{ u().totals.therms }} therms</div><div class="l">gas, for heating</div></div>

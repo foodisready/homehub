@@ -548,6 +548,20 @@ function migrate(db: Database.Database): void {
       UNIQUE(reminder_id, day)
     );
 
+    -- A panel monitor's energy by hour (local "YYYY-MM-DDTHH") and clamp, from its running totals.
+    CREATE TABLE IF NOT EXISTS panel_hours (
+      hour     TEXT NOT NULL,
+      channel  TEXT NOT NULL,
+      wh       REAL NOT NULL,
+      PRIMARY KEY (hour, channel)
+    );
+    -- The last running total read from each clamp, so time HomeHub was off is still counted.
+    CREATE TABLE IF NOT EXISTS panel_counters (
+      channel  TEXT PRIMARY KEY,
+      wh       REAL NOT NULL,
+      at       TEXT NOT NULL
+    );
+
     -- Buttons that call for help: a press visits /sos/<token>/help, a double press /sos/<token>/cancel.
     CREATE TABLE IF NOT EXISTS sos_buttons (
       id          INTEGER PRIMARY KEY AUTOINCREMENT,

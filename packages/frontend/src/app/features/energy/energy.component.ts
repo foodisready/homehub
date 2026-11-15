@@ -6,6 +6,7 @@ import { EnergyLiveComponent } from './energy-live.component';
 import { EnergyMonthsComponent } from './energy-months.component';
 import { EnergyOverviewComponent } from './energy-overview.component';
 import { EnergyWhereComponent } from './energy-where.component';
+import { EnergyPanelComponent } from './energy-panel.component';
 import { ThermostatHistoryComponent } from './thermostat-history.component';
 import { monthName, type Usage } from './energy.types';
 
@@ -19,7 +20,7 @@ import { monthName, type Usage } from './energy.types';
   selector: 'app-energy',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [EnergyOverviewComponent, EnergyWhereComponent, EnergyMonthsComponent, ThermostatHistoryComponent, EnergyLiveComponent],
+  imports: [EnergyOverviewComponent, EnergyPanelComponent, EnergyWhereComponent, EnergyMonthsComponent, ThermostatHistoryComponent, EnergyLiveComponent],
   styles: [`
     .top { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 1.1rem; }
     h1 { font-size: 1.4rem; font-weight: 700; margin: 0; }
@@ -46,6 +47,8 @@ import { monthName, type Usage } from './energy.types';
       @if (usage(); as u) {
         <div [class.refetch]="loading()">
           <app-energy-overview [usage]="u" [admin]="admin()" (changed)="load()" />
+          <h2>Whole home</h2>
+          <app-energy-panel [u]="u" [admin]="admin()" (changed)="load()" />
           <h2>Where it goes</h2>
           <app-energy-where [usage]="u" [admin]="admin()" (changed)="load()" />
           <h2>By month</h2>
