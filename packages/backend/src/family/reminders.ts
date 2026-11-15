@@ -3,7 +3,10 @@ import { getDb } from '../db';
 import { logger } from '../logger';
 import { isActiveServer } from '../system/role';
 import { getVoiceSettings, type VoiceLanguage } from '../system/voice-bridge';
+import { sendPushToAll } from '../push/push.service';
+import { emailConfigured, sendEmail } from '../notifications/providers/email';
 import { dayKey, localTime } from './checkin';
+import { personName } from './sos';
 
 /**
  * Spoken reminders: "食藥喇" at 9:00, said by the home's speakers in the language it's written in.
@@ -13,6 +16,11 @@ import { dayKey, localTime } from './checkin';
  * said it. A speaker in the middle of a command finishes that first.
  *
  * Only the active server says reminders, as only it runs voice.
+ *
+ * A reminder can ask back: "食藥喇。食咗藥未呀？" The speaker listens for the answer (no wake word
+ * needed on speakers that can start a conversation), and a yes or no in any language answers it
+ * while it's open. No answer, or "not yet", and it's asked again in 10 minutes, up to 3 times; then
+ * the family is told, by push and email only: it isn't an emergency.
  */
 
 export type ReminderLanguage = 'auto' | VoiceLanguage;
@@ -27,11 +35,18 @@ export interface Reminder {
   lastDay: string | null;
   lastStatus: string | null;
   lastSaidAt: string | null;
+  /** Asks if it's done, and tells the family if nobody says yes. */
+  ask: boolean;
+  /** For one that asks: the last week's answers, newest first. */
+  answers: AskDay[];
 }
 
-interface Row { id: number; text: string; language: string; at_time: string; days: string; enabled: number; last_day: string | null; last_status: string | null; last_said_at: string | null }
+export interface AskDay { id: number; day: string; answer: 'yes' | 'no' | null; asks: number; answeredAt: string | null; answeredBy: string | null; toldAt: string | null }
 
-export interface Announcement { id: string; text: string; lang: VoiceLanguage; reminderId: number | null; queuedAt: number }
+interface Row { id: number; text: string; language: string; at_time: string; days: string; enabled: number; last_day: string | null; last_status: string | null; last_said_at: string | null; ask: number }
+
+/** ask: the reminder_asks row this one asks about, so the speaker listens for the answer. */
+export interface Announcement { id: string; text: string; lang: VoiceLanguage; reminderId: number | null; queuedAt: number; ask: number | null }
 
 export class ReminderError extends Error {}
 
@@ -46,6 +61,7 @@ const LANGUAGES: ReminderLanguage[] = ['auto', 'en', 'yue', 'zh', 'vi'];
 const toReminder = (r: Row): Reminder => ({
   id: r.id, text: r.text, language: r.language as ReminderLanguage, at: r.at_time, days: [...r.days].map(Number),
   enabled: !!r.enabled, lastDay: r.last_day, lastStatus: r.last_status, lastSaidAt: r.last_said_at,
+  ask: !!r.ask, answers: r.ask ? recentAnswers(r.id) : [],
 });
 
 export function listReminders(): Reminder[] {
@@ -98,17 +114,18 @@ export function saveReminder(input: unknown, id?: number): Reminder {
     throw new ReminderError('days must be a list of weekdays, 0 (Sunday) to 6');
   }
   const enabled = 'enabled' in b ? b['enabled'] === true : existing?.enabled ?? true;
-  const values = [text, language, at, [...new Set(days as number[])].sort().join(''), enabled ? 1 : 0];
+  const ask = 'ask' in b ? b['ask'] === true : existing?.ask ?? false;
+  const values = [text, language, at, [...new Set(days as number[])].sort().join(''), enabled ? 1 : 0, ask ? 1 : 0];
   const db = getDb();
   // A time already passed today waits for tomorrow, so saving at 9:05 doesn't say a 9:00 reminder now.
   const today = dayKey(new Date());
   const passed = Date.now() >= localTime(today, at);
   if (existing) {
     const lastDay = existing.at !== at ? (passed ? today : null) : existing.lastDay;
-    db.prepare('UPDATE reminders SET text = ?, language = ?, at_time = ?, days = ?, enabled = ?, last_day = ? WHERE id = ?').run(...values, lastDay, existing.id);
+    db.prepare('UPDATE reminders SET text = ?, language = ?, at_time = ?, days = ?, enabled = ?, ask = ?, last_day = ? WHERE id = ?').run(...values, lastDay, existing.id);
     return getReminder(existing.id)!;
   }
-  const r = db.prepare('INSERT INTO reminders (text, language, at_time, days, enabled, last_day) VALUES (?, ?, ?, ?, ?, ?)').run(...values, passed ? today : null);
+  const r = db.prepare('INSERT INTO reminders (text, language, at_time, days, enabled, ask, last_day) VALUES (?, ?, ?, ?, ?, ?, ?)').run(...values, passed ? today : null);
   return getReminder(Number(r.lastInsertRowid))!;
 }
 
@@ -139,16 +156,16 @@ function setStatus(reminderId: number | null, status: string, said: boolean): vo
 }
 
 /** Puts something in the queue for the speakers. Returns its id. */
-export function announce(text: string, lang: VoiceLanguage, reminderId: number | null = null, now = Date.now()): string {
+export function announce(text: string, lang: VoiceLanguage, reminderId: number | null = null, now = Date.now(), ask: number | null = null): string {
   const id = randomUUID();
-  queue.set(id, { id, text, lang, reminderId, queuedAt: now });
+  queue.set(id, { id, text, lang, reminderId, queuedAt: now, ask });
   result(id, { state: 'waiting', said: [], error: null }, now);
   setStatus(reminderId, 'waiting for the speakers', false);
   return id;
 }
 
 /** What the bridge should say now. Old ones it never took are given up on. */
-export function pendingAnnouncements(now = Date.now()): Pick<Announcement, 'id' | 'text' | 'lang'>[] {
+export function pendingAnnouncements(now = Date.now()): (Pick<Announcement, 'id' | 'text' | 'lang'> & { ask?: number })[] {
   for (const a of queue.values()) {
     if (now - a.queuedAt > ANSWER_WITHIN_MS) {
       queue.delete(a.id);
@@ -157,7 +174,7 @@ export function pendingAnnouncements(now = Date.now()): Pick<Announcement, 'id' 
       logger.warn({ text: a.text }, 'Reminder not said: the voice bridge did not take it');
     }
   }
-  return [...queue.values()].map(({ id, text, lang }) => ({ id, text, lang }));
+  return [...queue.values()].map(({ id, text, lang, ask }) => ({ id, text, lang, ...(ask !== null ? { ask } : {}) }));
 }
 
 /** The bridge's answer: how many speakers said it, or why none did. */
@@ -201,10 +218,118 @@ export function checkReminders(now = Date.now()): number {
     if (!getVoiceSettings().enabled) { setStatus(r.id, 'not said: voice control is off', false); continue; }
     const lang = voiceFor(r.text, r.language);
     if (!lang) { setStatus(r.id, 'not said: its language isn’t on in Voice control', false); continue; }
-    announce(r.text, lang, r.id, now);
+    if (r.ask) {
+      const askId = startAsk(r.id, today, now);
+      announce(withQuestion(r.text, lang), lang, r.id, now, askId);
+    } else {
+      announce(r.text, lang, r.id, now);
+    }
     n++;
   }
+  askAgain(now);
+  pendingAnnouncements(now);   // gives up on any the bridge never took, even with no bridge asking
   return n;
+}
+
+// ── Asking back ─────────────────────────────────────────────────
+
+export const ASK_AGAIN_MS = 10 * 60_000;
+export const MAX_ASKS = 3;
+
+const MEDICINE = /藥|药|thuốc|medicine|medication|meds|pill|tablet/i;
+
+/** "食咗藥未呀？", "Have you taken it?": about medicine if the reminder is, otherwise "done it?". */
+export function question(text: string, lang: VoiceLanguage): string {
+  const med = MEDICINE.test(text);
+  switch (lang) {
+    case 'yue': return med ? '食咗藥未呀？' : '做咗未呀？';
+    case 'zh': return med ? '吃药了吗？' : '做了吗？';
+    case 'vi': return med ? 'Đã uống thuốc chưa?' : 'Đã làm chưa?';
+    default: return med ? 'Have you taken it?' : 'Have you done it?';
+  }
+}
+
+/** The reminder, then its question: "Take your pills. Have you taken it?", "食藥喇。食咗藥未呀？" */
+export function withQuestion(text: string, lang: VoiceLanguage): string {
+  const chinese = lang === 'yue' || lang === 'zh';
+  const ends = /[.!?。！？]$/.test(text.trim());
+  return `${text.trim()}${ends ? (chinese ? '' : ' ') : chinese ? '。' : '. '}${question(text, lang)}`;
+}
+
+interface AskRow { id: number; reminder_id: number; day: string; first_at: string; last_at: string; asks: number; answer: string | null; answered_at: string | null; answered_by: string | null; told_at: string | null }
+
+const toAskDay = (a: AskRow): AskDay => ({
+  id: a.id, day: a.day, answer: (a.answer as 'yes' | 'no' | null), asks: a.asks, answeredAt: a.answered_at, answeredBy: a.answered_by, toldAt: a.told_at,
+});
+
+export function recentAnswers(reminderId: number, days = 7): AskDay[] {
+  return (getDb().prepare('SELECT * FROM reminder_asks WHERE reminder_id = ? ORDER BY day DESC LIMIT ?').all(reminderId, days) as AskRow[]).map(toAskDay);
+}
+
+function startAsk(reminderId: number, day: string, now: number): number {
+  const at = new Date(now).toISOString();
+  getDb().prepare('INSERT INTO reminder_asks (reminder_id, day, first_at, last_at) VALUES (?, ?, ?, ?) ON CONFLICT(reminder_id, day) DO NOTHING').run(reminderId, day, at, at);
+  return (getDb().prepare('SELECT id FROM reminder_asks WHERE reminder_id = ? AND day = ?').get(reminderId, day) as { id: number }).id;
+}
+
+/** Questions waiting for an answer, for the bridge: a yes or no heard now answers one of these. */
+export function openAsks(now = Date.now()): { id: number; lang: VoiceLanguage }[] {
+  const rows = getDb().prepare(`SELECT a.id, r.text, r.language FROM reminder_asks a JOIN reminders r ON r.id = a.reminder_id
+    WHERE a.told_at IS NULL AND (a.answer IS NULL OR a.answer = 'no') AND a.last_at >= ? ORDER BY a.last_at DESC`)
+    .all(new Date(now - ASK_AGAIN_MS - 60_000).toISOString()) as { id: number; text: string; language: string }[];
+  return rows.flatMap((r) => { const lang = voiceFor(r.text, r.language as ReminderLanguage); return lang ? [{ id: r.id, lang }] : []; });
+}
+
+/** Tells the family: by push and email, never a call. Replaced in tests. */
+let tellFamily = (title: string, body: string): void => {
+  sendPushToAll(title, body, { url: '/family' });
+  if (emailConfigured()) sendEmail({ subject: title, text: `${body}\n\n— HomeHub` }).catch((err) => logger.warn({ err }, 'Reminder email failed'));
+};
+export function setTellFamilyForTests(fn: typeof tellFamily): void { tellFamily = fn; }
+
+function tell(a: AskRow, r: Reminder, now: number, said: 'no answer' | 'not yet'): void {
+  getDb().prepare('UPDATE reminder_asks SET told_at = ? WHERE id = ?').run(new Date(now).toISOString(), a.id);
+  const who = personName();
+  const at = new Date(localTime(a.day, r.at)).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  const how = said === 'not yet' ? `said “not yet” ${a.asks} ${a.asks === 1 ? 'time' : 'times'}` : `didn’t answer, asked ${a.asks} times`;
+  tellFamily(`${who} didn’t say “${r.text}” was done`, `The ${at} reminder “${r.text}”: ${who} ${how}. You might want to check.`);
+  logger.info({ reminder: r.id, said }, 'Reminder not done: the family was told');
+}
+
+/** An answer to "done yet?": yes ends it; no asks again in 10 minutes. False if it isn't open. */
+export function answerAsk(askId: number, answer: 'yes' | 'no', by: string, now = Date.now()): boolean {
+  const a = getDb().prepare('SELECT * FROM reminder_asks WHERE id = ?').get(askId) as AskRow | undefined;
+  if (!a || a.answer === 'yes') return false;
+  const at = new Date(now).toISOString();
+  if (answer === 'yes') {
+    getDb().prepare('UPDATE reminder_asks SET answer = ?, answered_at = ?, answered_by = ? WHERE id = ?').run('yes', at, by, askId);
+    if (a.told_at) {
+      const r = getReminder(a.reminder_id);
+      if (r) tellFamily(`“${r.text}” is done`, `${by === 'voice' ? personName() : by} said it’s done, at ${new Date(now).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}.`);
+    }
+    return true;
+  }
+  getDb().prepare('UPDATE reminder_asks SET answer = ?, answered_at = ?, answered_by = ?, last_at = ? WHERE id = ?').run('no', at, by, at, askId);
+  return true;
+}
+
+/** Asks again when 10 minutes have passed with no yes; after the last try, tells the family. */
+export function askAgain(now = Date.now()): void {
+  const rows = getDb().prepare(`SELECT * FROM reminder_asks WHERE told_at IS NULL AND (answer IS NULL OR answer = 'no') AND last_at <= ?`)
+    .all(new Date(now - ASK_AGAIN_MS).toISOString()) as AskRow[];
+  for (const a of rows) {
+    const r = getReminder(a.reminder_id);
+    if (!r) continue;
+    if (now - Date.parse(a.first_at) > 3 * 3_600_000) {   // HomeHub was off: too late to ask or tell
+      getDb().prepare('UPDATE reminder_asks SET told_at = ? WHERE id = ?').run(new Date(now).toISOString(), a.id);
+      continue;
+    }
+    if (a.asks >= MAX_ASKS) { tell(a, r, now, a.answer === 'no' ? 'not yet' : 'no answer'); continue; }
+    const lang = voiceFor(r.text, r.language);
+    if (!lang || !getVoiceSettings().enabled) { tell(a, r, now, 'no answer'); continue; }
+    getDb().prepare('UPDATE reminder_asks SET asks = asks + 1, last_at = ? WHERE id = ?').run(new Date(now).toISOString(), a.id);
+    announce(withQuestion(r.text, lang), lang, r.id, now, a.id);
+  }
 }
 
 let timer: ReturnType<typeof setInterval> | undefined;

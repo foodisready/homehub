@@ -14,7 +14,11 @@ export type VoiceLanguage = 'en' | 'yue' | 'zh' | 'vi';
 export interface Reminder {
   id: number; text: string; language: 'auto' | VoiceLanguage; at: string; days: number[]; enabled: boolean;
   lastDay: string | null; lastStatus: string | null; lastSaidAt: string | null;
+  ask: boolean; answers: AskDay[];
 }
+
+/** A day's answer to a reminder that asks back. */
+export interface AskDay { id: number; day: string; answer: 'yes' | 'no' | null; asks: number; answeredAt: string | null; answeredBy: string | null; toldAt: string | null }
 
 export interface Family {
   checkins: Checkin[];

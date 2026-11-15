@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, input
 import { HttpClient } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
-import { LANGUAGE_NAME, WEEKDAYS, clockText, daysText, errorText, type Family, type Reminder, type VoiceLanguage } from './family.types';
+import { LANGUAGE_NAME, WEEKDAYS, clockText, daysText, errorText, timeIn, todayIn, type AskDay, type Family, type Reminder, type VoiceLanguage } from './family.types';
 
 /** Things to say, for a quick start, in each language the speakers can say. */
 const EXAMPLES: Record<VoiceLanguage, string[]> = {
@@ -57,6 +57,18 @@ interface SayState { state: 'waiting' | 'said' | 'not said'; said: string[]; err
     .heard { font-size: 0.82rem; color: var(--text-muted); }
     .heard.bad { color: #fcd34d; }
     .err { color: var(--red); font-size: 0.85rem; margin: 0; }
+    label.check { display: flex; gap: 0.5rem; align-items: flex-start; font-size: 0.85rem; line-height: 1.45; color: var(--text-muted); }
+    label.check input { width: auto; margin-top: 0.2rem; }
+    .answer { display: block; font-size: 0.82rem; margin-top: 0.25rem; }
+    .answer.bad { color: #fcd34d; }
+    .linkish { background: none; border: none; color: var(--accent); padding: 0 0 0 0.3rem; font-size: 0.82rem; text-decoration: underline; }
+    .week { display: flex; gap: 0.25rem; align-items: center; margin-top: 0.35rem; flex-wrap: wrap; }
+    .dot { display: inline-block; width: 0.65rem; height: 0.65rem; border-radius: 50%; background: var(--border); }
+    .dot.yes { background: var(--green); }
+    .dot.told { background: #f59e0b; }
+    .week-label { font-size: 0.72rem; color: var(--text-muted); margin-right: 0.2rem; }
+    .week-key { font-size: 0.7rem; color: var(--text-muted); margin-left: 0.4rem; display: inline-flex; align-items: center; gap: 0.25rem; }
+    .week-key i { font-style: normal; }
     @media (max-width: 599px) {
       li { grid-template-columns: 4.4rem 1fr; }
       .acts { grid-column: 1 / -1; justify-content: flex-start; }
@@ -81,6 +93,20 @@ interface SayState { state: 'waiting' | 'said' | 'not said'; said: string[]; err
                 <span class="status" [class.bad]="s.state === 'not said'">{{ sayText(s) }}</span>
               } @else if (r.lastStatus) {
                 <span class="status" [class.bad]="r.lastStatus.startsWith('not said')">{{ statusText(r) }}</span>
+              }
+              @if (r.ask) {
+                @if (todayAsk(r); as t) {
+                  <span class="answer" [class.bad]="!!t.toldAt && t.answer !== 'yes'">{{ answerText(t) }}
+                    @if (t.answer !== 'yes') { <button type="button" class="linkish" (click)="markDone(t)">Mark done</button> }
+                  </span>
+                }
+                @if (r.answers.length > 1) {
+                  <span class="week">
+                    <span class="week-label">Last {{ r.answers.length }} days</span>
+                    @for (a of week(r); track a.day) { <span class="dot" [class]="'dot ' + dotOf(a)" [title]="a.day + ': ' + answerText(a)" role="img" [attr.aria-label]="a.day + ': ' + answerText(a)"></span> }
+                    <span class="week-key">· <i class="dot yes"></i> done <i class="dot told"></i> family told</span>
+                  </span>
+                }
               }
             </span>
             <span class="acts">
@@ -112,6 +138,10 @@ interface SayState { state: 'waiting' | 'said' | 'not said'; said: string[]; err
       </label>
       <label class="f">At
         <input type="time" [(ngModel)]="at" name="at" required />
+      </label>
+      <label class="check wide">
+        <input type="checkbox" [(ngModel)]="ask" name="ask" />
+        <span>Ask if it’s done (“{{ askPreview() }}”). If nobody says yes after 3 tries, 10 minutes apart, the family is told.</span>
       </label>
       <div class="days wide" role="group" aria-label="Days">
         @for (d of order; track d) {
@@ -145,6 +175,7 @@ export class RemindersComponent {
   text = '';
   language: 'auto' | VoiceLanguage = 'auto';
   at = '09:00';
+  ask = false;
   readonly dayList = signal<number[]>([0, 1, 2, 3, 4, 5, 6]);
   readonly editing = signal<Reminder | null>(null);
   readonly saving = signal(false);
@@ -201,20 +232,20 @@ export class RemindersComponent {
 
   edit(r: Reminder): void {
     this.editing.set(r);
-    this.text = r.text; this.language = r.language; this.at = r.at; this.dayList.set(r.days);
+    this.text = r.text; this.language = r.language; this.at = r.at; this.dayList.set(r.days); this.ask = r.ask;
     this.error.set(''); this.confirmDelete.set(false); this.trying.set(null);
   }
 
   reset(): void {
     this.editing.set(null);
-    this.text = ''; this.language = 'auto'; this.at = '09:00'; this.dayList.set([0, 1, 2, 3, 4, 5, 6]);
+    this.text = ''; this.language = 'auto'; this.at = '09:00'; this.dayList.set([0, 1, 2, 3, 4, 5, 6]); this.ask = false;
     this.error.set(''); this.confirmDelete.set(false); this.trying.set(null);
   }
 
   save(): void {
     this.saving.set(true);
     this.error.set('');
-    const body = { text: this.text.trim(), language: this.language, at: this.at, days: this.dayList() };
+    const body = { text: this.text.trim(), language: this.language, at: this.at, days: this.dayList(), ask: this.ask };
     const r = this.editing();
     (r ? this.http.put(`/api/family/reminders/${r.id}`, body) : this.http.post('/api/family/reminders', body)).subscribe({
       next: () => { this.saving.set(false); this.reset(); this.changed.emit(); },
@@ -234,6 +265,37 @@ export class RemindersComponent {
       next: () => { this.reset(); this.changed.emit(); },
       error: (e) => this.error.set(errorText(e, 'The reminder couldn’t be deleted.')),
     });
+  }
+
+  /** The question it would ask, as the backend words it. */
+  askPreview(): string {
+    const med = /藥|药|thuốc|medicine|medication|meds|pill|tablet/i.test(this.text);
+    const lang = this.guess(this.text);
+    if (lang === 'Cantonese') return med ? '食咗藥未呀？' : '做咗未呀？';
+    if (lang === 'Mandarin') return med ? '吃药了吗？' : '做了吗？';
+    if (lang === 'Vietnamese') return med ? 'Đã uống thuốc chưa?' : 'Đã làm chưa?';
+    return med ? 'Have you taken it?' : 'Have you done it?';
+  }
+
+  todayAsk(r: Reminder): AskDay | null {
+    const today = todayIn(this.data().timezone);
+    return r.answers.find((a) => a.day === today) ?? null;
+  }
+
+  /** Oldest first, for the row of dots. */
+  week(r: Reminder): AskDay[] { return [...r.answers].reverse(); }
+
+  dotOf(a: AskDay): string { return a.answer === 'yes' ? 'yes' : a.toldAt ? 'told' : 'open'; }
+
+  answerText(a: AskDay): string {
+    const tz = this.data().timezone;
+    if (a.answer === 'yes') return `Done${a.answeredAt ? ` at ${timeIn(a.answeredAt, tz)}` : ''}${a.answeredBy && a.answeredBy !== 'voice' ? `, marked by ${a.answeredBy}` : ', said to the speaker'}.`;
+    if (a.toldAt) return `Not said to be done${a.answer === 'no' ? ' (“not yet”)' : ''}: the family was told at ${timeIn(a.toldAt, tz)}.`;
+    return a.answer === 'no' ? `“Not yet”: asked ${a.asks} of 3 times so far.` : `Waiting for an answer: asked ${a.asks} of 3 times. If the speaker doesn’t catch it, it asks again.`;
+  }
+
+  markDone(a: AskDay): void {
+    this.http.post(`/api/family/reminders/asks/${a.id}/done`, {}).subscribe({ next: () => this.changed.emit(), error: () => this.changed.emit() });
   }
 
   sayNow(r: Reminder): void {

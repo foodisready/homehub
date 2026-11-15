@@ -238,7 +238,7 @@ class FakeClient:
         self.events.append((kind.name, data))
 
     async def send_voice_assistant_announcement_await_response(self, media_id, timeout, text='', preannounce_media_id='', start_conversation=False):
-        self.events.append(('ANNOUNCE', {'url': media_id, 'text': text}))
+        self.events.append(('ANNOUNCE', {'url': media_id, 'text': text, **({'listen': True} if start_conversation else {})}))
         return mock.Mock(success=True)
 
     async def disconnect(self):
@@ -577,6 +577,20 @@ class SpeakerLinkTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(c.events[-1], ('ANNOUNCE', {'url': 'http://me/3.wav', 'text': '食藥喇'}))
         # Heard back, it isn't a command.
         self.assertEqual(link.said[0], '食藥喇')
+
+    async def test_a_reminder_that_asks_listens_for_the_answer(self):
+        FakeClient.voice_flags = 1 | 16 | 32   # voice assistant, announce, start conversation
+        link, c = await self.connected_link(lambda *a: None)
+        self.assertTrue(await link.announce('食藥喇 食咗藥未呀？', 'yue', ask=7))
+        self.assertTrue(c.events[-1][1].get('listen'))
+        self.assertEqual(link.asked[0], 'ask:7')
+        self.assertEqual(link.asked[2], 'yue')
+
+    async def test_a_speaker_that_cant_listen_after_still_says_it(self):
+        FakeClient.voice_flags = 1 | 16
+        link, c = await self.connected_link(lambda *a: None)
+        self.assertTrue(await link.announce('Pills', 'en', ask=7))
+        self.assertNotIn('listen', c.events[-1][1])
 
     async def test_a_speaker_that_cant_announce_is_not_asked(self):
         link, c = await self.connected_link(lambda *a: None)

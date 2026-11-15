@@ -29,7 +29,7 @@ describe('spoken reminders', () => {
   });
   after(() => { db.close(); fs.rmSync(TMP, { recursive: true, force: true }); });
   beforeEach(() => {
-    db.exec('DELETE FROM reminders;');
+    db.exec('DELETE FROM reminders; DELETE FROM reminder_asks;');
     r.clearQueueForTests();
     voice(true, ['en', 'yue', 'vi']);
   });
@@ -121,5 +121,79 @@ describe('spoken reminders', () => {
   it('a new reminder whose time passed today waits for tomorrow', () => {
     const rem = r.saveReminder({ text: 'Pills', at: '00:00' });
     assert.equal(rem.lastDay, new Date().toLocaleDateString('en-CA'));
+  });
+  it('asks if it was done, and is done with a yes', () => {
+    const told: string[] = [];
+    r.setTellFamilyForTests((title) => { told.push(title); });
+    const rem = r.saveReminder({ text: '食藥喇', at: '09:00', ask: true });
+    db.prepare('UPDATE reminders SET last_day = NULL WHERE id = ?').run(rem.id);
+    r.checkReminders(at(18, 9, 0));
+    const [a] = r.pendingAnnouncements(at(18, 9, 0));
+    assert.equal(a.text, '食藥喇。食咗藥未呀？');
+    assert.equal(typeof a.ask, 'number');
+    assert.deepEqual(r.openAsks(at(18, 9, 1)), [{ id: a.ask, lang: 'yue' }]);
+    assert.equal(r.answerAsk(a.ask!, 'yes', 'voice', at(18, 9, 1)), true);
+    assert.deepEqual(r.openAsks(at(18, 9, 2)), [], 'answered');
+    r.checkReminders(at(18, 9, 30));
+    assert.deepEqual(told, []);
+    const day = r.getReminder(rem.id)!.answers[0];
+    assert.equal(day.answer, 'yes');
+    assert.equal(day.answeredBy, 'voice');
+    assert.equal(r.answerAsk(a.ask!, 'no', 'voice'), false, 'a yes is final');
+  });
+
+  it('asks again every 10 minutes, then tells the family', () => {
+    const told: string[] = [];
+    r.setTellFamilyForTests((title, body) => { told.push(`${title} | ${body}`); });
+    const rem = r.saveReminder({ text: 'Take your pills', at: '08:00', ask: true });
+    db.prepare('UPDATE reminders SET last_day = NULL WHERE id = ?').run(rem.id);
+    r.checkReminders(at(19, 8, 0));
+    assert.equal(r.pendingAnnouncements(at(19, 8, 0))[0].text, 'Take your pills. Have you taken it?');
+    r.clearQueueForTests();
+    r.checkReminders(at(19, 8, 9));
+    assert.equal(r.pendingAnnouncements(at(19, 8, 9)).length, 0, 'not yet');
+    r.checkReminders(at(19, 8, 10));
+    assert.equal(r.pendingAnnouncements(at(19, 8, 10)).length, 1, 'asked a second time');
+    r.clearQueueForTests();
+    r.checkReminders(at(19, 8, 20));
+    assert.equal(r.getReminder(rem.id)!.answers[0].asks, 3);
+    r.clearQueueForTests();
+    r.checkReminders(at(19, 8, 30));
+    assert.equal(r.pendingAnnouncements(at(19, 8, 30)).length, 0, 'not asked a fourth time');
+    assert.equal(told.length, 1);
+    assert.match(told[0], /^Someone didn’t say “Take your pills” was done \| The 8:00 AM reminder “Take your pills”: Someone didn’t answer, asked 3 times/);
+    r.checkReminders(at(19, 9, 0));
+    assert.equal(told.length, 1, 'told once');
+    // Said done later, in the app: the family hears that too.
+    r.answerAsk(r.getReminder(rem.id)!.answers[0].id, 'yes', 'Amy', at(19, 9, 5));
+    assert.match(told[1], /^“Take your pills” is done \| Amy said it’s done/);
+  });
+
+  it('"not yet" asks again in 10 minutes and says so if it never is', () => {
+    const told: string[] = [];
+    r.setTellFamilyForTests((title, body) => { told.push(body); });
+    const rem = r.saveReminder({ text: 'Take your pills', at: '08:00', ask: true });
+    db.prepare('UPDATE reminders SET last_day = NULL WHERE id = ?').run(rem.id);
+    r.checkReminders(at(20, 8, 0));
+    const id = r.getReminder(rem.id)!.answers[0].id;
+    r.answerAsk(id, 'no', 'voice', at(20, 8, 5));
+    r.checkReminders(at(20, 8, 14));
+    assert.equal(r.getReminder(rem.id)!.answers[0].asks, 1, '10 minutes from the "no"');
+    r.checkReminders(at(20, 8, 15));
+    r.answerAsk(id, 'no', 'voice', at(20, 8, 16));
+    r.checkReminders(at(20, 8, 26));
+    r.answerAsk(id, 'no', 'voice', at(20, 8, 27));
+    r.checkReminders(at(20, 8, 37));
+    assert.match(told[0], /said “not yet” 3 times/);
+  });
+
+  it('only asks about medicine when it is about medicine', () => {
+    assert.equal(r.question('Put the bins out', 'en'), 'Have you done it?');
+    assert.equal(r.question('食藥喇', 'yue'), '食咗藥未呀？');
+    assert.equal(r.question('吃药了', 'zh'), '吃药了吗？');
+    assert.equal(r.question('Uống thuốc', 'vi'), 'Đã uống thuốc chưa?');
+    assert.equal(r.question('Tưới cây', 'vi'), 'Đã làm chưa?');
+    assert.equal(r.withQuestion('Pills!', 'en'), 'Pills! Have you taken it?');
+    assert.equal(r.withQuestion('食藥喇！', 'yue'), '食藥喇！食咗藥未呀？');
   });
 });

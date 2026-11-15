@@ -13,7 +13,7 @@ import {
 import { readTwilioConfig, twilioReady } from '../notifications/providers/sms';
 import { homeAddresses } from '../discovery/local-name';
 import {
-  announce, announcementStatus, deleteReminder, getReminder, listReminders, ReminderError, saveReminder, voiceFor, type ReminderLanguage,
+  announce, announcementStatus, answerAsk, deleteReminder, getReminder, listReminders, ReminderError, saveReminder, voiceFor, type ReminderLanguage,
 } from '../family/reminders';
 
 /** Daily check-ins and spoken reminders, mounted at /api/family. Check-ins are an admin's to set. */
@@ -152,6 +152,12 @@ familyRouter.post('/reminders', (req: Request, res: Response) => {
 
 familyRouter.put('/reminders/:id', (req: Request, res: Response) => {
   try { res.json(saveReminder(req.body, id(req))); } catch (err) { bad(res, err); }
+});
+
+// POST /api/family/reminders/asks/:id/done: someone in the family says it's done.
+familyRouter.post('/reminders/asks/:id/done', (req: Request, res: Response) => {
+  if (!answerAsk(id(req), 'yes', req.user?.name ?? 'Someone')) return res.status(404).json({ error: 'Already done, or not asking', code: 'NOT_FOUND' });
+  res.json({ ok: true });
 });
 
 familyRouter.delete('/reminders/:id', (req: Request, res: Response) => {

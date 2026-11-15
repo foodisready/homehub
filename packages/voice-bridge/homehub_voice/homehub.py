@@ -32,6 +32,8 @@ class HomeHub:
         self.key = key
         self.timeout = timeout
         self.names: list[str] = []
+        # Reminders waiting for a yes or no: [{'id': 3, 'lang': 'yue'}], from the config check.
+        self.asking: list[dict] = []
         # The scenes' names among them: only these may be run by saying a name alone.
         self.scenes: list[str] = []
         # Each device's names (its alias and nicknames), so two nicknames of one light aren't a close call.
@@ -92,6 +94,16 @@ class HomeHub:
     def announced(self, announcement_id: str, said: list[str], error: str = '') -> None:
         """How saying a reminder went."""
         self._call(f'/announcements/{urllib.parse.quote(announcement_id)}', {'said': said, **({'error': error} if error else {})})
+
+    def answer_ask(self, ask_id: int, answer: str) -> bool:
+        """The answer to a reminder's "done yet?". False if HomeHub isn't asking it any more."""
+        try:
+            self._call(f'/asks/{int(ask_id)}', {'answer': answer})
+            return True
+        except HomeHubError as e:
+            if 'answered 404' in str(e):
+                return False
+            raise
 
     def sos(self, action: str, where: str, lang: str, heard: str) -> dict:
         """A call for help ('raise') or 'cancel', heard by the speaker `where`. Returns HomeHub's answer: its state."""

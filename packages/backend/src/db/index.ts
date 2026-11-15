@@ -533,6 +533,21 @@ function migrate(db: Database.Database): void {
       ended_at       TEXT
     );
 
+    -- A reminder that asks back ("食咗藥未呀？"): one row a day, with the answer.
+    CREATE TABLE IF NOT EXISTS reminder_asks (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      reminder_id  INTEGER NOT NULL REFERENCES reminders(id) ON DELETE CASCADE,
+      day          TEXT    NOT NULL,
+      first_at     TEXT    NOT NULL,
+      last_at      TEXT    NOT NULL,
+      asks         INTEGER NOT NULL DEFAULT 1,
+      answer       TEXT,
+      answered_at  TEXT,
+      answered_by  TEXT,
+      told_at      TEXT,
+      UNIQUE(reminder_id, day)
+    );
+
     -- Buttons that call for help: a press visits /sos/<token>/help, a double press /sos/<token>/cancel.
     CREATE TABLE IF NOT EXISTS sos_buttons (
       id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -542,4 +557,5 @@ function migrate(db: Database.Database): void {
       created_at  TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
     );
   `);
+  try { db.exec('ALTER TABLE reminders ADD COLUMN ask INTEGER NOT NULL DEFAULT 0'); } catch {}
 }
