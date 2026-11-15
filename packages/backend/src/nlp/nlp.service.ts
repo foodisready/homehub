@@ -11,6 +11,7 @@ import { applyPower, assistantMaySwitch, type PowerDevice } from '../devices/pow
 import { logger } from '../logger';
 import { findDeviceByName, findDeviceGroup, listDeviceNames } from './find-device';
 import { runGroupCommand, runPowerCommand } from './commands';
+import { runNativeCommand } from './native-commands';
 import { recordCommand } from './command-log';
 import { looksLikeToolCall, toolArguments, toolCallInText } from './tool-args';
 import { asksForLater, primeRewrite, rewriteMessage } from './rewrite';
@@ -453,7 +454,7 @@ Use the provided tools when the user wants to control devices or manage schedule
 
 IMPORTANT: When reporting device states, always use the exact data returned by the list_devices tool. Never guess or assume device states. To say which devices are on, report exactly the names in the "on" list of the tool result, and no others.
 
-Do NOT output raw JSON or tool call syntax in your responses. Always respond in plain English.
+Do NOT output raw JSON or tool call syntax in your responses. Reply in plain words, in the language the user wrote in: Vietnamese to Vietnamese, Cantonese to Cantonese, Mandarin to Mandarin, English to English. Never translate a device name: use it exactly as listed.
 
 Devices, rooms and their other names in this home. For a tool's alias, use one of these names exactly; never make one up:
 ${list}
@@ -533,7 +534,7 @@ export async function resolveTools(
 type Handled = { response: string; actions: ActionTaken[] };
 
 const byRules = async (text: string): Promise<Handled | null> =>
-  await runPowerCommand(text) ?? answerStatusQuestion(text) ?? await answerQuestion(text);
+  await runPowerCommand(text) ?? await runNativeCommand(text) ?? answerStatusQuestion(text) ?? await answerQuestion(text);
 
 /**
  * The rules didn't understand it: a small model says it again plainly

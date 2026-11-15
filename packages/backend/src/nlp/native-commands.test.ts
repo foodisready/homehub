@@ -1,0 +1,147 @@
+/**
+ * On and off typed in Vietnamese, Cantonese and Mandarin, against a real SQLite DB with stubbed
+ * drivers and the home's own names (from the Pi, 2026-11-15: "bật đèn bếp" went to the model,
+ * which answered in Chinese that it couldn't find 厨房灯).
+ *
+ * Modules load dynamically in before(), after DB_PATH is set, so this stays on its temp DB.
+ */
+import { describe, it, before, after, beforeEach } from 'node:test';
+import assert from 'node:assert/strict';
+import path from 'node:path';
+import os from 'node:os';
+import fs from 'node:fs';
+import type Database from 'better-sqlite3';
+
+const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'homehub-native-test-'));
+
+let db: Database.Database;
+let native: typeof import('./native-commands');
+let nlp: typeof import('./nlp.service');
+const calls: { ip: string; state: boolean }[] = [];
+let failing: string | null = null;
+
+describe('commands typed in Vietnamese and Chinese', () => {
+  before(async () => {
+    process.env.DB_PATH = path.join(TMP, 'db.sqlite');
+    process.env.OLLAMA_URL = 'http://127.0.0.1:1';
+    db = (await import('../db')).getDb();
+    const { getDriver } = await import('../drivers/registry');
+    native = await import('./native-commands');
+    nlp = await import('./nlp.service');
+    for (const kind of ['kasa', 'meross'] as const) {
+      getDriver(kind).setPower = async (ip: string, state: boolean) => {
+        if (ip === failing) throw new Error('unreachable');
+        calls.push({ ip, state });
+      };
+    }
+    const add = db.prepare('INSERT INTO devices (alias, ip, nicknames, driver_type, is_protected) VALUES (?, ?, ?, ?, ?)');
+    add.run('Kitchen lights', '10.0.0.9', JSON.stringify(['廚房燈', 'đèn bếp', 'đèn nhà bếp']), 'kasa', 0);
+    add.run('Kitchen counter lights', '10.0.0.16', JSON.stringify(['counter lights', '廚房燈', 'đèn bếp', 'đèn nhà bếp']), 'kasa', 0);
+    add.run('My office lamp', '10.0.0.4', JSON.stringify(['書房燈', 'đèn phòng làm việc']), 'kasa', 0);
+    add.run('Woman bedside lamp', '10.0.0.34', JSON.stringify(['亞娘床頭燈', 'đèn của bà']), 'kasa', 0);
+    add.run('Main Valve', '10.0.0.15', JSON.stringify(['總掣', 'van nước']), 'kasa', 1);
+    add.run('Garage Left', '10.0.0.22', JSON.stringify(['車房門', 'cửa ga-ra']), 'meross', 0);
+  });
+  after(() => { db.close(); fs.rmSync(TMP, { recursive: true, force: true }); });
+  beforeEach(() => {
+    db.prepare('UPDATE devices SET override_state = NULL, override_until = NULL, timer_off_at = NULL').run();
+    calls.length = 0;
+    failing = null;
+  });
+
+  describe('reading the command', () => {
+    const cases: Array<[string, { lang: string; state: boolean; name: string }]> = [
+      ['bật đèn bếp', { lang: 'vi', state: true, name: 'đèn bếp' }],
+      ['Tắt đèn của bà đi nhé!', { lang: 'vi', state: false, name: 'đèn của bà' }],
+      ['làm ơn bật giúp tôi đèn phòng làm việc', { lang: 'vi', state: true, name: 'đèn phòng làm việc' }],
+      ['bat den bep', { lang: 'vi', state: true, name: 'den bep' }],
+      ['mở cửa ga-ra', { lang: 'vi', state: true, name: 'cửa ga-ra' }],
+      ['開廚房燈', { lang: 'yue', state: true, name: '廚房燈' }],
+      ['唔該熄咗亞娘床頭燈啦', { lang: 'yue', state: false, name: '亞娘床頭燈' }],
+      ['閂車房門', { lang: 'yue', state: false, name: '車房門' }],
+      ['打开厨房灯', { lang: 'zh', state: true, name: '厨房灯' }],
+      ['把书房灯关掉吧', { lang: 'zh', state: false, name: '书房灯' }],
+      ['请关闭厨房灯。', { lang: 'zh', state: false, name: '厨房灯' }],
+    ];
+    for (const [text, want] of cases) {
+      it(`reads "${text}"`, () => {
+        const got = native.parseNativeCommand(text);
+        assert.deepEqual(got && { lang: got.lang, state: got.state, name: got.name }, want);
+      });
+    }
+
+    for (const text of ['turn on the kitchen lights', 'bật', '開', 'what time is it', 'mấy giờ rồi?', '幾點鐘', '今日天氣點']) {
+      it(`leaves "${text}" alone`, () => assert.equal(native.parseNativeCommand(text), null));
+    }
+
+    it('finds the home’s spelling without accents or in simplified characters, but only when one name fits', () => {
+      const names = ['Kitchen lights', '廚房燈', 'đèn bếp', 'Đèn Bếp', 'đèn bà', 'đèn ba'];
+      assert.equal(native.homeName('den bep', names), 'đèn bếp');
+      assert.equal(native.homeName('厨房灯', names), '廚房燈');
+      assert.equal(native.homeName('den ba', names), 'den ba');      // two names fit: left for the rules to ask
+      assert.equal(native.homeName('đèn ngủ', names), 'đèn ngủ');
+    });
+  });
+
+  describe('switching, and answering in the same language', () => {
+    it('turns on the kitchen lights from "bật đèn bếp", in Vietnamese', async () => {
+      const r = await native.runNativeCommand('bật đèn bếp');
+      assert.equal(r?.response, 'Đã bật đèn bếp.');
+      assert.deepEqual(calls.map((c) => c.ip).sort(), ['10.0.0.16', '10.0.0.9']);
+      assert.ok(calls.every((c) => c.state));
+    });
+
+    it('reads it typed without accents, or in simplified characters', async () => {
+      assert.equal((await native.runNativeCommand('tat den cua ba'))?.response, 'Đã tắt đèn của bà.');
+      assert.deepEqual(calls, [{ ip: '10.0.0.34', state: false }]);
+      calls.length = 0;
+      assert.equal((await native.runNativeCommand('关掉厨房灯'))?.response, '已关掉厨房灯。');
+      assert.equal(calls.length, 2);
+    });
+
+    it('answers Cantonese in Cantonese', async () => {
+      assert.equal((await native.runNativeCommand('開書房燈啦'))?.response, '開咗書房燈。');
+      assert.deepEqual(calls, [{ ip: '10.0.0.4', state: true }]);
+    });
+
+    it('closes the garage door, never opens it, and says so in the language typed', async () => {
+      assert.equal((await native.runNativeCommand('đóng cửa ga-ra'))?.response, 'Đang đóng cửa ga-ra.');
+      assert.equal((await native.runNativeCommand('閂車房門'))?.response, '閂緊車房門。');
+      assert.deepEqual(calls, [{ ip: '10.0.0.22', state: false }, { ip: '10.0.0.22', state: false }]);
+      calls.length = 0;
+      assert.match((await native.runNativeCommand('mở cửa ga-ra'))!.response, /^Vì an toàn/);
+      assert.match((await native.runNativeCommand('開車房門'))!.response, /^為咗安全/);
+      assert.match((await native.runNativeCommand('打开车房门'))!.response, /^为了安全/);
+      assert.deepEqual(calls, []);
+    });
+
+    it('leaves a protected device alone', async () => {
+      assert.match((await native.runNativeCommand('tắt van nước'))!.response, /^Main Valve được bảo vệ/);
+      assert.match((await native.runNativeCommand('熄總掣'))!.response, /^Main Valve受保護/);
+      assert.deepEqual(calls, []);
+    });
+
+    it('says which light it couldn’t reach', async () => {
+      failing = '10.0.0.16';
+      assert.equal((await native.runNativeCommand('bật đèn bếp'))?.response, 'Đã bật Kitchen lights. Không kết nối được Kitchen counter lights.');
+    });
+
+    it('asks which one in the same language when a name fits several', async () => {
+      const r = await native.runNativeCommand('bật đèn');
+      assert.match(r!.response, /^Ý bạn là cái nào: .*"My office lamp"/);
+      assert.deepEqual(calls, []);
+    });
+
+    it('leaves a name the home doesn’t have to the chat model', async () => {
+      assert.equal(await native.runNativeCommand('bật quạt trần'), null);
+      assert.equal(await native.runNativeCommand('開冷氣'), null);
+      assert.deepEqual(calls, []);
+    });
+
+    it('is what Chat does with it, without the model', async () => {
+      const r = await nlp.processMessage('bật đèn bếp', []);
+      assert.equal(r.response, 'Đã bật đèn bếp.');
+      assert.equal(calls.length, 2);
+    });
+  });
+});
