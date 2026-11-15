@@ -91,5 +91,10 @@ export const routes: Routes = [
     loadComponent: () => import('./features/health/health.component').then((m) => m.HealthComponent),
     canActivate: [authGuard],
   },
+  {
+    path: 'health/watchdog',
+    loadComponent: () => import('./features/health/watchdog.component').then((m) => m.WatchdogComponent),
+    canActivate: [authGuard],
+  },
   { path: '**', redirectTo: 'dashboard' },
 ];

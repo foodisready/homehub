@@ -8,7 +8,7 @@ function init(): void {
   if (initialized) return;
   const pub     = process.env.VAPID_PUBLIC_KEY;
   const priv    = process.env.VAPID_PRIVATE_KEY;
-  const contact = process.env.VAPID_CONTACT ?? 'mailto:admin@homehub.local';
+  const contact = process.env.VAPID_CONTACT ?? 'https://github.com/foodisready/homehub';
   if (!pub || !priv) {
     logger.warn('VAPID keys not set — push notifications disabled');
     return;

@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
+import webpush from 'web-push';
 
 /**
  * Secrets HomeHub makes for itself, so nobody has to generate and paste them
@@ -87,5 +88,40 @@ export function loadSecrets(): { created: ManagedSecret[] } {
     }
     process.env[key] = value;
   }
+  loadPushKeys(dir);
   return { created };
+}
+
+/**
+ * The key pair phones check push notifications against (VAPID). Made on first start like the
+ * others, but as a pair, so it has its own file. Changing it would cut off every phone that
+ * signed up, so it's kept from then on. Only the backend uses it.
+ */
+export function loadPushKeys(dir = secretsDir()): void {
+  if (isSet(process.env.VAPID_PUBLIC_KEY) && isSet(process.env.VAPID_PRIVATE_KEY)) return;
+  const file = path.join(dir, 'VAPID_KEYS');
+  const read = (): { publicKey: string; privateKey: string } | null => {
+    try {
+      const v = JSON.parse(fs.readFileSync(file, 'utf8'));
+      return typeof v?.publicKey === 'string' && typeof v?.privateKey === 'string' && v.publicKey && v.privateKey ? v : null;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
+      if (err instanceof SyntaxError) return null;
+      throw err;
+    }
+  };
+  let keys = read();
+  if (!keys) {
+    const made = webpush.generateVAPIDKeys();
+    try {
+      fs.writeFileSync(file, JSON.stringify(made) + '\n', { mode: 0o600, flag: fs.existsSync(file) ? 'w' : 'wx' });
+      keys = made;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+      keys = read();   // another process made it meanwhile
+      if (!keys) throw err;
+    }
+  }
+  process.env.VAPID_PUBLIC_KEY = keys.publicKey;
+  process.env.VAPID_PRIVATE_KEY = keys.privateKey;
 }

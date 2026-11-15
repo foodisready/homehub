@@ -1,7 +1,8 @@
 import { getDb } from '../db';
 import { getDriver } from '../drivers/registry';
 import { emitDeviceState, emitDeviceOnline, emitDeviceEnergy } from '../socket';
-import { sendPushToAll } from '../push/push.service';
+import { sendPushToUsers } from '../push/push.service';
+import { OfflineAlerts } from './offline-alerts';
 import { logger } from '../logger';
 import { lastPowerState, recordOnline, recordPower } from '../activity/activity';
 
@@ -13,6 +14,12 @@ export interface DeviceState {
 }
 
 const cache = new Map<number, DeviceState>();
+
+/** Device offline notifications go to admins, who can do something about them. */
+const offlineAlerts = new OfflineAlerts((id, alias) => {
+  const admins = (getDb().prepare("SELECT id FROM users WHERE role = 'admin'").all() as { id: number }[]).map((u) => u.id);
+  sendPushToUsers(admins, 'Device offline', `${alias} hasn’t been reachable for 10 minutes`, { url: '/settings?section=devices', deviceId: id });
+});
 
 const POLL_INTERVAL_MS = (Number(process.env.ENERGY_POLL_INTERVAL_SECONDS) || 30) * 1000;
 
@@ -72,6 +79,7 @@ async function pollDevice(
       recordPower(id, state, { source: 'outside' });
     }
     if (prev && !prev.online) recordOnline(id, true);
+    offlineAlerts.reached(id);
 
     // Track when device was turned on/off (for auto-off schedules)
     const db = getDb();
@@ -100,10 +108,8 @@ async function pollDevice(
   } catch {
     cache.set(id, { state: prev?.state ?? false, wattage: null, online: false, lastPolled: new Date() });
     if (!prev || prev.online) recordOnline(id, false);
-    if (!prev || prev.online) {
-      emitDeviceOnline(id, alias, false);
-      sendPushToAll('Device offline', `${alias} is no longer reachable`, { deviceId: id });
-    }
+    if (!prev || prev.online) emitDeviceOnline(id, alias, false);
+    offlineAlerts.missed(id, alias, prev?.online);
     logger.warn({ id, ip }, 'Device unreachable during poll');
   }
 }

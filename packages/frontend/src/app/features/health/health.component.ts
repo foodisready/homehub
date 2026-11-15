@@ -52,6 +52,7 @@ const SUMMARY: Record<HealthReport['status'], string> = {
     .err { color: var(--red); font-size: 0.88rem; }
     .btn-sm { padding: 0.35rem 0.8rem; font-size: 0.8rem; }
     .ghost { background: transparent; border: 1px solid var(--border); color: var(--text-muted); }
+    a.btn-sm { text-decoration: none; border-radius: 6px; display: inline-block; }
     .actions { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.6rem; align-items: center; }
     .confirm { font-size: 0.84rem; line-height: 1.45; margin-top: 0.6rem; }
     .overlay { position: fixed; inset: 0; z-index: 1000; background: rgba(2,6,23,0.82); backdrop-filter: blur(3px); display: flex; align-items: center; justify-content: center; padding: 1rem; }
@@ -160,6 +161,9 @@ const SUMMARY: Record<HealthReport['status'], string> = {
     </div>
 
     <ng-template #itemAction let-i>
+      @if (isAdmin() && i.id === 'watchdog' && (i.level === 'ok' || i.level === 'info')) {
+        <div class="actions"><a class="btn-sm ghost" routerLink="/health/watchdog">{{ i.level === 'info' ? 'Set up' : 'Change' }}</a></div>
+      }
       @if (isAdmin() && i.action === 'restart-voice-bridge') {
         <div class="actions">
           <button class="btn-sm ghost" type="button" (click)="restartBridge()" [disabled]="restartingBridge()">

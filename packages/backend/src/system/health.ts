@@ -7,6 +7,7 @@ import { cameraBridgeInstalled } from '../secrets';
 import { getSettings as cameraSettings } from '../cameras/snapshots';
 import { bridgeStandby, bridgeUrl, signInSavedAt } from '../cameras/bridge';
 import { roleStatus } from './role';
+import { FAILING_FOR_MS, watchdogStatus } from './watchdog';
 import { pictureHealth } from '../cameras/picture-status';
 import { cameraDevices } from '../cameras/watch';
 import { addedCameras as ringCameras, ringState } from '../ring/ring';
@@ -326,6 +327,20 @@ export function power(root = HWMON_ROOT, now = Date.now()): HealthItem[] {
   return [{ ...base, level: 'ok', detail: 'Enough power' }];
 }
 
+/** Whether someone outside the house would hear if HomeHub stopped. */
+export function watchdog(now: number): HealthItem[] {
+  const w = watchdogStatus();
+  const base = { id: 'watchdog', group: 'HomeHub' as const, label: 'Outside watchdog', link: '/health/watchdog' };
+  if (!w.url) {
+    return [{ ...base, level: 'info', detail: 'Not set up, so nobody would know if HomeHub stopped working, and a missed check-in would go unnoticed.' }];
+  }
+  if (w.failingSince && now - Date.parse(w.failingSince) >= FAILING_FOR_MS) {
+    return [{ ...base, level: 'warn', detail: `HomeHub hasn’t been able to check in with the watchdog for ${ago(now - Date.parse(w.failingSince)).replace(' ago', '')}, so it may be telling the family HomeHub is down. ${w.lastError ?? ''}`.trim() }];
+  }
+  if (w.lastOk) return [{ ...base, level: 'ok', detail: `Checked in ${ago(now - Date.parse(w.lastAt!))}. The watchdog tells you if HomeHub stops.` }];
+  return [{ ...base, level: 'ok', detail: 'Set up. HomeHub checks in every 5 minutes.' }];
+}
+
 function settingsChecks(): HealthItem[] {
   const items: HealthItem[] = [];
   const role = roleStatus();
@@ -335,6 +350,7 @@ function settingsChecks(): HealthItem[] {
   } else if (role.other) {
     items.push({ id: 'role', group: 'Settings', label: 'Another active HomeHub', level: 'error', link: '/settings', detail: `The HomeHub at ${role.other.address} also answers to this HomeHub's .local name, so both may be running your schedules. Set one of them to Backup in Settings → This server.` });
   }
+  if (role.role === 'active') items.push(...watchdog(Date.now()));
   if (pausedByHand()) {
     items.push({ id: 'paused', group: 'Settings', label: 'Automations', level: 'warn', link: '/settings', detail: 'Paused: schedules, motion lights, timers and water shutoff won\'t run until you resume them.' });
   }

@@ -73,6 +73,13 @@ select:focus { border-color: var(--accent); }
   font-weight: 600;
 }
 .btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
+/* A quieter button. Screens that style their own still win. */
+.btn-ghost {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+.btn-ghost:hover:not(:disabled) { border-color: var(--text-muted); }
 
 .card {
   background: var(--surface);

@@ -4,6 +4,7 @@ import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
 import { AuthService } from '../../core/auth/auth.service';
 import { SystemService } from '../../core/services/system.service';
+import { PushService } from '../../core/services/push.service';
 import { SocketService } from '../../core/socket/socket.service';
 import { DeviceFilterComponent, brandOf, matchesDevice, type DeviceFilter } from '../../shared/device-filter/device-filter.component';
 import { CamerasStateService } from '../../core/services/cameras-state.service';
@@ -829,27 +830,28 @@ const DRIVER_LABEL: Record<string, string> = {
       }
 
       <!-- ── Notifications ─────────────────────────────────────── -->
-      @if (pushSupported) {
-        <div class="section">
-          <button type="button" class="section-title section-toggle" (click)="toggleSection('notifications')" [attr.aria-expanded]="isSectionOpen('notifications')">
-            <span class="chev">{{ isSectionOpen('notifications') ? '▾' : '▸' }}</span> Notifications
-          </button>
-          @if (isSectionOpen('notifications')) {
-            <div class="card">
-              <div class="pref-row">
-                <div class="pref-label">
-                  Push notifications
-                  <div class="pref-sub">Get notified when a device goes offline</div>
-                </div>
-                <button class="btn-sm" [class.btn-primary]="!pushEnabled()" [class.btn-ghost]="pushEnabled()" (click)="togglePush()">
-                  {{ pushEnabled() ? 'Disable' : 'Enable' }}
-                </button>
+      <div class="section">
+        <button type="button" class="section-title section-toggle" (click)="toggleSection('notifications')" [attr.aria-expanded]="isSectionOpen('notifications')">
+          <span class="chev">{{ isSectionOpen('notifications') ? '▾' : '▸' }}</span> Notifications
+        </button>
+        @if (isSectionOpen('notifications')) {
+          <div class="card">
+            <div class="pref-row">
+              <div class="pref-label">
+                Notifications on this device
+                <div class="pref-sub">HomeHub’s alerts on this phone or computer: a missed check-in, a water leak, a device going offline</div>
               </div>
-              @if (pushMsg()) { <p class="msg" [class.ok]="!pushErr()" [class.err]="pushErr()">{{ pushMsg() }}</p> }
+              @if (push.state() === 'on' || push.state() === 'off') {
+                <button class="btn-sm" [class.btn-primary]="push.state() === 'off'" [class.btn-ghost]="push.state() === 'on'" (click)="togglePush()" [disabled]="pushBusy()">
+                  {{ push.state() === 'on' ? 'Turn off' : 'Turn on' }}
+                </button>
+              }
             </div>
-          }
-        </div>
-      }
+            @if (pushHelp(); as h) { <p class="msg">{{ h }}</p> }
+            @if (pushMsg()) { <p class="msg" [class.ok]="!pushErr()" [class.err]="pushErr()">{{ pushMsg() }}</p> }
+          </div>
+        }
+      </div>
 
       <!-- ── Preferences ───────────────────────────────────────── -->
       <!-- ── Voice control (admin only) ─────────────────────────── -->
@@ -1278,10 +1280,11 @@ export class SettingsComponent implements OnInit, OnDestroy {
   smsErr            = signal(false);
 
   // Push notifications
-  pushSupported = 'serviceWorker' in navigator && 'PushManager' in window;
-  pushEnabled   = signal(false);
-  pushMsg       = signal('');
-  pushErr       = signal(false);
+  readonly push = inject(PushService);
+  readonly pushBusy = signal(false);
+  readonly pushMsg = signal('');
+  readonly pushErr = signal(false);
+  readonly pushHelp = computed(() => PushService.help(this.push.state()));
 
   // kWh rate
   kwhRateDraft = localStorage.getItem('kwhRate') ?? '0.15';
@@ -1348,7 +1351,6 @@ export class SettingsComponent implements OnInit, OnDestroy {
       });
       this.loadNotificationSettings();
     }
-    this.checkPushStatus();
   }
 
   /** A restore can replace devices and users, so fetch both again. */
@@ -1426,42 +1428,23 @@ export class SettingsComponent implements OnInit, OnDestroy {
     return DRIVER_LABEL[type] ?? type;
   }
 
-  private async checkPushStatus(): Promise<void> {
-    if (!this.pushSupported) return;
-    const reg = await navigator.serviceWorker.ready;
-    const sub = await reg.pushManager.getSubscription();
-    this.pushEnabled.set(!!sub);
-  }
-
   async togglePush(): Promise<void> {
-    if (!this.pushSupported) return;
     this.pushMsg.set('');
+    this.pushBusy.set(true);
     try {
-      const reg = await navigator.serviceWorker.ready;
-      if (this.pushEnabled()) {
-        const sub = await reg.pushManager.getSubscription();
-        if (sub) {
-          await sub.unsubscribe();
-          this.http.delete('/api/push/subscribe', { body: { endpoint: sub.endpoint } }).subscribe();
-        }
-        this.pushEnabled.set(false);
-        this.pushMsg.set('Notifications disabled.');
+      if (this.push.state() === 'on') {
+        await this.push.disable();
+        this.pushMsg.set('Notifications are off on this device.');
       } else {
-        const keyRes = await fetch('/api/push/vapid-public-key', {
-          headers: { 'Authorization': `Bearer ${this.auth.accessToken()}` },
-        });
-        if (!keyRes.ok) { this.pushMsg.set('Push not configured on server.'); this.pushErr.set(true); return; }
-        const { key } = await keyRes.json();
-        const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
-        const json = sub.toJSON() as any;
-        this.http.post('/api/push/subscribe', { endpoint: json.endpoint, keys: json.keys }).subscribe();
-        this.pushEnabled.set(true);
-        this.pushMsg.set('Notifications enabled.');
-        this.pushErr.set(false);
+        await this.push.enable();
+        this.pushMsg.set('Notifications are on for this device.');
       }
-    } catch (err: any) {
-      this.pushMsg.set(err.message ?? 'Failed to toggle notifications.');
+      this.pushErr.set(false);
+    } catch (err) {
+      this.pushMsg.set(err instanceof Error ? err.message : 'Notifications couldn’t be changed.');
       this.pushErr.set(true);
+    } finally {
+      this.pushBusy.set(false);
     }
   }
 

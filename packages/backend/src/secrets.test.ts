@@ -10,7 +10,7 @@ import fs from 'node:fs';
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'homehub-secrets-test-'));
 const DIR = path.join(TMP, 'secrets');
-const KEYS = ['JWT_SECRET', 'JWT_REFRESH_SECRET', 'INTERNAL_API_KEY', 'MCP_SECRET', 'WATCHTOWER_HTTP_API_TOKEN', 'WYZE_BRIDGE_API_KEY', 'HOMEHUB_CAMERA_BRIDGE'];
+const KEYS = ['JWT_SECRET', 'JWT_REFRESH_SECRET', 'INTERNAL_API_KEY', 'MCP_SECRET', 'WATCHTOWER_HTTP_API_TOKEN', 'WYZE_BRIDGE_API_KEY', 'HOMEHUB_CAMERA_BRIDGE', 'VAPID_PUBLIC_KEY', 'VAPID_PRIVATE_KEY'];
 
 let secrets: typeof import('./secrets');
 const saved: Record<string, string | undefined> = {};
@@ -53,6 +53,28 @@ describe('generated secrets', () => {
     assert.ok(!created.includes('MCP_SECRET'));
     assert.ok(!fs.existsSync(path.join(DIR, 'MCP_SECRET')));
     assert.match(process.env.INTERNAL_API_KEY ?? '', /^[0-9a-f]{64}$/);
+  });
+
+  it('makes a push key pair once and keeps it, unless .env has one', () => {
+    secrets.loadSecrets();
+    const pub = process.env.VAPID_PUBLIC_KEY ?? '';
+    const priv = process.env.VAPID_PRIVATE_KEY ?? '';
+    assert.match(pub, /^[A-Za-z0-9_-]{87}$/, 'an uncompressed P-256 public key, base64url');
+    assert.match(priv, /^[A-Za-z0-9_-]{43}$/);
+    assert.equal(fs.statSync(path.join(DIR, 'VAPID_KEYS')).mode & 0o777, 0o600);
+
+    delete process.env.VAPID_PUBLIC_KEY; delete process.env.VAPID_PRIVATE_KEY;   // a restart
+    secrets.loadSecrets();
+    assert.deepEqual([process.env.VAPID_PUBLIC_KEY, process.env.VAPID_PRIVATE_KEY], [pub, priv]);
+
+    process.env.VAPID_PUBLIC_KEY = 'env-pub'; process.env.VAPID_PRIVATE_KEY = 'env-priv';
+    secrets.loadSecrets();
+    assert.deepEqual([process.env.VAPID_PUBLIC_KEY, process.env.VAPID_PRIVATE_KEY], ['env-pub', 'env-priv']);
+
+    fs.writeFileSync(path.join(DIR, 'VAPID_KEYS'), 'not json');
+    delete process.env.VAPID_PUBLIC_KEY; delete process.env.VAPID_PRIVATE_KEY;
+    secrets.loadSecrets();
+    assert.match(process.env.VAPID_PUBLIC_KEY ?? '', /^[A-Za-z0-9_-]{87}$/, 'a broken file is replaced');
   });
 
   it('uses the camera key unless .env leaves the bridge out', () => {

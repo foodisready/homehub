@@ -52,6 +52,7 @@ import { runBackup } from './db/backup';
 import { startBackupEmails } from './db/backup-email';
 import { startBackupSync, whenCopied } from './db/backup-sync';
 import { startComputerWatch } from './system/computer-watch';
+import { startWatchdog } from './system/watchdog';
 import { backupReadOnly } from './middleware/backup-read-only';
 import { applyRole, isActiveServer } from './system/role';
 import { checkAllSensors } from './sensors/stale-check';
@@ -193,6 +194,7 @@ httpServer.listen(PORT, async () => {
   });
   startBackupSync();         // on a paired backup, copy the active HomeHub every hour
   startComputerWatch();      // how hot the computer is, and on a Pi whether it has enough power
+  startWatchdog();           // checks in with an outside watchdog, if one is set, so the family hears if HomeHub stops
   if (isActiveServer()) warmModels().catch(() => undefined);   // load the chat models now, not on the first message
 
   // Hourly prune of flow_readings older than 7 days. flow_events are kept indefinitely.

@@ -62,7 +62,7 @@ describe('checkHealth', () => {
   it('is ok when everything is', async () => {
     allOnline();
     writeBackup(5);
-    getDb().prepare("INSERT INTO settings (key, value) VALUES ('home_latitude', '39.8'), ('home_longitude', '-89.6')").run();
+    getDb().prepare("INSERT INTO settings (key, value) VALUES ('home_latitude', '39.8'), ('home_longitude', '-89.6'), ('watchdog_url', 'https://hc-ping.com/abc')").run();
     const r = await checkHealth({ probe: up, now: NOW, dataDir: TMP, thermalRoot: path.join(TMP, 'none') });
     const bad = r.items.filter((i) => i.level !== 'ok' && i.id !== 'disk');   // the disk is this computer's
     assert.deepEqual(bad, []);

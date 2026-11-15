@@ -19,7 +19,7 @@ export interface Reminder {
 export interface Family {
   checkins: Checkin[];
   reminders: Reminder[];
-  audience: { phones: number; emails: number };
+  audience: { phones: number; people: string[]; emails: number };
   voice: { enabled: boolean; languages: VoiceLanguage[]; speakers: { name: string; connected: boolean; announce: boolean | null }[] };
   users: string[];
   motionRules: { id: number; name: string; ring: boolean }[];

@@ -4,9 +4,13 @@ import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { forkJoin } from 'rxjs';
 import { AuthService } from '../../core/auth/auth.service';
+import { PushService } from '../../core/services/push.service';
 import { CheckinEditorComponent } from './checkin-editor.component';
 import { RemindersComponent } from './reminders.component';
 import { clockText, daysText, errorText, timeIn, todayIn, type Checkin, type Family } from './family.types';
+
+/** "A", "A and B", "A, B and C". */
+const listText = (names: string[]) => names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
 
 interface DeviceLite { id: number; alias: string; room: string | null; power?: { excluded: string | null } }
 type Tone = 'good' | 'bad' | 'warn' | 'plain';
@@ -40,9 +44,11 @@ type Tone = 'good' | 'bad' | 'warn' | 'plain';
     .acts { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-top: 0.8rem; align-items: center; }
     .acts button { font-size: 0.85rem; padding: 0.35rem 0.8rem; border-radius: 6px; border: 1px solid var(--border); background: transparent; color: var(--text); min-height: 36px; }
     .acts input[type=date] { padding: 0.3rem 0.5rem; }
-    .told { font-size: 0.85rem; margin-top: 0.7rem; color: var(--text-muted); }
+    .told { font-size: 0.9rem; color: var(--text-muted); }
     .told.none { color: #fcd34d; }
     .told a, .lead a { color: var(--accent); }
+    .this-phone { display: flex; gap: 0.5rem 0.75rem; align-items: center; flex-wrap: wrap; margin-top: 0.5rem; }
+    .this-phone button { font-size: 0.85rem; padding: 0.35rem 0.8rem; border-radius: 6px; border: 1px solid var(--accent); background: transparent; color: var(--accent); min-height: 36px; }
     .privacy { font-size: 0.8rem; color: var(--text-muted); margin-top: 0.6rem; }
     .result { font-size: 0.85rem; color: var(--text-muted); }
     .intro ul { margin: 0.5rem 0 0.9rem 1.1rem; padding: 0; color: var(--text-muted); font-size: 0.9rem; line-height: 1.6; }
@@ -86,9 +92,6 @@ type Tone = 'good' | 'bad' | 'warn' | 'plain';
                   @if (testResult()) { <span class="result" aria-live="polite">{{ testResult() }}</span> }
                 </div>
               }
-              <p class="told" [class.none]="!told().ok">{{ told().text }}
-                @if (!told().ok) { <a routerLink="/settings">Set up email</a> or turn on notifications on your phone. }
-              </p>
               <p class="privacy">Make sure {{ c.name }} knows it’s on. HomeHub only looks at what’s switched and used at home, never at camera pictures.</p>
             </div>
           } @empty {
@@ -109,6 +112,25 @@ type Tone = 'good' | 'bad' | 'warn' | 'plain';
           @if (admin() && d.checkins.length) {
             <div><button type="button" class="btn-ghost" (click)="editing.set('new')">+ Another check-in</button></div>
           }
+        </div>
+
+        <h2>Who’s told</h2>
+        <div class="card">
+          <p class="told" [class.none]="!told().ok">{{ told().text }}
+            @if (!told().ok) { <a routerLink="/settings" [queryParams]="{ section: 'integrations' }">Set up email</a>, or turn on notifications on each family member’s phone. }
+          </p>
+          <div class="this-phone">
+            @switch (push.state()) {
+              @case ('on') { <span class="muted">✓ This device gets alerts.</span> }
+              @case ('off') {
+                <button type="button" (click)="enablePush()" [disabled]="pushBusy()">Get alerts on this device</button>
+                <span class="muted">Each family member does this on their own phone, signed in as themselves.</span>
+              }
+              @case ('checking') {}
+              @default { <span class="muted">{{ pushHelp() }}</span> }
+            }
+            @if (pushMsg()) { <span class="result" aria-live="polite">{{ pushMsg() }}</span> }
+          </div>
         </div>
 
         <h2>Spoken reminders</h2>
@@ -134,6 +156,10 @@ type Tone = 'good' | 'bad' | 'warn' | 'plain';
 export class FamilyComponent implements OnInit {
   private readonly http = inject(HttpClient);
   private readonly auth = inject(AuthService);
+  readonly push = inject(PushService);
+  readonly pushBusy = signal(false);
+  readonly pushMsg = signal('');
+  readonly pushHelp = computed(() => PushService.help(this.push.state()));
 
   readonly data = signal<Family | null>(null);
   readonly devices = signal<DeviceLite[]>([]);
@@ -161,9 +187,10 @@ export class FamilyComponent implements OnInit {
   isPaused(c: Checkin): boolean { return !!c.pausedUntil && c.pausedUntil >= this.todayDate(); }
 
   readonly told = computed(() => {
-    const a = this.data()?.audience ?? { phones: 0, emails: 0 };
+    const a = this.data()?.audience ?? { phones: 0, people: [], emails: 0 };
+    const whose = a.people.length ? ` (${listText(a.people)})` : '';
     const parts = [
-      a.phones ? `push on ${a.phones} ${a.phones === 1 ? 'phone' : 'phones'}` : '',
+      a.phones ? `notification on ${a.phones} ${a.phones === 1 ? 'device' : 'devices'}${whose}` : '',
       a.emails ? `email to ${a.emails} ${a.emails === 1 ? 'address' : 'addresses'}` : '',
     ].filter(Boolean);
     return parts.length
@@ -194,6 +221,19 @@ export class FamilyComponent implements OnInit {
     const weekday = new Date(`${today}T12:00:00`).getDay();
     if (!c.days.includes(weekday)) return { tone: 'plain', text: 'Not checked today.' };
     return { tone: 'plain', text: `Checks at ${by} today.` };
+  }
+
+  async enablePush(): Promise<void> {
+    this.pushBusy.set(true);
+    this.pushMsg.set('');
+    try {
+      await this.push.enable();
+      this.load();
+    } catch (err) {
+      this.pushMsg.set(err instanceof Error ? err.message : 'Notifications couldn’t be turned on.');
+    } finally {
+      this.pushBusy.set(false);
+    }
   }
 
   patch(c: Checkin, body: Partial<Checkin>): void {

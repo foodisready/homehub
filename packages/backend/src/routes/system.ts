@@ -5,6 +5,7 @@ import { automationsPaused, pausedByHand, setAutomationsPaused } from '../automa
 import { roleStatus, setServerRole } from '../system/role';
 import { BRIDGE_LATE_MS, checkHealth } from '../system/health';
 import { lastBridgeReport, requestBridgeRestart } from '../system/voice-bridge';
+import { setWatchdogUrl, visit, watchdogStatus } from '../system/watchdog';
 import { UpdaterError, VERSION_RE, previousVersion, requestSwitch, switchStatus, updaterAvailable } from '../system/updater';
 import { backupBefore } from '../db/backup';
 
@@ -145,6 +146,30 @@ systemRouter.get('/switch-status', requireAdmin, async (_req: Request, res: Resp
  * settings, each with what to do about it. For the Health page. */
 systemRouter.get('/health', async (_req: Request, res: Response) => {
   res.json(await checkHealth());
+});
+
+/* GET /api/system/watchdog (admin): the outside watchdog's address and how the last check-in went.
+ * PUT { url } saves it (null or '' removes it) and checks in straight away.
+ * POST /api/system/watchdog/test checks in now. */
+systemRouter.get('/watchdog', requireAdmin, (_req: Request, res: Response) => {
+  res.json(watchdogStatus());
+});
+
+systemRouter.put('/watchdog', requireAdmin, async (req: Request, res: Response) => {
+  try {
+    setWatchdogUrl((req.body ?? {}).url);
+  } catch (err) {
+    return res.status(400).json({ error: (err as Error).message, code: 'VALIDATION_ERROR' });
+  }
+  logger.info({ by: req.user?.name, set: !!watchdogStatus().url }, 'Watchdog address changed');
+  if (watchdogStatus().url) await visit();
+  res.json(watchdogStatus());
+});
+
+systemRouter.post('/watchdog/test', requireAdmin, async (_req: Request, res: Response) => {
+  if (!watchdogStatus().url) return res.status(400).json({ error: 'No watchdog address set', code: 'VALIDATION_ERROR' });
+  await visit();
+  res.json(watchdogStatus());
 });
 
 /* POST /api/system/voice-bridge/restart (admin)

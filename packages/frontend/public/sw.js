@@ -32,9 +32,21 @@ self.addEventListener('push', (event) => {
   );
 });
 
+// Opens the page the notification is about (a check-in opens Family), in a HomeHub window
+// that's already open if there is one.
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  event.waitUntil(clients.openWindow('/dashboard'));
+  const wanted = event.notification.data && typeof event.notification.data.url === 'string' && event.notification.data.url.startsWith('/')
+    ? event.notification.data.url : '/dashboard';
+  event.waitUntil((async () => {
+    const open = await clients.matchAll({ type: 'window', includeUncontrolled: true });
+    const here = open.find((c) => new URL(c.url).origin === self.location.origin);
+    if (here) {
+      await here.focus();
+      return here.navigate(wanted).catch(() => clients.openWindow(wanted));
+    }
+    return clients.openWindow(wanted);
+  })());
 });
 
 self.addEventListener('fetch', (event) => {

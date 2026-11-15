@@ -250,11 +250,15 @@ export function preview(s: CheckinSettings, checkDays: number[] = [0, 1, 2, 3, 4
 
 // ── Who is told ─────────────────────────────────────────────────
 
-export interface Audience { phones: number; emails: number }
+/** Who would be told: phones with notifications on (and whose they are), and email addresses. */
+export interface Audience { phones: number; people: string[]; emails: number }
 
 export function audience(): Audience {
+  const rows = getDb().prepare(`
+    SELECT u.name, COUNT(*) n FROM push_subscriptions p JOIN users u ON u.id = p.user_id GROUP BY u.id ORDER BY u.name
+  `).all() as { name: string; n: number }[];
   const phones = (getDb().prepare('SELECT COUNT(*) n FROM push_subscriptions').get() as { n: number }).n;
-  return { phones, emails: emailConfigured() ? emailRecipients().length : 0 };
+  return { phones, people: rows.map((r) => r.name), emails: emailConfigured() ? emailRecipients().length : 0 };
 }
 
 let tell = async (title: string, body: string): Promise<void> => {

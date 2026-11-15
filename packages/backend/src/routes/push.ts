@@ -25,7 +25,7 @@ pushRouter.post('/subscribe', (req: Request, res: Response) => {
   db.prepare(`
     INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth)
     VALUES (?, ?, ?, ?)
-    ON CONFLICT(endpoint) DO UPDATE SET p256dh = excluded.p256dh, auth = excluded.auth
+    ON CONFLICT(endpoint) DO UPDATE SET user_id = excluded.user_id, p256dh = excluded.p256dh, auth = excluded.auth
   `).run(user.sub, endpoint, keys.p256dh, keys.auth);
 
   res.status(201).json({ ok: true });
