@@ -262,6 +262,33 @@ describe('Claude Haiku option', () => {
     assert.deepEqual(events[0], { type: 'meta', by: 'model', model: 'Claude Haiku' });
   });
 
+  it('a monthly limit hands chat back to this HomeHub once reached, until next month', async () => {
+    choice.setClaudeKey(KEY); choice.setAiMode('claude');
+    assert.equal((await send('PUT', '', { monthlyLimitUsd: 500 })).status, 400);
+    assert.equal((await send('PUT', '', { monthlyLimitUsd: 0.01 })).status, 400);
+    assert.equal((await send('PUT', '', { monthlyLimitUsd: '5' })).status, 400);
+    let r = await send('PUT', '', { monthlyLimitUsd: 0.1 });
+    assert.equal(r.body.monthlyLimitUsd, 0.1);
+    assert.equal(r.body.overLimit, false);
+    assert.equal(r.body.mode, 'claude', 'the limit keeps the choice');
+
+    choice.recordClaudeUse(1_000_000, 0);   // $0.10: the limit
+    r = await send('GET', '');
+    assert.equal(r.body.overLimit, true);
+    const answer = await nlp.processMessage('make the front brighter', [], 't10');
+    assert.equal(anthropic.requests.length, 0, 'Claude isn’t asked past the limit');
+    assert.ok(ollama.requests.length > 0, 'this HomeHub answers');
+    assert.match(answer.response, /Porch light/);
+
+    const nextMonth = new Date(Date.now() + 32 * 86_400_000);
+    assert.equal(choice.claudeInUse(nextMonth), KEY, 'a new month starts again');
+
+    r = await send('PUT', '', { monthlyLimitUsd: null });
+    assert.equal(r.body.monthlyLimitUsd, null);
+    assert.equal(r.body.overLimit, false);
+    assert.equal(choice.aiMode(), 'claude');
+  });
+
   // ── Pieces ────────────────────────────────────────────────────
 
   it('a new month starts the count again, keeping the last problem', () => {

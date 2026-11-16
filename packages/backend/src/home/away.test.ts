@@ -310,6 +310,7 @@ describe('Away mode', () => {
       reminders.saveReminder({ text: 'Take your pills', at: '09:00', language: 'en' });
       // Saving marks a time already past on the real clock as done today; this test sets its own clock.
       db.prepare('UPDATE reminders SET last_day = NULL').run();
+      db.prepare('UPDATE checkins SET last_day = NULL, last_result = NULL').run();
       await a.startAway({}, null, at(16, 8));
       assert.equal(await checkin.checkOne(checkin.listCheckins().find((x) => x.id === c.id)!, at(16, 11).getTime()), 'skipped');
       assert.equal(reminders.checkReminders(at(16, 9, 1).getTime()), 0);

@@ -1,8 +1,8 @@
 import { Router, Request, Response } from 'express';
 import { requireAdmin } from '../middleware/auth';
 import {
-  aiMode, aiUsage, CLAUDE_MODEL, claudeErrorText, claudeKey, clearClaudeError, costUsd, keyHint,
-  looksLikeKey, PRICE_PER_MTOK, removeClaudeKey, setAiMode, setClaudeKey,
+  aiMode, aiUsage, CLAUDE_MODEL, claudeErrorText, claudeKey, clearClaudeError, costUsd, keyHint, LIMIT_RANGE,
+  looksLikeKey, monthlyLimitUsd, overLimit, PRICE_PER_MTOK, removeClaudeKey, setAiMode, setClaudeKey, setMonthlyLimit,
 } from '../nlp/ai-choice';
 
 /**
@@ -33,17 +33,23 @@ function view() {
     model:   CLAUDE_MODEL,
     price:   PRICE_PER_MTOK,
     usage:   { ...usage, costUsd: costUsd(usage) },
+    monthlyLimitUsd: monthlyLimitUsd(),
+    overLimit:       overLimit(),
   };
 }
 
 // GET /api/ai
 aiRouter.get('/', (_req: Request, res: Response) => { res.json(view()); });
 
-// PUT /api/ai  { mode?: 'local' | 'claude', apiKey?: string }
+// PUT /api/ai  { mode?: 'local' | 'claude', apiKey?: string, monthlyLimitUsd?: number | null }
 aiRouter.put('/', async (req: Request, res: Response) => {
-  const { mode, apiKey } = (req.body ?? {}) as { mode?: unknown; apiKey?: unknown };
+  const { mode, apiKey, monthlyLimitUsd: limit } = (req.body ?? {}) as { mode?: unknown; apiKey?: unknown; monthlyLimitUsd?: unknown };
   if (mode !== undefined && mode !== 'local' && mode !== 'claude') {
     return res.status(400).json({ error: 'Choose this HomeHub or Claude Haiku.', code: 'VALIDATION_ERROR' });
+  }
+  if (limit !== undefined && limit !== null &&
+      (typeof limit !== 'number' || !Number.isFinite(limit) || limit < LIMIT_RANGE.min || limit > LIMIT_RANGE.max)) {
+    return res.status(400).json({ error: `A monthly limit is from $${LIMIT_RANGE.min.toFixed(2)} to $${LIMIT_RANGE.max}.`, code: 'VALIDATION_ERROR' });
   }
   if (apiKey !== undefined) {
     if (typeof apiKey !== 'string' || !looksLikeKey(apiKey)) {
@@ -58,6 +64,7 @@ aiRouter.put('/', async (req: Request, res: Response) => {
     return res.status(400).json({ error: 'Enter an Anthropic API key first.', code: 'NO_KEY' });
   }
   if (mode !== undefined) setAiMode(mode);
+  if (limit !== undefined) setMonthlyLimit(limit === null ? null : Math.round(limit * 100) / 100);
   res.json(view());
 });
 

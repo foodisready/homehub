@@ -581,6 +581,8 @@ To use Claude Haiku:
 
 **What it costs:** about $0.0003 for each message Claude handles. Most messages never reach it, because HomeHub's rules answer them. A busy household spends a few cents a month. The card shows this month's requests and an estimate of the cost. Your Anthropic account shows the exact amount.
 
+**Monthly limit:** under the saved key, select **Set a limit** and enter an amount from $0.10 to $100. Once this month's estimate reaches it, the model on this HomeHub answers until the 1st of next month, and the card says so. Set a spending limit in your Anthropic account too: HomeHub's figure is an estimate, and Anthropic's limit is exact.
+
 **What's sent:** only Chat messages the rules don't understand, the few messages before them in the same chat, and your device, room and scene names. When Claude looks something up, such as which devices are on or a device's energy use, that goes too. Anthropic's terms for API use apply.
 
 **If Claude can't be reached** (the internet is down, the key was deleted, or the spending limit was reached), the model on this HomeHub answers instead, and the card shows the last problem. **Check key** asks Anthropic whether the saved key still works. **Remove** forgets the key and goes back to this HomeHub. Delete the key at console.anthropic.com too if you no longer need it.

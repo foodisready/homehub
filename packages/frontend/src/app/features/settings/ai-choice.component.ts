@@ -10,6 +10,8 @@ interface AiView {
   model: string;
   price: { input: number; output: number };
   usage: { month: string; requests: number; inputTokens: number; outputTokens: number; fallbacks: number; costUsd: number; lastError?: string; lastErrorAt?: string };
+  monthlyLimitUsd: number | null;
+  overLimit: boolean;
 }
 
 /**
@@ -42,6 +44,9 @@ interface AiView {
     .saved code { font-size:0.8rem; }
     .btn-sm { padding:0.3rem 0.75rem; font-size:0.8rem; }
     .btn-ghost { background:transparent; border:1px solid var(--border); color:var(--text); }
+    .limit { display:flex; gap:0.4rem; flex-wrap:wrap; align-items:center; margin-top:0.55rem; font-size:0.82rem; }
+    .limit .money { display:flex; align-items:center; gap:0.2rem; }
+    .limit input { width:5.5rem; min-width:0; font-size:0.85rem; padding:0.3rem 0.5rem; }
     .usage { font-size:0.8rem; color:var(--text-muted); border-top:1px solid var(--border); padding-top:0.6rem; margin-top:0.6rem; line-height:1.5; }
     .usage strong { color:var(--text); font-weight:600; }
     .warn { font-size:0.8rem; color:var(--red); margin:0.35rem 0 0; overflow-wrap:anywhere; }
@@ -99,6 +104,27 @@ interface AiView {
               <button class="btn-sm btn-ghost" type="button" (click)="replacing.set(true)" [disabled]="busy()">Replace</button>
               <button class="btn-sm btn-ghost" type="button" (click)="remove()" [disabled]="busy()">Remove</button>
             </div>
+            <div class="limit">
+              @if (editingLimit()) {
+                <label for="ai-limit">Monthly limit</label>
+                <span class="money">$<input id="ai-limit" type="number" inputmode="decimal" min="0.1" max="100" step="0.5"
+                       [ngModel]="limitInput()" (ngModelChange)="limitInput.set($event)" (keyup.enter)="saveLimit()" /></span>
+                <button class="btn-sm" type="button" (click)="saveLimit()" [disabled]="busy()">Save</button>
+                @if (v.monthlyLimitUsd !== null) {
+                  <button class="btn-sm btn-ghost" type="button" (click)="clearLimit()" [disabled]="busy()">No limit</button>
+                }
+                <button class="btn-sm btn-ghost" type="button" (click)="editingLimit.set(false)">Cancel</button>
+              } @else if (v.monthlyLimitUsd !== null) {
+                <span>Monthly limit: <strong>{{ dollars(v.monthlyLimitUsd) }}</strong></span>
+                <button class="btn-sm btn-ghost" type="button" (click)="editLimit()">Change</button>
+              } @else {
+                <span>No monthly limit in HomeHub.</span>
+                <button class="btn-sm btn-ghost" type="button" (click)="editLimit()">Set a limit</button>
+              }
+            </div>
+            @if (editingLimit()) {
+              <p class="hint">Past the limit, this HomeHub answers until the 1st of next month. HomeHub's figure is an estimate; your Anthropic account's own spending limit is exact.</p>
+            }
           } @else {
             <label for="anthropic-key">Anthropic API key</label>
             <div class="row">
@@ -124,8 +150,11 @@ interface AiView {
       @if (v.keyHint || v.usage.requests) {
         <div class="usage">
           This month: <strong>{{ v.usage.requests }}</strong> {{ v.usage.requests === 1 ? 'request' : 'requests' }} to Claude,
-          about <strong>{{ dollars(v.usage.costUsd) }}</strong>.
+          about <strong>{{ dollars(v.usage.costUsd) }}</strong>{{ v.monthlyLimitUsd !== null ? ' of your ' + dollars(v.monthlyLimitUsd) + ' limit' : '' }}.
           @if (v.usage.fallbacks) { {{ v.usage.fallbacks }} {{ v.usage.fallbacks === 1 ? 'message was' : 'messages were' }} answered by this HomeHub because Claude couldn't be reached. }
+          @if (v.overLimit && v.mode === 'claude') {
+            <p class="warn">This month's limit is reached, so this HomeHub answers until {{ nextMonth() }}.</p>
+          }
           @if (v.usage.lastError && v.mode === 'claude') {
             <p class="warn">Last problem{{ v.usage.lastErrorAt ? ' (' + when(v.usage.lastErrorAt) + ')' : '' }}: {{ v.usage.lastError }}</p>
           }
@@ -144,6 +173,8 @@ export class AiChoiceComponent implements OnInit {
   readonly choice = signal<Mode>('local');
   readonly keyInput = signal('');
   readonly replacing = signal(false);
+  readonly editingLimit = signal(false);
+  readonly limitInput = signal<number | null>(5);
   readonly busy = signal(false);
   readonly message = signal('');
   readonly isError = signal(false);
@@ -191,24 +222,44 @@ export class AiChoiceComponent implements OnInit {
     });
   }
 
+  editLimit(): void {
+    this.limitInput.set(this.view()?.monthlyLimitUsd ?? 5);
+    this.editingLimit.set(true);
+  }
+
+  saveLimit(): void {
+    const usd = Number(this.limitInput());
+    if (!Number.isFinite(usd) || usd < 0.1 || usd > 100) { this.show('A monthly limit is from $0.10 to $100.', true); return; }
+    this.send({ monthlyLimitUsd: usd }, `Monthly limit set to ${this.dollars(usd)}.`, () => this.editingLimit.set(false));
+  }
+
+  clearLimit(): void {
+    this.send({ monthlyLimitUsd: null }, 'No monthly limit in HomeHub now.', () => this.editingLimit.set(false));
+  }
+
   dollars(usd: number): string {
     if (usd === 0) return '$0';
     if (usd < 0.01) return 'less than 1¢';
     return `$${usd.toFixed(2)}`;
   }
 
+  nextMonth(): string {
+    const d = new Date();
+    return new Date(d.getFullYear(), d.getMonth() + 1, 1).toLocaleDateString([], { month: 'long', day: 'numeric' });
+  }
+
   when(iso: string): string {
     return new Date(iso).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
   }
 
-  private send(body: { mode?: Mode; apiKey?: string }, ok: string, done?: () => void): void {
+  private send(body: { mode?: Mode; apiKey?: string; monthlyLimitUsd?: number | null }, ok: string, done?: () => void): void {
     this.busy.set(true);
     this.http.put<AiView>('/api/ai', body).subscribe({
       next: (v) => { this.busy.set(false); this.set(v); done?.(); this.show(ok); },
       error: (err: HttpErrorResponse) => {
         this.busy.set(false);
         // A rejected key stays on Claude so it can be corrected; anything else goes back to what's saved.
-        this.choice.set(body.apiKey ? 'claude' : (this.view()?.mode ?? 'local'));
+        this.choice.set(body.apiKey || body.monthlyLimitUsd !== undefined ? 'claude' : (this.view()?.mode ?? 'local'));
         this.show(err.error?.error ?? 'Could not save', true);
       },
     });

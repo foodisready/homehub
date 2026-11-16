@@ -33,8 +33,24 @@ function write(key: string, value: unknown): void {
     .run(key, JSON.stringify(value));
 }
 
+interface Choice { mode?: string; monthlyLimitUsd?: number | null }
+
 export function aiMode(): AiMode {
-  return read<{ mode?: string }>(AI_CHOICE_KEY)?.mode === 'claude' ? 'claude' : 'local';
+  return read<Choice>(AI_CHOICE_KEY)?.mode === 'claude' ? 'claude' : 'local';
+}
+
+/** The household's own monthly limit on Claude, in US dollars, or null for none. */
+export function monthlyLimitUsd(): number | null {
+  const v = read<Choice>(AI_CHOICE_KEY)?.monthlyLimitUsd;
+  return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : null;
+}
+
+export const LIMIT_RANGE = { min: 0.1, max: 100 };
+
+/** This month's Claude use has reached the limit: this HomeHub answers until next month. */
+export function overLimit(now = new Date()): boolean {
+  const limit = monthlyLimitUsd();
+  return limit !== null && costUsd(aiUsage(now)) >= limit;
 }
 
 export function claudeKey(): string | null {
@@ -43,11 +59,14 @@ export function claudeKey(): string | null {
 }
 
 /** The key to use for this message, or null to use the model on this HomeHub. */
-export function claudeInUse(): string | null {
-  return aiMode() === 'claude' ? claudeKey() : null;
+export function claudeInUse(now = new Date()): string | null {
+  return aiMode() === 'claude' && !overLimit(now) ? claudeKey() : null;
 }
 
-export function setAiMode(mode: AiMode): void { write(AI_CHOICE_KEY, { mode }); }
+export function setAiMode(mode: AiMode): void { write(AI_CHOICE_KEY, { ...read<Choice>(AI_CHOICE_KEY), mode }); }
+export function setMonthlyLimit(usd: number | null): void {
+  write(AI_CHOICE_KEY, { mode: aiMode(), monthlyLimitUsd: usd });
+}
 export function setClaudeKey(key: string): void { write(ANTHROPIC_KEY_SETTING, key.trim()); }
 export function removeClaudeKey(): void {
   getDb().prepare('DELETE FROM settings WHERE key = ?').run(ANTHROPIC_KEY_SETTING);
