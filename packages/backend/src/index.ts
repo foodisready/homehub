@@ -74,6 +74,7 @@ import { startCheckins } from './family/checkin';
 import { startReminders } from './family/reminders';
 import { thermostatsRouter } from './routes/thermostats';
 import { awayRouter } from './routes/away';
+import { aiRouter } from './routes/ai';
 import { startMatter, stopMatter } from './matter/service';
 import { noteRunningVersion } from './system/updater';
 import { initSocket } from './socket';
@@ -150,6 +151,7 @@ app.use('/api/setup',                  setupRouter);
 app.use('/api/matter',                 requireAdmin, matterRouter);
 app.use('/api/thermostats',            thermostatsRouter);
 app.use('/api/away',                   awayRouter);
+app.use('/api/ai',                     aiRouter);
 app.use('/api/energy',                 energyUsageRouter);
 app.use('/api/family',                 familyRouter);
 

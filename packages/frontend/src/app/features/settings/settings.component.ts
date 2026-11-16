@@ -19,6 +19,7 @@ import { MerossLoginComponent } from './meross-login.component';
 import { OtherNetworksComponent } from './other-networks.component';
 import { HomeSettingsComponent } from './home-settings.component';
 import { AiConnectionComponent } from './ai-connection.component';
+import { AiChoiceComponent } from './ai-choice.component';
 import { CamerasToggleComponent } from './cameras-toggle.component';
 import { TeachCommandsComponent } from './teach-commands.component';
 import { VoiceRepliesComponent } from './voice-replies.component';
@@ -79,7 +80,7 @@ const DRIVER_LABEL: Record<string, string> = {
 @Component({
   selector: 'app-settings',
   standalone: true,
-  imports: [SecretInputDirective, NicknameChipsComponent, ThermostatRangesComponent, FormsModule, RouterLink, InviteQrComponent, MatterPairComponent, DeviceFilterComponent, BackupsComponent, BackupSyncComponent, ServerRoleComponent, MerossLoginComponent, OtherNetworksComponent, HomeSettingsComponent, AiConnectionComponent, CamerasToggleComponent, TeachCommandsComponent, VoiceRepliesComponent, VoiceControlComponent],
+  imports: [SecretInputDirective, NicknameChipsComponent, ThermostatRangesComponent, FormsModule, RouterLink, InviteQrComponent, MatterPairComponent, DeviceFilterComponent, BackupsComponent, BackupSyncComponent, ServerRoleComponent, MerossLoginComponent, OtherNetworksComponent, HomeSettingsComponent, AiConnectionComponent, AiChoiceComponent, CamerasToggleComponent, TeachCommandsComponent, VoiceRepliesComponent, VoiceControlComponent],
   styles: [`
     .topbar { display:flex; align-items:center; justify-content:space-between; margin-bottom:1.5rem; }
     .topbar h1 { font-size:1.4rem; font-weight:700; }
@@ -854,6 +855,18 @@ const DRIVER_LABEL: Record<string, string> = {
       </div>
 
       <!-- ── Preferences ───────────────────────────────────────── -->
+      <!-- ── AI for Chat (admin only) ─────────────────────────── -->
+      @if (isAdmin() && !automations.readOnly()) {
+        <div class="section" id="ai-choice">
+          <button type="button" class="section-title section-toggle" (click)="toggleSection('ai')" [attr.aria-expanded]="isSectionOpen('ai')">
+            <span class="chev">{{ isSectionOpen('ai') ? '▾' : '▸' }}</span> AI for Chat
+          </button>
+          @if (isSectionOpen('ai')) {
+            <div class="card"><app-ai-choice /></div>
+          }
+        </div>
+      }
+
       <!-- ── Voice control (admin only) ─────────────────────────── -->
       @if (isAdmin() && !automations.readOnly()) {
         <div class="section">

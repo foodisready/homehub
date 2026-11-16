@@ -184,18 +184,22 @@ async function* ollamaChunks(res: Response): AsyncGenerator<string> {
 }
 
 /**
- * Asks Claude, with the same form as structured output. Reads the API key the SDK's usual way
- * (ANTHROPIC_API_KEY); customer boxes will go through a HomeHub relay instead (HARDWARE_PLAN.md).
+ * Asks Claude, with the same form as structured output. The key is the household's own, from
+ * Settings (ai-choice.ts), or, without one, ANTHROPIC_API_KEY (the eval).
  * Effort is low: this is a short classification, not reasoning.
  */
 export async function understandWithClaude(
   text: string,
   home: HomeNames,
-  opts: { model?: string } = {},
-): Promise<UnderstandResult & { inputTokens?: number; outputTokens?: number }> {
+  opts: { model?: string; apiKey?: string; timeoutMs?: number } = {},
+): Promise<UnderstandResult & { inputTokens?: number; outputTokens?: number; status?: number }> {
   const t0 = Date.now();
   const { default: Anthropic } = await import('@anthropic-ai/sdk');
-  const client = new Anthropic();
+  // A person is waiting: one quick retry, then this HomeHub's own model takes over.
+  const client = new Anthropic({
+    ...(opts.apiKey ? { apiKey: opts.apiKey } : {}),
+    ...(opts.timeoutMs ? { timeout: opts.timeoutMs, maxRetries: 1 } : {}),
+  });
   // Number limits aren't needed for the API's structured output; HomeHub checks them anyway.
   const schema = JSON.parse(JSON.stringify(understandingSchema(home)).replace(/,"minimum":1,"maximum":1440/g, ''));
   try {
@@ -211,7 +215,7 @@ export async function understandWithClaude(
     const raw = res.content.map((b) => (b.type === 'text' ? b.text : '')).join('');
     return { understanding: parseUnderstanding(raw, home), ms: Date.now() - t0, ...usage };
   } catch (err) {
-    if (err instanceof Anthropic.APIError) return { understanding: null, ms: Date.now() - t0, error: `Claude ${err.status}: ${err.message}` };
+    if (err instanceof Anthropic.APIError) return { understanding: null, ms: Date.now() - t0, error: `Claude ${err.status}: ${err.message}`, ...(err.status !== undefined ? { status: err.status } : {}) };
     return { understanding: null, ms: Date.now() - t0, error: (err as Error).message };
   }
 }

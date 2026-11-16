@@ -330,6 +330,8 @@ export const THIS_HOMEHUB_ONLY = [
   'ring_token',
   // Pairing between an active HomeHub and its backup (backup-sync.ts): each side's own.
   'backup_sync_serve', 'backup_sync_follow',
+  // What this HomeHub spent on Claude this month.
+  'ai_usage',
 ];
 
 /** Settings this HomeHub keeps when it already has them: the backup fills them in only if unset. */

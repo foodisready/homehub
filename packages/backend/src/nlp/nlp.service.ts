@@ -16,8 +16,10 @@ import { runNativeCommand } from './native-commands';
 import { recordCommand } from './command-log';
 import { looksLikeToolCall, toolArguments, toolCallInText } from './tool-args';
 import { asksForLater, primeRewrite, rewriteMessage } from './rewrite';
-import { answerKind, askText, confirm, declined, propose, refusedText, setPending, takePending } from './confirm';
-import { understandPrompt, understandWithOllama, type HomeNames } from './understand';
+import { answerKind, askText, confirm, declined, propose, refusedText, setPending, takePending, type Lang } from './confirm';
+import { understandPrompt, understandWithClaude, understandWithOllama, type HomeNames, type UnderstandResult } from './understand';
+import { CLAUDE_LABEL, claudeErrorText, claudeInUse, recordClaudeFailure, recordClaudeUse } from './ai-choice';
+import { chatWithClaude, ClaudeChatError } from './claude-chat';
 
 export interface ChatMessage {
   role: 'user' | 'assistant';
@@ -50,6 +52,13 @@ interface OllamaTool {
       required?: string[];
     };
   };
+}
+
+/** The home's time zone (Settings → Home sets TZ), else the computer's. */
+function homeTz(): string {
+  const tz = process.env.TZ || process.env.TIMEZONE;
+  try { if (tz) { new Intl.DateTimeFormat('en-US', { timeZone: tz }); return tz; } } catch { /* not a zone */ }
+  return Intl.DateTimeFormat().resolvedOptions().timeZone;
 }
 
 // ── Tool definitions ───────────────────────────────────────────
@@ -302,8 +311,12 @@ async function executeTool(name: string, args: Record<string, unknown>, userMess
       const { lat, lon } = solarLocation();
       const d   = args.date ? new Date(String(args.date)) : new Date();
       const t   = SunCalc.getTimes(d, lat, lon);
+      const local = (x: Date) => x.toLocaleTimeString('en-US', { timeZone: homeTz(), hour: 'numeric', minute: '2-digit' });
       return {
         date:       d.toDateString(),
+        // In the home's time zone, as a person would say them.
+        sunriseLocal: local(t.sunrise),
+        sunsetLocal:  local(t.sunset),
         sunrise:    t.sunrise.toISOString(),
         sunset:     t.sunset.toISOString(),
         dawn:       t.dawn.toISOString(),
@@ -594,9 +607,23 @@ async function byAnswer(text: string, who: string): Promise<Handled | null> {
  * The model fills in a form, and HomeHub asks before doing what it read. Null when the model
  * didn't name anything to switch, or couldn't be reached: then the chat model has it, as before.
  */
-async function byForm(text: string, who: string): Promise<Handled | null> {
+async function byForm(text: string, who: string): Promise<Handled & { lang?: never } | { lang: Lang } | null> {
   if (!askingOn()) return null;
-  const read = await understandWithOllama(text, homeNames(), {
+  // "Every day at 11pm" is a schedule, not a switch now: the chat model has the schedule tools.
+  if (asksForLater(text)) return null;
+  const home = homeNames();
+  let read: UnderstandResult | null = null;
+  const key = claudeInUse();
+  if (key) {
+    const r = await understandWithClaude(text, home, { apiKey: key, timeoutMs: 8_000 });
+    if (r.inputTokens) recordClaudeUse(r.inputTokens, r.outputTokens ?? 0);
+    if (r.error) {
+      // Not reached, or the key stopped working: this HomeHub's model answers instead.
+      logger.warn({ err: r.error }, 'Claude form not filled; using the local model');
+      recordClaudeFailure(r.error === 'refused' ? 'Claude declined to answer one message.' : claudeErrorText(r.status, r.error));
+    } else read = r;
+  }
+  read ??= await understandWithOllama(text, home, {
     url:   process.env.OLLAMA_URL ?? 'http://localhost:11434',
     model: process.env.OLLAMA_MODEL ?? 'llama3.2:3b',
     keepAlive: keepAlive(),
@@ -604,10 +631,23 @@ async function byForm(text: string, who: string): Promise<Handled | null> {
   if (read.error) logger.warn({ err: read.error }, 'NLP form not filled');
   const reading = propose(text, read.understanding);
   logger.info({ ms: read.ms, read: read.understanding, reading: reading?.kind ?? null }, 'NLP form');
-  if (!reading) return null;
+  if (!reading) return read.understanding ? { lang: read.understanding.lang } : null;
   if (reading.kind === 'refuse') return { response: refusedText(reading), actions: [] };
   setPending(who, reading.proposal);
   return { response: askText(reading.proposal), actions: [] };
+}
+
+const isHandled = (r: Awaited<ReturnType<typeof byForm>>): r is Handled => !!r && 'response' in r;
+
+/** How Claude should answer, on top of the chat model's instructions. */
+function claudeStyle(): string {
+  const tz = homeTz();
+  const now = new Date().toLocaleString('en-US', { timeZone: tz, weekday: 'long', hour: 'numeric', minute: '2-digit' });
+  return `
+
+Replies may be read aloud: answer in one or two short sentences of plain text, with no markdown, lists or headings.
+The home's time zone is ${tz}, and it's now ${now} there. Say times in the home's time zone, the way people say them ("5:02 PM").
+Switching a device asks the person first: call set_power_state for what they most likely mean, and HomeHub asks them "Turn on …?" itself. Don't offer to switch something in your own words, and never say something was switched.`;
 }
 
 /**
@@ -615,6 +655,53 @@ async function byForm(text: string, who: string): Promise<Handled | null> {
  * ("turn on ffice liights" → "turn on office lights"), and if the rules
  * understand that, they act on it. Null leaves it to the full chat model.
  */
+/**
+ * With the household's Anthropic key: Claude Haiku answers, with the same tools as the local chat.
+ * Null when there's no key or Claude couldn't answer; then this HomeHub's model does, as before.
+ */
+async function byClaudeChat(text: string, history: ChatMessage[], who: string, lang: Lang | undefined): Promise<Handled | null> {
+  const key = claudeInUse();
+  if (!key) return null;
+  // Claude never switches anything itself either: a switch becomes "Did you mean…?", as with the form.
+  let asked: Handled | null = null;
+  const execute = async (name: string, args: Record<string, unknown>): Promise<unknown> => {
+    if (name !== 'set_power_state' || asksForLater(text)) return executeTool(name, args, text);
+    if (asked) return { error: 'HomeHub is already asking the user about one change. Wait for their answer.' };
+    const alias = String(args.alias ?? '');
+    const group = findDeviceGroup(alias);
+    const one = group.length ? null : findDeviceByName(alias);
+    const devices = group.length ? group.map((d) => d.alias) : one && !('error' in one) ? [String(one.device.alias)] : [];
+    if (!devices.length) return { error: one && 'error' in one ? one.error : `No device is called ${alias}.` };
+    const minutes = timerMinutes(args.minutes) ?? null;
+    const reading = propose(text, { action: String(args.state) === 'on' ? 'on' : 'off', devices, scene: null, minutes, lang: lang ?? 'en' });
+    if (!reading) return { error: 'Nothing there can be switched.' };
+    if (reading.kind === 'refuse') {
+      asked = { response: refusedText(reading), actions: [] };
+      return { error: 'HomeHub doesn’t do that from chat or voice.' };
+    }
+    setPending(who, reading.proposal);
+    asked = { response: askText(reading.proposal), actions: [] };
+    return { asking: true, note: 'HomeHub is asking the user to confirm. Nothing was switched yet.' };
+  };
+  try {
+    const r = await chatWithClaude(text, history, {
+      apiKey: key, system: buildSystemPrompt() + claudeStyle(), tools: TOOLS, execute, stop: () => asked !== null,
+    });
+    recordClaudeUse(r.inputTokens, r.outputTokens);
+    if (asked) return asked;
+    for (const a of r.actions) logger.info({ tool: a.tool, args: a.args }, 'Claude tool call');
+    const response = r.response
+      ? honestReply(r.response, r.actions)
+      : r.actions.some((a) => a.tool === 'set_power_state') ? didntSwitch(r.actions) : NOT_UNDERSTOOD;
+    return { response, actions: r.actions };
+  } catch (err) {
+    const e = err as ClaudeChatError;
+    logger.warn({ err: e.message, status: e.status }, 'Claude chat failed; using the local model');
+    recordClaudeFailure(e.message === 'refused' ? 'Claude declined to answer one message.' : claudeErrorText(e.status, e.message));
+    return null;
+  }
+}
+
 async function byRewrite(text: string): Promise<Handled | null> {
   const plain = await rewriteMessage(text, { keepAlive: keepAlive() });
   return plain ? byRules(plain) : null;
@@ -635,7 +722,10 @@ export async function processMessage(
   if (handled) return handled;
 
   const asked = await byForm(userMessage, who);
-  if (asked) return asked;
+  if (isHandled(asked)) return asked;
+
+  const claude = await byClaudeChat(userMessage, history, who, asked?.lang);
+  if (claude) return claude;
 
   const rewritten = await byRewrite(userMessage);
   if (rewritten) return rewritten;
@@ -688,11 +778,19 @@ export async function* processMessageStream(
 
   const ollamaUrl = process.env.OLLAMA_URL ?? 'http://localhost:11434';
   const model     = process.env.OLLAMA_MODEL ?? 'llama3.2:3b';
-  yield { type: 'meta', by: 'model', model };
+  yield { type: 'meta', by: 'model', model: claudeInUse() ? CLAUDE_LABEL : model };
 
   const asked = await byForm(userMessage, who);
-  if (asked) {
+  if (isHandled(asked)) {
     yield { type: 'token', content: asked.response };
+    yield { type: 'done' };
+    return;
+  }
+
+  const claude = await byClaudeChat(userMessage, history, who, asked?.lang);
+  if (claude) {
+    for (const action of claude.actions) yield { type: 'action', action };
+    yield { type: 'token', content: claude.response };
     yield { type: 'done' };
     return;
   }
