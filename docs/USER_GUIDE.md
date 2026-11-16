@@ -389,12 +389,12 @@ For when everyone's out for a day or more. On **Home**, select **✈ Away mode�
 While it's on, a banner on **Home** says what it's doing, and:
 
 - **Thermostats** go to their away temperatures: at first the edges of their **Never beyond** range, such as 60 °F heating and 82 °F cooling. Change them with **−** and **+**. Their temperature schedules wait. Heating or cooling isn't turned on or off. A thermostat that isn't connected is set when it connects.
-- **Water:** with a water sensor, any water use is treated as a leak. You're told at once, and a shutoff valve set up for the sensor closes. Turn this off if sprinklers, a water softener or an ice maker use water while you're away.
+- **Water:** with a water sensor, any water use that starts after you leave is treated as a leak (water already running then, such as the dishwasher, isn't). You're told at once, and a shutoff valve set up for the sensor closes. Turn this off if sprinklers, a water softener or an ice maker use water while you're away.
 - **Cameras:** paused cameras resume when it starts.
-- **Check-ins and spoken reminders** wait. Days while away aren't checked, then or after you're back.
+- **Check-ins and spoken reminders** wait until the day and time you're back, including the warm-up hour. Days while away aren't checked, then or after you're back.
 - **Lived-in lights:** lamps you choose go on 0–45 minutes after sunset and off between 10 and 11:30 PM, at different times each day.
 
-With a day back, Away mode ends by itself an hour before (or the time you choose under **Back to normal**), so the house is warm or cool when you arrive, and everyone with notifications on is told. Thermostats go back to what their schedule says for that time, or to what they were set to before. Lamps it turned on go off. **I'm back** ends it straight away. **Change** moves the day back.
+With a day back, Away mode ends by itself an hour before (or the time you choose under **Back to normal**), so the house is warm or cool when you arrive, and everyone with notifications on is told. The day back has to be later than that warm-up time from now. Thermostats go back to what their schedule says for that time, or to what they were set to before. Lamps it turned on go off. **I'm back** ends it straight away. **Change** moves the day back.
 
 The day back is in your home's time zone, even when you set it from a phone somewhere else. While automations are paused (**Pause automations**), Away mode changes no devices.
 

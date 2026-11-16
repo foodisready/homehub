@@ -148,6 +148,86 @@ describe('Away mode', () => {
     });
   });
 
+  describe('found in review', () => {
+    it('ending while a check waits on a slow thermostat still puts it back', async () => {
+      view = fresh({ online: false });
+      await a.startAway({}, null, at(16, 9));
+      view = fresh();
+      let release!: () => void;
+      const gate = new Promise<void>((r) => { release = r; });
+      a.setAwayDeps({
+        read: async () => { await gate; return view; },
+        change: async (_id, c) => { sent.push(c); view = { ...view, ...c }; },
+      });
+      try {
+        const checking = a.tick(at(16, 9, 1));          // waits on the read
+        const ending = a.endAway('person', at(16, 9, 1)); // a person taps "I'm back" meanwhile
+        release();
+        await Promise.all([checking, ending]);
+      } finally {
+        a.setAwayDeps({ read: async () => view, change: async (_id, c) => { sent.push(c); view = { ...view, ...c }; } });
+      }
+      assert.equal(a.awayView().active, false);
+      assert.ok(near(sent[sent.length - 1].heat, f(68)), `last change puts it back, got ${JSON.stringify(sent)}`);
+    });
+
+    it('starting again keeps what to go back to from a return still waiting', async () => {
+      await a.startAway({}, null, at(16, 9));                 // 68 → 60
+      view = fresh({ online: false, heat: f(60), cool: f(82) });
+      await a.endAway('person', at(16, 10));                  // offline: return waits
+      view = fresh({ heat: f(60), cool: f(82) });
+      await a.startAway({}, null, at(16, 11));
+      await a.endAway('person', at(16, 12));
+      assert.ok(near(sent[sent.length - 1].heat, f(68)), 'back to 68, not the away 60');
+    });
+
+    it('a heat-only schedule brings cooling back to what it was', async () => {
+      await sched.saveSchedule(thermostatId, { points: [{ days: [0, 1, 2, 3, 4, 5, 6], time: '06:30', heat: f(70) }] }, async () => view);
+      await a.startAway({}, null, at(16, 9));
+      await a.endAway('person', at(17, 8));
+      const last = sent[sent.length - 1];
+      assert.ok(near(last.heat, f(70)) && near(last.cool, f(76)), JSON.stringify(last));
+    });
+
+    it('fits away targets to the thermostat\'s own gap between heating and cooling', async () => {
+      a.saveAwaySettings({ thermostats: { [thermostatId]: { heat: f(70), cool: f(73) } } });
+      view = fresh({ deadband: 2.5 });
+      await a.startAway({}, null, at(16, 9));
+      assert.ok(sent[0].cool! - sent[0].heat! >= 2.5 - 0.01, JSON.stringify(sent[0]));
+    });
+
+    it('won\'t start if the warm-up would end it at once', async () => {
+      a.saveAwaySettings({ warmUpMinutes: 60 });
+      await assert.rejects(a.startAway({ until: at(16, 9, 45).toISOString() }, null, at(16, 9)), /60 minutes before/);
+      assert.equal(a.awayView().active, false);
+    });
+
+    it('keeps check-ins waiting until the day back when it ends early to warm up', async () => {
+      a.saveAwaySettings({ warmUpMinutes: 60 });
+      const state = await import('./away-state');
+      await a.startAway({ until: at(22, 10).toISOString() }, null, at(16, 9));
+      await a.tick(at(22, 9));                                    // ends at 9:00 to warm up
+      assert.equal(a.awayView().active, false);
+      assert.equal(state.awayPausesFamily(at(22, 7).getTime()), true, 'a 7–10 window is skipped');
+      assert.equal(state.awayPausesFamily(at(22, 10, 30).getTime()), false, 'later ones aren\'t');
+      assert.equal(state.awayPausesFamily(at(23, 7).getTime()), false, 'nor the next day');
+    });
+
+    it('doesn\'t count water already running when Away started', async () => {
+      const engine = await import('../sensors/flow-engine');
+      await a.startAway({}, null, at(16, 9));
+      const config = flow.parseSensorConfig(null);
+      assert.equal(config.vacationSince, at(16, 9).toISOString());
+      const reading = { rate: 0.5, totalM3: 1, recordedAt: at(16, 9, 10), signalQuality: 90 } as never;
+      const event = (start: Date) => ({ id: 1, startTime: start, peakRate: 0.5, alertLevel: 0, totalM3Start: 1 }) as never;
+      const level = (start: Date) => engine.evaluateFlowReading({
+        reading, config, state: { pendingState: 'flowing', pendingCount: 5, snoozedUntil: null }, activeEvent: event(start),
+      }).updateEvent?.alertLevel ?? 0;
+      assert.ok(level(at(16, 8, 50)) < 3, 'the dishwasher that was on');
+      assert.equal(level(at(16, 9, 5)), 3, 'flow that started after');
+    });
+  });
+
   describe('with automations paused', () => {
     it('ends on time without touching devices or telling anyone, and puts things back once they resume', async () => {
       a.saveAwaySettings({ lights: [lampId] });

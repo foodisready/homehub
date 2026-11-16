@@ -26,6 +26,12 @@ export interface FlowConfig {
   level1AfterMin:       number;
   minSignalQuality:     number;
   vacationMode:         boolean;
+  /**
+   * Set by Away mode: when it started (ISO). Flow already running then (a dishwasher, the
+   * sprinklers) isn't escalated; only flow starting after it is. Null: the sensor's own
+   * vacation mode, which counts all flow.
+   */
+  vacationSince?:       string | null;
   quietHours:           QuietHours | null;
   /** Number of consecutive samples before transitioning idle→flowing or flowing→idle. */
   openDebounce:         number;
@@ -178,8 +184,10 @@ function computeNextLevel(
   reading: FlowReading,
   config: FlowConfig,
 ): AlertLevel {
-  // Vacation mode and quiet-hours flow are always L3.
-  if (config.vacationMode) return Math.max(event.alertLevel, 3) as AlertLevel;
+  // Vacation mode and quiet-hours flow are always L3; for Away mode, only flow that started after it.
+  if (config.vacationMode && (!config.vacationSince || event.startTime.getTime() >= Date.parse(config.vacationSince))) {
+    return Math.max(event.alertLevel, 3) as AlertLevel;
+  }
   if (isInQuietHours(reading.recordedAt, config.quietHours) &&
       reading.rate > (config.quietHours?.thresholdM3h ?? 0)) {
     return Math.max(event.alertLevel, 3) as AlertLevel;

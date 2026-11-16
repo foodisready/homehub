@@ -212,7 +212,7 @@ export function checkReminders(now = Date.now()): number {
     const at = localTime(today, r.at);
     if (now < at) continue;
     getDb().prepare('UPDATE reminders SET last_day = ? WHERE id = ?').run(today, r.id);
-    if (awayPausesFamily()) { setStatus(r.id, `not said at ${r.at}: Away mode was on`, false); continue; }
+    if (awayPausesFamily(at)) { setStatus(r.id, `not said at ${r.at}: Away mode was on`, false); continue; }
     if (now - at > LATE_LIMIT_MS) {
       setStatus(r.id, `not said at ${r.at}: HomeHub was off`, false);
       continue;

@@ -243,11 +243,18 @@ export class ThermostatScheduleComponent implements OnInit {
     const t = this.view();
     if (!t || !this.keys().includes('heat')) return null;
     const u = t.unit;
-    const day = t.comfort.low;
-    const night = Math.max(t.allowed.low, toC(shown(day, u) - (u === 'F' ? 7 : 4), u));
+    // Inside both the allowed range and what the thermostat itself takes, as the server checks.
+    const low = Math.max(t.allowed.low, t.heatLimits?.[0] ?? -Infinity);
+    const day = Math.max(t.comfort.low, low);
+    const night = Math.max(low, toC(shown(day, u) - (u === 'F' ? 7 : 4), u));
     if (night >= day - 0.01) return null;
-    const hasCool = this.keys().includes('cool');
-    const cool = hasCool ? Math.max(t.comfort.high, day + t.deadband) : null;
+    let cool: number | null = null;
+    if (this.keys().includes('cool')) {
+      const high = Math.min(t.allowed.high, t.coolLimits?.[1] ?? Infinity);
+      cool = Math.min(Math.max(t.comfort.high, day + t.deadband), high);
+      if (cool - day < t.deadband - 0.01) cool = null;   // no room for both: heating only
+    }
+    const hasCool = cool !== null;
     const point = (time: string, heat: number): SchedulePoint => ({ days: EVERY_DAY, time, sun: null, heat, cool, enabled: true });
     return {
       points: [point('06:30', day), point('22:30', night)],

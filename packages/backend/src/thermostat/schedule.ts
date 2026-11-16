@@ -264,7 +264,9 @@ export async function runThermostatSchedule(id: number, now = new Date(), deps: 
   if (automationsPaused() || awayActive()) { setChecked(id, now); return 'paused'; }
 
   const view = await deps.read(id);
-  if (!view.online) return 'offline';   // tried again on the next tick; a later change takes its place
+  if (!view.online) return 'offline';
+  // Again after the wait: Away mode may have just started and set its own temperature.
+  if (automationsPaused() || awayActive()) { setChecked(id, now); return 'paused'; }   // tried again on the next tick; a later change takes its place
   const change: { heat?: number; cool?: number } = {};
   if (due.point.heat !== null && view.heatLimits) change.heat = due.point.heat;
   if (due.point.cool !== null && view.coolLimits) change.cool = due.point.cool;

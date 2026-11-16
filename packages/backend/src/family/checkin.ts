@@ -313,8 +313,8 @@ export async function checkOne(c: Checkin, now = Date.now()): Promise<'waiting' 
   if (c.pausedUntil && c.pausedUntil >= today) return 'skipped';
   const from = localTime(today, c.from);
   const by = localTime(today, c.by);
-  // Away mode: nobody's expected home, so the day isn't checked, then or after coming back.
-  if (awayPausesFamily()) {
+  // Away mode, or back later today: nobody's expected home, so the day isn't checked, then or after.
+  if (awayPausesFamily(from)) {
     if (now >= by) setResult(c.id, { last_day: today, last_result: 'away', last_sign_at: null, last_sign: null });
     return 'skipped';
   }

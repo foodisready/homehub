@@ -5,7 +5,7 @@
  */
 
 import { getDb } from '../db';
-import { awayWatchesWater } from '../home/away-state';
+import { awayWatchesWaterSince } from '../home/away-state';
 import {
   evaluateFlowReading,
   resolveFlowConfig,
@@ -65,7 +65,7 @@ export function getActiveEvent(sensorRowId: number): FlowEventRow | undefined {
     .get(sensorRowId) as FlowEventRow | undefined;
 }
 
-/** A sensor's settings. In Away mode, any flow counts as a leak, as with its own vacation mode. */
+/** A sensor's settings. In Away mode, any flow starting after it began counts as a leak, as with its own vacation mode. */
 export function parseSensorConfig(configJson: string | null): FlowConfig {
   let config: FlowConfig;
   try {
@@ -73,7 +73,9 @@ export function parseSensorConfig(configJson: string | null): FlowConfig {
   } catch {
     config = resolveFlowConfig(null);
   }
-  return awayWatchesWater() ? { ...config, vacationMode: true } : config;
+  if (config.vacationMode) return config;   // the sensor's own: all flow
+  const since = awayWatchesWaterSince();
+  return since ? { ...config, vacationMode: true, vacationSince: since } : config;
 }
 
 export interface IngestResult {

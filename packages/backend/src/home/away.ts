@@ -232,11 +232,18 @@ let deps: AwayDeps = realDeps;
 /** For tests. */
 export function setAwayDeps(d: AwayDeps | null): void { deps = d ?? realDeps; }
 
-/** Sends targets a thermostat has; true once done or not possible, false while it's offline. */
+/**
+ * Sends the targets a thermostat has, fitted to its own limits and to the gap it keeps
+ * between heating and cooling. True once done or not possible, false while it's offline.
+ */
 async function setTargets(id: number, t: Targets, view: ThermostatView): Promise<boolean> {
+  const fit = (x: number, limits: [number, number]) => Math.min(Math.max(x, limits[0]), limits[1]);
   const change: { heat?: number; cool?: number } = {};
-  if (t.heat !== null && view.heatLimits) change.heat = t.heat;
-  if (t.cool !== null && view.coolLimits) change.cool = t.cool;
+  if (t.heat !== null && view.heatLimits) change.heat = fit(t.heat, view.heatLimits);
+  if (t.cool !== null && view.coolLimits) change.cool = fit(t.cool, view.coolLimits);
+  if (change.heat !== undefined && change.cool !== undefined && change.cool - change.heat < view.deadband) {
+    change.cool = Math.round((change.heat + view.deadband) * 100) / 100;
+  }
   if (!Object.keys(change).length) return true;
   try {
     await deps.change(id, change);
@@ -264,10 +271,13 @@ async function applyThermostats(s: AwayState, settings: AwaySettings): Promise<b
   return changed;
 }
 
-/** What a thermostat goes back to: what its schedule says now, else what it was before. */
+/**
+ * What a thermostat goes back to: what its schedule says now, else what it was before.
+ * A target the schedule leaves alone (heating only, say) goes back to what it was.
+ */
 export function backTo(id: number, before: Targets | undefined, now: Date): Targets | null {
   const due = latestDue(schedulePoints(id), new Date(0), now);
-  if (due) return { heat: due.point.heat, cool: due.point.cool };
+  if (due) return { heat: due.point.heat ?? before?.heat ?? null, cool: due.point.cool ?? before?.cool ?? null };
   return before ?? null;
 }
 
@@ -300,51 +310,83 @@ export function endsAt(s: Pick<AwayState, 'until'>, settings = getAwaySettings()
   return s.until ? new Date(Date.parse(s.until) - settings.warmUpMinutes * 60_000) : null;
 }
 
-function parseUntil(until: unknown, now: Date): string | null {
+function parseUntil(until: unknown, now: Date, warmUpMinutes: number): string | null {
   if (until === undefined || until === null || until === '') return null;
   const t = typeof until === 'string' ? Date.parse(until) : NaN;
   if (Number.isNaN(t)) throw new AwayError('“Back on” must be a date and time.');
   if (t <= now.getTime() + 5 * 60_000) throw new AwayError('“Back on” must be later than now.');
+  // Otherwise it would end, and say welcome back, as soon as it started.
+  if (t - warmUpMinutes * 60_000 <= now.getTime() + 5 * 60_000) {
+    throw new AwayError(`Back to normal is set to ${warmUpMinutes} minutes before you’re back, so the day back must be later than that from now.`);
+  }
   if (t > now.getTime() + MAX_AWAY_DAYS * 86_400_000) throw new AwayError(`Away mode can be set for up to ${MAX_AWAY_DAYS} days.`);
   return new Date(t).toISOString();
 }
 
-export async function startAway(input: { until?: unknown }, by: string | null, now = new Date()): Promise<AwayView> {
-  const until = parseUntil(input.until, now);
-  const existing = state();
-  if (existing) {
-    // Already away: only the day back changes.
-    write(AWAY_STATE_KEY, { ...existing, until });
-    logger.info({ until }, 'Away mode: day back changed');
-    return awayView();
-  }
-  const settings = getAwaySettings();
-  const s: AwayState = { since: now.toISOString(), until, by, before: {}, applied: [], lights: {} };
-  write(RESTORE_KEY, null);   // starting again replaces any return still waiting
-  write(AWAY_STATE_KEY, s);
-  logger.info({ until, by }, 'Away mode on');
-
-  // Paused automations (a development copy, say) leave every device alone.
-  if (settings.cameras && !automationsPaused()) {
-    for (const d of devices().filter((x) => x.driver_type === 'wyze' && getCachedState(x.id)?.state === false)) {
-      try {
-        await withActivity({ source: 'away', detail: 'resumed for Away mode' }, () => applyPower(d, true));
-        logger.info({ id: d.id, alias: d.alias }, 'Away mode: camera resumed');
-      } catch (err) {
-        logger.warn({ id: d.id, err: String((err as Error)?.message ?? err) }, 'Away mode: a camera didn’t resume');
-      }
-    }
-  }
-  await tick(now);
-  return awayView();
+/**
+ * Starting, ending and the regular check run one at a time, so ending can't slip in
+ * while a check is waiting on a thermostat and leave it at its away temperature.
+ */
+let queue: Promise<unknown> = Promise.resolve();
+function serial<T>(fn: () => Promise<T>): Promise<T> {
+  const run = queue.then(fn, fn);
+  queue = run.catch(() => undefined);
+  return run;
 }
 
-export async function endAway(why: 'person' | 'time', now = new Date()): Promise<AwayView> {
+/** Until when check-ins and reminders stay paused after Away mode: the day back. */
+export const AWAY_FAMILY_UNTIL_KEY = 'away_family_until';
+
+export function startAway(input: { until?: unknown }, by: string | null, now = new Date()): Promise<AwayView> {
+  return serial(async () => {
+    const settings = getAwaySettings();
+    const until = parseUntil(input.until, now, settings.warmUpMinutes);
+    const existing = state();
+    if (existing) {
+      // Already away: only the day back changes.
+      write(AWAY_STATE_KEY, { ...existing, until });
+      logger.info({ until }, 'Away mode: day back changed');
+      return awayView();
+    }
+    // A return still waiting (a thermostat that was offline, lamps left while paused) carries
+    // over, so this time's end puts them back to what they were before the last time.
+    const pending = read<Restore>(RESTORE_KEY);
+    const s: AwayState = { since: now.toISOString(), until, by, before: {}, applied: [], lights: {} };
+    for (const id of pending?.ids ?? []) if (pending!.before[String(id)]) s.before[String(id)] = pending!.before[String(id)];
+    for (const id of pending?.lamps ?? []) s.lights[String(id)] = true;
+    write(RESTORE_KEY, null);
+    write(AWAY_FAMILY_UNTIL_KEY, null);
+    write(AWAY_STATE_KEY, s);
+    logger.info({ until, by }, 'Away mode on');
+
+    // Paused automations (a development copy, say) leave every device alone.
+    if (settings.cameras && !automationsPaused()) {
+      for (const d of devices().filter((x) => x.driver_type === 'wyze' && getCachedState(x.id)?.state === false)) {
+        try {
+          await withActivity({ source: 'away', detail: 'resumed for Away mode' }, () => applyPower(d, true));
+          logger.info({ id: d.id, alias: d.alias }, 'Away mode: camera resumed');
+        } catch (err) {
+          logger.warn({ id: d.id, err: String((err as Error)?.message ?? err) }, 'Away mode: a camera didn’t resume');
+        }
+      }
+    }
+    await check(now);
+    return awayView();
+  });
+}
+
+export function endAway(why: 'person' | 'time', now = new Date()): Promise<AwayView> {
+  return serial(() => end(why, now));
+}
+
+async function end(why: 'person' | 'time', now: Date): Promise<AwayView> {
   const s = state();
   if (!s) return awayView();
   write(AWAY_STATE_KEY, null);
   const lamps = Object.keys(s.lights).filter((k) => s.lights[k]).map(Number);
   write(RESTORE_KEY, { at: now.toISOString(), ids: s.applied, before: s.before, lamps });
+  // Ending early to warm the house up: nobody's home yet, so check-ins wait for the day back.
+  if (s.until && Date.parse(s.until) > now.getTime()) write(AWAY_FAMILY_UNTIL_KEY, s.until);
   logger.info({ why }, 'Away mode off');
 
   // Paused automations leave devices alone; it's all put back once they resume.
@@ -364,28 +406,28 @@ export async function endAway(why: 'person' | 'time', now = new Date()): Promise
 
 // ── Running ────────────────────────────────────────────────────────
 
-let running = false;
 /** Ends Away mode when it's time, sets thermostats that were offline, and runs the lamps. Exported for tests. */
-export async function tick(now = new Date()): Promise<void> {
-  if (running) return;
-  running = true;
+export function tick(now = new Date()): Promise<void> {
+  return serial(() => check(now));
+}
+
+async function check(now: Date): Promise<void> {
   try {
     const s = state();
     const settings = getAwaySettings();
     if (s) {
-      const end = endsAt(s, settings);
-      if (end && now >= end) { await endAway('time', now); return; }
+      const endAt = endsAt(s, settings);
+      if (endAt && now >= endAt) { await end('time', now); return; }
       if (automationsPaused()) return;
       const a = await applyThermostats(s, settings);
       const b = await runLights(s, settings, now);
-      // Only if still away: a person may have ended it meanwhile.
-      if ((a || b) && awayActive()) write(AWAY_STATE_KEY, s);
+      if (a || b) write(AWAY_STATE_KEY, s);
     } else if (!automationsPaused()) {
       await runRestore(now);
     }
   } catch (err) {
     logger.error({ err }, 'Away mode failed');
-  } finally { running = false; }
+  }
 }
 
 let timer: ReturnType<typeof setInterval> | undefined;
