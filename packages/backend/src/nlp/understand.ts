@@ -101,7 +101,16 @@ export interface UnderstandResult {
   error?:        string;
 }
 
-/** Asks a local model through Ollama, with the form as its required output format. */
+/** Actions that never lead to a question: the form stops being written once it says one of these. */
+const NOTHING_TO_SWITCH = new Set<string>(['scene', 'question', 'unclear']);
+
+/**
+ * Asks a local model through Ollama, with the form as its required output format.
+ *
+ * The answer streams in, action first. When the action is a question, a scene or unclear,
+ * nothing will be switched, so HomeHub stops the model there: on a Pi 4, writing the rest of
+ * the form takes about 10 s that "幾點" would otherwise wait before the chat model answers it.
+ */
 export async function understandWithOllama(
   text: string,
   home: HomeNames,
@@ -109,24 +118,68 @@ export async function understandWithOllama(
 ): Promise<UnderstandResult> {
   const t0 = Date.now();
   const doFetch = opts.fetchImpl ?? fetch;
+  const stop = new AbortController();
   try {
     const res = await doFetch(`${opts.url}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: opts.model,
-        stream: false,
+        stream: true,
         format: understandingSchema(home),
         keep_alive: opts.keepAlive ?? '30m',
         options: { temperature: 0, num_predict: 80 },
         messages: [{ role: 'system', content: understandPrompt(home) }, { role: 'user', content: text }],
       }),
+      signal: stop.signal,
     });
     if (!res.ok) return { understanding: null, ms: Date.now() - t0, error: `Ollama ${res.status}: ${await res.text()}` };
-    const data = await res.json() as { message?: { content?: string } };
-    return { understanding: parseUnderstanding(data.message?.content ?? '', home), ms: Date.now() - t0 };
+
+    let form = '';
+    for await (const chunk of ollamaChunks(res)) {
+      form += chunk;
+      const action = /^\s*\{\s*"action"\s*:\s*"([a-z]+)"/.exec(form)?.[1];
+      if (action && NOTHING_TO_SWITCH.has(action)) {
+        stop.abort();   // Ollama stops generating when the request goes away
+        return {
+          understanding: { action: action as Understanding['action'], devices: [], scene: null, minutes: null, lang: 'en' },
+          ms: Date.now() - t0,
+        };
+      }
+    }
+    return { understanding: parseUnderstanding(form, home), ms: Date.now() - t0 };
   } catch (err) {
     return { understanding: null, ms: Date.now() - t0, error: (err as Error).message };
+  }
+}
+
+/** The text of each piece of an Ollama /api/chat stream (one JSON object per line). */
+async function* ollamaChunks(res: Response): AsyncGenerator<string> {
+  if (!res.body) {
+    // A test double may give the whole answer at once.
+    const data = await res.json() as { message?: { content?: string } };
+    yield data.message?.content ?? '';
+    return;
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+  while (true) {
+    const { done, value } = await reader.read();
+    if (value) buf += decoder.decode(value, { stream: true });
+    const lines = buf.split('\n');
+    buf = done ? '' : lines.pop() ?? '';
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        const piece = JSON.parse(line) as { message?: { content?: string }; error?: string };
+        if (piece.error) throw new Error(`Ollama: ${piece.error}`);
+        if (piece.message?.content) yield piece.message.content;
+      } catch (err) {
+        if ((err as Error).message.startsWith('Ollama:')) throw err;   // a malformed line is skipped
+      }
+    }
+    if (done) return;
   }
 }
 
