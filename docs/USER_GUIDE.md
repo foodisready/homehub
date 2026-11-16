@@ -119,6 +119,17 @@ To set its temperature ranges, an administrator opens the thermostat with **Edit
 - **Comfortable**, 68–76 °F at first: where you like it when you're home and awake. The thermostat's card points out a target outside it, and HomeHub's savings advice will keep to it.
 - **Never beyond**, 60–82 °F at first: the furthest Chat, voice, schedules and scenes can ever set it, at night and while you're out too. You can still go further on the thermostat itself or with **−** and **+**, within the thermostat's own limits.
 
+### Temperature schedule
+
+Each thermostat has its own card at the top of **Schedules**: a list of changes, each setting the heating and cooling targets on some days, at a time or at sunrise or sunset. For example, "Weekdays · 6:30 AM: Heat 68°" and "Every day · 10:30 PM: Heat 61°". The thermostat's card on **Home** shows the next one, with a link to the schedule.
+
+- **Use a suggested schedule** fills in a start: your lowest comfortable temperature from 6:30 AM, and 7 °F (4 °C) lower from 10:30 PM. The U.S. Department of Energy estimates that lowering the heat 7–10 °F for 8 hours a day saves up to about 10% a year. Change it afterwards as you like.
+- A schedule only changes the targets. It never turns heating or cooling on or off, so a thermostat you've turned off for the summer stays off.
+- A change made on the thermostat, its card, Chat or by voice holds until the next scheduled one.
+- Every target has to be inside **Never beyond**. If you narrow that range later, scheduled changes stop at its edge.
+- If HomeHub was off or restarting when a change came due, it makes the latest one it missed as soon as it's back, so the house isn't left at the night temperature all day. Changes that came due while automations were paused are skipped.
+- Turn off the thermostat's own schedule and learning, such as Nest's Auto-Schedule. Otherwise it changes the targets back.
+
 Matter thermostats share only the basics with other apps: temperatures, mode and targets. Features of the thermostat's own app, such as Nest's Eco mode and learning, stay in that app.
 
 #### Heating and cooling history

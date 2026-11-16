@@ -136,4 +136,21 @@ describe('Matter thermostats', { timeout: 120_000 }, () => {
     await driver.setPower(row.ip, true, JSON.parse(row.driver_config));
     await eventually(async () => (await thermostat.getThermostat(id)).mode === 'heat');
   });
+
+  it('makes a scheduled change on the thermostat itself, leaving the mode alone', async () => {
+    const schedule = await import('../thermostat/schedule');
+    db.prepare("DELETE FROM settings WHERE key = 'automations_paused'").run();
+    const before = await thermostat.getThermostat(id);
+    const target = before.heat !== null && Math.abs(before.heat - 18.5) < 0.1 ? 19 : 18.5;
+    // Every day, at a time a minute ago; saving counts as a look, so wind the last look back.
+    const now = new Date();
+    const past = new Date(now.getTime() - 60_000);
+    const time = `${String(past.getHours()).padStart(2, '0')}:${String(past.getMinutes()).padStart(2, '0')}`;
+    await schedule.saveSchedule(id, { points: [{ days: [0, 1, 2, 3, 4, 5, 6], time, heat: target }] });
+    db.prepare('UPDATE thermostats SET schedule_checked_at = ? WHERE device_id = ?').run(new Date(now.getTime() - 120_000).toISOString(), id);
+    assert.equal(await schedule.runThermostatSchedule(id, now), 'set');
+    await eventually(async () => Math.abs(((await thermostat.getThermostat(id)).heat ?? 0) - target) < 0.05);
+    assert.equal((await thermostat.getThermostat(id)).mode, before.mode);
+    assert.equal(await schedule.runThermostatSchedule(id, new Date(now.getTime() + 30_000)), 'none', 'once only');
+  });
 });

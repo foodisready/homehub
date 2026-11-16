@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, OnDestroy, OnInit, computed, inject, input, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { MODE_NAME, ThermostatService, shown, step, toC, type ThermostatMode, type ThermostatView } from './thermostat.service';
+import { describeNext, describeTargets } from './schedule-text';
 
 /**
  * A thermostat: the room's temperature, what it's doing, its mode, and its target
@@ -31,6 +32,8 @@ import { MODE_NAME, ThermostatService, shown, step, toC, type ThermostatMode, ty
     .note.warn { color: #fbbf24; }
     .note.err { color: var(--red); }
     .history { font-size: 0.85rem; color: var(--accent); align-self: flex-start; padding: 0.2rem 0; }
+    .links { display: flex; flex-wrap: wrap; gap: 0.2rem 1.2rem; }
+    .scheduled { font-size: 0.85rem; color: var(--text-muted); margin: 0; }
   `],
   template: `
     @if (view(); as t) {
@@ -62,7 +65,11 @@ import { MODE_NAME, ThermostatService, shown, step, toC, type ThermostatMode, ty
           }
         }
         @if (error()) { <p class="note err" role="alert">{{ error() }}</p> }
-        <a class="history" [routerLink]="['/energy']" [queryParams]="{ thermostat: t.id }">History and running hours ›</a>
+        @if (nextText(); as n) { <p class="scheduled">Schedule: {{ n }}, then holds until the next change.</p> }
+        <div class="links">
+          <a class="history" [routerLink]="['/schedules']" [queryParams]="{ thermostat: t.id }">{{ hasSchedule() ? 'Temperature schedule ›' : 'Set a temperature schedule ›' }}</a>
+          <a class="history" [routerLink]="['/energy']" [queryParams]="{ thermostat: t.id }">History and running hours ›</a>
+        </div>
       </div>
     } @else {
       <p class="note">Loading…</p>
@@ -79,8 +86,29 @@ export class ThermostatControlComponent implements OnInit, OnDestroy {
   readonly error = signal('');
   private timer?: ReturnType<typeof setTimeout>;
 
-  ngOnInit(): void { this.svc.watch(this.deviceId()); }
-  ngOnDestroy(): void { if (this.timer) { clearTimeout(this.timer); this.send(); } }
+  /** The schedule's next change, as words; refreshed once it has passed. */
+  readonly nextText = signal<string | null>(null);
+  readonly hasSchedule = signal(false);
+  private nextTimer?: ReturnType<typeof setTimeout>;
+
+  ngOnInit(): void { this.svc.watch(this.deviceId()); this.loadSchedule(); }
+  ngOnDestroy(): void {
+    if (this.nextTimer) clearTimeout(this.nextTimer);
+    if (this.timer) { clearTimeout(this.timer); this.send(); }
+  }
+
+  private loadSchedule(): void {
+    this.svc.schedule(this.deviceId()).subscribe({
+      next: (v) => {
+        this.hasSchedule.set(v.points.length > 0);
+        this.nextText.set(v.next ? `${describeTargets(v.next, v.unit)} at ${describeNext(v.next.at, v.timezone)}` : null);
+        if (this.nextTimer) clearTimeout(this.nextTimer);
+        const wait = v.next ? Date.parse(v.next.at) - Date.now() + 45_000 : 0;   // after the server has made it
+        if (v.next && wait > 0 && wait < 2 ** 31 - 1) this.nextTimer = setTimeout(() => this.loadSchedule(), wait);
+      },
+      error: () => this.nextText.set(null),
+    });
+  }
 
   readonly targets = computed<Array<'heat' | 'cool'>>(() => {
     const t = this.view();

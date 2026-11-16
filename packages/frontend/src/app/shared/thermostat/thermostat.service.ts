@@ -41,6 +41,27 @@ export function toC(v: number, unit: 'F' | 'C'): number {
 /** One step of − or +: 1 °F or 0.5 °C. */
 export const step = (unit: 'F' | 'C') => (unit === 'F' ? 1 : 0.5);
 
+/** One change in a thermostat's weekly schedule. Temperatures in °C; times are the home's. */
+export interface SchedulePoint {
+  id?: number;
+  /** 0 Sunday … 6 Saturday. */
+  days: number[];
+  /** "HH:MM", or null at sunrise or sunset. */
+  time: string | null;
+  sun: { event: 'sunrise' | 'sunset'; offset: number } | null;
+  heat: number | null;
+  cool: number | null;
+  enabled: boolean;
+}
+
+/** GET /api/thermostats/:id/schedule */
+export interface ScheduleView {
+  points: SchedulePoint[];
+  next: { at: string; pointId: number; heat: number | null; cool: number | null } | null;
+  unit: 'F' | 'C';
+  timezone: string;
+}
+
 export const MODE_NAME: Record<ThermostatMode | 'other', string> = { off: 'Off', heat: 'Heat', cool: 'Cool', auto: 'Auto', other: 'Other' };
 
 /** "71° · Heating to 72°": a thermostat in a line, for the device list. */
@@ -88,6 +109,16 @@ export class ThermostatService {
   /** Mode or targets, in °C. */
   change(id: number, patch: { mode?: ThermostatMode; heat?: number; cool?: number }): Observable<ThermostatView> {
     return this.http.patch<ThermostatView>(`/api/thermostats/${id}`, patch).pipe(tap((v) => this.put(v)));
+  }
+
+  schedule(id: number): Observable<ScheduleView> {
+    return this.http.get<ScheduleView>(`/api/thermostats/${id}/schedule`);
+  }
+
+  /** Replaces the whole schedule. */
+  saveSchedule(id: number, points: SchedulePoint[]): Observable<ScheduleView> {
+    const body = points.map(({ days, time, sun, heat, cool, enabled }) => ({ days, time, sun, heat, cool, enabled }));
+    return this.http.put<ScheduleView>(`/api/thermostats/${id}/schedule`, { points: body });
   }
 
   saveRanges(id: number, ranges: Ranges): Observable<Ranges> {

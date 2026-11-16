@@ -184,6 +184,8 @@ httpServer.listen(PORT, async () => {
     const { listThermostats } = await import('./thermostat/thermostat');
     startHistory(listThermostats);
   });
+  // Thermostats' temperature schedules, and any change missed while HomeHub was down.
+  void import('./thermostat/schedule').then(({ startThermostatSchedules }) => startThermostatSchedules());
 
   // Daily DB backup: run once at startup, then every 24 hours
   runBackup();

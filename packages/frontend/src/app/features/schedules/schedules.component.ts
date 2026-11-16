@@ -1,4 +1,6 @@
 import { Component, OnInit, signal, computed, inject } from '@angular/core';
+import { ActivatedRoute } from '@angular/router';
+import { ThermostatScheduleComponent } from '../../shared/thermostat/thermostat-schedule.component';
 import { AutomationsService } from '../../core/services/automations.service';
 import { HttpClient } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
@@ -51,8 +53,9 @@ const CRON_PRESETS = [
 @Component({
   selector: 'app-schedules',
   standalone: true,
-  imports: [FormsModule],
+  imports: [FormsModule, ThermostatScheduleComponent],
   styles: [`
+    .thermostats { display: flex; flex-direction: column; gap: 0.75rem; margin-bottom: 0.75rem; }
     .topbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.75rem; margin-bottom: 1.5rem; }
     .topbar h1 { font-size: 1.4rem; font-weight: 700; }
     .back-link { color: var(--text-muted); font-size: 0.9rem; }
@@ -252,8 +255,17 @@ const CRON_PRESETS = [
         }
       </div>
 
+      <!-- Thermostats' temperatures first: a weekly list of targets, separate from on and off -->
+      @if (thermostats().length) {
+        <div class="thermostats">
+          @for (t of thermostats(); track t.id) {
+            <app-thermostat-schedule [deviceId]="t.id" [canEdit]="canEdit()" [focus]="t.id === focusThermostat" />
+          }
+        </div>
+      }
+
       <!-- List, grouped by device -->
-      @if (groups().length === 0) {
+      @if (groups().length === 0 && !thermostats().length) {
         <div class="empty">No schedules yet. Create one to automate your plugs.</div>
       } @else {
         <div class="schedule-list">
@@ -470,6 +482,10 @@ export class SchedulesComponent implements OnInit {
   private readonly _collapsed = signal(loadCollapsed());
 
   readonly devices    = this._devices.asReadonly();
+  /** Matter thermostats, each with its temperature schedule. */
+  readonly thermostats = computed(() => this._devices().filter((d) => d.driverConfig?.['kind'] === 'thermostat'));
+  /** From the thermostat card's link: ?thermostat=<id>. */
+  readonly focusThermostat = Number(inject(ActivatedRoute).snapshot.queryParamMap.get('thermostat')) || null;
   readonly groups     = computed<ScheduleGroup[]>(() => {
     const byDevice = new Map<number, ScheduleGroup>();
     for (const s of this._schedules()) {

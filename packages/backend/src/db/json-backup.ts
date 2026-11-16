@@ -18,6 +18,8 @@ export const BACKUP_TABLES = [
   'devices',
   // A thermostat's comfort and allowed ranges and its heating and cooling system: settings, so kept.
   'thermostats',
+  // Its temperature schedule.
+  'thermostat_schedule',
   'sensors',
   'scenes',
   'scene_actions',

@@ -134,6 +134,25 @@ export function thermostatIdFor(nodeId: string, endpoint: number): number | null
   return rows().find((r) => { const c = configOf(r); return c.nodeId === nodeId && c.endpoint === endpoint; })?.id ?? null;
 }
 
+/** Every thermostat's device id. */
+export function thermostatIds(): number[] {
+  return rows().map((r) => r.id);
+}
+
+/** Its thermostats row, with the default ranges if it has none yet. */
+export function ensureThermostatRow(id: number): void {
+  getDb().prepare(`
+    INSERT INTO thermostats (device_id, comfort_low, comfort_high, allowed_low, allowed_high) VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT (device_id) DO NOTHING
+  `).run(id, DEFAULT_RANGES.comfort.low, DEFAULT_RANGES.comfort.high, DEFAULT_RANGES.allowed.low, DEFAULT_RANGES.allowed.high);
+}
+
+/** Checks the id is a thermostat; throws a 404 ThermostatError if not. */
+export function requireThermostat(id: number): { id: number; alias: string } {
+  const r = row(id);
+  return { id: r.id, alias: r.alias };
+}
+
 function rememberMode(id: number, mode: ThermostatMode): void {
   getDb().prepare(`
     INSERT INTO thermostats (device_id, comfort_low, comfort_high, allowed_low, allowed_high, last_mode) VALUES (?, ?, ?, ?, ?, ?)

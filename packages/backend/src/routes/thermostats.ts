@@ -4,6 +4,8 @@ import { changeThermostat, getThermostat, listThermostats, saveRanges, Thermosta
 import { day, months, reportsRunning } from '../thermostat/history';
 import { getHomeSettings } from '../home/home-settings';
 import { DEFAULT_SIZE, hvacSystem, saveHvacSystem } from '../energy/usage';
+import { nextDue, saveSchedule, schedulePoints } from '../thermostat/schedule';
+import { temperatureUnit } from '../home/weather';
 
 /** Thermostats, mounted at /api/thermostats. Every temperature is °C; `unit` says how the home shows them. */
 export const thermostatsRouter = Router();
@@ -78,4 +80,30 @@ thermostatsRouter.put('/:id/system', requireAdmin, async (req: Request, res: Res
 // PUT /api/thermostats/:id/ranges  { comfort: { low, high }, allowed: { low, high } } — admin
 thermostatsRouter.put('/:id/ranges', requireAdmin, (req: Request, res: Response) => {
   try { res.json(saveRanges(Number(req.params.id), req.body)); } catch (err) { fail(res, err); }
+});
+
+/** A schedule and its next change, for the page. */
+function scheduleView(id: number) {
+  const points = schedulePoints(id);
+  const next = nextDue(points, new Date());
+  return {
+    points,
+    next: next ? { at: next.at.toISOString(), pointId: next.point.id, heat: next.point.heat, cool: next.point.cool } : null,
+    unit: temperatureUnit(),
+    timezone: getHomeSettings().timezone,
+  };
+}
+
+// GET /api/thermostats/:id/schedule — its weekly temperature changes and the next one
+thermostatsRouter.get('/:id/schedule', async (req: Request, res: Response) => {
+  try { const t = await getThermostat(Number(req.params.id)); res.json(scheduleView(t.id)); } catch (err) { fail(res, err); }
+});
+
+// PUT /api/thermostats/:id/schedule  { points: [{ days, time | sun, heat, cool, enabled }] } — admin; replaces the whole schedule
+thermostatsRouter.put('/:id/schedule', requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const id = Number(req.params.id);
+    await saveSchedule(id, req.body);
+    res.json(scheduleView(id));
+  } catch (err) { fail(res, err); }
 });

@@ -399,6 +399,27 @@ function migrate(db: Database.Database): void {
       last_mode     TEXT
     );
   `);
+  // When the temperature schedule last looked for changes due, so one missed while HomeHub was down is made when it's back.
+  try { db.exec('ALTER TABLE thermostats ADD COLUMN schedule_checked_at TEXT'); } catch {}
+  // A thermostat's temperature schedule: on these days (bit 0 Sunday … bit 6 Saturday), at a time
+  // or at sunrise or sunset, set the heating and cooling targets (°C). The mode is left alone.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS thermostat_schedule (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      device_id     INTEGER NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+      days          INTEGER NOT NULL CHECK(days BETWEEN 1 AND 127),
+      at_minute     INTEGER CHECK(at_minute BETWEEN 0 AND 1439),
+      solar_event   TEXT    CHECK(solar_event IN ('sunrise', 'sunset')),
+      solar_offset  INTEGER NOT NULL DEFAULT 0,
+      heat          REAL,
+      cool          REAL,
+      enabled       INTEGER NOT NULL DEFAULT 1,
+      created_at    TEXT    NOT NULL DEFAULT (datetime('now')),
+      CHECK ((at_minute IS NULL) <> (solar_event IS NULL)),
+      CHECK (heat IS NOT NULL OR cool IS NOT NULL)
+    );
+    CREATE INDEX IF NOT EXISTS idx_thermostat_schedule ON thermostat_schedule(device_id);
+  `);
 
   // ── Thermostat history ──
   // samples: every 5 minutes, for the day chart. runs: each time heating or cooling ran,
