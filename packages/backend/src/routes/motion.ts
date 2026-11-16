@@ -6,8 +6,8 @@ import { logger } from '../logger';
 import { getDriver } from '../drivers/registry';
 import { isMotionShelly } from '../drivers/ShellyDriver';
 import {
-  SensorLoginError, SensorResponseError, connectSensor, createMotionRule, handleMotion, motionStatus,
-  type RuleWithDevice,
+  MAX_RULE_LIGHTS, SensorLoginError, SensorResponseError, connectSensor, createMotionRule, handleMotion, motionStatus,
+  ruleLights, ruleStatus, setRuleLights, type RuleWithDevice,
 } from '../sensors/motion';
 import { MAX_LUX, MAX_SUN_OFFSET_MINUTES, TURN_ON_WHEN, isTime, sunTimes, type TurnOnWhen } from '../sensors/motion-when';
 import { getHomeSettings } from '../home/home-settings';
@@ -20,34 +20,41 @@ const RULE_SELECT = `
   SELECT d.*, r.* FROM motion_rules r JOIN devices d ON d.id = r.device_id
 `;
 
-const toPublic = (rule: RuleWithDevice) => ({
-  id:              rule.id,
-  name:            rule.name,
-  deviceId:        rule.device_id,
-  deviceAlias:     rule.alias,
-  offAfterMinutes: rule.off_after_minutes,
-  turnOnWithMotion: rule.turn_on_with_motion === 1,
-  sensorIp:        rule.sensor_ip,
-  sensorUsername:  rule.sensor_username,
-  hasSensorPassword: !!rule.sensor_password,
-  // A Ring camera that also reports motion for this rule.
-  ringCameraId:    rule.ring_camera_id ?? null,
-  ringCameraName:  rule.ring_camera_id == null ? null : (ringCameras().find((c) => c.id === rule.ring_camera_id)?.name ?? null),
-  occupied:        rule.occupied === 1,
-  lastMotionAt:    rule.last_motion_at,
-  status:          motionStatus(rule, Date.now()),
-  turnOnWhen:      rule.turn_on_when,
-  darkBelowLux:    rule.dark_below_lux,
-  sunOffsetMinutes: rule.sun_offset_minutes,
-  hoursFrom:       rule.hours_from,
-  hoursTo:         rule.hours_to,
-  lastLux:         rule.last_lux,
-  lastLuxAt:       rule.last_lux_at,
-  // Why the last motion didn't turn the light on, if it didn't.
-  skipped:         rule.skipped_at ? { at: rule.skipped_at, reason: rule.skipped_reason } : null,
-  // Today's dark window, so "between sunset and sunrise" shows its times.
-  sunToday:        sunWindow(rule.sun_offset_minutes),
-});
+function toPublic(rule: RuleWithDevice) {
+  const now = Date.now();
+  const lights = ruleLights(rule.id).map((light) => ({ light, status: motionStatus(light, now) }));
+  return {
+    id:              rule.id,
+    name:            rule.name,
+    // The first light, for older apps.
+    deviceId:        rule.device_id,
+    deviceAlias:     rule.alias,
+    lights:          lights.map(({ light, status }) => ({ deviceId: light.device_id, alias: light.alias, status })),
+    offAfterMinutes: rule.off_after_minutes,
+    turnOnWithMotion: rule.turn_on_with_motion === 1,
+    sensorIp:        rule.sensor_ip,
+    sensorUsername:  rule.sensor_username,
+    hasSensorPassword: !!rule.sensor_password,
+    // A Ring camera that also reports motion for this rule.
+    ringCameraId:    rule.ring_camera_id ?? null,
+    ringCameraName:  rule.ring_camera_id == null ? null : (ringCameras().find((c) => c.id === rule.ring_camera_id)?.name ?? null),
+    occupied:        rule.occupied === 1,
+    lastMotionAt:    rule.last_motion_at,
+    // The rule's own status, from its lights': see ruleStatus.
+    status:          ruleStatus(lights.map((l) => l.status)),
+    turnOnWhen:      rule.turn_on_when,
+    darkBelowLux:    rule.dark_below_lux,
+    sunOffsetMinutes: rule.sun_offset_minutes,
+    hoursFrom:       rule.hours_from,
+    hoursTo:         rule.hours_to,
+    lastLux:         rule.last_lux,
+    lastLuxAt:       rule.last_lux_at,
+    // Why the last motion didn't turn the light on, if it didn't.
+    skipped:         rule.skipped_at ? { at: rule.skipped_at, reason: rule.skipped_reason } : null,
+    // Today's dark window, so "between sunset and sunrise" shows its times.
+    sunToday:        sunWindow(rule.sun_offset_minutes),
+  };
+}
 
 function sunWindow(offset: number): { darkFrom: string; darkUntil: string; located: boolean } | null {
   const sun = sunTimes(new Date(), offset);
@@ -74,6 +81,27 @@ function whenError(body: Record<string, unknown>, rule: RuleWithDevice): string 
 
 const readRule = (id: unknown) =>
   getDb().prepare(`${RULE_SELECT} WHERE r.id = ?`).get(id) as RuleWithDevice | undefined;
+
+/**
+ * The lights a POST or PATCH asks for: `deviceIds`, or one `deviceId` from older apps.
+ * Undefined when neither was sent; otherwise the ids, or an error to send.
+ */
+function chosenLights(body: { deviceId?: unknown; deviceIds?: unknown }):
+  undefined | { ids: number[] } | { status: number; error: string; code: string } {
+  const raw = body.deviceIds !== undefined ? body.deviceIds : body.deviceId !== undefined ? [body.deviceId] : undefined;
+  if (raw === undefined) return undefined;
+  if (!Array.isArray(raw) || raw.length === 0 || !raw.every((id) => Number.isInteger(id))) {
+    return { status: 400, error: 'Choose at least one light', code: 'VALIDATION_ERROR' };
+  }
+  const ids = [...new Set(raw as number[])];
+  if (ids.length > MAX_RULE_LIGHTS) return { status: 400, error: `Choose up to ${MAX_RULE_LIGHTS} lights`, code: 'VALIDATION_ERROR' };
+  for (const id of ids) {
+    const device = getDb().prepare('SELECT * FROM devices WHERE id = ?').get(id) as PowerDevice | undefined;
+    if (!device) return { status: 404, error: 'Device not found', code: 'DEVICE_NOT_FOUND' };
+    if (isProtectedDevice(device)) return { status: 400, error: `${device.alias} is protected`, code: 'DEVICE_PROTECTED' };
+  }
+  return { ids };
+}
 
 const validMinutes = (value: unknown): value is number =>
   Number.isInteger(value) && (value as number) >= 1 && (value as number) <= MAX_MINUTES;
@@ -102,21 +130,18 @@ motionRouter.get('/', (_req: Request, res: Response) => {
 
 // POST /api/motion
 motionRouter.post('/', (req: Request, res: Response) => {
-  const { name, deviceId, offAfterMinutes, turnOnWithMotion } = req.body as {
-    name?: unknown; deviceId?: unknown; offAfterMinutes?: unknown; turnOnWithMotion?: unknown;
+  const { name, offAfterMinutes, turnOnWithMotion } = req.body as {
+    name?: unknown; offAfterMinutes?: unknown; turnOnWithMotion?: unknown;
   };
   if (typeof name !== 'string' || !name.trim() || !validMinutes(offAfterMinutes)) {
     return res.status(400).json({ error: 'A name and 1 to 1440 minutes are required', code: 'VALIDATION_ERROR' });
   }
 
-  const device = getDb().prepare('SELECT * FROM devices WHERE id = ?').get(deviceId) as PowerDevice | undefined;
-  if (!device) return res.status(404).json({ error: 'Device not found', code: 'DEVICE_NOT_FOUND' });
-  if (isProtectedDevice(device)) {
-    return res.status(400).json({ error: `${device.alias} is protected`, code: 'DEVICE_PROTECTED' });
-  }
+  const lights = chosenLights(req.body) ?? { status: 400, error: 'Choose at least one light', code: 'VALIDATION_ERROR' };
+  if (!('ids' in lights)) return res.status(lights.status).json({ error: lights.error, code: lights.code });
 
   try {
-    const rule = createMotionRule(name.trim(), device.id, offAfterMinutes, turnOnWithMotion === true);
+    const rule = createMotionRule(name.trim(), lights.ids, offAfterMinutes, turnOnWithMotion === true);
     res.status(201).json(toPublic(readRule(rule.id)!));
   } catch (err: any) {
     if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
@@ -128,8 +153,8 @@ motionRouter.post('/', (req: Request, res: Response) => {
 
 // PATCH /api/motion/:id — changes only the fields sent
 motionRouter.patch('/:id', (req: Request, res: Response) => {
-  const { name, deviceId, offAfterMinutes, turnOnWithMotion } = req.body as {
-    name?: unknown; deviceId?: unknown; offAfterMinutes?: unknown; turnOnWithMotion?: unknown;
+  const { name, offAfterMinutes, turnOnWithMotion } = req.body as {
+    name?: unknown; offAfterMinutes?: unknown; turnOnWithMotion?: unknown;
   };
   if (name !== undefined && (typeof name !== 'string' || !name.trim())) {
     return res.status(400).json({ error: 'A name is required', code: 'VALIDATION_ERROR' });
@@ -146,13 +171,8 @@ motionRouter.patch('/:id', (req: Request, res: Response) => {
   }
 
   const db = getDb();
-  if (deviceId !== undefined) {
-    const device = db.prepare('SELECT * FROM devices WHERE id = ?').get(deviceId) as PowerDevice | undefined;
-    if (!device) return res.status(404).json({ error: 'Device not found', code: 'DEVICE_NOT_FOUND' });
-    if (isProtectedDevice(device)) {
-      return res.status(400).json({ error: `${device.alias} is protected`, code: 'DEVICE_PROTECTED' });
-    }
-  }
+  const lights = chosenLights(req.body);
+  if (lights && !('ids' in lights)) return res.status(lights.status).json({ error: lights.error, code: lights.code });
 
   const rule = readRule(req.params.id);
   if (!rule) return res.status(404).json({ error: 'Rule not found', code: 'NOT_FOUND' });
@@ -162,25 +182,27 @@ motionRouter.patch('/:id', (req: Request, res: Response) => {
   if (invalid) return res.status(400).json({ error: invalid, code: 'VALIDATION_ERROR' });
 
   try {
-    db.prepare(`
-      UPDATE motion_rules
-         SET name = ?, device_id = ?, off_after_minutes = ?, turn_on_with_motion = ?,
-             turn_on_when = ?, dark_below_lux = ?, sun_offset_minutes = ?, hours_from = ?, hours_to = ?,
-             ring_camera_id = ?
-       WHERE id = ?
-    `).run(
-      name === undefined ? rule.name : (name as string).trim(),
-      deviceId ?? rule.device_id,
-      offAfterMinutes ?? rule.off_after_minutes,
-      turnOnWithMotion === undefined ? rule.turn_on_with_motion : (turnOnWithMotion ? 1 : 0),
-      body.turnOnWhen ?? rule.turn_on_when,
-      body.darkBelowLux ?? rule.dark_below_lux,
-      body.sunOffsetMinutes ?? rule.sun_offset_minutes,
-      body.hoursFrom ?? rule.hours_from,
-      body.hoursTo ?? rule.hours_to,
-      ringCameraId === undefined ? rule.ring_camera_id : ringCameraId,
-      rule.id,
-    );
+    db.transaction(() => {
+      db.prepare(`
+        UPDATE motion_rules
+           SET name = ?, off_after_minutes = ?, turn_on_with_motion = ?,
+               turn_on_when = ?, dark_below_lux = ?, sun_offset_minutes = ?, hours_from = ?, hours_to = ?,
+               ring_camera_id = ?
+         WHERE id = ?
+      `).run(
+        name === undefined ? rule.name : (name as string).trim(),
+        offAfterMinutes ?? rule.off_after_minutes,
+        turnOnWithMotion === undefined ? rule.turn_on_with_motion : (turnOnWithMotion ? 1 : 0),
+        body.turnOnWhen ?? rule.turn_on_when,
+        body.darkBelowLux ?? rule.dark_below_lux,
+        body.sunOffsetMinutes ?? rule.sun_offset_minutes,
+        body.hoursFrom ?? rule.hours_from,
+        body.hoursTo ?? rule.hours_to,
+        ringCameraId === undefined ? rule.ring_camera_id : ringCameraId,
+        rule.id,
+      );
+      if (lights) setRuleLights(rule.id, lights.ids);
+    })();
   } catch (err: any) {
     if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
       return res.status(409).json({ error: 'That name is already used', code: 'CONFLICT' });

@@ -46,22 +46,61 @@ export type RuleWithDevice = MotionRuleRow & PowerDevice & {
   timer_off_at:    string | null;
 };
 
+/** Most lights one rule can switch. */
+export const MAX_RULE_LIGHTS = 20;
+
+/**
+ * One row per light of each rule: the rule's fields, with the light's device fields and its
+ * device_id. Devices have their own id, so the rule's comes after and wins; the light's
+ * device_id comes last, in place of the rule's first light.
+ */
+export const LIGHT_ROWS = `
+  SELECT d.*, r.*, l.device_id AS device_id
+    FROM motion_rules r
+    JOIN motion_rule_lights l ON l.rule_id = r.id
+    JOIN devices d ON d.id = l.device_id
+`;
+
+/** The rule's lights, first light first, then in the order they were added. */
+export function ruleLights(ruleId: number): RuleWithDevice[] {
+  return getDb().prepare(`${LIGHT_ROWS} WHERE r.id = ?
+    ORDER BY l.device_id <> r.device_id, (SELECT id FROM motion_rule_devices x WHERE x.rule_id = r.id AND x.device_id = l.device_id)`)
+    .all(ruleId) as RuleWithDevice[];
+}
+
+/** Sets the rule's lights. The first one is kept in motion_rules.device_id too. */
+export function setRuleLights(ruleId: number, deviceIds: number[]): void {
+  const db = getDb();
+  db.transaction(() => {
+    db.prepare('UPDATE motion_rules SET device_id = ? WHERE id = ?').run(deviceIds[0], ruleId);
+    db.prepare(`DELETE FROM motion_rule_devices WHERE rule_id = ? AND device_id NOT IN (${deviceIds.map(() => '?').join(', ')})`)
+      .run(ruleId, ...deviceIds);
+    const add = db.prepare('INSERT OR IGNORE INTO motion_rule_devices (rule_id, device_id) VALUES (?, ?)');
+    for (const id of deviceIds) add.run(ruleId, id);
+  })();
+}
+
 /** SQLite's datetime('now') is UTC with no zone marker. */
 const toMs = (time: string | null) =>
   time ? Date.parse(time.includes('T') ? time : `${time.replace(' ', 'T')}Z`) : 0;
 
 export function createMotionRule(
   name: string,
-  deviceId: number,
+  deviceIds: number | number[],
   offAfterMinutes: number,
   turnOnWithMotion = false,
 ): MotionRuleRow {
+  const ids = Array.isArray(deviceIds) ? deviceIds : [deviceIds];
   const token = crypto.randomBytes(16).toString('hex');
   const db = getDb();
-  const { lastInsertRowid } = db.prepare(
-    'INSERT INTO motion_rules (name, token, device_id, off_after_minutes, turn_on_with_motion) VALUES (?, ?, ?, ?, ?)',
-  ).run(name, token, deviceId, offAfterMinutes, turnOnWithMotion ? 1 : 0);
-  return db.prepare('SELECT * FROM motion_rules WHERE id = ?').get(lastInsertRowid) as MotionRuleRow;
+  const id = db.transaction(() => {
+    const { lastInsertRowid } = db.prepare(
+      'INSERT INTO motion_rules (name, token, device_id, off_after_minutes, turn_on_with_motion) VALUES (?, ?, ?, ?, ?)',
+    ).run(name, token, ids[0], offAfterMinutes, turnOnWithMotion ? 1 : 0);
+    setRuleLights(Number(lastInsertRowid), ids);
+    return lastInsertRowid;
+  })();
+  return db.prepare('SELECT * FROM motion_rules WHERE id = ?').get(id) as MotionRuleRow;
 }
 
 /** Both events mean someone was there just now. Returns false for an unknown token. */
@@ -88,22 +127,23 @@ function noteMotionSeen(ruleId: number, now: Date): void {
   db.prepare('INSERT INTO motion_seen (rule_id, at) VALUES (?, ?)').run(ruleId, now.toISOString());
 }
 
-/** Records a sensor event and, if the rule asks for it, turns the light on. */
+/** Records a sensor event and, if the rule asks for it, turns its lights on. */
 export async function handleMotion(token: string, occupied: boolean, now = new Date()): Promise<boolean> {
   if (!recordMotion(token, occupied, now)) return false;
   if (!occupied) return true;
 
   const db = getDb();
   const rule = db.prepare(`
-    SELECT d.*, r.device_id, r.turn_on_with_motion, r.name, r.turn_on_when, r.dark_below_lux, r.sun_offset_minutes,
+    SELECT r.id, r.turn_on_with_motion, r.name, r.turn_on_when, r.dark_below_lux, r.sun_offset_minutes,
            r.hours_from, r.hours_to, r.sensor_ip, r.sensor_username, r.sensor_password
-    FROM motion_rules r JOIN devices d ON d.id = r.device_id WHERE r.token = ?
-  `).get(token) as RuleWithDevice & WhenRule;
-  if (!rule.turn_on_with_motion || isProtectedDevice(rule)) return true;
-  if (automationsPaused()) return true;
+    FROM motion_rules r WHERE r.token = ?
+  `).get(token) as MotionRuleRow & WhenRule;
+  if (!rule.turn_on_with_motion || automationsPaused()) return true;
 
-  // Someone chose to hold this light in its current state.
-  if (rule.timer_off_at || toMs(rule.override_until) > now.getTime()) return true;
+  // Lights someone chose to hold in their current state, and protected ones, are left alone.
+  const lights = ruleLights(rule.id).filter((light) =>
+    !isProtectedDevice({ ...light, id: light.device_id }) && !light.timer_off_at && toMs(light.override_until) <= now.getTime());
+  if (lights.length === 0) return true;
 
   // Daylight, by the sensor's light reading, the sun or the clock, as the rule chose.
   const decision = await decideTurnOn(rule, now);
@@ -119,12 +159,15 @@ export async function handleMotion(token: string, occupied: boolean, now = new D
 
   // Don't rely on the cached state: it can be a minute old, so a light just
   // switched off at the wall would look on. Turning on a lit light is harmless.
-  try {
-    await withActivity({ source: 'motion', detail: rule.name }, () => applyPower({ ...rule, id: rule.device_id }, true));
-    logger.info({ rule: rule.name, device: rule.alias }, 'Motion, light turned on');
-  } catch (err) {
-    logger.warn({ err, rule: rule.name }, 'Could not turn on light after motion');
-  }
+  // One light that can't be reached doesn't stop the others.
+  await Promise.all(lights.map(async (light) => {
+    try {
+      await withActivity({ source: 'motion', detail: rule.name }, () => applyPower({ ...light, id: light.device_id }, true));
+      logger.info({ rule: rule.name, device: light.alias }, 'Motion, light turned on');
+    } catch (err) {
+      logger.warn({ err, rule: rule.name, device: light.alias }, 'Could not turn on light after motion');
+    }
+  }));
   return true;
 }
 
@@ -160,6 +203,20 @@ export function motionStatus(rule: RuleWithDevice, now: number): MotionStatus {
   return { kind: 'counting', offAt: new Date(start + rule.off_after_minutes * 60_000).toISOString() };
 }
 
+/** Which status the rule shows when its lights differ: the one that says most about what happens next. */
+const STATUS_ORDER: MotionStatus['kind'][] = ['waiting', 'occupied', 'counting', 'held', 'off_cooldown', 'off', 'offline'];
+
+/** One status for a rule from each light's: a countdown shows the soonest turn-off. All offline only when every light is. */
+export function ruleStatus(statuses: MotionStatus[]): MotionStatus {
+  if (statuses.length === 0) return { kind: 'off' };
+  const online = statuses.filter((s) => s.kind !== 'offline');
+  if (online.length === 0) return { kind: 'offline' };
+  const kind = STATUS_ORDER.find((k) => online.some((s) => s.kind === k))!;
+  if (kind !== 'counting') return { kind } as MotionStatus;
+  const offAt = online.flatMap((s) => (s.kind === 'counting' ? [s.offAt] : [])).sort()[0];
+  return { kind: 'counting', offAt };
+}
+
 function shouldTurnOff(rule: RuleWithDevice, now: number): boolean {
   const status = motionStatus(rule, now);
   return status.kind === 'counting' && Date.parse(status.offAt) <= now;
@@ -171,10 +228,8 @@ export async function sweepMotionRules(now = Date.now()): Promise<void> {
   if (sweeping || automationsPaused()) return;
   sweeping = true;
   try {
-    const rules = getDb().prepare(`
-      SELECT d.*, r.device_id, r.off_after_minutes, r.occupied, r.last_motion_at, r.name
-      FROM motion_rules r JOIN devices d ON d.id = r.device_id
-    `).all() as RuleWithDevice[];
+    // Each light on its own: one switched on by hand later gets its full time.
+    const rules = getDb().prepare(LIGHT_ROWS).all() as RuleWithDevice[];
 
     await Promise.all(rules.filter((rule) => shouldTurnOff(rule, now)).map(async (rule) => {
       try {
@@ -208,9 +263,10 @@ const rearming = new Set<number>();
  * but switching detection off and on ends the blind time, tested on an SHMOS-01.
  */
 export async function rearmSensors(deviceId: number): Promise<void> {
-  const rules = getDb().prepare(
-    'SELECT * FROM motion_rules WHERE device_id = ? AND occupied = 1 AND sensor_ip IS NOT NULL',
-  ).all(deviceId) as MotionRuleRow[];
+  const rules = getDb().prepare(`
+    SELECT * FROM motion_rules r WHERE occupied = 1 AND sensor_ip IS NOT NULL
+       AND EXISTS (SELECT 1 FROM motion_rule_lights l WHERE l.rule_id = r.id AND l.device_id = ?)
+  `).all(deviceId) as MotionRuleRow[];
 
   await Promise.all(rules.filter((rule) => !rearming.has(rule.id)).map(async (rule) => {
     rearming.add(rule.id);

@@ -40,7 +40,7 @@ describe('pausing automations', () => {
 
   beforeEach(() => {
     db.pragma('foreign_keys = OFF');
-    for (const t of ['motion_rules', 'devices', 'settings', 'users']) db.prepare(`DELETE FROM ${t}`).run();
+    for (const t of ['motion_rule_devices', 'motion_rules', 'devices', 'settings', 'users']) db.prepare(`DELETE FROM ${t}`).run();
     db.pragma('foreign_keys = ON');
     db.prepare("INSERT INTO devices (id, alias, ip, driver_type) VALUES (1, 'Kitchen lights', '10.0.0.1', 'kasa')").run();
     calls.length = 0;

@@ -49,7 +49,7 @@ describe('auto-off', () => {
 
   beforeEach(() => {
     db.pragma('foreign_keys = OFF');
-    for (const t of ['motion_rules', 'schedules', 'devices']) db.prepare(`DELETE FROM ${t}`).run();
+    for (const t of ['motion_rule_devices', 'motion_rules', 'schedules', 'devices']) db.prepare(`DELETE FROM ${t}`).run();
     db.pragma('foreign_keys = ON');
     cache.getAllCachedStates().clear();
   });
@@ -64,6 +64,17 @@ describe('auto-off', () => {
     const id = addDevice('Kitchen lights', true, 20);
     addRule(id, { occupied: false, lastMotionMinAgo: 3 });
     assert.deepEqual(autoOff.pendingAutoOff(NOW).get(id), { at: '2026-11-02T20:07:00.000Z', cause: 'motion', detail: 'Kitchen sensor' });
+  });
+
+  it("counts down each of a motion rule's lights from when it came on", () => {
+    const first = addDevice('Kitchen lights', true, 20);
+    const strip = addDevice('Cabinet strip', true, 1);
+    addRule(first, { occupied: false, lastMotionMinAgo: 3 });
+    const ruleId = (db.prepare('SELECT id FROM motion_rules').get() as { id: number }).id;
+    db.prepare('INSERT INTO motion_rule_devices (rule_id, device_id) VALUES (?, ?)').run(ruleId, strip);
+    const pending = autoOff.pendingAutoOff(NOW);
+    assert.equal(pending.get(first)?.at, '2026-11-02T20:07:00.000Z');
+    assert.deepEqual(pending.get(strip), { at: '2026-11-02T20:09:00.000Z', cause: 'motion', detail: 'Kitchen sensor' });
   });
 
   it('says a motion rule is waiting while the room is occupied', () => {

@@ -24,6 +24,7 @@ describe('motion rules', () => {
   let cache: Map<number, { state: boolean; wattage: null; online: boolean; lastPolled: Date }>;
   let calls: { ip: string; state: boolean }[];
   let failing: boolean;
+  let unreachableIp: string | null;
   let lightId: number;
   let token: string;
   let server: http.Server;
@@ -55,7 +56,7 @@ describe('motion rules', () => {
     cache = getAllCachedStates() as never;
 
     getDriver('kasa').setPower = async (ip: string, state: boolean) => {
-      if (failing) throw new Error('unreachable');
+      if (failing || ip === unreachableIp) throw new Error('unreachable');
       calls.push({ ip, state });
     };
 
@@ -95,6 +96,7 @@ describe('motion rules', () => {
   beforeEach(() => {
     calls = [];
     failing = false;
+    unreachableIp = null;
     sensorRequests = [];
     sensorSaved = [];
     sensorForgets = false;
@@ -407,6 +409,179 @@ describe('motion rules', () => {
     failing = true;
     await motion.sweepMotionRules(at(30));
     assert.deepEqual(calls, []);
+  });
+
+  describe('several lights', () => {
+    let stripId: number;
+    const stripOn = (on: boolean) => cache.set(stripId, { state: on, wattage: null, online: true, lastPolled: new Date() });
+    const lights = (id: number) => motion.ruleLights(id).map((l) => l.alias);
+    const ruleId = () => (db.prepare('SELECT id FROM motion_rules').get() as { id: number }).id;
+
+    beforeEach(() => {
+      db.prepare("DELETE FROM devices WHERE alias IN ('Cabinet strip', 'Pantry')").run();
+      stripId = Number(db.prepare("INSERT INTO devices (alias, ip, turned_on_at) VALUES ('Cabinet strip', '10.0.0.2', ?)").run(sqlite(0)).lastInsertRowid);
+      stripOn(true);
+      motion.setRuleLights(ruleId(), [lightId, stripId]);
+    });
+
+    after(() => db.prepare("DELETE FROM devices WHERE alias IN ('Cabinet strip', 'Pantry')").run());
+
+    it('keeps the first light in the rule row and lists the lights in order', () => {
+      assert.deepEqual(lights(ruleId()), ['Kitchen lights', 'Cabinet strip']);
+      motion.setRuleLights(ruleId(), [stripId, lightId]);
+      assert.deepEqual(lights(ruleId()), ['Cabinet strip', 'Kitchen lights']);
+      assert.equal((db.prepare('SELECT device_id FROM motion_rules').get() as any).device_id, stripId);
+      motion.setRuleLights(ruleId(), [lightId]);
+      assert.deepEqual(lights(ruleId()), ['Kitchen lights']);
+      assert.equal((db.prepare('SELECT COUNT(*) AS n FROM motion_rule_devices').get() as any).n, 1);
+    });
+
+    it('creates a rule with several lights', () => {
+      db.prepare('DELETE FROM motion_rules').run();
+      const rule = motion.createMotionRule('Both', [stripId, lightId], 5);
+      assert.equal(rule.device_id, stripId);
+      assert.deepEqual(lights(rule.id), ['Cabinet strip', 'Kitchen lights']);
+    });
+
+    it('still finds a rule made before lights were listed (no rows of its own)', () => {
+      db.prepare('DELETE FROM motion_rule_devices').run();
+      assert.deepEqual(lights(ruleId()), ['Kitchen lights']);
+    });
+
+    describe('motion', () => {
+      beforeEach(() => {
+        cache.set(lightId, { state: false, wattage: null, online: true, lastPolled: new Date() });
+        stripOn(false);
+        db.prepare('UPDATE motion_rules SET turn_on_with_motion = 1').run();
+      });
+
+      it('turns every light on', async () => {
+        await motion.handleMotion(token, true);
+        assert.deepEqual(calls.sort((a, b) => a.ip.localeCompare(b.ip)), [{ ip: '10.0.0.1', state: true }, { ip: '10.0.0.2', state: true }]);
+      });
+
+      it('still turns the others on when one cannot be reached', async () => {
+        unreachableIp = '10.0.0.1';
+        assert.equal(await motion.handleMotion(token, true), true);
+        assert.deepEqual(calls, [{ ip: '10.0.0.2', state: true }]);
+      });
+
+      it('leaves a held or protected light alone and turns on the rest', async () => {
+        setLight({ timer_off_at: sqlite(60) });
+        await motion.handleMotion(token, true);
+        assert.deepEqual(calls, [{ ip: '10.0.0.2', state: true }]);
+        calls = [];
+        setLight({ timer_off_at: null, is_protected: 1 });
+        await motion.handleMotion(token, true);
+        assert.deepEqual(calls, [{ ip: '10.0.0.2', state: true }]);
+      });
+
+      it('applies the rule\'s "only" to all of them', async () => {
+        db.prepare("UPDATE motion_rules SET turn_on_when = 'hours', hours_from = '01:00', hours_to = '01:01'").run();
+        await motion.handleMotion(token, true, new Date('2026-11-01T12:00:00'));
+        assert.deepEqual(calls, []);
+      });
+    });
+
+    it('turns each light off on its own time', async () => {
+      motion.recordMotion(token, false, new Date(at(1)));
+      db.prepare('UPDATE devices SET turned_on_at = ? WHERE id = ?').run(sqlite(8), stripId);
+
+      await motion.sweepMotionRules(at(11));
+      assert.deepEqual(calls, [{ ip: '10.0.0.1', state: false }]);
+      calls = [];
+      await motion.sweepMotionRules(at(17));
+      assert.deepEqual(calls, []);
+      await motion.sweepMotionRules(at(18));
+      assert.deepEqual(calls, [{ ip: '10.0.0.2', state: false }]);
+    });
+
+    it('keeps the rule when its first light is deleted, and deletes it with its last', () => {
+      db.prepare('DELETE FROM devices WHERE id = ?').run(stripId);
+      assert.deepEqual(lights(ruleId()), ['Kitchen lights']);
+      const pantry = Number(db.prepare("INSERT INTO devices (alias, ip) VALUES ('Pantry', '10.0.0.3')").run().lastInsertRowid);
+      motion.setRuleLights(ruleId(), [pantry, lightId]);
+      db.prepare('DELETE FROM devices WHERE id = ?').run(pantry);
+      assert.equal((db.prepare('SELECT device_id FROM motion_rules').get() as any).device_id, lightId);
+      assert.deepEqual(lights(ruleId()), ['Kitchen lights']);
+      // A rule with no light left is deleted, as before.
+      const only = Number(db.prepare("INSERT INTO devices (alias, ip) VALUES ('Pantry', '10.0.0.3')").run().lastInsertRowid);
+      const other = motion.createMotionRule('Pantry', only, 5);
+      db.prepare('DELETE FROM devices WHERE id = ?').run(only);
+      assert.equal(db.prepare('SELECT 1 FROM motion_rules WHERE id = ?').get(other.id), undefined);
+    });
+
+    it('resets the sensor when any of its lights is switched off', async () => {
+      db.prepare("UPDATE motion_rules SET sensor_ip = ?, sensor_username = 'admin', sensor_password = 'right'")
+        .run(`127.0.0.1:${(sensor.address() as { port: number }).port}`);
+      motion.recordMotion(token, true);
+      await motion.rearmSensors(stripId);
+      assert.deepEqual(sensorRequests.map(({ url }) => url), ['/settings?motion_enable=false', '/settings?motion_enable=true']);
+    });
+
+    describe('ruleStatus', () => {
+      it('shows the soonest countdown, and offline only when every light is', () => {
+        assert.deepEqual(motion.ruleStatus([{ kind: 'counting', offAt: iso(9) }, { kind: 'counting', offAt: iso(5) }, { kind: 'off' }]),
+          { kind: 'counting', offAt: iso(5) });
+        assert.deepEqual(motion.ruleStatus([{ kind: 'offline' }, { kind: 'off' }]), { kind: 'off' });
+        assert.deepEqual(motion.ruleStatus([{ kind: 'offline' }, { kind: 'offline' }]), { kind: 'offline' });
+        assert.deepEqual(motion.ruleStatus([{ kind: 'held' }, { kind: 'counting', offAt: iso(2) }]), { kind: 'counting', offAt: iso(2) });
+        assert.deepEqual(motion.ruleStatus([{ kind: 'held' }, { kind: 'off' }]), { kind: 'held' });
+        assert.deepEqual(motion.ruleStatus([{ kind: 'occupied' }, { kind: 'off_cooldown' }]), { kind: 'occupied' });
+      });
+    });
+
+    describe('routes', () => {
+      const send = (method: string, url: string, body?: unknown) => fetch(`${baseUrl}${url}`, {
+        method, headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined,
+      });
+
+      it('lists the lights with their own status', async () => {
+        motion.recordMotion(token, false, new Date(Date.now() - MINUTE));
+        stripOn(false);
+        const [rule] = await (await send('GET', '/api/motion')).json() as any[];
+        assert.deepEqual(rule.lights.map((l: any) => [l.deviceId, l.alias, l.status.kind]),
+          [[lightId, 'Kitchen lights', 'counting'], [stripId, 'Cabinet strip', 'off']]);
+        assert.equal(rule.status.kind, 'counting');
+        assert.equal(rule.deviceId, lightId);
+      });
+
+      it('saves deviceIds, in order and without repeats', async () => {
+        const res = await send('PATCH', `/api/motion/${ruleId()}`, { deviceIds: [stripId, lightId, stripId] });
+        assert.equal(res.status, 200);
+        assert.deepEqual(((await res.json()) as any).lights.map((l: any) => l.alias), ['Cabinet strip', 'Kitchen lights']);
+      });
+
+      it('takes one deviceId from an older app as the only light', async () => {
+        const res = await send('PATCH', `/api/motion/${ruleId()}`, { deviceId: stripId });
+        assert.deepEqual(((await res.json()) as any).lights.map((l: any) => l.alias), ['Cabinet strip']);
+      });
+
+      it('creates a rule with deviceIds', async () => {
+        const res = await send('POST', '/api/motion', { name: 'Both', deviceIds: [stripId, lightId], offAfterMinutes: 5 });
+        assert.equal(res.status, 201);
+        assert.deepEqual(((await res.json()) as any).lights.map((l: any) => l.alias), ['Cabinet strip', 'Kitchen lights']);
+      });
+
+      it('refuses no lights, an unknown or protected one, and changes nothing', async () => {
+        const id = ruleId();
+        assert.equal((await send('PATCH', `/api/motion/${id}`, { deviceIds: [] })).status, 400);
+        assert.equal((await send('PATCH', `/api/motion/${id}`, { deviceIds: ['1'] })).status, 400);
+        assert.equal((await send('PATCH', `/api/motion/${id}`, { deviceIds: [lightId, 99999] })).status, 404);
+        db.prepare('UPDATE devices SET is_protected = 1 WHERE id = ?').run(stripId);
+        const res = await send('PATCH', `/api/motion/${id}`, { deviceIds: [stripId], name: 'Renamed' });
+        assert.equal(res.status, 400);
+        assert.equal(((await res.json()) as any).code, 'DEVICE_PROTECTED');
+        assert.equal((await send('POST', '/api/motion', { name: 'X', offAfterMinutes: 5 })).status, 400);
+        assert.deepEqual(lights(id), ['Kitchen lights', 'Cabinet strip']);
+        assert.equal((db.prepare('SELECT name FROM motion_rules').get() as any).name, 'Kitchen');
+      });
+
+      it('refuses more than the most lights a rule can have', async () => {
+        const ids = Array.from({ length: motion.MAX_RULE_LIGHTS + 1 }, (_, i) => i + 1);
+        assert.equal((await send('PATCH', `/api/motion/${ruleId()}`, { deviceIds: ids })).status, 400);
+      });
+    });
   });
 
   describe('routes', () => {

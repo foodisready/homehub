@@ -272,6 +272,29 @@ describe('JSON backups', () => {
     assert.equal(jb.listBackups().length, 1, 'nothing saved');
   });
 
+  it("restores a motion rule's lights, and gives a rule from an older backup only its first light", () => {
+    const lightsOf = () => (db().prepare('SELECT rule_id, device_id FROM motion_rule_lights ORDER BY rule_id, device_id').all() as object[])
+      .map((r) => Object.values(r).join(':'));
+    db().prepare("INSERT INTO motion_rules (id, name, token, device_id, off_after_minutes) VALUES (1, 'Kitchen', 'tok', 1, 10)").run();
+    db().prepare('INSERT INTO motion_rule_devices (rule_id, device_id) VALUES (1, 1), (1, 2)').run();
+    try {
+      const data = jb.snapshot();
+      assert.equal(data.tables.motion_rule_devices?.length, 2);
+      db().prepare('DELETE FROM motion_rule_devices WHERE device_id = 2').run();
+      jb.applyBackup(data);
+      assert.deepEqual(lightsOf(), ['1:1', '1:2']);
+
+      // Made before rules had several lights: today's rule 1 lights must not join the restored rule 1.
+      const old = { ...data, tables: { ...data.tables } };
+      delete old.tables.motion_rule_devices;
+      old.tables.motion_rules = [{ ...data.tables.motion_rules![0], name: 'Hall', device_id: 2 }];
+      jb.applyBackup(old);
+      assert.deepEqual(lightsOf(), ['1:2']);
+    } finally {
+      db().prepare('DELETE FROM motion_rules').run();
+    }
+  });
+
   it('deletes a backup', () => {
     const { name } = jb.createBackup();
     jb.deleteBackup(name);

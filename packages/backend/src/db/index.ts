@@ -133,6 +133,30 @@ function migrate(db: Database.Database): void {
   try { db.exec('ALTER TABLE motion_rules ADD COLUMN skipped_reason TEXT'); } catch {}
   // A Ring camera whose motion and doorbell presses count as motion for the rule. Ring's own id: Ring cameras aren't devices.
   try { db.exec('ALTER TABLE motion_rules ADD COLUMN ring_camera_id INTEGER'); } catch {}
+  // A rule's lights. motion_rules.device_id stays its first light, so older backups and code still
+  // find one; the view reads both, so a rule with no rows here still has that light.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS motion_rule_devices (
+      id        INTEGER PRIMARY KEY AUTOINCREMENT,
+      rule_id   INTEGER NOT NULL REFERENCES motion_rules(id) ON DELETE CASCADE,
+      device_id INTEGER NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+      UNIQUE (rule_id, device_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_motion_rule_devices_device ON motion_rule_devices(device_id);
+    INSERT OR IGNORE INTO motion_rule_devices (rule_id, device_id) SELECT id, device_id FROM motion_rules;
+    CREATE VIEW IF NOT EXISTS motion_rule_lights AS
+      SELECT id AS rule_id, device_id FROM motion_rules
+      UNION SELECT rule_id, device_id FROM motion_rule_devices;
+    -- Deleting a rule's first light would delete the rule: when it has another light, that one becomes first.
+    CREATE TRIGGER IF NOT EXISTS motion_rule_keeps_lights BEFORE DELETE ON devices
+    BEGIN
+      UPDATE motion_rules
+         SET device_id = (SELECT device_id FROM motion_rule_devices
+                           WHERE rule_id = motion_rules.id AND device_id <> OLD.id ORDER BY id LIMIT 1)
+       WHERE device_id = OLD.id
+         AND EXISTS (SELECT 1 FROM motion_rule_devices WHERE rule_id = motion_rules.id AND device_id <> OLD.id);
+    END;
+  `);
   try { db.exec('ALTER TABLE devices ADD COLUMN override_state INTEGER'); } catch {}
   try { db.exec('ALTER TABLE devices ADD COLUMN override_until TEXT'); } catch {}
   try { db.exec('ALTER TABLE devices ADD COLUMN timer_off_at TEXT'); } catch {}

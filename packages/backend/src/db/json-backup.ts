@@ -25,6 +25,8 @@ export const BACKUP_TABLES = [
   'scene_actions',
   'schedules',
   'motion_rules',
+  // A motion rule's lights. Older backups don't have it: each rule then gets its first light only.
+  'motion_rule_devices',
   'ip_cameras',
   'settings',
   'notification_preferences',
@@ -393,6 +395,11 @@ export function applyBackup(data: BackupFile, opts: { dryRun?: boolean } = {}): 
   db.pragma('foreign_keys = OFF');
   try {
     db.transaction(() => {
+      // From a backup made before rules had several lights: the lights here belong to today's rules,
+      // which the restore replaces, so they'd be added to whichever restored rule has the same id.
+      if (tables.includes('motion_rules') && !tables.includes('motion_rule_devices')) {
+        db.prepare('DELETE FROM motion_rule_devices').run();
+      }
       for (const t of tables) {
         const rows = data.tables[t]!;
 

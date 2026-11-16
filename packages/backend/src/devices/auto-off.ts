@@ -1,6 +1,6 @@
 import { getDb } from '../db';
 import { getCachedState } from '../kasa/device.cache';
-import { motionStatus, type RuleWithDevice } from '../sensors/motion';
+import { LIGHT_ROWS, motionStatus, type RuleWithDevice } from '../sensors/motion';
 
 /**
  * When each device that's on will next turn itself off, and why. Three
@@ -61,7 +61,7 @@ export function pendingAutoOff(now = Date.now()): Map<number, AutoOff> {
   }
 
   // 2. Motion rules.
-  const rules = db.prepare('SELECT d.*, r.* FROM motion_rules r JOIN devices d ON d.id = r.device_id').all() as RuleWithDevice[];
+  const rules = db.prepare(LIGHT_ROWS).all() as RuleWithDevice[];
   for (const rule of rules) {
     if (!on.has(rule.device_id)) continue;
     const status = motionStatus(rule, now);

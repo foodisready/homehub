@@ -437,9 +437,19 @@ A sensor already used by another rule is marked. Picking it moves it to this rul
 **+ Discover on network** in Settings leaves sensors out, since they have nothing to switch.
 6. Wave at the sensor to activate the rule.
 
-A Ring doorbell or camera can be a rule's sensor too, instead of or as well as a Shelly Motion: choose it under **Ring camera** on the rule's card, after adding it on the Cameras page. Its motion counts, and so does the doorbell ringing, so a porch light can come on for whoever's at the door. Ring sends no "motion over", so the rule hears it a minute after the last motion. Ring has no light reading, so **When the room is dark** needs a Shelly Motion; use **Between sunset and sunrise** instead.
+A Ring doorbell or camera can be a rule's sensor instead of a Shelly Motion (a rule has one sensor, so choosing Ring replaces the Shelly): choose it under **Ring camera** on the rule's card, after adding it on the Cameras page. Its motion counts, and so does the doorbell ringing, so a porch light can come on for whoever's at the door. Ring sends no "motion over", so the rule hears it a minute after the last motion. Ring has no light reading, so **When the room is dark** needs a Shelly Motion; use **Between sunset and sunrise** instead.
 
-A rule does nothing until its sensor first reports. Its card shows what it's doing, including a countdown to when the light turns off. The countdown clears when the light goes off, within about a minute if you use a wall switch. Clear **Turn on when motion starts** to only turn lights off. You can edit a rule's name, light and minutes on its card, and test the light with the button next to it.
+A rule does nothing until its sensor first reports. Its card shows what it's doing, including a countdown to when the light turns off. The countdown clears when the light goes off, within about a minute if you use a wall switch. Clear **Turn on when motion starts** to only turn lights off. You can edit a rule's name, lights and minutes on its card, and test each light with the button next to it.
+
+### Several lights from one sensor
+
+One sensor can switch several lights, such as the kitchen lights and the cabinet strip. Add the rule with its first light, then choose more under **Add another light…** on its card. Select **✕** next to a light to take it out of the rule; a rule always keeps at least one.
+
+- Motion turns on every light in the rule. **Only** (such as **When the room is dark**) applies to all of them.
+- A light on a keep-on timer, or a protected one, is left alone, and the others still come on. So is one that can't be reached.
+- Each light turns off on its own time: one switched on by hand later still gets the full minutes. The card shows each light's countdown.
+- Use one rule for a sensor's lights, not a rule per light: a Shelly Motion reports to only one rule, so connecting it to a second rule takes it from the first.
+- Deleting a device takes it out of its rules. A rule is deleted only along with its last light.
 
 ### Only when it's dark
 

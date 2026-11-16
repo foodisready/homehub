@@ -11,6 +11,8 @@ interface MotionRule {
   name:            string;
   deviceId:        number;
   deviceAlias:     string;
+  /** Every light the rule switches, first light first, each with its own turn-off status. */
+  lights:          { deviceId: number; alias: string; status: { kind: string; offAt?: string } }[];
   offAfterMinutes: number;
   turnOnWithMotion: boolean;
   sensorIp:        string | null;
@@ -86,6 +88,11 @@ interface FoundSensor { ip: string; name: string; model: string; needsLogin: boo
     .found .used { color: var(--text-muted); font-size: 0.78rem; white-space: nowrap; }
     .sensor { display: flex; flex-direction: column; gap: 0.45rem; padding: 0.6rem 0.75rem; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); }
     .sensor-now { display: flex; align-items: baseline; gap: 0.5rem; flex-wrap: wrap; }
+    .lights { display: flex; flex-direction: column; gap: 0.4rem; }
+    .light { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+    .light .alias { flex: 1 1 8rem; min-width: 0; font-weight: 600; overflow-wrap: anywhere; }
+    .lights select { width: 100%; }
+    .btn-x { background: transparent; border: 1px solid var(--border); color: var(--text-muted); padding: 0.3rem 0.6rem; font-size: 0.8rem; line-height: 1; }
     .btn-remove { background: transparent; border: 1px solid var(--border); color: var(--text-muted); padding: 0.3rem 0.7rem; font-size: 0.8rem; }
   `],
   template: `
@@ -102,15 +109,15 @@ interface FoundSensor { ip: string; name: string; model: string; needsLogin: boo
         <div class="meta">
           @switch (rule.status.kind) {
             @case ('waiting') { Waiting for the sensor's first report, so this rule isn't active yet }
-            @case ('occupied') { Motion detected. The light stays on. }
-            @case ('counting') { <span class="countdown">Turns off in {{ countdown(rule) }}</span> }
+            @case ('occupied') { Motion detected. {{ rule.lights.length > 1 ? 'The lights stay on.' : 'The light stays on.' }} }
+            @case ('counting') { <span class="countdown">{{ offTimesDiffer(rule) ? 'First light turns off in' : 'Turns off in' }} {{ countdown(rule.status) }}</span> }
             @case ('off_cooldown') {
-              @if (rule.ringCameraId !== null) { Light is off. There was motion a moment ago. }
-              @else { Light is off. The sensor needs about a minute without motion before motion can turn it on again. }
+              @if (rule.ringCameraId !== null) { {{ offText(rule) }} There was motion a moment ago. }
+              @else { {{ offText(rule) }} The sensor needs about a minute without motion before motion can turn {{ rule.lights.length > 1 ? 'them' : 'it' }} on again. }
             }
-            @case ('held') { The light is on a keep-on timer, so this rule won't turn it off yet. }
-            @case ('offline') { The light is offline. }
-            @default { Light is off. Last motion {{ rule.lastMotionAt | date:'short' }} }
+            @case ('held') { {{ rule.lights.length > 1 ? 'A light is' : 'The light is' }} on a keep-on timer, so this rule won't turn it off yet. }
+            @case ('offline') { {{ rule.lights.length > 1 ? 'The lights are offline.' : 'The light is offline.' }} }
+            @default { {{ offText(rule) }} Last motion {{ rule.lastMotionAt | date:'short' }} }
           }
           @if (skippedNote(rule); as note) { <div>{{ note }}</div> }
         </div>
@@ -126,7 +133,7 @@ interface FoundSensor { ip: string; name: string; model: string; needsLogin: boo
             }
           </div>
           @if (rule.ringCameraId !== null) {
-            <span class="meta">Motion it sees{{ ringIsDoorbell(rule) ? ', and the doorbell ringing,' : '' }} turns on this light, a few seconds after it happens. The light goes off when it has seen nothing for the minutes below.</span>
+            <span class="meta">Motion it sees{{ ringIsDoorbell(rule) ? ', and the doorbell ringing,' : '' }} turns on {{ rule.lights.length > 1 ? 'these lights' : 'this light' }}, a few seconds after it happens. {{ rule.lights.length > 1 ? 'They go' : 'The light goes' }} off when it has seen nothing for the minutes below.</span>
           }
           @if (connecting() !== rule.id) {
             <div class="fields">
@@ -143,17 +150,29 @@ interface FoundSensor { ip: string; name: string; model: string; needsLogin: boo
             </div>
           }
         </div>
-        <div class="fields">
-          <select [ngModel]="rule.deviceId" aria-label="Light" (ngModelChange)="save(rule, { deviceId: $event })">
-            @for (device of lights(); track device.id) {
-              <option [ngValue]="device.id">{{ device.alias }}</option>
-            }
-          </select>
-          @if (deviceFor(rule); as device) {
-            <span class="meta">{{ !device.online ? 'Offline' : device.state ? 'On' : 'Off' }}</span>
-            <button class="btn-remove" [disabled]="switching() === device.id" (click)="switchLight(rule, device, !device.state)">
-              {{ device.state ? 'Turn off' : 'Turn on' }}
-            </button>
+        <div class="lights" role="group" [attr.aria-label]="'Lights for ' + rule.name">
+          @for (light of rule.lights; track light.deviceId) {
+            <div class="light">
+              <span class="alias">{{ light.alias }}</span>
+              @if (deviceById(light.deviceId); as device) {
+                <span class="meta">{{ lightState(rule, light, device) }}</span>
+                <button class="btn-remove" [disabled]="switching() === device.id || !device.online" (click)="switchLight(rule, device, !device.state)">
+                  {{ device.state ? 'Turn off' : 'Turn on' }}
+                </button>
+              }
+              @if (rule.lights.length > 1) {
+                <button class="btn-x" type="button" [attr.aria-label]="'Remove ' + light.alias + ' from ' + rule.name"
+                        title="Remove from this rule" (click)="removeLight(rule, light.deviceId)">✕</button>
+              }
+            </div>
+          }
+          @if (otherLights(rule).length) {
+            <select [attr.aria-label]="'Add a light to ' + rule.name" (change)="addLight(rule, $event)">
+              <option value="" selected disabled>Add another light…</option>
+              @for (device of otherLights(rule); track device.id) {
+                <option [value]="device.id">{{ device.alias }}</option>
+              }
+            </select>
           }
         </div>
         <div class="fields">
@@ -215,7 +234,7 @@ interface FoundSensor { ip: string; name: string; model: string; needsLogin: boo
                 <span class="meta">A range like 17:00 until 08:00 runs overnight.</span>
               }
             }
-            <span class="meta">Only stops motion turning the light on. Turning it off after no motion, the switch, the app and voice work as usual.</span>
+            <span class="meta">Only stops motion turning {{ rule.lights.length > 1 ? 'the lights' : 'the light' }} on. Turning {{ rule.lights.length > 1 ? 'them' : 'it' }} off after no motion, the switch, the app and voice work as usual.</span>
           </div>
         }
         @if (connecting() === rule.id) {
@@ -335,9 +354,9 @@ export class MotionRulesComponent implements OnInit, OnDestroy {
   /** Why motion just now didn't switch the light on, while the light is still off. */
   skippedNote(rule: MotionRule): string | null {
     const s = rule.skipped;
-    if (!s || this.now() - Date.parse(s.at) > SKIPPED_SHOWN_MS || this.deviceFor(rule)?.state) return null;
+    if (!s || this.now() - Date.parse(s.at) > SKIPPED_SHOWN_MS || rule.lights.some((l) => this.deviceById(l.deviceId)?.state)) return null;
     const at = new Date(s.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-    return `Motion at ${at} didn't turn the light on: ${s.reason}.`;
+    return `Motion at ${at} didn't turn ${rule.lights.length > 1 ? 'the lights' : 'the light'} on: ${s.reason}.`;
   }
 
   /** The usual choices, plus the rule's own if it's something else. */
@@ -347,8 +366,26 @@ export class MotionRulesComponent implements OnInit, OnDestroy {
       : [...LUX_CHOICES, { lux: rule.darkBelowLux, label: `Below ${rule.darkBelowLux} lux` }].sort((a, b) => a.lux - b.lux);
   }
 
-  countdown(rule: MotionRule): string {
-    const seconds = Math.max(0, Math.ceil((Date.parse(rule.status.offAt ?? '') - this.now()) / 1000));
+  /** Whether the rule's lights that are counting down turn off at different times, within a second. */
+  offTimesDiffer(rule: MotionRule): boolean {
+    const times = rule.lights.flatMap((l) => (l.status.kind === 'counting' && l.status.offAt ? [Math.round(Date.parse(l.status.offAt) / 1000)] : []));
+    return new Set(times).size > 1;
+  }
+
+  offText(rule: MotionRule): string {
+    return rule.lights.length > 1 ? 'Lights are off.' : 'Light is off.';
+  }
+
+  /** A light's state. With several lights, each one on shows its own countdown, since each one's time starts when it came on. */
+  lightState(rule: MotionRule, light: MotionRule['lights'][number], device: Device): string {
+    if (!device.online) return 'Offline';
+    if (!device.state) return 'Off';
+    if (rule.lights.length > 1 && light.status.kind === 'counting') return `On, off in ${this.countdown(light.status)}`;
+    return 'On';
+  }
+
+  countdown(status: { offAt?: string }): string {
+    const seconds = Math.max(0, Math.ceil((Date.parse(status.offAt ?? '') - this.now()) / 1000));
     return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
   }
 
@@ -372,8 +409,32 @@ export class MotionRulesComponent implements OnInit, OnDestroy {
     return this.ringCameras().find((c) => c.id === rule.ringCameraId)?.isDoorbell ?? false;
   }
 
-  deviceFor(rule: MotionRule): Device | undefined {
-    return this.devices().find((d) => d.id === rule.deviceId);
+  deviceById(id: number): Device | undefined {
+    return this.devices().find((d) => d.id === id);
+  }
+
+  /** Lights the rule could add. */
+  otherLights(rule: MotionRule): Device[] {
+    return this.lights().filter((d) => !rule.lights.some((l) => l.deviceId === d.id));
+  }
+
+  addLight(rule: MotionRule, event: Event): void {
+    const select = event.target as HTMLSelectElement;
+    const id = Number(select.value);
+    // Back to "Add another light…", whether or not the save works.
+    select.value = '';
+    if (id) this.saveLights(rule, [...rule.lights.map((l) => l.deviceId), id]);
+  }
+
+  removeLight(rule: MotionRule, id: number): void {
+    this.saveLights(rule, rule.lights.map((l) => l.deviceId).filter((x) => x !== id));
+  }
+
+  private saveLights(rule: MotionRule, deviceIds: number[]): void {
+    this.http.patch(`/api/motion/${rule.id}`, { deviceIds }).subscribe({
+      next: () => { this.show(rule, 'Saved', false); this.load(); },
+      error: (err) => { this.show(rule, err.error?.error ?? 'Could not save.', true); this.load(); },
+    });
   }
 
   switchLight(rule: MotionRule, device: Device, on: boolean): void {
