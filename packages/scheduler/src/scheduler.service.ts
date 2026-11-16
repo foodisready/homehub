@@ -1,4 +1,4 @@
-import cron from 'node-cron';
+import cron, { type ScheduledTask } from 'node-cron';
 import Database from 'better-sqlite3';
 import pino from 'pino';
 import { getSolarEventTime, type SolarEvent } from './solar';
@@ -30,7 +30,7 @@ interface ScheduleRow {
 }
 
 export class SchedulerService {
-  private cronJobs      = new Map<number, cron.ScheduledTask>();
+  private cronJobs      = new Map<number, ScheduledTask>();
   private solarTimers   = new Map<number, NodeJS.Timeout>();
   private autoOffTimers = new Map<number, NodeJS.Timeout>();
 
