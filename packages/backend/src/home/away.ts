@@ -68,8 +68,8 @@ interface AwayState {
   lights: Record<string, boolean>;
 }
 
-/** Thermostats to put back after Away mode, retried while they're offline. */
-interface Restore { at: string; ids: number[]; before: Record<string, Targets> }
+/** Thermostats to put back after Away mode, retried while they're offline, and lamps to turn off. */
+interface Restore { at: string; ids: number[]; before: Record<string, Targets>; lamps?: number[] }
 const RESTORE_KEY = 'away_restore';
 
 // ── Storage ────────────────────────────────────────────────────────
@@ -274,6 +274,10 @@ export function backTo(id: number, before: Targets | undefined, now: Date): Targ
 async function runRestore(now: Date): Promise<void> {
   const r = read<Restore>(RESTORE_KEY);
   if (!r) return;
+  // Lamps lived-in lights left on go off, once.
+  for (const d of devices(r.lamps ?? [])) {
+    try { await withActivity({ source: 'away', detail: 'Away mode ended' }, () => applyPower(d, false)); } catch { /* left as is */ }
+  }
   const left: number[] = [];
   for (const id of r.ids) {
     if (!thermostatIds().includes(id)) continue;
@@ -285,7 +289,7 @@ async function runRestore(now: Date): Promise<void> {
     getDb().prepare('UPDATE thermostats SET schedule_checked_at = ? WHERE device_id = ?').run(now.toISOString(), id);
     logger.info({ id, alias: view.alias, ...target }, 'Away mode: thermostat back');
   }
-  if (left.length && now.getTime() - Date.parse(r.at) < RESTORE_GIVE_UP_MS) write(RESTORE_KEY, { ...r, ids: left });
+  if (left.length && now.getTime() - Date.parse(r.at) < RESTORE_GIVE_UP_MS) write(RESTORE_KEY, { ...r, ids: left, lamps: [] });
   else write(RESTORE_KEY, null);
 }
 
@@ -339,16 +343,15 @@ export async function endAway(why: 'person' | 'time', now = new Date()): Promise
   const s = state();
   if (!s) return awayView();
   write(AWAY_STATE_KEY, null);
-  write(RESTORE_KEY, { at: now.toISOString(), ids: s.applied, before: s.before });
+  const lamps = Object.keys(s.lights).filter((k) => s.lights[k]).map(Number);
+  write(RESTORE_KEY, { at: now.toISOString(), ids: s.applied, before: s.before, lamps });
   logger.info({ why }, 'Away mode off');
 
-  // Lamps lived-in lights left on go off.
-  for (const d of devices(Object.keys(s.lights).filter((k) => s.lights[k]).map(Number))) {
-    try { await withActivity({ source: 'away', detail: 'Away mode ended' }, () => applyPower(d, false)); } catch { /* left as is */ }
-  }
-  await runRestore(now);
+  // Paused automations leave devices alone; it's all put back once they resume.
+  const paused = automationsPaused();
+  if (!paused) await runRestore(now);
 
-  if (why === 'time') {
+  if (why === 'time' && !paused) {
     const back = s.applied.map((id) => {
       const t = backTo(id, s.before[String(id)], now);
       const name = getDb().prepare('SELECT alias FROM devices WHERE id = ?').get(id) as { alias: string } | undefined;

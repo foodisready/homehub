@@ -148,6 +148,27 @@ describe('Away mode', () => {
     });
   });
 
+  describe('with automations paused', () => {
+    it('ends on time without touching devices or telling anyone, and puts things back once they resume', async () => {
+      a.saveAwaySettings({ lights: [lampId] });
+      await a.startAway({ until: at(20, 18).toISOString() }, null, at(16, 9));
+      const p = a.lightPlan(lampId, at(19))!;
+      await a.tick(new Date(p.on.getTime() + 60_000));   // lamp on, thermostat at away
+      const before = { sent: sent.length, switched: switched.length };
+      db.prepare("INSERT INTO settings (key, value) VALUES ('automations_paused', '1')").run();
+      a.saveAwaySettings({ warmUpMinutes: 60 });
+      await a.tick(at(20, 17));
+      assert.equal(a.awayView().active, false, 'still ends');
+      assert.deepEqual([sent.length, switched.length], [before.sent, before.switched], 'nothing switched while paused');
+      db.prepare("DELETE FROM settings WHERE key = 'automations_paused'").run();
+      await a.tick(at(20, 17, 1));
+      assert.deepEqual(switched[switched.length - 1], { ip: '10.0.0.1', state: false }, 'lamp off');
+      assert.ok(near(sent[sent.length - 1].heat, f(68)), 'thermostat back');
+      await a.tick(at(20, 17, 2));
+      assert.equal(switched.filter((x) => !x.state).length, 1, 'lamp turned off once');
+    });
+  });
+
   describe('lived-in lights', () => {
     it('plans each lamp\'s evening the same way every time, different each day', () => {
       const p = a.lightPlan(lampId, at(16))!;
