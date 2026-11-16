@@ -15,6 +15,8 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'homehub-questions-test-'));
 let db: Database.Database;
 let q: typeof import('./questions');
 let weather: typeof import('../home/weather');
+let nq: typeof import('./native-questions');
+let home: typeof import('../home/home-settings');
 
 const FORECAST = {
   current: { temperature_2m: 61.6, apparent_temperature: 60.2, weather_code: 2 },
@@ -37,7 +39,7 @@ function fakeFetch(body: unknown = FORECAST, status = 200) {
 }
 
 const setHome = (lat: number | null, lon: number | null, tz = 'America/Los_Angeles') => {
-  db.prepare("DELETE FROM settings WHERE key LIKE 'home_%'").run();
+  db.prepare("DELETE FROM settings WHERE key LIKE 'home_%' OR key = 'temperature_unit'").run();
   const put = db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)');
   if (lat !== null && lon !== null) { put.run('home_latitude', String(lat)); put.run('home_longitude', String(lon)); }
   put.run('home_timezone', tz);
@@ -50,6 +52,8 @@ describe('time, date and weather questions', () => {
     db = (await import('../db')).getDb();
     q = await import('./questions');
     weather = await import('../home/weather');
+    nq = await import('./native-questions');
+    home = await import('../home/home-settings');
   });
 
   after(() => {
@@ -97,7 +101,7 @@ describe('time, date and weather questions', () => {
   it('answers the weather in °F in the United States, from a rounded location', async () => {
     const f = fakeFetch();
     const a = await q.answerQuestion("What's the weather?", { fetchImpl: f.impl });
-    assert.equal(a?.response, "Right now it's 62 degrees and partly cloudy. Today's high is 68 and the low is 51.");
+    assert.equal(a?.response, "Right now it's 62°F and partly cloudy. Today's high is 68°F and the low is 51°F.");
     const url = new URL(f.urls[0]);
     assert.equal(url.hostname, 'api.open-meteo.com');
     assert.equal(url.searchParams.get('latitude'), '47.61');
@@ -111,7 +115,7 @@ describe('time, date and weather questions', () => {
   it('answers tomorrow and rain, and asks Open-Meteo once in ten minutes', async () => {
     const f = fakeFetch();
     assert.equal((await q.answerQuestion('Weather tomorrow?', { fetchImpl: f.impl }))?.response,
-      "Tomorrow: rain, with a high of 59 and a low of 48 degrees. There's a 70% chance of rain.");
+      "Tomorrow: rain, with a high of 59°F and a low of 48°F. There's a 70% chance of rain.");
     assert.equal((await q.answerQuestion('Will it rain tomorrow?', { fetchImpl: f.impl }))?.response, 'Yes, rain is likely tomorrow: a 70% chance.');
     assert.equal((await q.answerQuestion('Will it rain today?', { fetchImpl: f.impl }))?.response, "Rain isn't likely today: a 10% chance.");
     assert.equal(f.urls.length, 1);
@@ -136,5 +140,90 @@ describe('time, date and weather questions', () => {
     const down = await q.answerQuestion("What's the weather?", { fetchImpl: fakeFetch({}, 503).impl });
     assert.equal(down?.response, "I can't get the weather right now.");
     assert.equal((down!.actions[0].result as any).code, 'UNREACHABLE');
+  });
+
+  describe('the unit', () => {
+    it('follows the time zone until one is chosen, then .env, then Settings', async () => {
+      assert.deepEqual([home.getHomeSettings().temperatureUnit, home.getHomeSettings().source.temperatureUnit], ['F', 'default']);
+      process.env.TEMPERATURE_UNIT = 'c';
+      try {
+        assert.deepEqual([home.getHomeSettings().temperatureUnit, home.getHomeSettings().source.temperatureUnit], ['C', 'env']);
+        home.saveHomeSettings({ temperatureUnit: 'F' });
+        assert.deepEqual([home.getHomeSettings().temperatureUnit, home.getHomeSettings().source.temperatureUnit], ['F', 'settings']);
+        home.saveHomeSettings({ temperatureUnit: 'auto' });
+        assert.equal(home.getHomeSettings().source.temperatureUnit, 'env');
+      } finally { delete process.env.TEMPERATURE_UNIT; }
+      assert.throws(() => home.saveHomeSettings({ temperatureUnit: 'K' }), /C or F/);
+    });
+
+    it('asks Open-Meteo in the chosen unit, and writes it', async () => {
+      home.saveHomeSettings({ temperatureUnit: 'C' });
+      const f = fakeFetch({ ...FORECAST, current: { temperature_2m: -2.4, apparent_temperature: -8, weather_code: 71 } });
+      const a = await q.answerQuestion("what's the temperature", { fetchImpl: f.impl });
+      assert.equal(new URL(f.urls[0]).searchParams.get('temperature_unit'), 'celsius');
+      assert.equal(a?.response, "Right now it's −2°C, feeling like −8°C, and light snow. Today's high is 68°C and the low is 51°C.");
+    });
+
+    it('is said as degrees by a speaker', () => {
+      assert.equal(q.spokenDegrees("Right now it's −2°C, feeling like 28°F. High 57°F."), "Right now it's minus 2 degrees, feeling like 28 degrees. High 57 degrees.");
+    });
+  });
+
+  describe('typed in Cantonese, Mandarin or Vietnamese', () => {
+    it('reads which question, and in which language', () => {
+      const cases: Array<[string, string, string]> = [
+        ['幾點', 'yue', 'time'], ['而家幾點呀？', 'yue', 'time'], ['现在几点', 'zh', 'time'], ['几点了', 'zh', 'time'],
+        ['今日幾號', 'yue', 'date'], ['今天星期几', 'zh', 'date'], ['今日禮拜幾', 'yue', 'date'],
+        ['今日天氣點', 'yue', 'today'], ['今日天氣點？', 'yue', 'today'], ['今天天气怎么样', 'zh', 'today'], ['外面幾度', 'yue', 'today'],
+        ['熱唔熱', 'yue', 'today'], ['聽日天氣點', 'yue', 'tomorrow'], ['明天天气', 'zh', 'tomorrow'],
+        ['聽日會唔會落雨', 'yue', 'rain-tomorrow'], ['今日會唔會落雨', 'yue', 'rain-today'], ['明天会下雨吗', 'zh', 'rain-tomorrow'],
+        ['Mấy giờ rồi?', 'vi', 'time'], ['may gio roi', 'vi', 'time'], ['Hôm nay thứ mấy?', 'vi', 'date'],
+        ['Thời tiết hôm nay thế nào?', 'vi', 'today'], ['thoi tiet ngay mai', 'vi', 'tomorrow'], ['Ngày mai có mưa không?', 'vi', 'rain-tomorrow'],
+        ['Hôm nay có mưa không', 'vi', 'rain-today'],
+      ];
+      for (const [text, lang, asked] of cases) assert.deepEqual(nq.nativeQuestion(text), { lang, asked }, text);
+    });
+
+    it('leaves commands, English and other things alone', () => {
+      for (const text of ['開廳燈', '关厨房灯', 'bật đèn bếp', 'tắt đèn', 'mua sữa', 'what time is it', '你好', 'xin chào', '']) {
+        assert.equal(nq.nativeQuestion(text), null, text);
+      }
+    });
+
+    it('tells the time and the date in the language asked', async () => {
+      const ask = async (text: string) => (await nq.answerNativeQuestion(text, { now: at }))?.response;
+      assert.equal(await ask('幾點'), '而家係下晝3點45分。');
+      assert.equal(await ask('现在几点'), '现在是下午3点45分。');
+      assert.equal(await ask('Mấy giờ rồi?'), 'Bây giờ là 3 giờ 45 phút chiều.');
+      assert.equal(await ask('今日幾號'), '今日係11月13號，星期五。');
+      assert.equal(await ask('今天几号'), '今天是11月13号，星期五。');
+      assert.equal(await ask('Hôm nay ngày mấy'), 'Hôm nay là thứ sáu, ngày 13 tháng 11.');
+      const half = new Date('2026-11-13T17:30:00Z');   // 9:30 AM
+      assert.equal((await nq.answerNativeQuestion('幾點', { now: half }))?.response, '而家係朝早9點半。');
+      const a = await nq.answerNativeQuestion('幾點', { now: at });
+      assert.equal(a?.actions[0].tool, 'get_time');
+    });
+
+    it('gives the real weather with its unit, never a made-up one', async () => {
+      const f = fakeFetch();
+      const ask = async (text: string) => (await nq.answerNativeQuestion(text, { fetchImpl: f.impl }))?.response;
+      assert.equal(await ask('今日天氣點'), '而家62°F，間中有雲。今日最高68°F，最低51°F。');
+      assert.equal(await ask('今天天气怎么样'), '现在62°F，局部多云。今天最高68°F，最低51°F。');
+      assert.equal(await ask('Thời tiết hôm nay thế nào?'), 'Bây giờ trời 62°F, có mây rải rác. Hôm nay cao nhất 68°F, thấp nhất 51°F.');
+      assert.equal(await ask('聽日天氣點'), '聽日有雨，最高59°F，最低48°F。落雨機會70%。');
+      assert.equal(await ask('聽日會唔會落雨'), '會，聽日好大機會落雨，機會70%。');
+      assert.equal(await ask('明天会下雨吗'), '会，明天很可能下雨，概率70%。');
+      assert.equal(await ask('Hôm nay có mưa không'), 'Hôm nay ít khả năng mưa, 10%.');
+      const a = await nq.answerNativeQuestion('今日天氣點', { fetchImpl: f.impl });
+      assert.equal(a?.actions[0].tool, 'get_weather');
+    });
+
+    it('says what is wrong in the language asked', async () => {
+      setHome(null, null);
+      assert.match((await nq.answerNativeQuestion('今日天氣點', { fetchImpl: fakeFetch().impl }))!.response, /未知你屋企喺邊/);
+      setHome(47.6, -122.3);
+      assert.equal((await nq.answerNativeQuestion('Thời tiết hôm nay', { fetchImpl: fakeFetch({}, 503).impl }))?.response,
+        'Hiện không lấy được thông tin thời tiết.');
+    });
   });
 });

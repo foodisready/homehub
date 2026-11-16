@@ -61,6 +61,7 @@ async function main() {
   const native = await import('../native-commands');
   const { answerStatusQuestion } = await import('../status');
   const { answerQuestion } = await import('../questions');
+  const { answerNativeQuestion } = await import('../native-questions');
   const nlp = await import('../nlp.service');
   const understand = await import('../understand');
   const confirmMod = await import('../confirm');
@@ -93,7 +94,7 @@ async function main() {
   const isDoor = (alias: string) => home.devices.find((d) => d.alias === alias)?.driver_type === 'meross';
 
   const rules086 = async (t: string) => await commands.runPowerCommand(t) ?? answerStatusQuestion(t) ?? await answerQuestion(t);
-  const rules = async (t: string) => await commands.runPowerCommand(t) ?? await native.runNativeCommand(t) ?? answerStatusQuestion(t) ?? await answerQuestion(t);
+  const rules = async (t: string) => await commands.runPowerCommand(t) ?? await native.runNativeCommand(t) ?? answerStatusQuestion(t) ?? await answerQuestion(t) ?? await answerNativeQuestion(t);
 
   /** What HomeHub would do with the form: switch the named devices (a garage door only closes). */
   const claudeModel = arg('claude-model', 'claude-haiku-5-5')!;

@@ -3,7 +3,7 @@ import { cancel as cancelSos, openAlert as openSos, raise as raiseSos, reach as 
 import { Router, Request, Response } from 'express';
 import { reply } from '../nlp/replies';
 import { answerStatusQuestion } from '../nlp/status';
-import { answerQuestion } from '../nlp/questions';
+import { answerQuestion, spokenDegrees } from '../nlp/questions';
 import { requireInternalKey } from '../middleware/internal';
 import { getDb } from '../db';
 import { getDriver } from '../drivers/registry';
@@ -111,7 +111,7 @@ internalRouter.post('/voice/command', async (req: Request, res: Response) => {
   if (handled || retry !== true) recordVoiceCommand(text.trim(), handled !== null);
   if (!handled) return res.json({ handled: false, response: reply('not_understood', {}), actions: [] });
 
-  res.json({ handled: true, ...handled });
+  res.json({ handled: true, ...handled, response: spokenDegrees(handled.response) });
 });
 
 // POST /internal/voice/sos  { action: 'raise' | 'cancel', where?, lang?, heard? }

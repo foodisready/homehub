@@ -40,7 +40,7 @@ export function homeClock(at = new Date(), timezone = getHomeSettings().timezone
   };
 }
 
-function answerClock(asked: 'time' | 'date', at: Date): Handled {
+export function answerClock(asked: 'time' | 'date', at: Date): Handled {
   const { timezone } = getHomeSettings();
   const clock = homeClock(at, timezone);
   const response = asked === 'time'
@@ -66,6 +66,12 @@ function chance(day: DayForecast, word: string, when: string): string {
   return `${word[0].toUpperCase()}${word.slice(1)} isn't likely ${when}: a ${day.rain}% chance.`;
 }
 
+/** 35°F, −2°C: as written in Chat. */
+export const degrees = (n: number, unit: 'F' | 'C') => `${n < 0 ? '−' : ''}${Math.abs(n)}°${unit}`;
+
+/** For a speaker: "35°F" read aloud as "35 degrees", as before the unit was written. */
+export const spokenDegrees = (text: string) => text.replace(/(−?)(\d+)°[FC]/g, (_m, minus: string, n: string) => `${minus ? 'minus ' : ''}${n} degrees`);
+
 export function weatherReply(w: Weather, asked: WeatherAsked, snow = false): string {
   const word = snow ? 'snow' : 'rain';
   if (asked === 'rain-today') {
@@ -74,18 +80,19 @@ export function weatherReply(w: Weather, asked: WeatherAsked, snow = false): str
     return chance(w.today, word, 'today');
   }
   if (asked === 'rain-tomorrow') return chance(w.tomorrow, word, 'tomorrow');
+  const deg = (n: number) => degrees(n, w.unit);
   if (asked === 'tomorrow') {
     const t = w.tomorrow;
     const rain = t.rain >= 30 ? ` There's a ${t.rain}% chance of rain.` : '';
-    return `Tomorrow: ${describeWeather(t.code)}, with a high of ${t.high} and a low of ${t.low} degrees.${rain}`;
+    return `Tomorrow: ${describeWeather(t.code)}, with a high of ${deg(t.high)} and a low of ${deg(t.low)}.${rain}`;
   }
   const t = w.today;
-  const feels = Math.abs(w.now.feelsLike - w.now.temperature) >= 5 ? `, feeling like ${w.now.feelsLike},` : '';
+  const feels = Math.abs(w.now.feelsLike - w.now.temperature) >= 5 ? `, feeling like ${deg(w.now.feelsLike)},` : '';
   const rain = t.rain >= 30 ? ` There's a ${t.rain}% chance of rain.` : '';
-  return `Right now it's ${w.now.temperature} degrees${feels} and ${describeWeather(w.now.code)}. Today's high is ${t.high} and the low is ${t.low}.${rain}`;
+  return `Right now it's ${deg(w.now.temperature)}${feels} and ${describeWeather(w.now.code)}. Today's high is ${deg(t.high)} and the low is ${deg(t.low)}.${rain}`;
 }
 
-async function answerWeather(asked: WeatherAsked, snow: boolean, fetchImpl?: typeof fetch): Promise<Handled> {
+export async function answerWeather(asked: WeatherAsked, snow: boolean, fetchImpl?: typeof fetch): Promise<Handled> {
   try {
     const w = await getWeather({ fetchImpl });
     return {

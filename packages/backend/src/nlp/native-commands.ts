@@ -117,9 +117,9 @@ const ZH_BEFORE = /^(?:(?:唔該|唔该|請|请|麻煩|麻烦|幫我|帮我|幫�
 const ZH_AFTER = /(?:\s*(?:啦|喇|吧|呀|啊|吖|了|一下|下|先|喎|嘞|唔該|唔该|謝謝|谢谢|得唔得|好嗎|好吗|好唔好|嗎|吗))+$/;
 const ZH_BA = /^(?:把|將|将)/;
 // Characters only written in simplified Chinese, or in Mandarin: then the reply is Mandarin.
-const MANDARIN = /[开关灯厅门帮请这吧么们厨书边头楼区细写办闭灭闩个后车库卧风电视机热气饭园帘间儿把]/;
+export const MANDARIN = /[开关灯厅门帮请这吧么们厨书边头楼区细写办闭灭闩个后车库卧风电视机热气饭园帘间儿把]/;
 
-const hasChinese = (text: string) => /[㐀-鿿]/.test(text);
+export const hasChinese = (text: string) => /[㐀-鿿]/.test(text);
 
 const takeFirst = (text: string, verbs: string[]) => verbs.find((v) => text.startsWith(v));
 const takeLast = (text: string, verbs: string[]) => verbs.find((v) => text.endsWith(v));

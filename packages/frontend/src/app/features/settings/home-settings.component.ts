@@ -7,7 +7,10 @@ interface HomeSettings {
   longitude: number | null;
   timezone: string;
   located: boolean;
-  source: { location: 'settings' | 'env' | 'none'; timezone: 'settings' | 'env' | 'default' };
+  temperatureUnit: 'C' | 'F';
+  /** What Automatic gives: .env's TEMPERATURE_UNIT, or the time zone's unit. */
+  autoTemperature: { unit: 'C' | 'F'; from: 'env' | 'timezone' };
+  source: { location: 'settings' | 'env' | 'none'; timezone: 'settings' | 'env' | 'default'; temperatureUnit: 'settings' | 'env' | 'default' };
   today?: { sunrise: string | null; sunset: string | null } | null;
 }
 
@@ -79,6 +82,16 @@ interface HomeSettings {
       }
     }
 
+    <div class="row">
+      <label for="home-unit">Temperatures</label>
+      <select id="home-unit" [(ngModel)]="unit">
+        <option value="auto">Automatic: {{ autoUnitLabel() }}</option>
+        <option value="F">°F (Fahrenheit)</option>
+        <option value="C">°C (Celsius)</option>
+      </select>
+    </div>
+    <p class="hint">For the weather in Chat and by voice, and for thermostats.</p>
+
     <button class="btn-sm btn-primary" type="button" (click)="save()" [disabled]="busy() || !dirty()">Save</button>
     @if (message()) { <p class="msg" [class.ok]="!isError()" [class.err]="isError()">{{ message() }}</p> }
   `,
@@ -105,6 +118,8 @@ export class HomeSettingsComponent implements OnInit {
   timezone = '';
   latitude = '';
   longitude = '';
+  /** 'auto' follows .env's TEMPERATURE_UNIT, or else the time zone. */
+  unit: 'auto' | 'C' | 'F' = 'auto';
 
   private static allZones(extra: string): string[] {
     let zones: string[] = [];
@@ -126,6 +141,20 @@ export class HomeSettingsComponent implements OnInit {
     if (!this.zones.includes(this.timezone)) this.zones.push(this.timezone);
     this.latitude = s.latitude === null ? '' : String(s.latitude);
     this.longitude = s.longitude === null ? '' : String(s.longitude);
+    this.unit = s.source.temperatureUnit === 'settings' ? s.temperatureUnit : 'auto';
+  }
+
+  /** What Automatic gives: from .env, or by the saved time zone (°F in the United States). */
+  autoUnitLabel(): string {
+    const s = this.settings();
+    if (!s) return '';
+    const a = s.autoTemperature;
+    return `°${a.unit}${a.from === 'env' ? ', from .env' : ', by time zone'}`;
+  }
+
+  private savedUnit(): 'auto' | 'C' | 'F' {
+    const s = this.settings();
+    return s?.source.temperatureUnit === 'settings' ? s.temperatureUnit : 'auto';
   }
 
   dirty(): boolean {
@@ -133,7 +162,8 @@ export class HomeSettingsComponent implements OnInit {
     if (!s) return false;
     return s.source.timezone === 'default' || this.timezone !== s.timezone
       || this.latitude.trim() !== (s.latitude === null ? '' : String(s.latitude))
-      || this.longitude.trim() !== (s.longitude === null ? '' : String(s.longitude));
+      || this.longitude.trim() !== (s.longitude === null ? '' : String(s.longitude))
+      || this.unit !== this.savedUnit();
   }
 
   /** "39.80, -89.64" pasted from Google Maps fills both boxes. */
@@ -157,7 +187,7 @@ export class HomeSettingsComponent implements OnInit {
   }
 
   save(): void {
-    const body: Record<string, unknown> = { timezone: this.timezone };
+    const body: Record<string, unknown> = { timezone: this.timezone, temperatureUnit: this.unit };
     const lat = this.latitude.trim(), lon = this.longitude.trim();
     if (lat || lon) {
       if (!lat || !lon) { this.show('Enter both latitude and longitude.', true); return; }
@@ -168,12 +198,17 @@ export class HomeSettingsComponent implements OnInit {
         return;
       }
     }
+    const before = this.settings();
     this.busy.set(true);
     this.http.put<HomeSettings>('/api/home-settings', body).subscribe({
       next: (s) => {
         this.busy.set(false);
         this.fill(s);
-        this.show(s.located ? 'Saved. Schedules now use this location and time zone.' : 'Saved. Add your location for sunrise and sunset schedules.');
+        const placeChanged = !before || before.timezone !== s.timezone || before.latitude !== s.latitude || before.longitude !== s.longitude
+          || before.source.timezone === 'default';
+        const unit = before?.temperatureUnit !== s.temperatureUnit ? ` Temperatures are now in °${s.temperatureUnit}.` : '';
+        if (!placeChanged) { this.show(`Saved.${unit}`); return; }
+        this.show((s.located ? 'Saved. Schedules now use this location and time zone.' : 'Saved. Add your location for sunrise and sunset schedules.') + unit);
       },
       error: (err) => { this.busy.set(false); this.show(this.errorText(err), true); },
     });

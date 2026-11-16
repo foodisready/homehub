@@ -1,4 +1,4 @@
-import { getHomeSettings } from './home-settings';
+import { getHomeSettings, type TemperatureUnit } from './home-settings';
 import { logger } from '../logger';
 
 /**
@@ -7,7 +7,7 @@ import { logger } from '../logger';
  * places (about a kilometre). Asked at most every ten minutes.
  */
 
-export type TemperatureUnit = 'F' | 'C';
+export type { TemperatureUnit } from './home-settings';
 
 export interface DayForecast {
   /** YYYY-MM-DD, in the home's time zone. */
@@ -32,14 +32,9 @@ export class WeatherError extends Error {
   constructor(message: string, readonly code: 'NOT_LOCATED' | 'UNREACHABLE') { super(message); }
 }
 
-/** Time zones of the United States and its territories, where temperatures are in °F. */
-const FAHRENHEIT_ZONES = /^(?:America\/(?:New_York|Chicago|Denver|Los_Angeles|Phoenix|Anchorage|Juneau|Sitka|Yakutat|Nome|Metlakatla|Adak|Boise|Detroit|Indiana\/.+|Kentucky\/.+|North_Dakota\/.+|Menominee|Puerto_Rico|St_Thomas)|Pacific\/(?:Honolulu|Guam|Saipan|Pago_Pago)|US\/.+)$/;
-
-/** °F in the United States, °C elsewhere; TEMPERATURE_UNIT=C or F in .env decides instead. */
-export function temperatureUnit(timezone = getHomeSettings().timezone): TemperatureUnit {
-  const set = process.env.TEMPERATURE_UNIT?.trim().toUpperCase();
-  if (set === 'C' || set === 'F') return set;
-  return FAHRENHEIT_ZONES.test(timezone) ? 'F' : 'C';
+/** How the home shows temperatures: chosen in Settings → Home, else TEMPERATURE_UNIT, else by time zone. */
+export function temperatureUnit(): TemperatureUnit {
+  return getHomeSettings().temperatureUnit;
 }
 
 /** What a WMO weather code means, in a few words: "partly cloudy", "light rain". */
@@ -73,7 +68,7 @@ export async function getWeather(opts: { fetchImpl?: typeof fetch; now?: number 
   if (home.latitude === null || home.longitude === null) {
     throw new WeatherError("HomeHub doesn't know where your home is yet. Set it in Settings → Home.", 'NOT_LOCATED');
   }
-  const unit = temperatureUnit(home.timezone);
+  const unit = home.temperatureUnit;
   const lat = home.latitude.toFixed(2), lon = home.longitude.toFixed(2);
   const key = `${lat},${lon},${unit},${home.timezone}`;
   const now = opts.now ?? Date.now();

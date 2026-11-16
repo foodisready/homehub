@@ -5,6 +5,7 @@ import os from 'node:os';
 import { getCachedState } from '../kasa/device.cache';
 import { answerStatusQuestion } from './status';
 import { answerQuestion } from './questions';
+import { answerNativeQuestion } from './native-questions';
 import { describeWeather, getWeather, WeatherError } from '../home/weather';
 import { getDriver } from '../drivers/registry';
 import { applyPower, assistantMaySwitch, isProtectedDevice, type PowerDevice } from '../devices/power';
@@ -552,7 +553,7 @@ export async function resolveTools(
 type Handled = { response: string; actions: ActionTaken[] };
 
 const byRules = async (text: string): Promise<Handled | null> =>
-  await runPowerCommand(text) ?? await runNativeCommand(text) ?? answerStatusQuestion(text) ?? await answerQuestion(text);
+  await runPowerCommand(text) ?? await runNativeCommand(text) ?? answerStatusQuestion(text) ?? await answerQuestion(text) ?? await answerNativeQuestion(text);
 
 // ── "Did you mean…?" (confirm.ts) ───────────────────────────────
 

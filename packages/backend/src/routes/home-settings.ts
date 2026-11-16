@@ -1,15 +1,24 @@
 import { Router, Request, Response } from 'express';
 import SunCalc from 'suncalc';
 import { requireAdmin } from '../middleware/auth';
-import { getHomeSettings, saveHomeSettings, HomeSettingsError, type HomeSettings } from '../home/home-settings';
+import { getHomeSettings, saveHomeSettings, unitForTimezone, HomeSettingsError, type HomeSettings } from '../home/home-settings';
 import { notifyScheduler } from './schedules';
 import { logger } from '../logger';
 
 /** Settings → Home: the home's location and time zone, and the AI assistant connection. */
 export const homeSettingsRouter = Router();
 
-/** The settings plus today's sunrise and sunset, so the page can show they're right. */
-function withToday(s: HomeSettings) {
+/**
+ * The settings plus today's sunrise and sunset, so the page can show they're right, and the unit
+ * "Automatic" would give: .env's TEMPERATURE_UNIT, or the time zone's.
+ */
+function withToday(settings: HomeSettings) {
+  const env = process.env.TEMPERATURE_UNIT?.trim().toUpperCase();
+  const fromEnv = env === 'C' || env === 'F';
+  const s = {
+    ...settings,
+    autoTemperature: { unit: fromEnv ? env : unitForTimezone(settings.timezone), from: fromEnv ? 'env' : 'timezone' },
+  };
   if (s.latitude === null || s.longitude === null) return { ...s, today: null };
   const t = SunCalc.getTimes(new Date(), s.latitude, s.longitude);
   const iso = (d: Date) => (Number.isNaN(d.getTime()) ? null : d.toISOString());   // none near the poles
@@ -25,7 +34,7 @@ homeSettingsRouter.put('/', requireAdmin, (req: Request, res: Response) => {
   try {
     const before = getHomeSettings();
     const after = saveHomeSettings(req.body ?? {});
-    logger.info({ timezone: after.timezone, located: after.located, by: req.user?.name }, 'Home settings saved');
+    logger.info({ timezone: after.timezone, located: after.located, unit: after.temperatureUnit, by: req.user?.name }, 'Home settings saved');
     // The scheduler reads them from the database; reload so sunrise and clock times move now.
     if (before.timezone !== after.timezone || before.latitude !== after.latitude || before.longitude !== after.longitude) {
       notifyScheduler();

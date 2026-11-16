@@ -16,11 +16,25 @@ export interface HomeSettings {
   timezone: string;
   /** False until a real location is known, so the page can ask for it. */
   located: boolean;
-  /** Where each value came from. */
-  source: { location: 'settings' | 'env' | 'none'; timezone: 'settings' | 'env' | 'default' };
+  /** How temperatures are shown and said: the weather, thermostats. */
+  temperatureUnit: TemperatureUnit;
+  /** Where each value came from. A unit from 'default' follows the time zone. */
+  source: { location: 'settings' | 'env' | 'none'; timezone: 'settings' | 'env' | 'default'; temperatureUnit: 'settings' | 'env' | 'default' };
 }
 
-const KEYS = { latitude: 'home_latitude', longitude: 'home_longitude', timezone: 'home_timezone' } as const;
+export type TemperatureUnit = 'F' | 'C';
+
+const KEYS = { latitude: 'home_latitude', longitude: 'home_longitude', timezone: 'home_timezone', temperatureUnit: 'temperature_unit' } as const;
+
+/** Time zones of the United States and its territories, where temperatures are in °F. */
+const FAHRENHEIT_ZONES = /^(?:America\/(?:New_York|Chicago|Denver|Los_Angeles|Phoenix|Anchorage|Juneau|Sitka|Yakutat|Nome|Metlakatla|Adak|Boise|Detroit|Indiana\/.+|Kentucky\/.+|North_Dakota\/.+|Menominee|Puerto_Rico|St_Thomas)|Pacific\/(?:Honolulu|Guam|Saipan|Pago_Pago)|US\/.+)$/;
+
+/** °F in the United States, °C elsewhere: the unit when nobody has chosen one. */
+export const unitForTimezone = (timezone: string): TemperatureUnit => (FAHRENHEIT_ZONES.test(timezone) ? 'F' : 'C');
+const asUnit = (v: string | undefined): TemperatureUnit | null => {
+  const u = v?.trim().toUpperCase();
+  return u === 'C' || u === 'F' ? u : null;
+};
 /** .env.example's San Francisco values: present in many .env files, but never a real home. */
 const EXAMPLE = { latitude: 37.7749, longitude: -122.4194 };
 
@@ -37,13 +51,14 @@ export function isTimezone(tz: string): boolean {
 }
 
 function stored(): Partial<Record<keyof typeof KEYS, string>> {
-  const rows = getDb().prepare(`SELECT key, value FROM settings WHERE key IN (?, ?, ?)`)
-    .all(KEYS.latitude, KEYS.longitude, KEYS.timezone) as { key: string; value: string }[];
+  const rows = getDb().prepare(`SELECT key, value FROM settings WHERE key IN (?, ?, ?, ?)`)
+    .all(KEYS.latitude, KEYS.longitude, KEYS.timezone, KEYS.temperatureUnit) as { key: string; value: string }[];
   const byKey = new Map(rows.map((r) => [r.key, r.value]));
   return {
     latitude: byKey.get(KEYS.latitude),
     longitude: byKey.get(KEYS.longitude),
     timezone: byKey.get(KEYS.timezone),
+    temperatureUnit: byKey.get(KEYS.temperatureUnit),
   };
 }
 
@@ -74,7 +89,17 @@ export function getHomeSettings(): HomeSettings {
     timezone = envTz; tzSource = 'env';
   }
 
-  return { latitude, longitude, timezone, located: latitude !== null, source: { location, timezone: tzSource } };
+  // Chosen in Settings, else TEMPERATURE_UNIT in .env, else by the time zone.
+  let temperatureUnit = unitForTimezone(timezone);
+  let unitSource: HomeSettings['source']['temperatureUnit'] = 'default';
+  const savedUnit = asUnit(s.temperatureUnit), envUnit = asUnit(process.env.TEMPERATURE_UNIT);
+  if (savedUnit) { temperatureUnit = savedUnit; unitSource = 'settings'; }
+  else if (envUnit) { temperatureUnit = envUnit; unitSource = 'env'; }
+
+  return {
+    latitude, longitude, timezone, located: latitude !== null, temperatureUnit,
+    source: { location, timezone: tzSource, temperatureUnit: unitSource },
+  };
 }
 
 /** For sunrise and sunset: the home, or .env.example's location if none is set yet. */
@@ -85,8 +110,13 @@ export function solarLocation(): { lat: number; lon: number } {
     : { lat: EXAMPLE.latitude, lon: EXAMPLE.longitude };
 }
 
-export function saveHomeSettings(input: { latitude?: unknown; longitude?: unknown; timezone?: unknown }): HomeSettings {
+export function saveHomeSettings(input: { latitude?: unknown; longitude?: unknown; timezone?: unknown; temperatureUnit?: unknown }): HomeSettings {
   const upsert = getDb().prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
+  // Checked first, so a bad unit saves nothing else either.
+  const unit = input.temperatureUnit;
+  if (unit !== undefined && unit !== 'auto' && unit !== 'C' && unit !== 'F') {
+    throw new HomeSettingsError('Temperatures must be in C or F, or auto');
+  }
   const hasLat = input.latitude !== undefined, hasLon = input.longitude !== undefined;
   if (hasLat !== hasLon) throw new HomeSettingsError('Send latitude and longitude together');
   if (hasLat) {
@@ -107,6 +137,9 @@ export function saveHomeSettings(input: { latitude?: unknown; longitude?: unknow
     }
     upsert.run(KEYS.timezone, input.timezone);
   }
+  // 'auto' goes back to .env's TEMPERATURE_UNIT, or the time zone's unit.
+  if (unit === 'auto') getDb().prepare('DELETE FROM settings WHERE key = ?').run(KEYS.temperatureUnit);
+  else if (unit === 'C' || unit === 'F') upsert.run(KEYS.temperatureUnit, unit);
   applyHomeTimezone();
   return getHomeSettings();
 }

@@ -134,7 +134,9 @@ describe('first-run setup and home settings', () => {
     assert.equal(s.located, false);
     assert.equal(s.latitude, null);
     assert.equal(s.timezone, 'America/Los_Angeles');
-    assert.deepEqual(s.source, { location: 'none', timezone: 'env' });
+    assert.deepEqual(s.source, { location: 'none', timezone: 'env', temperatureUnit: 'default' });
+    assert.equal(s.temperatureUnit, 'F');
+    assert.deepEqual(s.autoTemperature, { unit: 'F', from: 'timezone' });
     assert.equal(s.today, null);
   });
 
@@ -157,6 +159,7 @@ describe('first-run setup and home settings', () => {
       { latitude: 10 },
       { latitude: '', longitude: '' },
       { timezone: 'Mars/Olympus' },
+      { timezone: 'UTC', temperatureUnit: 'kelvin' },
     ]) {
       const res = await put('/api/home-settings', body, adminToken);
       assert.equal(res.status, 400, JSON.stringify(body));
@@ -164,6 +167,13 @@ describe('first-run setup and home settings', () => {
     const s = await (await get('/api/home-settings', adminToken)).json() as { latitude: number; timezone: string };
     assert.equal(s.latitude, 40.71278);
     assert.equal(s.timezone, 'America/New_York');
+  });
+
+  it('saves a temperature unit, and goes back to Automatic', async () => {
+    const c = await (await put('/api/home-settings', { temperatureUnit: 'C' }, adminToken)).json() as Record<string, any>;
+    assert.deepEqual([c.temperatureUnit, c.source.temperatureUnit, c.autoTemperature.unit], ['C', 'settings', 'F']);
+    const auto = await (await put('/api/home-settings', { temperatureUnit: 'auto' }, adminToken)).json() as Record<string, any>;
+    assert.deepEqual([auto.temperatureUnit, auto.source.temperatureUnit], ['F', 'default']);
   });
 
   it('lets only admins change them, and only admins see the MCP secret', async () => {
