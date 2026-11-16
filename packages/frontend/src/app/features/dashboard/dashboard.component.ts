@@ -9,6 +9,7 @@ import { DeviceFilterComponent, matchesDevice, type DeviceFilter } from '../../s
 import { SystemStatusComponent } from './system-status.component';
 import { HomeSetupNoticeComponent } from './home-setup-notice.component';
 import { CamerasCardComponent } from './cameras-card.component';
+import { AwayComponent } from './away.component';
 import { Device } from '../../shared/models/device.model';
 
 const COLLAPSED_KEY = 'homehub.dashboard.collapsed';
@@ -44,7 +45,7 @@ function changed(d: Device, state: boolean): Device['lastChange'] {
 @Component({
   selector: 'app-dashboard',
   standalone: true,
-  imports: [DeviceRowComponent, DeviceFilterComponent, SystemStatusComponent, HomeSetupNoticeComponent, CamerasCardComponent, DecimalPipe],
+  imports: [DeviceRowComponent, DeviceFilterComponent, SystemStatusComponent, HomeSetupNoticeComponent, CamerasCardComponent, AwayComponent, DecimalPipe],
   styles: [`
     .topbar {
       display: flex;
@@ -109,6 +110,8 @@ function changed(d: Device, state: boolean): Device['lastChange'] {
       <!-- HomeHub self-update card (shows when an upstream release is available) -->
       <app-system-status />
       <app-home-setup-notice />
+      <!-- Away mode: a button when off, a banner while on -->
+      <app-away />
       <!-- Every camera, Ring and IP included, which aren't device rows -->
       <app-cameras-card />
 

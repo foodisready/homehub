@@ -5,6 +5,7 @@
  */
 
 import { getDb } from '../db';
+import { awayWatchesWater } from '../home/away-state';
 import {
   evaluateFlowReading,
   resolveFlowConfig,
@@ -64,13 +65,15 @@ export function getActiveEvent(sensorRowId: number): FlowEventRow | undefined {
     .get(sensorRowId) as FlowEventRow | undefined;
 }
 
+/** A sensor's settings. In Away mode, any flow counts as a leak, as with its own vacation mode. */
 export function parseSensorConfig(configJson: string | null): FlowConfig {
-  if (!configJson) return resolveFlowConfig(null);
+  let config: FlowConfig;
   try {
-    return resolveFlowConfig(JSON.parse(configJson) as Partial<FlowConfig>);
+    config = resolveFlowConfig(configJson ? JSON.parse(configJson) as Partial<FlowConfig> : null);
   } catch {
-    return resolveFlowConfig(null);
+    config = resolveFlowConfig(null);
   }
+  return awayWatchesWater() ? { ...config, vacationMode: true } : config;
 }
 
 export interface IngestResult {

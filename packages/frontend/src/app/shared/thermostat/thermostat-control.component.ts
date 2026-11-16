@@ -65,7 +65,7 @@ import { describeNext, describeTargets } from './schedule-text';
           }
         }
         @if (error()) { <p class="note err" role="alert">{{ error() }}</p> }
-        @if (nextText(); as n) { <p class="scheduled">Schedule: {{ n }}, then holds until the next change.</p> }
+        @if (nextText(); as n) { <p class="scheduled">Schedule: {{ n }}{{ n.startsWith('waiting') ? '.' : ', then holds until the next change.' }}</p> }
         <div class="links">
           <a class="history" [routerLink]="['/schedules']" [queryParams]="{ thermostat: t.id }">{{ hasSchedule() ? 'Temperature schedule ›' : 'Set a temperature schedule ›' }}</a>
           <a class="history" [routerLink]="['/energy']" [queryParams]="{ thermostat: t.id }">History and running hours ›</a>
@@ -101,7 +101,8 @@ export class ThermostatControlComponent implements OnInit, OnDestroy {
     this.svc.schedule(this.deviceId()).subscribe({
       next: (v) => {
         this.hasSchedule.set(v.points.length > 0);
-        this.nextText.set(v.next ? `${describeTargets(v.next, v.unit)} at ${describeNext(v.next.at, v.timezone)}` : null);
+        this.nextText.set(v.away && v.points.length ? 'waiting while Away mode is on'
+          : v.next ? `${describeTargets(v.next, v.unit)} at ${describeNext(v.next.at, v.timezone)}` : null);
         if (this.nextTimer) clearTimeout(this.nextTimer);
         const wait = v.next ? Date.parse(v.next.at) - Date.now() + 45_000 : 0;   // after the server has made it
         if (v.next && wait > 0 && wait < 2 ** 31 - 1) this.nextTimer = setTimeout(() => this.loadSchedule(), wait);

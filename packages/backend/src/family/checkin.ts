@@ -2,6 +2,7 @@ import { getDb } from '../db';
 import { logger } from '../logger';
 import { upIntervals } from '../energy/usage';
 import { isActiveServer } from '../system/role';
+import { awayPausesFamily } from '../home/away-state';
 import { sendPushToAll } from '../push/push.service';
 import { emailConfigured, emailRecipients, sendEmail } from '../notifications/providers/email';
 
@@ -312,6 +313,11 @@ export async function checkOne(c: Checkin, now = Date.now()): Promise<'waiting' 
   if (c.pausedUntil && c.pausedUntil >= today) return 'skipped';
   const from = localTime(today, c.from);
   const by = localTime(today, c.by);
+  // Away mode: nobody's expected home, so the day isn't checked, then or after coming back.
+  if (awayPausesFamily()) {
+    if (now >= by) setResult(c.id, { last_day: today, last_result: 'away', last_sign_at: null, last_sign: null });
+    return 'skipped';
+  }
   if (now < by) return 'waiting';
   if (now - by > LATE_LIMIT_MS) {
     setResult(c.id, { last_day: today, last_result: 'missed', last_sign_at: null, last_sign: null });

@@ -87,7 +87,9 @@ interface Form {
         @if (canEdit() && points().length) { <button class="add" type="button" (click)="openNew()">+ Add</button> }
       </div>
 
-      @if (nextText(); as n) { <p class="next">Next: <strong>{{ n.targets }}</strong> at {{ n.when }}</p> }
+      @if (away() && points().length) {
+        <p class="next">Waiting while Away mode is on. It picks up again when Away mode ends.</p>
+      } @else if (nextText(); as n) { <p class="next">Next: <strong>{{ n.targets }}</strong> at {{ n.when }}</p> }
 
       @if (loaded() && !points().length) {
         <p class="intro">
@@ -212,6 +214,7 @@ export class ThermostatScheduleComponent implements OnInit {
   readonly next = signal<{ at: string; heat: number | null; cool: number | null } | null>(null);
   readonly timezone = signal('');
   readonly loaded = signal(false);
+  readonly away = signal(false);
   readonly saving = signal(false);
   readonly error = signal('');
   readonly form = signal<Form | null>(null);
@@ -268,7 +271,8 @@ export class ThermostatScheduleComponent implements OnInit {
     });
   }
 
-  private apply(v: { points: SchedulePoint[]; next: { at: string; heat: number | null; cool: number | null } | null; timezone: string }): void {
+  private apply(v: { points: SchedulePoint[]; next: { at: string; heat: number | null; cool: number | null } | null; timezone: string; away: boolean }): void {
+    this.away.set(v.away);
     this.points.set(v.points);
     this.next.set(v.next);
     this.timezone.set(v.timezone);

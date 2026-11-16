@@ -19,7 +19,7 @@ import { noteRunning } from './history';
 // matter.js loads only when Matter is used.
 const matter = () => import('../matter/controller');
 
-export type ChangeSource = 'app' | 'chat' | 'voice' | 'schedule' | 'scene' | 'assistant';
+export type ChangeSource = 'app' | 'chat' | 'voice' | 'schedule' | 'scene' | 'assistant' | 'away';
 
 export interface Ranges {
   comfort: { low: number; high: number };
@@ -132,6 +132,11 @@ export async function refresh(id: number): Promise<void> {
 /** The thermostat device for a Matter address, for the controller's change reports. */
 export function thermostatIdFor(nodeId: string, endpoint: number): number | null {
   return rows().find((r) => { const c = configOf(r); return c.nodeId === nodeId && c.endpoint === endpoint; })?.id ?? null;
+}
+
+/** What a thermostat last reported, if it has since HomeHub started. */
+export function lastKnown(id: number): ThermostatView | undefined {
+  return last.get(id);
 }
 
 /** Every thermostat's device id. */

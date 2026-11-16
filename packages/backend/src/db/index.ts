@@ -507,7 +507,7 @@ function migrate(db: Database.Database): void {
       water         INTEGER NOT NULL DEFAULT 1,
       paused_until  TEXT,              -- a local day, YYYY-MM-DD, last day paused
       last_day      TEXT,              -- the local day last checked
-      last_result   TEXT,              -- ok | alerted | all-clear | missed
+      last_result   TEXT,              -- ok | alerted | all-clear | missed | away
       last_sign_at  TEXT,
       last_sign     TEXT,
       alerted_at    TEXT,

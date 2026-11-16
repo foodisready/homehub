@@ -60,6 +60,8 @@ export interface ScheduleView {
   next: { at: string; pointId: number; heat: number | null; cool: number | null } | null;
   unit: 'F' | 'C';
   timezone: string;
+  /** Away mode is on, so the schedule waits. */
+  away: boolean;
 }
 
 export const MODE_NAME: Record<ThermostatMode | 'other', string> = { off: 'Off', heat: 'Heat', cool: 'Cool', auto: 'Auto', other: 'Other' };

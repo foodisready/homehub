@@ -4,6 +4,7 @@ import { logger } from '../logger';
 import { solarLocation } from '../home/home-settings';
 import { temperatureUnit } from '../home/weather';
 import { automationsPaused } from '../automation/pause';
+import { awayActive } from '../home/away-state';
 import { withActivity } from '../activity/activity';
 import {
   ThermostatError, changeThermostat, ensureThermostatRow, getThermostat, rangesOf, requireThermostat, thermostatIds,
@@ -19,8 +20,8 @@ import {
  * - A change made by a person holds until the next scheduled one.
  * - Every target must be inside the thermostat's allowed range.
  * - A change missed while HomeHub was down is made when it's back, if it's still the
- *   latest one due (up to a week back). One that came due while automations were paused
- *   is skipped, like other schedules.
+ *   latest one due (up to a week back). One that came due while automations were paused,
+ *   or in Away mode, is skipped.
  *
  * Times are the home's local time (process.env.TZ, set from Settings → Home).
  */
@@ -259,7 +260,8 @@ export async function runThermostatSchedule(id: number, now = new Date(), deps: 
   const points = schedulePoints(id);
   const due = points.length ? latestDue(points, since, now) : null;
   if (!due) { setChecked(id, now); return 'none'; }
-  if (automationsPaused()) { setChecked(id, now); return 'paused'; }
+  // Paused, or Away mode holds the away temperature: the change is skipped, not saved for later.
+  if (automationsPaused() || awayActive()) { setChecked(id, now); return 'paused'; }
 
   const view = await deps.read(id);
   if (!view.online) return 'offline';   // tried again on the next tick; a later change takes its place

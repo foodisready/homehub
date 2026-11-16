@@ -6,6 +6,7 @@ import { getHomeSettings } from '../home/home-settings';
 import { DEFAULT_SIZE, hvacSystem, saveHvacSystem } from '../energy/usage';
 import { nextDue, saveSchedule, schedulePoints } from '../thermostat/schedule';
 import { temperatureUnit } from '../home/weather';
+import { awayActive } from '../home/away-state';
 
 /** Thermostats, mounted at /api/thermostats. Every temperature is °C; `unit` says how the home shows them. */
 export const thermostatsRouter = Router();
@@ -91,6 +92,8 @@ function scheduleView(id: number) {
     next: next ? { at: next.at.toISOString(), pointId: next.point.id, heat: next.point.heat, cool: next.point.cool } : null,
     unit: temperatureUnit(),
     timezone: getHomeSettings().timezone,
+    /** Away mode holds the away temperature; the schedule picks up again after. */
+    away: awayActive(),
   };
 }
 

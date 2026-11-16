@@ -1,7 +1,7 @@
 /** Turning Activity entries into plain words, shared by the Activity page and the dashboard. */
 
 export type ActivitySource =
-  | 'app' | 'scene' | 'schedule' | 'timer' | 'motion' | 'chat' | 'voice' | 'assistant' | 'shutoff' | 'outside' | 'homehub';
+  | 'app' | 'scene' | 'schedule' | 'timer' | 'motion' | 'chat' | 'voice' | 'assistant' | 'shutoff' | 'away' | 'outside' | 'homehub';
 
 export interface LastChange {
   state: boolean;
@@ -44,6 +44,7 @@ export function causeText(c: Pick<LastChange, 'source' | 'detail' | 'via' | 'use
     case 'voice': return 'by voice';
     case 'assistant': return 'by the AI assistant';
     case 'shutoff': return 'by automatic water shutoff';
+    case 'away': return 'by Away mode';
     case 'outside': return 'outside HomeHub';
     // A detail here is HomeHub's own finding, e.g. "didn't respond to the switch", not something it did.
     default: return c.detail ? `(${c.detail})` : 'by HomeHub';

@@ -5,7 +5,7 @@ import { KEEP_DAYS, keepDays, listActivity, setKeepDays, type ActivitySource } f
 /** Activity: device changes and their causes. Anyone signed in can read it. */
 export const activityRouter = Router();
 
-const SOURCES: ActivitySource[] = ['app', 'scene', 'schedule', 'timer', 'motion', 'chat', 'voice', 'assistant', 'shutoff', 'outside', 'homehub'];
+const SOURCES: ActivitySource[] = ['app', 'scene', 'schedule', 'timer', 'motion', 'chat', 'voice', 'assistant', 'shutoff', 'away', 'outside', 'homehub'];
 
 // GET /api/activity?deviceId=&room=&source=&kind=&before=&limit=
 activityRouter.get('/', (req: Request, res: Response) => {

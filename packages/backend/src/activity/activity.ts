@@ -18,6 +18,7 @@ export type ActivitySource =
   | 'scene' | 'schedule' | 'timer' | 'motion'
   | 'chat' | 'voice' | 'assistant'
   | 'shutoff'    // automatic water shutoff
+  | 'away'       // Away mode: lived-in lights, resumed cameras
   | 'outside'    // a wall switch, the device's own app, or anything else
   | 'homehub';   // HomeHub itself, with no more specific cause
 

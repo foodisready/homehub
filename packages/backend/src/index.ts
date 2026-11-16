@@ -73,6 +73,7 @@ import { startSos } from './family/sos';
 import { startCheckins } from './family/checkin';
 import { startReminders } from './family/reminders';
 import { thermostatsRouter } from './routes/thermostats';
+import { awayRouter } from './routes/away';
 import { startMatter, stopMatter } from './matter/service';
 import { noteRunningVersion } from './system/updater';
 import { initSocket } from './socket';
@@ -148,6 +149,7 @@ app.use('/api/home-settings',          homeSettingsRouter);
 app.use('/api/setup',                  setupRouter);
 app.use('/api/matter',                 requireAdmin, matterRouter);
 app.use('/api/thermostats',            thermostatsRouter);
+app.use('/api/away',                   awayRouter);
 app.use('/api/energy',                 energyUsageRouter);
 app.use('/api/family',                 familyRouter);
 
@@ -186,6 +188,8 @@ httpServer.listen(PORT, async () => {
   });
   // Thermostats' temperature schedules, and any change missed while HomeHub was down.
   void import('./thermostat/schedule').then(({ startThermostatSchedules }) => startThermostatSchedules());
+  // Away mode: thermostats, lived-in lights, and ending on the day you're back.
+  void import('./home/away').then(({ startAwayMode }) => startAwayMode());
 
   // Daily DB backup: run once at startup, then every 24 hours
   runBackup();

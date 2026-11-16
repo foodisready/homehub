@@ -273,6 +273,7 @@ export class FamilyComponent implements OnInit, OnDestroy {
         case 'all-clear': return { tone: 'good', text: `Today: no activity by ${by}, so the family was told. Then activity at ${sign}.` };
         case 'alerted': return { tone: 'bad', text: `Today: no activity by ${by}. The family was told at ${c.alertedAt ? timeIn(c.alertedAt, tz) : by}. HomeHub will say when it sees activity.` };
         case 'missed': return { tone: 'warn', text: `Today: HomeHub was off at ${by}, so it couldn’t check.` };
+        case 'away': return { tone: 'plain', text: 'Today: not checked, Away mode was on.' };
         default: return { tone: 'plain', text: `Checks at ${by} tomorrow.` };
       }
     }

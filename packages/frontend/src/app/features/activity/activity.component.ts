@@ -19,6 +19,7 @@ const CAUSES: { value: ActivitySource | ''; label: string }[] = [
   { value: 'scene', label: 'Scenes' },
   { value: 'timer', label: 'Timers' },
   { value: 'motion', label: 'Motion' },
+  { value: 'away', label: 'Away mode' },
   { value: 'chat', label: 'Chat' },
   { value: 'voice', label: 'Voice' },
   { value: 'assistant', label: 'AI assistant' },

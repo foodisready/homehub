@@ -5,7 +5,7 @@ export interface Checkin {
   from: string; by: string; days: number[];
   devices: number[] | null; motion: number[] | null; appUsers: string[] | null;
   voice: boolean; water: boolean; pausedUntil: string | null;
-  lastDay: string | null; lastResult: 'ok' | 'alerted' | 'all-clear' | 'missed' | null;
+  lastDay: string | null; lastResult: 'ok' | 'alerted' | 'all-clear' | 'missed' | 'away' | null;
   lastSignAt: string | null; lastSign: string | null; alertedAt: string | null;
 }
 
