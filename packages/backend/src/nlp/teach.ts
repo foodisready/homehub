@@ -91,7 +91,7 @@ function missText(source: MissSource, id: number): string {
 }
 
 /** Hide a miss, and the same wording elsewhere in the list. */
-function resolve(text: string): void {
+export function resolve(text: string): void {
   const db = getDb();
   const key = cleanUp(text);
   for (const table of ['voice_commands', 'chat_commands']) {
@@ -130,6 +130,49 @@ function checkPhrase(phrase: unknown): string {
   return trimmed;
 }
 
+/**
+ * Saves `phrase` as a nickname on these devices, and checks that "turn on <phrase>" now switches
+ * exactly them. Throws TeachError, saving nothing, when it wouldn't.
+ * Returns the devices' names, and whether the phrase is new to any of them.
+ */
+export function saveDeviceNickname(phrase: string, ids: unknown): { devices: string[]; added: boolean } {
+  const db = getDb();
+  // Its own transaction (a savepoint inside teach's), so a refused nickname is never left saved.
+  return db.transaction(() => {
+    if (!Array.isArray(ids) || !ids.length || ids.some((x) => !Number.isInteger(x))) {
+      throw new TeachError('Choose at least one device.');
+    }
+    const chosen = [...new Set(ids as number[])].sort((a, b) => a - b);
+    const devices = chosen.map((id) =>
+      db.prepare('SELECT id, alias, nicknames FROM devices WHERE id = ?').get(id) as
+        { id: number; alias: string; nicknames: string | null } | undefined);
+    if (devices.some((d) => !d)) throw new TeachError('One of those devices no longer exists.');
+
+    const other = db.prepare('SELECT alias FROM devices WHERE id NOT IN (' + chosen.map(() => '?').join(',') + ')')
+      .all(...chosen) as { alias: string }[];
+    const taken = other.find((d) => normalize(d.alias) === normalize(phrase));
+    if (taken) throw new TeachError(`"${taken.alias}" is already called that. Choose different words.`);
+
+    const save = db.prepare('UPDATE devices SET nicknames = ? WHERE id = ?');
+    let added = false;
+    for (const d of devices as { id: number; alias: string; nicknames: string | null }[]) {
+      const names = readNames(d.nicknames);
+      if (normalize(d.alias) === normalize(phrase) || names.some((n) => normalize(n) === normalize(phrase))) continue;
+      save.run(JSON.stringify([...names, phrase]), d.id);
+      added = true;
+    }
+
+    const now = devicesFor(phrase);
+    if (now.join(',') !== chosen.join(',')) {
+      throw new TeachError(
+        now.length
+          ? `HomeHub would still read "${phrase}" as other devices, such as a room or a shared nickname. Choose different words, or change that nickname in Settings → Devices.`
+          : `HomeHub still couldn't tell which device "${phrase}" means. Choose different words.`,
+      );
+    }
+    return { devices: (devices as { alias: string }[]).map((d) => d.alias), added };
+  })();
+}
 
 export function teach(input: {
   source: MissSource; id: number; phrase: unknown; deviceIds?: unknown; sceneId?: unknown;
@@ -155,37 +198,7 @@ export function teach(input: {
       return;
     }
 
-    const ids = input.deviceIds;
-    if (!Array.isArray(ids) || !ids.length || ids.some((x) => !Number.isInteger(x))) {
-      throw new TeachError('Choose at least one device.');
-    }
-    const chosen = [...new Set(ids as number[])].sort((a, b) => a - b);
-    const devices = chosen.map((id) =>
-      db.prepare('SELECT id, alias, nicknames FROM devices WHERE id = ?').get(id) as
-        { id: number; alias: string; nicknames: string | null } | undefined);
-    if (devices.some((d) => !d)) throw new TeachError('One of those devices no longer exists.');
-
-    const other = db.prepare('SELECT alias FROM devices WHERE id NOT IN (' + chosen.map(() => '?').join(',') + ')')
-      .all(...chosen) as { alias: string }[];
-    const taken = other.find((d) => normalize(d.alias) === normalize(phrase));
-    if (taken) throw new TeachError(`"${taken.alias}" is already called that. Choose different words.`);
-
-    const save = db.prepare('UPDATE devices SET nicknames = ? WHERE id = ?');
-    for (const d of devices as { id: number; alias: string; nicknames: string | null }[]) {
-      const names = readNames(d.nicknames);
-      if (normalize(d.alias) === normalize(phrase) || names.some((n) => normalize(n) === normalize(phrase))) continue;
-      save.run(JSON.stringify([...names, phrase]), d.id);
-    }
-
-    const now = devicesFor(phrase);
-    if (now.join(',') !== chosen.join(',')) {
-      throw new TeachError(
-        now.length
-          ? `HomeHub would still read "${phrase}" as other devices, such as a room or a shared nickname. Choose different words, or change that nickname in Settings → Devices.`
-          : `HomeHub still couldn't tell which device "${phrase}" means. Choose different words.`,
-      );
-    }
-    result = { phrase, devices: (devices as { alias: string }[]).map((d) => d.alias) };
+    result = { phrase, devices: saveDeviceNickname(phrase, input.deviceIds).devices };
   });
 
   run();

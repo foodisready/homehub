@@ -119,7 +119,7 @@ export function parseDoorCommand(text: string): PowerCommand | null {
 export const isGarageDoor = (device: { driver_type?: string | null }) => device.driver_type === 'meross';
 
 /** "Closing Garage Left." A door takes a while to move, and its sensor says so only once it's down. */
-function doorReply(result: { response: string; actions: ActionTaken[] }, state: boolean) {
+export function doorReply(result: { response: string; actions: ActionTaken[] }, state: boolean) {
   const moved = result.actions.filter((a) => (a.result as { success?: boolean } | undefined)?.success).map((a) => String(a.args.alias));
   if (!moved.length || moved.length !== result.actions.length) return result;
   return { ...result, response: `${state ? 'Opening' : 'Closing'} ${joinNames(moved)}.` };

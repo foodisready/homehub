@@ -77,6 +77,9 @@ nlpRouter.post('/misses/dismiss', requireAdmin, (req: Request, res: Response) =>
   }
 });
 
+/** Whose "Did you mean…?" a yes answers: each signed-in person has their own. */
+const who = (req: Request) => (req.user ? `user:${req.user.sub}` : 'chat');
+
 // POST /api/nlp  (non-streaming, kept for compatibility)
 nlpRouter.post('/', async (req: Request, res: Response) => {
   const { message, history = [] } = req.body as { message?: string; history?: ChatMessage[] };
@@ -86,7 +89,7 @@ nlpRouter.post('/', async (req: Request, res: Response) => {
   }
 
   try {
-    const result = await processMessage(message.trim(), history);
+    const result = await processMessage(message.trim(), history, who(req));
     res.json(result);
   } catch (err: any) {
     logger.error(err, 'NLP processing failed');
@@ -114,7 +117,7 @@ nlpRouter.post('/stream', async (req: Request, res: Response) => {
   const heartbeat = setInterval(() => res.write(': waiting\n\n'), 15_000);
 
   try {
-    for await (const event of processMessageStream(message.trim(), history)) {
+    for await (const event of processMessageStream(message.trim(), history, who(req))) {
       send(event);
       if (event.type === 'done' || event.type === 'error') break;
     }

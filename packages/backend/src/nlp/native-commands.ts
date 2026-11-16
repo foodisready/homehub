@@ -106,8 +106,9 @@ export function parseVietnamese(text: string): NativeCommand | null {
 
 // ── Cantonese and Mandarin ─────────────────────────────────────
 
-// Longest first, so 打開 isn't read as 打 + 開…
-const ZH_ON = ['打開', '打开', '開返', '开返', '開着', '開', '开'];
+// Longest first, so 打開 isn't read as 打 + 開… 着 (zoek) is Cantonese for switching a light on,
+// as the voice bridge already reads it.
+const ZH_ON = ['打開', '打开', '開返', '开返', '開着', '開', '开', '着返', '著返', '着', '著'];
 const ZH_OFF = ['關閉', '关闭', '關掉', '关掉', '關埋', '关埋', '熄滅', '熄灭', '熄埋', '熄', '關', '关', '閂埋', '闩埋', '閂', '闩'];
 // Mandarin's verb last: 把客厅灯打开, 厨房灯关了.
 const ZH_ON_LAST = ['打開', '打开', '開', '开'];

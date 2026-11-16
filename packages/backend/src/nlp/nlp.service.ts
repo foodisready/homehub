@@ -7,14 +7,16 @@ import { answerStatusQuestion } from './status';
 import { answerQuestion } from './questions';
 import { describeWeather, getWeather, WeatherError } from '../home/weather';
 import { getDriver } from '../drivers/registry';
-import { applyPower, assistantMaySwitch, type PowerDevice } from '../devices/power';
+import { applyPower, assistantMaySwitch, isProtectedDevice, type PowerDevice } from '../devices/power';
 import { logger } from '../logger';
-import { findDeviceByName, findDeviceGroup, listDeviceNames } from './find-device';
-import { runGroupCommand, runPowerCommand } from './commands';
+import { findDeviceByName, findDeviceGroup, listDeviceNames, NOT_A_LIGHT } from './find-device';
+import { isCamera, isGarageDoor, runGroupCommand, runPowerCommand } from './commands';
 import { runNativeCommand } from './native-commands';
 import { recordCommand } from './command-log';
 import { looksLikeToolCall, toolArguments, toolCallInText } from './tool-args';
 import { asksForLater, primeRewrite, rewriteMessage } from './rewrite';
+import { answerKind, askText, confirm, declined, propose, refusedText, setPending, takePending } from './confirm';
+import { understandPrompt, understandWithOllama, type HomeNames } from './understand';
 
 export interface ChatMessage {
   role: 'user' | 'assistant';
@@ -419,6 +421,22 @@ export async function warmModels(
   const rewriteModel = models[models.length - 1];
   if (loaded.includes(rewriteModel)) await primeRewrite({ url, model: rewriteModel, keepAlive: keep, fetchImpl: opts.fetchImpl });
 
+  // The form's instructions next: an unknown command reaches it before the chat model. On a Pi 4,
+  // reading them takes about 100 s, and every command after that about 13 s.
+  if (loaded.includes(main) && askingOn()) {
+    try {
+      await doFetch(`${url}/api/chat`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: main, stream: false, keep_alive: keep,
+          messages: [{ role: 'system', content: understandPrompt(homeNames()) }, { role: 'user', content: 'hello' }],
+          options: { num_predict: 1 },
+        }),
+        signal: AbortSignal.timeout(5 * 60_000),
+      });
+    } catch { /* only slower on the first command */ }
+  }
+
   // The chat model's instructions, with and without its tools (the final
   // answer is written without them), read now so they're cached.
   if (loaded.includes(main)) {
@@ -536,6 +554,61 @@ type Handled = { response: string; actions: ActionTaken[] };
 const byRules = async (text: string): Promise<Handled | null> =>
   await runPowerCommand(text) ?? await runNativeCommand(text) ?? answerStatusQuestion(text) ?? await answerQuestion(text);
 
+// ── "Did you mean…?" (confirm.ts) ───────────────────────────────
+
+/** CHAT_ASK=off goes back to the chat model for every command the rules don't know. */
+const askingOn = () => process.env.CHAT_ASK?.trim().toLowerCase() !== 'off';
+
+/** The home's devices, rooms and scenes, as the form offers them. */
+export function homeNames(): HomeNames {
+  const db = getDb();
+  const devices = db.prepare('SELECT alias, nicknames, room, driver_type, is_protected FROM devices').all() as
+    (PowerDevice & { alias: string; nicknames: string | null; room: string | null; driver_type: string | null })[];
+  const scenes = db.prepare('SELECT name, nicknames FROM scenes').all() as { name: string; nicknames: string | null }[];
+  const list = (v: string | null): string[] => { try { const a = JSON.parse(v ?? '[]'); return Array.isArray(a) ? a.map(String) : []; } catch { return []; } };
+  return {
+    devices: devices.map((d) => ({
+      alias: d.alias, nicknames: list(d.nicknames), room: d.room,
+      // As "<room> lights" reads elsewhere: not a camera, a door, a valve or a protected device.
+      light: !isCamera(d) && !isGarageDoor(d) && !isProtectedDevice(d) && !NOT_A_LIGHT.test(d.alias),
+    })),
+    scenes: scenes.map((sc) => ({ name: sc.name, nicknames: list(sc.nicknames) })),
+  };
+}
+
+/** A yes or no to the question this person was just asked. Anything else drops the question. */
+async function byAnswer(text: string, who: string): Promise<Handled | null> {
+  const proposal = takePending(who);
+  if (!proposal) return null;
+  const kind = answerKind(text);
+  if (kind === 'yes') {
+    const done = await confirm(proposal);
+    return { response: done.response, actions: done.actions };
+  }
+  if (kind === 'no') return { response: declined(proposal), actions: [] };
+  return null;
+}
+
+/**
+ * The model fills in a form, and HomeHub asks before doing what it read. Null when the model
+ * didn't name anything to switch, or couldn't be reached: then the chat model has it, as before.
+ */
+async function byForm(text: string, who: string): Promise<Handled | null> {
+  if (!askingOn()) return null;
+  const read = await understandWithOllama(text, homeNames(), {
+    url:   process.env.OLLAMA_URL ?? 'http://localhost:11434',
+    model: process.env.OLLAMA_MODEL ?? 'llama3.2:3b',
+    keepAlive: keepAlive(),
+  });
+  if (read.error) logger.warn({ err: read.error }, 'NLP form not filled');
+  const reading = propose(text, read.understanding);
+  logger.info({ ms: read.ms, read: read.understanding, reading: reading?.kind ?? null }, 'NLP form');
+  if (!reading) return null;
+  if (reading.kind === 'refuse') return { response: refusedText(reading), actions: [] };
+  setPending(who, reading.proposal);
+  return { response: askText(reading.proposal), actions: [] };
+}
+
 /**
  * The rules didn't understand it: a small model says it again plainly
  * ("turn on ffice liights" → "turn on office lights"), and if the rules
@@ -551,10 +624,17 @@ async function byRewrite(text: string): Promise<Handled | null> {
 export async function processMessage(
   userMessage: string,
   history: ChatMessage[],
+  who = 'chat',
 ): Promise<{ response: string; actions: ActionTaken[] }> {
+  const answered = await byAnswer(userMessage, who);
+  if (answered) return answered;
+
   const handled = await byRules(userMessage);
   recordCommand(userMessage, handled ? 'rules' : 'model');
   if (handled) return handled;
+
+  const asked = await byForm(userMessage, who);
+  if (asked) return asked;
 
   const rewritten = await byRewrite(userMessage);
   if (rewritten) return rewritten;
@@ -584,7 +664,17 @@ export type StreamEvent =
 export async function* processMessageStream(
   userMessage: string,
   history: ChatMessage[],
+  who = 'chat',
 ): AsyncGenerator<StreamEvent> {
+  const answered = await byAnswer(userMessage, who);
+  if (answered) {
+    yield { type: 'meta', by: 'rules' };
+    for (const action of answered.actions) yield { type: 'action', action };
+    yield { type: 'token', content: answered.response };
+    yield { type: 'done' };
+    return;
+  }
+
   const handled = await byRules(userMessage);
   recordCommand(userMessage, handled ? 'rules' : 'model');
   if (handled) {
@@ -598,6 +688,13 @@ export async function* processMessageStream(
   const ollamaUrl = process.env.OLLAMA_URL ?? 'http://localhost:11434';
   const model     = process.env.OLLAMA_MODEL ?? 'llama3.2:3b';
   yield { type: 'meta', by: 'model', model };
+
+  const asked = await byForm(userMessage, who);
+  if (asked) {
+    yield { type: 'token', content: asked.response };
+    yield { type: 'done' };
+    return;
+  }
 
   const rewritten = await byRewrite(userMessage);
   if (rewritten) {

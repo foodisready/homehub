@@ -1,10 +1,10 @@
 /**
  * Understanding a command with a model that must fill in a form, rather than chat and call tools:
  *
- *   "bật đèn bếp"  →  { action: 'on', devices: ['Kitchen lights', 'Kitchen counter lights'], lang: 'vi' }
+ *   "tắt đèn phòng khách"  →  { action: 'off', target: 'Living room lights', lang: 'vi' }
  *
- * The form's device field only accepts the home's real device names (the model server enforces
- * the schema), so a model can't make a name up, and the language it was asked in stops mattering:
+ * The form's target only accepts the home's own devices and rooms (the model server enforces the
+ * schema), so a model can't make a name up, and the language it was asked in stops mattering:
  * HomeHub writes the reply itself. Small models are far more reliable at this than at a free
  * conversation with tools, and it's one short answer, so it's quick.
  *
@@ -16,6 +16,7 @@ export const LANGS = ['en', 'yue', 'zh', 'vi'] as const;
 
 export interface Understanding {
   action:  typeof ACTIONS[number];
+  /** The devices the chosen target means: one device, or a room's lights. */
   devices: string[];
   scene:   string | null;
   minutes: number | null;
@@ -23,49 +24,71 @@ export interface Understanding {
 }
 
 export interface HomeNames {
-  devices: { alias: string; nicknames: string[]; room: string | null }[];
+  /** light: whether "<room> lights" includes it (not a camera, door, valve or protected device). */
+  devices: { alias: string; nicknames: string[]; room: string | null; light?: boolean }[];
   scenes:  { name: string; nicknames: string[] }[];
 }
 
-/** The form, as a JSON schema. Device and scene names are limited to the home's own. */
+/**
+ * What a message can mean: each device, and each room's lights. The model picks one. A list of
+ * devices would let it pick several, and small models, Ollama 0.35's especially, then keep adding
+ * names until the answer runs out (every device in the house for "tắt hết đèn phòng khách").
+ */
+export interface Target { label: string; devices: string[]; about: string }
+
+export function targets(home: HomeNames): Target[] {
+  const list: Target[] = home.devices.map((d) => ({
+    label:   d.alias,
+    devices: [d.alias],
+    about:   [d.room ? `room: ${d.room}` : '', d.nicknames.length ? `also called: ${d.nicknames.join(', ')}` : ''].filter(Boolean).join('; '),
+  }));
+  const taken = new Set(list.map((t) => t.label.toLowerCase()));
+  const rooms = [...new Set(home.devices.map((d) => d.room).filter((r): r is string => !!r))];
+  for (const room of rooms) {
+    const lights = home.devices.filter((d) => d.room === room && d.light !== false).map((d) => d.alias);
+    const label = `${room} lights`;
+    if (lights.length < 2 || taken.has(label.toLowerCase())) continue;
+    list.push({ label, devices: lights, about: `all of: ${lights.join(', ')}` });
+    taken.add(label.toLowerCase());
+  }
+  return list;
+}
+
+/** The form, as a JSON schema. The target and scene can only be the home's own. */
 export function understandingSchema(home: HomeNames) {
-  const aliases = home.devices.map((d) => d.alias);
   const scenes = home.scenes.map((s) => s.name);
   return {
     type: 'object',
     properties: {
       action:  { type: 'string', enum: [...ACTIONS] },
-      devices: { type: 'array', items: { type: 'string', enum: aliases } },
+      target:  { anyOf: [{ type: 'string', enum: targets(home).map((t) => t.label) }, { type: 'null' }] },
       scene:   scenes.length ? { anyOf: [{ type: 'string', enum: scenes }, { type: 'null' }] } : { type: 'null' },
       minutes: { anyOf: [{ type: 'integer', minimum: 1, maximum: 1440 }, { type: 'null' }] },
       lang:    { type: 'string', enum: [...LANGS] },
     },
-    required: ['action', 'devices', 'scene', 'minutes', 'lang'],
+    required: ['action', 'target', 'scene', 'minutes', 'lang'],
     additionalProperties: false,
   };
 }
 
-/** Each device with its room and other names, one line each, as the model sees them. */
+/** Each target with what it is, one line each, as the model sees them. */
 export function catalog(home: HomeNames): string {
-  const devices = home.devices.map((d) => {
-    const extra = [d.room ? `room: ${d.room}` : '', d.nicknames.length ? `also called: ${d.nicknames.join(', ')}` : ''].filter(Boolean);
-    return `- ${d.alias}${extra.length ? ` (${extra.join('; ')})` : ''}`;
-  });
+  const lines = targets(home).map((t) => `- ${t.label}${t.about ? ` (${t.about})` : ''}`);
   const scenes = home.scenes.map((s) => `- ${s.name}${s.nicknames.length ? ` (also called: ${s.nicknames.join(', ')})` : ''}`);
-  return `Devices:\n${devices.join('\n')}\n\nScenes:\n${scenes.length ? scenes.join('\n') : '(none)'}`;
+  return `Targets:\n${lines.join('\n')}\n\nScenes:\n${scenes.length ? scenes.join('\n') : '(none)'}`;
 }
 
 export function understandPrompt(home: HomeNames): string {
   return `You read one message to a smart home and fill in a form saying what it asks for. Messages come in English, Cantonese, Mandarin or Vietnamese, often from speech recognition, so expect misheard words and simplified characters for Cantonese.
 
 action:
-- on / off: switch devices on or off (開, 着, 打开, bật, mở = on; 關, 熄, 关, 閂, tắt = off)
+- on / off: switch something on or off (開, 着, 打开, bật, mở = on; 關, 熄, 关, 閂, tắt = off)
 - open / close: a garage door (開車房門, mở cửa ga-ra = open; 關/鎖車房門, đóng cửa ga-ra = close)
 - scene: run one of the scenes
 - question: a question, such as the time or what's on
-- unclear: anything else, or you can't tell which device is meant
+- unclear: anything else, or you can't tell what is meant
 
-devices: every device the message means, by its exact name from the list. A device's other names and its room count: "kitchen lights" in a room means the lights in that room. Leave it empty for a question, a scene, or unclear.
+target: the one device, or the one room's lights, that the message means, written exactly as in the list. A device's other names and its room count. null for a question, a scene, or unclear.
 minutes: only if a length of time is said ("for 10 minutes", 十分鐘, mười phút), else null.
 lang: the language of the message: en, yue (Cantonese), zh (Mandarin), vi (Vietnamese).
 
@@ -95,7 +118,7 @@ export async function understandWithOllama(
         stream: false,
         format: understandingSchema(home),
         keep_alive: opts.keepAlive ?? '30m',
-        options: { temperature: 0, num_predict: 120 },
+        options: { temperature: 0, num_predict: 80 },
         messages: [{ role: 'system', content: understandPrompt(home) }, { role: 'user', content: text }],
       }),
     });
@@ -142,15 +165,14 @@ export async function understandWithClaude(
 
 /** The model's form, checked again here: anything outside the schema counts as unclear. */
 export function parseUnderstanding(raw: string, home: HomeNames): Understanding | null {
-  let v: Partial<Understanding>;
+  let v: { action?: unknown; target?: unknown; scene?: unknown; minutes?: unknown; lang?: unknown };
   try { v = JSON.parse(raw); } catch { return null; }
-  const aliases = new Set(home.devices.map((d) => d.alias));
-  const scenes = new Set(home.scenes.map((s) => s.name));
   if (!v || !ACTIONS.includes(v.action as Understanding['action'])) return null;
-  const devices = Array.isArray(v.devices) ? [...new Set(v.devices.filter((d): d is string => typeof d === 'string' && aliases.has(d)))] : [];
+  const target = targets(home).find((t) => t.label === v.target);
+  const scenes = new Set(home.scenes.map((s) => s.name));
   return {
     action:  v.action as Understanding['action'],
-    devices,
+    devices: target ? target.devices : [],
     scene:   typeof v.scene === 'string' && scenes.has(v.scene) ? v.scene : null,
     minutes: Number.isInteger(v.minutes) && (v.minutes as number) > 0 ? v.minutes as number : null,
     lang:    LANGS.includes(v.lang as Understanding['lang']) ? v.lang as Understanding['lang'] : 'en',

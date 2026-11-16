@@ -19,7 +19,7 @@ type Expect =
   | { kind: 'none' };
 interface Case { id: string; source: string; lang: string; text: string; expect: Expect }
 interface Switched { alias: string; state: boolean }
-interface Outcome { switched: Switched[]; response: string; ms: number; by?: string; error?: string }
+interface Outcome { switched: Switched[]; response: string; ms: number; by?: string; error?: string; asked?: string; askRight?: boolean; learned?: string | null }
 interface HomeFile {
   devices: { alias: string; nicknames: string[]; room: string | null; driver_type: string | null; is_protected: number }[];
   scenes: { name: string; nicknames: string[] }[];
@@ -63,6 +63,7 @@ async function main() {
   const { answerQuestion } = await import('../questions');
   const nlp = await import('../nlp.service');
   const understand = await import('../understand');
+  const confirmMod = await import('../confirm');
 
   const home = JSON.parse(fs.readFileSync(homeFile, 'utf8')) as HomeFile;
   const db = getDb();
@@ -74,12 +75,21 @@ async function main() {
     add.run(d.alias, ip, JSON.stringify(d.nicknames ?? []), d.room, d.driver_type ?? 'kasa', d.is_protected ? 1 : 0);
   });
   for (const s of home.scenes) db.prepare('INSERT INTO scenes (name, nicknames) VALUES (?, ?)').run(s.name, JSON.stringify(s.nicknames ?? []));
+  /** Back to the home's own nicknames: what one system learned mustn't help the next. */
+  const reseed = () => {
+    const put = db.prepare('UPDATE devices SET nicknames = ? WHERE alias = ?');
+    for (const d of home.devices) put.run(JSON.stringify(d.nicknames ?? []), d.alias);
+  };
 
   let switched: Switched[] = [];
   for (const driver of getAllDrivers()) {
     driver.setPower = async (ip: string, state: boolean) => { switched.push({ alias: byIp.get(ip) ?? ip, state }); };
   }
-  const names = { devices: home.devices.map((d) => ({ alias: d.alias, nicknames: d.nicknames ?? [], room: d.room })), scenes: home.scenes };
+  const { NOT_A_LIGHT } = await import('../find-device');
+  // As "<room> lights" reads in HomeHub: not a camera, a garage door, a valve or a protected device.
+  const light = (d: HomeFile['devices'][number]) =>
+    d.driver_type !== 'wyze' && d.driver_type !== 'meross' && !d.is_protected && !NOT_A_LIGHT.test(d.alias);
+  const names = { devices: home.devices.map((d) => ({ alias: d.alias, nicknames: d.nicknames ?? [], room: d.room, light: light(d) })), scenes: home.scenes };
   const isDoor = (alias: string) => home.devices.find((d) => d.alias === alias)?.driver_type === 'meross';
 
   const rules086 = async (t: string) => await commands.runPowerCommand(t) ?? answerStatusQuestion(t) ?? await answerQuestion(t);
@@ -115,7 +125,35 @@ async function main() {
     return { response: u.action, by };
   }
 
-  const run: Record<string, (t: string) => Promise<{ response: string; by?: string; error?: string }>> = {
+  /**
+   * "Did you mean…?" (confirm.ts): the model only proposes, and a stand-in for the person answers:
+   * yes when the proposal is what the label says, no otherwise. A yes switches and may teach a nickname.
+   */
+  let current: Case | null = null;
+  async function withAsk(t: string, ask: (t: string) => Promise<import('../understand').UnderstandResult>, thenChat = false):
+    Promise<{ response: string; by?: string; error?: string; asked?: string; askRight?: boolean; learned?: string | null }> {
+    const r = await rules(t);
+    if (r) return { response: r.response, by: 'rules' };
+    const m = await ask(t);
+    if (!m.understanding) return { response: '', by: 'model', error: m.error ?? 'no form' };
+    const reading = confirmMod.propose(t, m.understanding);
+    const by = `ask:${m.understanding.action}:${m.understanding.lang}`;
+    // Chat as it would run: a question, or anything the form couldn't place, goes on to today's chat.
+    if (!reading && thenChat) { const r = await nlp.processMessage(t, []); return { response: r.response, by: `${by}>chat` }; }
+    if (!reading) return { response: 'Which one do you mean?', by };
+    if (reading.kind === 'refuse') return { response: confirmMod.refusedText(reading), by };
+    const asked = confirmMod.askText(reading.proposal);
+    const e = current!.expect;
+    const right = e.kind === 'switch' && e.sets.some((set) => confirmMod.sameProposal(reading.proposal, set, e.state === 'on'));
+    if (!right) return { response: confirmMod.declined(reading.proposal), by, asked, askRight: false };
+    const done = await confirmMod.confirm(reading.proposal);
+    return { response: done.response, by, asked, askRight: true, learned: done.learned };
+  }
+
+  const run: Record<string, (t: string) => Promise<{ response: string; by?: string; error?: string; asked?: string; askRight?: boolean; learned?: string | null }>> = {
+    'rules+structured+ask': (t) => withAsk(t, askOllama),
+    'rules+claude+ask': (t) => withAsk(t, askClaude),
+    'rules+structured+ask+chat': (t) => withAsk(t, askOllama, true),
     'rules-0.1.86': async (t) => ({ response: (await rules086(t))?.response ?? '', by: 'rules' }),
     rules: async (t) => ({ response: (await rules(t))?.response ?? '', by: 'rules' }),
     structured: (t) => structured(t),
@@ -133,14 +171,16 @@ async function main() {
     const fn = run[system];
     if (!fn) throw new Error(`Unknown system ${system}`);
     const rows: (Case & Outcome & { pass: boolean })[] = [];
+    reseed();
     for (const c of cases) {
+      current = c;
       db.prepare('UPDATE devices SET override_state = NULL, override_until = NULL, timer_off_at = NULL').run();
       switched = [];
       const t0 = Date.now();
       let out: Outcome;
       try {
         const r = await fn(c.text);
-        out = { switched: [...switched], response: r.response, ms: Date.now() - t0, by: r.by, error: r.error };
+        out = { switched: [...switched], response: r.response, ms: Date.now() - t0, by: r.by, error: r.error, asked: r.asked, askRight: r.askRight, learned: r.learned };
       } catch (err) {
         out = { switched: [...switched], response: '', ms: Date.now() - t0, error: (err as Error).message };
       }
@@ -157,8 +197,29 @@ async function main() {
     // Worse than not understanding: something was switched, and it wasn't what was asked.
     const wrong = rows.filter((r) => !r.pass && r.switched.length).length;
     const ms = rows.map((r) => r.ms).sort((a, b) => a - b);
-    (report.systems as Record<string, unknown>)[system] = { groups, wrong, medianMs: ms[Math.floor(ms.length / 2)], rows };
+    const asking = system.includes('+ask') ? {
+      rightAtOnce:  rows.filter((r) => r.pass && !r.asked).length,
+      rightAsked:   rows.filter((r) => r.pass && r.askRight).length,
+      askedWrong:   rows.filter((r) => r.asked && !r.askRight).length,
+      learned:      [...new Set(rows.map((r) => r.learned).filter(Boolean))],
+    } : undefined;
+    // A week later: the same commands, with only the rules and what was learned.
+    let afterwards: { pass: number; wrong: number } | undefined;
+    if (asking) {
+      let pass = 0, wrongLater = 0;
+      for (const c of cases) {
+        db.prepare('UPDATE devices SET override_state = NULL, override_until = NULL, timer_off_at = NULL').run();
+        switched = [];
+        const r = await rules(c.text);
+        const out: Outcome = { switched: [...switched], response: r?.response ?? '', ms: 0 };
+        if (passes(c.expect, out)) pass++;
+        else if (out.switched.length) wrongLater++;
+      }
+      afterwards = { pass, wrong: wrongLater };
+    }
+    (report.systems as Record<string, unknown>)[system] = { groups, wrong, medianMs: ms[Math.floor(ms.length / 2)], asking, afterwards, rows };
     console.log(`${system.padEnd(18)} wrong ${wrong}  ${Object.entries(groups).map(([g, v]) => `${g} ${v.pass}/${v.n}`).join('  ')}  median ${ms[Math.floor(ms.length / 2)]} ms`);
+    if (asking) console.log(`  right at once ${asking.rightAtOnce}, right after a yes ${asking.rightAsked}, asked wrongly ${asking.askedWrong}, phrases learned ${asking.learned.length}; afterwards rules alone ${afterwards!.pass}/${cases.length}, wrong ${afterwards!.wrong}`);
   }
   if (tokens.input) {
     report.claudeTokens = tokens;

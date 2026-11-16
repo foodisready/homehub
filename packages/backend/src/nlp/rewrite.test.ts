@@ -145,7 +145,9 @@ describe('plain rewrites', () => {
 
   describe('in Chat', () => {
     const realFetch = globalThis.fetch;
-    after(() => { globalThis.fetch = realFetch; });
+    // These are about the rewrite and the chat model; asking first is tested below.
+    before(() => { process.env.CHAT_ASK = 'off'; });
+    after(() => { globalThis.fetch = realFetch; delete process.env.CHAT_ASK; });
 
     const run = async (text: string) => {
       const events: any[] = [];
@@ -321,6 +323,112 @@ describe('plain rewrites', () => {
       await run('turn on office lights');
       assert.equal(ollama.asked.length, 0);
       assert.deepEqual(switched, [{ ip: '10.0.0.1', state: true }]);
+    });
+  });
+  describe('in Chat, asking first', () => {
+    const realFetch = globalThis.fetch;
+    after(() => { globalThis.fetch = realFetch; });
+
+    const form = (target: string | null, action = 'on', lang = 'en') =>
+      JSON.stringify({ action, target, scene: null, minutes: null, lang });
+    const run = async (text: string, who?: string) => {
+      const events: any[] = [];
+      for await (const e of nlp.processMessageStream(text, [], who)) events.push(e);
+      return { events, said: events.filter((e) => e.type === 'token').map((e) => e.content).join('') };
+    };
+    const nicknamesOf = (alias: string) =>
+      JSON.parse((db.prepare('SELECT nicknames n FROM devices WHERE alias = ?').get(alias) as { n: string | null }).n ?? '[]');
+
+    beforeEach(() => db.prepare("UPDATE devices SET nicknames = '[]'").run());
+
+    it('asks before switching what the model read, then a yes switches it and teaches the words', async () => {
+      const ollama = fakeOllama(form('Office lights', 'on'));
+      globalThis.fetch = ollama.impl;
+
+      const asked = await run('turn of ffice liights', 'user:1');
+      assert.equal(asked.said, 'Turn off Office lights?', 'off, from the rules\' reading of "turn of"');
+      assert.deepEqual(switched, []);
+      assert.equal(ollama.asked.length, 1, 'only the form');
+      assert.ok(ollama.asked[0].format, 'with the form as its required answer');
+
+      const yes = await run('yes', 'user:1');
+      assert.deepEqual(switched, [{ ip: '10.0.0.1', state: false }]);
+      assert.match(yes.said, /Office lights.*Next time I'll know "ffice liights"\.$/);
+      assert.deepEqual(nicknamesOf('Office lights'), ['ffice liights']);
+      const miss = db.prepare("SELECT resolved FROM chat_commands WHERE text = 'turn of ffice liights'").get() as { resolved: number };
+      assert.equal(miss.resolved, 1, 'no longer listed to teach');
+      assert.equal(yes.events.find((e) => e.type === 'action').action.args.alias, 'Office lights');
+
+      // The same words again: the rules, at once, with no model and no question.
+      switched.length = 0;
+      const again = await run('turn on ffice liights', 'user:1');
+      assert.equal(again.events[0].by, 'rules');
+      assert.deepEqual(switched, [{ ip: '10.0.0.1', state: true }]);
+      assert.equal(ollama.asked.length, 1);
+    });
+
+    it('a no changes nothing, and a second answer finds no question', async () => {
+      globalThis.fetch = fakeOllama(form('Kitchen lights', 'on')).impl;
+      await run('lights in the cooking place on', 'user:2');
+      assert.equal((await run('no', 'user:2')).said, 'OK, I left everything as it was.');
+      globalThis.fetch = fakeOllama('NONE', 'Yes to what?').impl;
+      await run('yes', 'user:2');
+      assert.deepEqual(switched, []);
+      assert.deepEqual(nicknamesOf('Kitchen lights'), []);
+    });
+
+    it('answers only the person who was asked', async () => {
+      globalThis.fetch = fakeOllama(form('Kitchen lights', 'on'), 'NONE', 'Hello!').impl;
+      await run('kichen lite on', 'user:3');
+      await run('yes', 'user:4');
+      assert.deepEqual(switched, [], 'someone else\'s yes');
+      await run('yes', 'user:3');
+      assert.deepEqual(switched, [{ ip: '10.0.0.2', state: true }]);
+    });
+
+    it('a new command instead of an answer drops the question, and is read on its own', async () => {
+      globalThis.fetch = fakeOllama(form('Kitchen lights', 'on')).impl;
+      await run('kichen lite on', 'user:5');
+      const next = await run('turn on office lights', 'user:5');
+      assert.equal(next.events[0].by, 'rules');
+      assert.deepEqual(switched, [{ ip: '10.0.0.1', state: true }]);
+      globalThis.fetch = fakeOllama('NONE', 'Yes to what?').impl;
+      await run('yes', 'user:5');
+      assert.deepEqual(switched, [{ ip: '10.0.0.1', state: true }], 'the old question is gone');
+    });
+
+    it('goes on to the rewrite and the chat model when the form names nothing, or the model is down', async () => {
+      const ollama = fakeOllama(form(null, 'question'), 'NONE', 'Why did the lamp go to school?');
+      globalThis.fetch = ollama.impl;
+      assert.equal((await run('tell me a joke', 'user:6')).said, 'Why did the lamp go to school?');
+      assert.equal(ollama.asked.length, 3);
+
+      globalThis.fetch = fakeOllama(new Error('connect ECONNREFUSED'), 'NONE', 'Sorry, which light?').impl;
+      assert.equal((await run('the lamp thing', 'user:6')).said, 'Sorry, which light?');
+      assert.deepEqual(switched, []);
+    });
+
+    it('never asks to open a garage door or pause a camera: it says why', async () => {
+      db.prepare("INSERT INTO devices (alias, ip, driver_type) VALUES ('Garage Left', '10.0.0.9', 'meross')").run();
+      try {
+        globalThis.fetch = fakeOllama(form('Garage Left', 'open')).impl;
+        assert.match((await run('opne the garaj', 'user:7')).said, /won't open a garage door/);
+        assert.deepEqual(switched, []);
+      } finally {
+        db.prepare("DELETE FROM devices WHERE alias = 'Garage Left'").run();
+      }
+    });
+
+    it('CHAT_ASK=off goes straight to the rewrite and the chat model, as before', async () => {
+      process.env.CHAT_ASK = 'off';
+      try {
+        const ollama = fakeOllama('NONE', 'Which one?');
+        globalThis.fetch = ollama.impl;
+        await run('kichen lite on', 'user:8');
+        assert.ok(ollama.asked.every((body) => !body.format));
+      } finally {
+        delete process.env.CHAT_ASK;
+      }
     });
   });
 });
