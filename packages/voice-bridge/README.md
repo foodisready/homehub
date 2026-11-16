@@ -8,7 +8,7 @@ speaker → wake word → bridge: Whisper (speech to text) → HomeHub → Piper
 
 It works with ESPHome voice speakers: [Ava](https://github.com/brownard/Ava) on an Android tablet, and should work with the Home Assistant Voice Preview Edition (not tested yet; see below). Speakers on your network are found automatically. When two speakers hear the same command, only the one that heard it loudest, usually the nearest, answers and carries it out.
 
-Commands go through HomeHub's rules only, never an AI model, so a misheard command can't switch a device the rules didn't match. Protected devices are never switched by voice.
+Commands go through HomeHub's rules, so a misheard command can't switch a device the rules didn't match. With Claude Haiku chosen in **Settings → AI for Chat and voice**, a command the rules don't understand can come back as a question, such as "Turn on Porch light?": the speaker asks it and listens for a yes or no (`confirm.py`), and nothing is switched without a yes. Protected devices are never switched by voice.
 
 ## Turning it on
 

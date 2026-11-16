@@ -17,6 +17,7 @@ import { maybeFireShutoff } from '../sensors/shutoff';
 import { realInvoker, realNotifier } from '../sensors/shutoff-runtime';
 import { notifyStaleRecovery } from '../sensors/stale-check';
 import { runPowerCommand } from '../nlp/commands';
+import { answerVoiceAsk, askForVoice } from '../nlp/nlp.service';
 import { recordVoiceCommand } from '../nlp/command-log';
 import { withActivity } from '../activity/activity';
 import { issueTokens, serviceUser } from '../auth/auth.service';
@@ -93,12 +94,15 @@ internalRouter.post('/voice/status', (req: Request, res: Response) => {
   res.json({ ok: true, ...bridgeInstructions() });
 });
 
-// POST /internal/voice/command  { text: string }
-// Rules only. Spoken text can be misheard, so a model never gets to guess a device from it.
+// POST /internal/voice/command  { text: string, retry?, ask?, lang? }
+// The rules act at once. Spoken text can be misheard, so a model never switches a device from it:
+// with Claude in use, a miss can become a question ("Turn on Kitchen light?") the bridge asks aloud.
 internalRouter.post('/voice/command', async (req: Request, res: Response) => {
   // retry: the bridge will try again with a slower, more careful hearing if this isn't understood,
   // so a miss isn't recorded yet. A command that is understood is recorded either way.
-  const { text, retry } = req.body as { text?: unknown; retry?: unknown };
+  // ask: the bridge can ask "Turn on …?" and listen for the answer (bridges before it couldn't).
+  // lang: the language it heard, for the question's words and voice.
+  const { text, retry, ask, lang } = req.body as { text?: unknown; retry?: unknown; ask?: unknown; lang?: unknown };
   if (typeof text !== 'string' || !text.trim()) {
     return res.status(400).json({ error: '`text` is required', code: 'VALIDATION_ERROR' });
   }
@@ -109,9 +113,30 @@ internalRouter.post('/voice/command', async (req: Request, res: Response) => {
 
   const handled = await withActivity({ source: 'voice' }, () => runPowerCommand(spoken)) ?? answerStatusQuestion(spoken) ?? await answerQuestion(spoken);
   if (handled || retry !== true) recordVoiceCommand(text.trim(), handled !== null);
-  if (!handled) return res.json({ handled: false, response: reply('not_understood', {}), actions: [] });
+  if (!handled) {
+    // With Claude in use, HomeHub asks before doing what it read. Not on a first try the bridge will
+    // hear again more carefully. Claude reading nothing to switch leaves it not understood, as before.
+    const language = (VOICE_LANGUAGES as readonly string[]).includes(String(lang)) ? (lang as VoiceLanguage) : null;
+    const asked = ask === true && retry !== true ? await askForVoice(spoken, language) : null;
+    if (asked) {
+      return res.json({ handled: false, response: asked.say, say: asked.say, lang: asked.lang, actions: [],
+        ...(asked.confirmId ? { confirmId: asked.confirmId } : {}) });
+    }
+    return res.json({ handled: false, response: reply('not_understood', {}), actions: [] });
+  }
 
   res.json({ handled: true, ...handled, response: spokenDegrees(handled.response) });
+});
+
+// POST /internal/voice/confirm/:id  { answer: 'yes' | 'no' }: the answer to "Turn on …?" after a
+// voice command. Replies with what to say, in the question's language; 404 once it isn't asking.
+internalRouter.post('/voice/confirm/:id', async (req: Request, res: Response) => {
+  const answer = (req.body ?? {}).answer;
+  if (answer !== 'yes' && answer !== 'no') return res.status(400).json({ error: '`answer` must be yes or no', code: 'VALIDATION_ERROR' });
+  const done = await withActivity({ source: 'voice' }, () => answerVoiceAsk(String(req.params['id']), answer));
+  if (!done) return res.status(404).json({ error: 'Not asking', code: 'NOT_FOUND' });
+  const ok = answer === 'no' || done.actions.some((a) => (a.result as { success?: boolean } | undefined)?.success);
+  res.json({ handled: ok, response: done.response, lang: done.lang, actions: done.actions });
 });
 
 // POST /internal/voice/sos  { action: 'raise' | 'cancel', where?, lang?, heard? }

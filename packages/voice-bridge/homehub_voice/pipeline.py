@@ -14,6 +14,7 @@ import logging
 import re
 import time
 from collections.abc import Callable
+from contextvars import ContextVar
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Protocol
@@ -23,6 +24,7 @@ from .chatter import looks_like_chatter
 from . import mandarin as zh
 from . import questions
 from . import ask
+from . import confirm
 from . import sos
 from . import vietnamese as vi
 from .homehub import CommandResult, HomeHubError
@@ -53,6 +55,28 @@ class Commander(Protocol):
     names: list[str]
 
     def command(self, text: str, retry: bool = False) -> CommandResult: ...
+
+
+# The id of HomeHub's "Turn on …?" this command may be the answer to, while it's being answered.
+_confirming: ContextVar[str | None] = ContextVar('confirming', default=None)
+
+
+def to_homehub(homehub: Commander, text: str, lang: str, retry: bool = False, may_ask: bool = True) -> CommandResult:
+    """A command for HomeHub. One it doesn't know may come back as a question to ask (with Claude
+    chosen in Settings), when may_ask and HomeHub can."""
+    if may_ask and getattr(homehub, 'can_ask', False) is True:
+        return homehub.command(text, retry=retry, lang=lang, ask=True)
+    return homehub.command(text, retry) if retry else homehub.command(text)
+
+
+def asked_back(heard: str, res: CommandResult, t0: float, t1: float, passes: int = 0) -> Answer | None:
+    """HomeHub's own words, when it sent some: "Turn on Porch light?", listening for the answer, or why
+    it won't (a garage door is never opened by voice). None for an ordinary answer."""
+    if not res.say:
+        return None
+    lang = res.say_lang or 'en'
+    return Answer(heard, res.say, res.confirm_id is None, t1 - t0, time.monotonic() - t1, lang=lang,
+                  asked=f'{confirm.PREFIX}{res.confirm_id}' if res.confirm_id else None, passes=passes)
 
 
 @dataclass
@@ -127,7 +151,11 @@ def answer(audio: bytes, spoke: bool, listener: Transcriber, homehub: Commander,
            ears: CantoneseEars | None = None, asked: str | None = None,
            vi_ears: VietnameseEars | None = None, prefer: str | None = None, where: str = '') -> Answer:
     """What was heard and what to say back; a miss with nothing of a command in it is marked chatter."""
-    a = _answer(audio, spoke, listener, homehub, ears, asked, vi_ears, prefer, where)
+    token = _confirming.set(asked[len(confirm.PREFIX):] if asked and asked.startswith(confirm.PREFIX) else None)
+    try:
+        a = _answer(audio, spoke, listener, homehub, ears, asked, vi_ears, prefer, where)
+    finally:
+        _confirming.reset(token)
     if not a.handled and a.asked is None and not asked and looks_like_chatter(a.heard, list(getattr(homehub, 'names', []))):
         a.chatter = True
     return a
@@ -144,7 +172,7 @@ def _answer(audio: bytes, spoke: bool, listener: Transcriber, homehub: Commander
     t0 = time.monotonic()
     # Straight after a reminder asked "done yet?": its answer is read more loosely.
     just_asked = bool(asked and asked.startswith(ask.PREFIX))
-    if asked == sos.ASKED or just_asked:
+    if asked == sos.ASKED or just_asked or (asked and asked.startswith(confirm.PREFIX)):
         asked = None   # listening for "cancel" or an answer: anything else is taken as usual
     which = asked if asked and asked.startswith(vi.WHICH_PREFIX) else None
     en_which = asked if asked and asked.startswith(EN_WHICH_PREFIX) else None
@@ -271,7 +299,7 @@ def english(text: str, homehub: Commander, asked: str | None, retry: bool = Fals
     heard = f'{text} → {send}' if reply_to else text
     t = time.monotonic()
     try:
-        return heard, homehub.command(send, retry=retry), time.monotonic() - t
+        return heard, to_homehub(homehub, send, 'en', retry), time.monotonic() - t
     except HomeHubError as e:
         log.warning('%s', e)
         return heard, None, time.monotonic() - t
@@ -281,6 +309,9 @@ def finish(sent: tuple[str, CommandResult | None, float], total_s: float) -> Ans
     heard, res, homehub_s = sent
     if res is None:
         return Answer(heard, NO_HOMEHUB, False, total_s - homehub_s, homehub_s)
+    if res.say:
+        return Answer(heard, res.say, res.confirm_id is None, total_s - homehub_s, homehub_s, lang=res.say_lang or 'en',
+                      asked=f'{confirm.PREFIX}{res.confirm_id}' if res.confirm_id else None)
     if SEVERAL.match(res.response or ''):
         # "Turn on the lights" fits several: ask which, rather than read out every light's name.
         question, follow_up = which_asked(heard.split(' → ')[-1])
@@ -370,7 +401,7 @@ def read_chinese(way: Chinese, audio: bytes, ears: CantoneseEars, homehub: Comma
 
 
 def send_chinese(way: Chinese, r: Reading, homehub: Commander, t0: float, where: str = '') -> Answer:
-    if r.kind in (sos.RAISE, sos.CANCEL, ask.YES, ask.NO):
+    if r.kind in (sos.RAISE, sos.CANCEL, ask.YES, ask.NO, CONFIRMED):
         a = special(r.text, way.lang, homehub, t0, where)
         return a or Answer(r.text, way.not_understood, False, time.monotonic() - t0, lang=way.lang, passes=r.passes)
     if r.kind:
@@ -384,10 +415,12 @@ def send_chinese(way: Chinese, r: Reading, homehub: Commander, t0: float, where:
     heard = f'{text} → {act.homehub_text}' if act else text
     try:
         # Unread commands go to HomeHub too, as heard, so they're listed with the commands it missed.
-        res = homehub.command(act.homehub_text if act else way.unread(text))
+        res = to_homehub(homehub, act.homehub_text if act else way.unread(text), way.lang, may_ask=command is None)
     except HomeHubError as e:
         log.warning('%s', e)
         return Answer(heard, way.no_homehub, False, t1 - t0, time.monotonic() - t1, lang=way.lang, passes=passes)
+    if a := asked_back(heard, res, t0, t1, passes):
+        return a
     reply = way.reply(command, res.handled, res.response, res.failed)
     return Answer(heard, reply, bool(act) and res.handled, t1 - t0, time.monotonic() - t1, lang=way.lang,
                   asked=command.name if command and command.action == 'ask' else None, passes=passes)
@@ -437,8 +470,14 @@ def answer_chinese(audio: bytes, ears: CantoneseEars, homehub: Commander, t0: fl
     return a
 
 
+# special_kind's answer for a yes or no to HomeHub's "Turn on …?".
+CONFIRMED = 'confirmed'
+
+
 def special_kind(text: str, lang: str, homehub: Commander) -> str | None:
     """A call for help or "cancel" (sos), or, while a reminder is waiting for one, a yes or no (ask)."""
+    if _confirming.get() and confirm.loose_kind(text, lang):
+        return CONFIRMED
     return sos.kind(text, lang) or (ask.kind(text, lang) if getattr(homehub, 'asking', None) else None)
 
 
@@ -448,6 +487,17 @@ def special(text: str, lang: str, homehub: Commander, t0: float, where: str, jus
     k = sos.kind(text, lang)
     if k and (a := answer_sos(k, text, lang, homehub, t0, where)):
         return a
+    # "Yes" just after HomeHub asked "Turn on …?": that question, before any reminder's.
+    confirming = _confirming.get()
+    if confirming and (k := confirm.loose_kind(text, lang)):
+        t1 = time.monotonic()
+        r = confirm.run(k, confirming, lang, homehub)
+        if r is None:
+            return Answer(f'{text} → {k}', NO_HOMEHUB if lang == 'en' else {'vi': vi.NO_HOMEHUB, 'yue': yue.NO_HOMEHUB, 'zh': zh.NO_HOMEHUB}.get(lang, NO_HOMEHUB),
+                          False, t1 - t0, time.monotonic() - t1, lang=lang)
+        # Answered: a second pass of the same words mustn't answer it again.
+        _confirming.set(None)
+        return Answer(f'{text} → {k}', r.reply, r.handled, t1 - t0, r.homehub_s, lang=r.lang)
     waiting = ask.waiting(homehub, None)
     if waiting and (k := (ask.loose_kind if just_asked else ask.kind)(text, lang)):
         t1 = time.monotonic()
@@ -512,9 +562,11 @@ def send_vietnamese(text: str, command: vi.Command | None, homehub: Commander, t
         return Answer(heard, vi.reply(command, False, '', []), False, t1 - t0, lang='vi', asked=command.name)
     try:
         # Unread commands go to HomeHub too, as heard, so they're listed with the commands it missed.
-        res = homehub.command(act.homehub_text if act else ' '.join(vi.words(text)))
+        res = to_homehub(homehub, act.homehub_text if act else ' '.join(vi.words(text)), 'vi', may_ask=command is None)
     except HomeHubError as e:
         log.warning('%s', e)
         return Answer(heard, vi.NO_HOMEHUB, False, t1 - t0, time.monotonic() - t1, lang='vi')
+    if a := asked_back(heard, res, t0, t1):
+        return a
     reply = vi.reply(command, res.handled, res.response, res.failed)
     return Answer(heard, reply, bool(act) and res.handled, t1 - t0, time.monotonic() - t1, lang='vi')

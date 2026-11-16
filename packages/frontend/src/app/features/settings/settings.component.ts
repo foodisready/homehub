@@ -855,11 +855,11 @@ const DRIVER_LABEL: Record<string, string> = {
       </div>
 
       <!-- ── Preferences ───────────────────────────────────────── -->
-      <!-- ── AI for Chat (admin only) ─────────────────────────── -->
+      <!-- ── AI for Chat and voice (admin only) ─────────────────────────── -->
       @if (isAdmin() && !automations.readOnly()) {
         <div class="section" id="ai-choice">
           <button type="button" class="section-title section-toggle" (click)="toggleSection('ai')" [attr.aria-expanded]="isSectionOpen('ai')">
-            <span class="chev">{{ isSectionOpen('ai') ? '▾' : '▸' }}</span> AI for Chat
+            <span class="chev">{{ isSectionOpen('ai') ? '▾' : '▸' }}</span> AI for Chat and voice
           </button>
           @if (isSectionOpen('ai')) {
             <div class="card"><app-ai-choice /></div>

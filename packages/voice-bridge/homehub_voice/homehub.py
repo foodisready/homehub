@@ -24,6 +24,12 @@ class CommandResult:
     failed: list[str] = field(default_factory=list)
     # The time or the weather, with its numbers, for a question answered in Vietnamese or Cantonese.
     info: dict | None = None
+    # HomeHub's own words to say, already in the language heard: "Turn on Porch light?" when it
+    # asks before doing what Claude read, or why it won't do something.
+    say: str | None = None
+    say_lang: str | None = None
+    # Set when it asks: the speaker listens for a yes or no and sends it with this.
+    confirm_id: str | None = None
 
 
 class HomeHub:
@@ -40,6 +46,8 @@ class HomeHub:
         self.groups: list[list[str]] = []
         # HomeHub's version of the names, so the bridge knows when they change.
         self.names_version: str | None = None
+        # HomeHub can answer a command it doesn't know with "Turn on …?" (see confirm.py).
+        self.can_ask = True
 
     def _call(self, path: str, body: dict | None = None) -> dict:
         req = urllib.request.Request(
@@ -109,11 +117,30 @@ class HomeHub:
         """A call for help ('raise') or 'cancel', heard by the speaker `where`. Returns HomeHub's answer: its state."""
         return self._call('/family/sos', {'action': action, 'where': where, 'lang': lang, 'heard': heard})
 
-    def command(self, text: str, retry: bool = False) -> CommandResult:
-        """retry: if this isn't understood, the bridge will try again, so HomeHub doesn't list it as missed yet."""
-        res = self._call('/command', {'text': text, **({'retry': True} if retry else {})})
+    def answer_confirm(self, confirm_id: str, answer: str) -> dict | None:
+        """The yes or no to HomeHub's "Turn on …?". Its answer says what to say; None if it isn't asking any more."""
+        try:
+            return self._call(f'/confirm/{urllib.parse.quote(confirm_id, safe="")}', {'answer': answer})
+        except HomeHubError as e:
+            if 'answered 404' in str(e):
+                return None
+            raise
+
+    def command(self, text: str, retry: bool = False, lang: str | None = None, ask: bool = False) -> CommandResult:
+        """retry: if this isn't understood, the bridge will try again, so HomeHub doesn't list it as missed yet.
+        ask: HomeHub may answer a command its rules don't know with a question (with Claude chosen), which the
+        speaker can ask and listen for. lang: the language heard.
+
+        Also for what the bridge would take for talk in the room ("make the front brighter" has no on or off
+        word): Claude asks only about a device it can name, and when it can't, the speaker stays quiet as before."""
+        ask = ask and not retry
+        res = self._call('/command', {'text': text, **({'retry': True} if retry else {}),
+                                      **({'ask': True} if ask else {}), **({'lang': lang} if lang else {})})
         failed = [str((a.get('args') or {}).get('alias', '')) for a in res.get('actions') or []
                   if isinstance(a, dict) and isinstance(a.get('result'), dict) and a['result'].get('error')]
         info = next((a['result'] for a in res.get('actions') or [] if isinstance(a, dict)
                      and a.get('tool') in ('get_time', 'get_weather') and isinstance(a.get('result'), dict)), None)
-        return CommandResult(bool(res.get('handled')), str(res.get('response') or ''), failed, info)
+        say = res.get('say') if isinstance(res.get('say'), str) and res.get('say') else None
+        confirm_id = res.get('confirmId') if say and isinstance(res.get('confirmId'), str) else None
+        return CommandResult(bool(res.get('handled')), str(res.get('response') or ''), failed, info,
+                             say, str(res.get('lang') or lang or 'en') if say else None, confirm_id)

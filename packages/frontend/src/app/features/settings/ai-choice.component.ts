@@ -15,7 +15,7 @@ interface AiView {
 }
 
 /**
- * Settings → AI for Chat: which model works out what the rules don't understand.
+ * Settings → AI for Chat and voice: which model works out what the rules don't understand.
  * This HomeHub's own (default) or Claude Haiku with the household's Anthropic key. Admin only.
  * The figures come from the household test set (homehub-business/evals, 2026-11-16).
  */
@@ -58,8 +58,8 @@ interface AiView {
   template: `
     <p class="intro">
       When HomeHub's own rules don't understand a message in Chat, an AI model works out what was meant.
+      With Claude Haiku, voice commands too: the speaker asks "Turn on Porch light?" and waits for a yes.
       Either way, HomeHub asks before switching anything it isn't sure about, and never opens a garage door.
-      Voice commands use HomeHub's rules only, for now.
     </p>
 
     @if (view(); as v) {
@@ -84,8 +84,8 @@ interface AiView {
         <div>
           <h3>Claude Haiku (your own Anthropic key)</h3>
           <p>
-            Understood 156 of the same 166 and rarely asks about the wrong device. Messages the rules don't understand,
-            with your device and room names, are sent to Anthropic. If the internet or the key stops working,
+            Understood 156 of the same 166 and rarely asks about the wrong device. Messages and voice commands the rules
+            don't understand, with your device and room names, are sent to Anthropic. If the internet or the key stops working,
             this HomeHub answers instead.
           </p>
           <div class="facts">

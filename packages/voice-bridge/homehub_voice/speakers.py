@@ -13,6 +13,7 @@ import aioesphomeapi as api
 from aioesphomeapi.model import VoiceAssistantEventType as E
 from aioesphomeapi.model import VoiceAssistantFeature
 
+from . import confirm
 from .config import Speaker
 from .endpoint import MAX_S, Endpointer, loudness
 from .pipeline import Answer, wake_language
@@ -293,7 +294,9 @@ class SpeakerLink:
                 follow_up = a.asked if isinstance(getattr(a, 'asked', None), str) else None
                 # Talk that never stopped until the speaker gave up listening, and wasn't a command: a TV
                 # or a conversation that sounded like the wake word, not someone speaking to it.
-                if not a.handled and not follow_up and background_talk(run.listen.seconds, run.listen.voiced):
+                # A question HomeHub would ask about it ("Turn on …?") doesn't make TV talk a command.
+                asks_back = bool(follow_up and follow_up.startswith(confirm.PREFIX))
+                if not a.handled and (not follow_up or asks_back) and background_talk(run.listen.seconds, run.listen.voiced):
                     log.info('%s #%d (%s) heard %r in %.1fs of talk that didn\'t stop, most likely a TV or a conversation, so it stays quiet',
                              self.who, run.n, run.wake or 'no wake word', a.heard, run.listen.seconds)
                     return

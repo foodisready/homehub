@@ -2,6 +2,7 @@ import SunCalc from 'suncalc';
 import { solarLocation } from '../home/home-settings';
 import { getDb } from '../db';
 import os from 'node:os';
+import { randomUUID } from 'node:crypto';
 import { getCachedState } from '../kasa/device.cache';
 import { answerStatusQuestion } from './status';
 import { answerQuestion } from './questions';
@@ -638,6 +639,62 @@ async function byForm(text: string, who: string): Promise<Handled & { lang?: nev
 }
 
 const isHandled = (r: Awaited<ReturnType<typeof byForm>>): r is Handled => !!r && 'response' in r;
+
+// ── Voice: "Did you mean…?" out loud ────────────────────────────
+
+/** What the speaker says back for a voice command the rules missed, in the language it was heard in. */
+export interface VoiceAsk {
+  say:  string;
+  lang: Lang;
+  /** Set when HomeHub is asking: the speaker listens for a yes or no and sends it with this id. */
+  confirmId?: string;
+}
+
+/**
+ * A voice command the rules didn't understand, with Claude in use: Claude fills in the form, and the
+ * speaker asks "Turn on Kitchen light?" before anything is switched, as Chat does. Null when Claude
+ * isn't in use, couldn't answer, or read nothing to switch: the speaker says it didn't understand.
+ *
+ * Only Claude, not this HomeHub's model: on heard speech the small model asked the wrong question
+ * too often (the command test set) to be worth a question out loud.
+ */
+export async function askForVoice(text: string, lang: Lang | null): Promise<VoiceAsk | null> {
+  if (!askingOn() || asksForLater(text)) return null;
+  const key = claudeInUse();
+  if (!key) return null;
+  // Shorter than Chat's: someone is standing at the speaker waiting.
+  const r = await understandWithClaude(text, homeNames(), { apiKey: key, timeoutMs: 6_000 });
+  if (r.inputTokens) recordClaudeUse(r.inputTokens, r.outputTokens ?? 0);
+  if (r.error) {
+    logger.warn({ err: r.error }, 'Claude form not filled for voice');
+    recordClaudeFailure(r.error === 'refused' ? 'Claude declined to answer one message.' : claudeErrorText(r.status, r.error));
+    return null;
+  }
+  const reading = propose(text, r.understanding);
+  logger.info({ ms: r.ms, read: r.understanding, reading: reading?.kind ?? null }, 'Voice form');
+  if (!reading) return null;
+  // Said in the voice the speaker heard, whatever language Claude thought it was.
+  if (reading.kind === 'refuse') {
+    const said = { ...reading, lang: lang ?? reading.lang };
+    return { say: refusedText(said), lang: said.lang };
+  }
+  const proposal = { ...reading.proposal, lang: lang ?? reading.proposal.lang };
+  const confirmId = randomUUID();
+  setPending(`voice:${confirmId}`, proposal);
+  return { say: askText(proposal), lang: proposal.lang, confirmId };
+}
+
+/**
+ * The yes or no heard after the speaker asked. Null when it isn't asking that any more (answered,
+ * or more than two minutes ago).
+ */
+export async function answerVoiceAsk(confirmId: string, answer: 'yes' | 'no'): Promise<Handled & { lang: Lang } | null> {
+  const proposal = takePending(`voice:${confirmId}`);
+  if (!proposal) return null;
+  if (answer === 'no') return { response: declined(proposal), actions: [], lang: proposal.lang };
+  const done = await confirm(proposal);
+  return { response: done.response, actions: done.actions, lang: proposal.lang };
+}
 
 /** How Claude should answer, on top of the chat model's instructions. */
 function claudeStyle(): string {

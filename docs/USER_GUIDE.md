@@ -279,7 +279,7 @@ Set up a timer in Chat by adding a time, such as "turn on my office lamp for an 
 
 When Chat doesn't know the words for a device, such as a misspelling ("turn of ffice liights") or a name in another language ("tắt đèn phòng khách"), the AI model works out what you probably meant, and Chat asks first: "Turn off Office lights?" or "Tắt Living room lamps, Living room statue và Woman statue?". Reply **yes** or **no** (có / không, 係 / 唔係, 是 / 不是). A yes switches them and saves your words as their nickname, so next time the same words work straight away, with no question. A no changes nothing. Anything else is read as a new command. The question waits two minutes, and only for the person who was asked. On a Pi 4 the question takes about 15 seconds. To skip asking and send these commands to the AI model's chat as before, set `CHAT_ASK=off` in `.env`.
 
-Ask what's on, such as "which devices are on?", "which lights are off?" or "is the kitchen light on?", in Chat or by voice. HomeHub answers these itself, straight away, from the states the dashboard shows. Cameras are left out of the lists. Anything HomeHub can't answer itself goes to the AI model, which runs on the HomeHub computer and can take a minute on an older one, unless you've chosen Claude Haiku (see [AI for Chat](#ai-for-chat)). Under each reply, Chat shows who answered, **HomeHub** or **the AI model**, and how long it took.
+Ask what's on, such as "which devices are on?", "which lights are off?" or "is the kitchen light on?", in Chat or by voice. HomeHub answers these itself, straight away, from the states the dashboard shows. Cameras are left out of the lists. Anything HomeHub can't answer itself goes to the AI model, which runs on the HomeHub computer and can take a minute on an older one, unless you've chosen Claude Haiku (see [AI for Chat and voice](#ai-for-chat-and-voice)). Under each reply, Chat shows who answered, **HomeHub** or **the AI model**, and how long it took.
 
 Ask the time, the date or the weather the same way: "what time is it?", "what's the date?", "what's the weather?", "what's the weather tomorrow?" or "will it rain today?". In Chat or by voice you can also ask in Vietnamese ("Mấy giờ rồi?", "Thời tiết hôm nay thế nào?", "Ngày mai có mưa không?"), Cantonese ("幾點呀？", "今日天氣點？", "聽日會唔會落雨？") or Mandarin ("现在几点？", "明天会下雨吗？"), and the answer comes in the same language. The weather needs your home's location in **Settings → Home**. It comes from Open-Meteo, a free weather service: only the location leaves the house, rounded to about a kilometre, and at most every ten minutes. Choose °F or °C under **Temperatures** in **Settings → Home**. It's used for the weather and for thermostats. Left on Automatic, it's °F in the United States and °C elsewhere, unless `TEMPERATURE_UNIT=C` or `F` is set in `.env`.
 
@@ -565,25 +565,27 @@ The guided setup asks for your town and sets both for you. To change them later,
 
 After you save, the page shows today's sunrise and sunset, so you can check they look right. Schedules change straight away, without a restart.
 
-## AI for Chat
+## AI for Chat and voice
 
-When HomeHub's own rules don't understand a message typed in Chat, an AI model works out what was meant. Voice commands use HomeHub's rules only, for now. In **Settings → AI for Chat** (admins), choose which one:
+When HomeHub's own rules don't understand a message typed in Chat, an AI model works out what was meant. In **Settings → AI for Chat and voice** (admins), choose which one:
 
 - **This HomeHub (free):** the model runs on the HomeHub computer. It's private and works without the internet, but on a Pi 4 it's slow (about 15 seconds for a command, longer for a question) and less accurate. In a test of 166 real household commands in English, Cantonese and Vietnamese, it understood 121 and often asked about the wrong device.
 - **Claude Haiku (your own Anthropic key):** understood 156 of the same 166, rarely asks about the wrong device, and answers in a second or two. It also answers questions HomeHub can't answer itself, such as energy use or setting up a schedule.
 
 Either way, HomeHub answers what it can itself first, asks before switching anything the model picked ("Turn on Porch light?"), and never opens a garage door from Chat or voice.
 
+**Voice:** with Claude Haiku, a voice command HomeHub's rules don't understand goes to Claude too. If Claude can tell which device was meant, the speaker asks, such as "Turn on Porch light?", 係咪要開廚房燈？ or "Bật Đèn bàn?", in the language you spoke. Answer within 15 seconds: "yes", 係, 是 or "có" switches it, and "no", 唔係, 不 or "không" leaves everything as it was. A speaker that listens again by itself after a question needs no wake word for the answer. Anything else is taken as a new command. If Claude can't tell, the speaker says it didn't understand, as before, or stays quiet if it sounded like talk in the room. With the model on this HomeHub, voice uses HomeHub's rules only: on heard speech, the small model asked about the wrong device too often.
+
 To use Claude Haiku:
 
 1. Make an API key at [console.anthropic.com](https://console.anthropic.com/settings/keys), and set a monthly spending limit there, such as $5.
-2. In **Settings → AI for Chat**, select **Claude Haiku**, paste the key, and select **Save and use Claude**. HomeHub checks the key with Anthropic before saving it, and never shows it again.
+2. In **Settings → AI for Chat and voice**, select **Claude Haiku**, paste the key, and select **Save and use Claude**. HomeHub checks the key with Anthropic before saving it, and never shows it again.
 
 **What it costs:** about $0.0003 for each message Claude handles. Most messages never reach it, because HomeHub's rules answer them. A busy household spends a few cents a month. The card shows this month's requests and an estimate of the cost. Your Anthropic account shows the exact amount.
 
 **Monthly limit:** under the saved key, select **Set a limit** and enter an amount from $0.10 to $100. Once this month's estimate reaches it, the model on this HomeHub answers until the 1st of next month, and the card says so. Set a spending limit in your Anthropic account too: HomeHub's figure is an estimate, and Anthropic's limit is exact.
 
-**What's sent:** only Chat messages the rules don't understand, the few messages before them in the same chat, and your device, room and scene names. When Claude looks something up, such as which devices are on or a device's energy use, that goes too. Anthropic's terms for API use apply.
+**What's sent:** only Chat messages and voice commands the rules don't understand (as text, never the recording), the few messages before them in the same chat, and your device, room and scene names. When Claude looks something up, such as which devices are on or a device's energy use, that goes too. Anthropic's terms for API use apply.
 
 **If Claude can't be reached** (the internet is down, the key was deleted, or the spending limit was reached), the model on this HomeHub answers instead, and the card shows the last problem. **Check key** asks Anthropic whether the saved key still works. **Remove** forgets the key and goes back to this HomeHub. Delete the key at console.anthropic.com too if you no longer need it.
 

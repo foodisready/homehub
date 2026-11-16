@@ -23,6 +23,8 @@ let chat: typeof import('./claude-chat');
 let fake: http.Server;
 let appServer: http.Server;
 let api = '';
+let internal = '';
+const INTERNAL = 'test-internal-key';
 const switched: { ip: string; state: boolean }[] = [];
 
 /** What the fake Anthropic API saw and will answer. */
@@ -78,6 +80,7 @@ describe('Claude Haiku option', () => {
     process.env.OLLAMA_MODEL = 'qwen2.5:1.5b';
     process.env.SCHEDULER_URL = 'http://127.0.0.1:1';
     delete process.env.ANTHROPIC_API_KEY;
+    process.env.INTERNAL_API_KEY = INTERNAL;
     db = (await import('../db')).getDb();
     choice = await import('./ai-choice');
     nlp = await import('./nlp.service');
@@ -93,8 +96,10 @@ describe('Claude Haiku option', () => {
     app.use(express.json());
     app.use((req, _res, next) => { req.user = { userId: 1, username: 't', role: req.headers['x-role'] ?? 'admin' } as never; next(); });
     app.use('/api/ai', aiRouter);
+    app.use('/internal', (await import('../routes/internal')).internalRouter);
     await new Promise<void>((ok) => { appServer = app.listen(0, '127.0.0.1', () => ok()); });
     api = `http://127.0.0.1:${(appServer.address() as { port: number }).port}/api/ai`;
+    internal = api.replace('/api/ai', '/internal/voice');
   });
 
   after(async () => {
@@ -317,5 +322,85 @@ describe('Claude Haiku option', () => {
     assert.match(choice.claudeErrorText(400, 'Your credit balance is too low'), /out of credit/);
     assert.match(choice.claudeErrorText(undefined, 'ECONNREFUSED'), /internet/);
     assert.ok(!choice.claudeErrorText(500, KEY).includes(KEY));
+  });
+  // ── Voice ─────────────────────────────────────────────────────
+
+  const voice = async (url: string, body: unknown) => {
+    const r = await fetch(internal + url, { method: 'POST', headers: { 'content-type': 'application/json', 'x-internal-key': INTERNAL }, body: JSON.stringify(body) });
+    return { status: r.status, body: await r.json() as any };
+  };
+
+  it('voice: with Claude, a missed command is asked about out loud, and a yes switches it', async () => {
+    choice.setClaudeKey(KEY); choice.setAiMode('claude');
+    const r = await voice('/command', { text: 'make the front brighter', ask: true, lang: 'en' });
+    assert.equal(r.body.handled, false);
+    assert.equal(r.body.say, 'Turn on Porch light?');
+    assert.equal(r.body.lang, 'en');
+    assert.ok(r.body.confirmId);
+    assert.equal(switched.length, 0, 'nothing switched before a yes');
+    assert.equal(usage().requests, 1, 'counted with Chat’s use');
+    const yes = await voice(`/confirm/${r.body.confirmId}`, { answer: 'yes' });
+    assert.equal(yes.status, 200);
+    assert.equal(yes.body.handled, true);
+    assert.deepEqual(switched, [{ ip: '192.0.2.10', state: true }]);
+    // Answered: a second yes finds nothing to answer.
+    assert.equal((await voice(`/confirm/${r.body.confirmId}`, { answer: 'yes' })).status, 404);
+  });
+
+  it('voice: a no leaves everything, said in the language heard', async () => {
+    choice.setClaudeKey(KEY); choice.setAiMode('claude');
+    anthropic.form = { action: 'off', target: 'Desk lamp', scene: null, minutes: null, lang: 'en' };
+    const r = await voice('/command', { text: 'ván đèn bàn đi', ask: true, lang: 'vi' });
+    assert.equal(r.body.say, 'Tắt Desk lamp?');
+    assert.equal(r.body.lang, 'vi');
+    const no = await voice(`/confirm/${r.body.confirmId}`, { answer: 'no' });
+    assert.equal(no.body.response, 'Được, tôi không thay đổi gì.');
+    assert.equal(switched.length, 0);
+  });
+
+  it('voice: no question without Claude, from an older bridge, or on a first try heard again', async () => {
+    choice.setClaudeKey(KEY);
+    let r = await voice('/command', { text: 'make the front brighter', ask: true });
+    assert.equal(r.body.confirmId, undefined, 'this HomeHub’s model never asks out loud');
+    choice.setAiMode('claude');
+    r = await voice('/command', { text: 'make the front brighter' });
+    assert.equal(r.body.confirmId, undefined, 'a bridge that doesn’t say it can listen for the answer');
+    r = await voice('/command', { text: 'make the front brighter', ask: true, retry: true });
+    assert.equal(r.body.confirmId, undefined);
+    assert.equal(anthropic.requests.length, 0);
+    assert.equal(ollama.requests.length, 0);
+    assert.match(r.body.response, /understand/i);
+  });
+
+  it('voice: the rules still act at once, and Claude failing just means not understood', async () => {
+    choice.setClaudeKey(KEY); choice.setAiMode('claude');
+    let r = await voice('/command', { text: 'turn on porch light', ask: true });
+    assert.equal(r.body.handled, true);
+    assert.equal(anthropic.requests.length, 0);
+    anthropic.status = 401;
+    r = await voice('/command', { text: 'make the front brighter', ask: true });
+    assert.equal(r.body.confirmId, undefined);
+    assert.match(usage().lastError ?? '', /rejected the key/);
+  });
+
+  it('voice: opening a garage door is refused, never asked', async () => {
+    choice.setClaudeKey(KEY); choice.setAiMode('claude');
+    db.prepare("INSERT INTO devices (alias, ip, room, driver_type) VALUES ('Garage', '192.0.2.12', 'Garage', 'meross')").run();
+    try {
+      anthropic.form = { action: 'open', target: 'Garage', scene: null, minutes: null, lang: 'en' };
+      const r = await voice('/command', { text: 'let the car out', ask: true, lang: 'yue' });
+      assert.equal(r.body.confirmId, undefined);
+      assert.match(r.body.say, /車房門/);
+    } finally {
+      db.prepare("DELETE FROM devices WHERE alias = 'Garage'").run();
+    }
+  });
+
+  it('voice: past the monthly limit, no question', async () => {
+    choice.setClaudeKey(KEY); choice.setAiMode('claude'); choice.setMonthlyLimit(0.1);
+    choice.recordClaudeUse(1_000_000, 0);
+    const r = await voice('/command', { text: 'make the front brighter', ask: true });
+    assert.equal(r.body.confirmId, undefined);
+    assert.equal(anthropic.requests.length, 0);
   });
 });
