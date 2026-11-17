@@ -23,6 +23,7 @@ import { withActivity } from '../activity/activity';
 import { issueTokens, serviceUser } from '../auth/auth.service';
 import { automationsPaused } from '../automation/pause';
 import { VOICE_LANGUAGES, bridgeInstructions, recordBridgeReport, voiceConfig, voiceNames, type VoiceLanguage } from '../system/voice-bridge';
+import { noteBridgeReport } from '../system/voice-ready';
 import { cancelPowerTimer, setScheduleTimer } from '../devices/power';
 import { MAX_STAY_ON_MINUTES } from './schedules';
 
@@ -87,9 +88,11 @@ internalRouter.post('/voice/announcements/:id', (req: Request, res: Response) =>
 // The voice bridge checks in every minute, for the Health page. The answer says
 // whether its names are out of date, and whether an admin asked it to restart.
 internalRouter.post('/voice/status', (req: Request, res: Response) => {
-  if (!recordBridgeReport(req.body)) {
+  const report = recordBridgeReport(req.body);
+  if (!report) {
     return res.status(400).json({ error: '`speakers` must be a list', code: 'VALIDATION_ERROR' });
   }
+  noteBridgeReport(report);
   // namesVersion changes when a device, nickname, room or scene name does, so the bridge fetches them again.
   res.json({ ok: true, ...bridgeInstructions() });
 });

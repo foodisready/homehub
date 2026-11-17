@@ -141,7 +141,10 @@ describe('GET /api/system/ai-warmup', () => {
     warmup.warmupStep(3);
     const r = await fetch(`${baseUrl}/api/system/ai-warmup`, { headers: { Authorization: `Bearer ${userToken}` } });
     assert.equal(r.status, 200);
-    assert.deepEqual(await r.json(), {
+    const body = await r.json() as any;
+    assert.equal(typeof body.voice?.state, 'string', 'and whether voice is back');
+    delete body.voice;
+    assert.deepEqual(body, {
       state: 'loading', step: 3, steps: 4, startedAt: '2026-11-16T12:00:00.000Z', readyAt: null, claude: false,
     });
     warmup.resetWarmup();

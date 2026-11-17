@@ -63,7 +63,28 @@ import { AiWarmupService } from './core/services/ai-warmup.service';
       </div>
     }
     @if (auth.isLoggedIn()) {
-      @if (warmup.loading()) {
+      @if (warmup.voiceStarting()) {
+        <div class="paused warming" role="status" aria-live="polite">
+          <span>
+            <strong>Voice is starting.</strong>
+            Speakers will answer in about a minute. Everything else works now.
+          </span>
+          <span class="progress">{{ warmup.status()!.voice!.loading ? 'Loading speech' : 'Finding speakers' }} · {{ warmup.voiceElapsed() }}</span>
+        </div>
+      } @else if (warmup.voiceMissing()) {
+        <div class="paused" role="alert">
+          <span>
+            <strong>No speaker has reconnected.</strong>
+            Voice commands won't be heard until one does. Check that the speaker is on and connected to Wi-Fi.
+            @if (isAdmin()) { <a routerLink="/health">Health</a> shows which one and why. }
+          </span>
+          <button type="button" (click)="warmup.dismissVoiceMissing()">OK</button>
+        </div>
+      } @else if (warmup.voiceJustReady()) {
+        <div class="paused ready" role="status" aria-live="polite">
+          <span><strong>Voice is ready.</strong> Speakers are listening again.</span>
+        </div>
+      } @else if (warmup.loading()) {
         <div class="paused warming" role="status" aria-live="polite">
           <span>
             <strong>HomeHub is getting its AI ready.</strong>

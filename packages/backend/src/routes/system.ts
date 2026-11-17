@@ -10,6 +10,7 @@ import { UpdaterError, VERSION_RE, previousVersion, requestSwitch, switchStatus,
 import { backupBefore } from '../db/backup';
 import { warmupStatus } from '../nlp/warmup';
 import { claudeInUse } from '../nlp/ai-choice';
+import { voiceReady } from '../system/voice-ready';
 
 /**
  * HomeHub-self update routes — see auraflow/docs/ota-strategy.md
@@ -87,9 +88,10 @@ async function canSwitch(): Promise<boolean> {
 }
 
 /* GET /api/system/ai-warmup — whether the AI models are still loading after a start, for the
- * banner that says Chat is slow until they are. claude: Chat uses Claude Haiku, so it doesn't wait. */
+ * banner that says Chat is slow until they are. claude: Chat uses Claude Haiku, so it doesn't wait.
+ * voice: whether a speaker is listening again after the start (see system/voice-ready.ts). */
 systemRouter.get('/ai-warmup', (_req: Request, res: Response) => {
-  res.json({ ...warmupStatus(), claude: !!claudeInUse() });
+  res.json({ ...warmupStatus(), claude: !!claudeInUse(), voice: voiceReady() });
 });
 
 systemRouter.get('/version', async (_req: Request, res: Response) => {
