@@ -684,6 +684,52 @@ class SpeakerLinkTest(unittest.IsolatedAsyncioTestCase):
         made[1].usable = False
         self.assertEqual(group.status(), [{'name': '10.0.0.5', 'address': '10.0.0.5', 'connected': True, 'announce': False}])
 
+    async def test_a_speaker_that_moves_is_followed_to_its_new_address(self):
+        # 2026-11-17: Ava's phone changed its network ID and moved from .246 to .20.
+        from homehub_voice import speakers
+
+        made = []
+
+        def make(s, listed):
+            link = speakers.SpeakerLink(s, lambda a, sp: None, lambda t, h: '', listed)
+            link.start = lambda: None
+            made.append(link)
+            return link
+
+        group = speakers.Speakers([], make, discover=False)
+        group.found('Android Voice Assistant', cfg.Speaker('192.168.86.246', 6053))
+        old = made[0]
+        old.task = asyncio.ensure_future(asyncio.sleep(60))
+        group.found('Android Voice Assistant', cfg.Speaker('192.168.86.246', 6053))  # announced again, same place
+        self.assertEqual(len(made), 1)
+        group.found('Android Voice Assistant', cfg.Speaker('192.168.86.20', 6053))
+        self.assertEqual([l.speaker.host for l in group.links.values()], ['192.168.86.20'])
+        await asyncio.sleep(0)
+        self.assertTrue(old.task.cancelled(), 'the old address is no longer tried')
+        # Another speaker's announcement leaves this one alone.
+        group.found('Kitchen speaker', cfg.Speaker('192.168.86.30', 6053))
+        self.assertEqual(sorted(l.speaker.host for l in group.links.values()), ['192.168.86.20', '192.168.86.30'])
+        # The same phone under a second name: moving one name keeps the address the other still has.
+        group.found('Android Voice Assistant (2)', cfg.Speaker('192.168.86.20', 6053))
+        group.found('Android Voice Assistant', cfg.Speaker('192.168.86.21', 6053))
+        self.assertEqual(sorted(l.speaker.host for l in group.links.values()), ['192.168.86.20', '192.168.86.21', '192.168.86.30'])
+
+    async def test_asking_for_an_address_keeps_trying_until_it_answers(self):
+        from homehub_voice import speakers
+        answers = [None, None, RuntimeError('network'), cfg.Speaker('192.168.86.20', 6053)]
+        asked = []
+
+        async def ask():
+            asked.append(1)
+            a = answers.pop(0)
+            if isinstance(a, Exception):
+                raise a
+            return a
+
+        got = await asyncio.wait_for(speakers.keep_asking(ask, first=0.01, most=0.02), 2)
+        self.assertEqual(got.host, '192.168.86.20')
+        self.assertEqual(len(asked), 4)
+
 
 
 

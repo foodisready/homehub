@@ -382,6 +382,28 @@ class SpeakerLink:
         c.subscribe_voice_assistant(handle_start=on_start, handle_stop=on_stop, handle_audio=on_audio)
 
 
+# Asking an announced speaker for its address: soon at first, then less often, never giving up
+# while it's still announced (the caller cancels when it goes).
+ASK_FIRST_S = 2.0
+ASK_MOST_S = 30.0
+
+
+async def keep_asking(ask: Callable, first: float = ASK_FIRST_S, most: float = ASK_MOST_S):
+    delay = first
+    while True:
+        try:
+            got = await ask()
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001 — a network hiccup; try again
+            log.debug('asking a speaker for its address failed: %s', e)
+            got = None
+        if got:
+            return got
+        await asyncio.sleep(delay)
+        delay = min(delay * 2, most)
+
+
 def resolve(host: str) -> str:
     try:
         return socket.gethostbyname(host)
@@ -396,6 +418,8 @@ class Speakers:
         self.make = make
         self.discover = discover
         self.links: dict[str, SpeakerLink] = {}
+        # Speakers found on the network, by the name they announce: which link is theirs.
+        self.named: dict[str, str] = {}
         self.listed = listed
         self.changed = asyncio.Event()
 
@@ -427,6 +451,22 @@ class Speakers:
         link.start()
         self.changed.set()
 
+    def found(self, name: str, speaker: Speaker) -> None:
+        """A speaker announced on the network, at the address it has now. One that moved is followed
+        to its new address, and the link to the old one is dropped, so it isn't tried forever."""
+        key = f'{resolve(speaker.host)}:{speaker.port}'
+        old = self.named.get(name)
+        # A phone can be announced under two names at once ("Android Voice Assistant (2)"): the
+        # old address is dropped only if no other name still points to it.
+        shared = any(k == old for n, k in self.named.items() if n != name)
+        if old and old != key and not shared and (link := self.links.pop(old, None)) is not None:
+            log.info('%s moved from %s to %s', link.name, link.speaker.label, speaker.label)
+            if link.task:
+                link.task.cancel()
+            self.changed.set()
+        self.named[name] = key
+        self.add(speaker, False)
+
     async def run(self) -> None:
         for s in self.listed:
             self.add(s, True)
@@ -436,21 +476,35 @@ class Speakers:
         from zeroconf.asyncio import AsyncServiceBrowser, AsyncServiceInfo, AsyncZeroconf
 
         zc = AsyncZeroconf()
-        pending: set[asyncio.Task] = set()
+        looking: dict[str, asyncio.Task] = {}
 
-        async def found(name: str) -> None:
+        async def address(name: str) -> Speaker | None:
             info = AsyncServiceInfo(ESPHOME_SERVICE, name)
             if not await info.async_request(zc.zeroconf, 3000):
-                return
+                return None
             addrs = info.parsed_addresses(version=__import__('zeroconf').IPVersion.V4Only)
-            if addrs and info.port:
-                self.add(Speaker(addrs[0], info.port), False)
+            return Speaker(addrs[0], info.port) if addrs and info.port else None
+
+        async def found(name: str) -> None:
+            # A speaker that has just joined the network, or is changing address, often doesn't
+            # answer the first time: ask again until it does, for as long as it's announced.
+            speaker = await keep_asking(lambda: address(name))
+            if speaker:
+                self.found(name, speaker)
+
+        def look(name: str) -> None:
+            if (t := looking.pop(name, None)):
+                t.cancel()
+            t = asyncio.ensure_future(found(name))
+            looking[name] = t
+            t.add_done_callback(lambda done, n=name: looking.pop(n, None) if looking.get(n) is done else None)
 
         def changed(zeroconf, service_type, name, state_change) -> None:
-            if state_change is ServiceStateChange.Added:
-                t = asyncio.ensure_future(found(name))
-                pending.add(t)
-                t.add_done_callback(pending.discard)
+            # Updated: it may have a new address (a phone that changed its network ID, say).
+            if state_change in (ServiceStateChange.Added, ServiceStateChange.Updated):
+                look(name)
+            elif state_change is ServiceStateChange.Removed and (t := looking.pop(name, None)):
+                t.cancel()
 
         browser = AsyncServiceBrowser(zc.zeroconf, ESPHOME_SERVICE, handlers=[changed])
         log.info('looking for speakers on the network')
