@@ -651,6 +651,10 @@ To turn it on, an administrator opens **Settings → Voice control**, ticks **Vo
 
 If two speakers hear the same command, only the one that heard you loudest, usually the nearest, answers, and the command is carried out once. If a speaker wakes but hears no words, usually because something on TV or in a conversation sounded like the wake word, it stops listening without saying anything. It also stays quiet when what it hears has nothing of a command in it, such as a line from a show ("I don't want to pay for your drink"): no on or off word, nothing that's part of a device's name, and more than a couple of words. A short miss, such as a command cut off, still gets an answer, so you know to say it again. It never takes its own reply, heard back as it listens again, for a command.
 
+If a TV, a video or a conversation keeps going while you speak, the speaker listens for its full eight seconds. It then answers only if it made out a few words with an on or off word or a thing like a light in them, such as "mở đèn của nhà vua" said over a video; longer talk is taken for the room and gets no answer. For the quickest answer, speak when the room is quiet.
+
+When the speaker asks "Did you mean…?", it uses the name you'd say in your language: "Bật đèn của nhà vua?" rather than "Bật King's lamp?", when the device has a Vietnamese or Chinese nickname.
+
 When a name you say is close to two devices, voice doesn't guess. For example, 開卓軒燈 sounds as close to 着氣燈 (one child's lamps) as to anything, but 卓軒 is exactly in 卓軒房邊燈 (the other child's lamp), so it answers that it didn't understand rather than switch the wrong light. Say the full nickname, or add the shorter one you use, such as 卓軒燈, to the right device.
 
 A wake word named in Chinese characters, such as 老友, tells HomeHub to listen in Cantonese, or in Mandarin if that's the one on, and one with Vietnamese letters, such as Xin Chào, in Vietnamese, so a command isn't taken for another language. With Cantonese and Mandarin both on, a Chinese wake word could be either, so it doesn't decide. Other wake words, such as Okay Nabu, work in every language that's on.

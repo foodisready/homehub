@@ -34,6 +34,32 @@ def _words(text: str) -> list[str]:
     return [w for w in re.split(r"[^\w']+", text.lower()) if w]
 
 
+# A command is a few words. The household's recorded commands are at most six Vietnamese words
+# (Bật đèn phòng ngủ lớn) or five Chinese characters (開主人房燈), and a time adds about three
+# more. Talk from a TV or a video fills the eight seconds a speaker listens with fifteen or more.
+COMMAND_WORDS = 8
+COMMAND_SYLLABLES = 10
+
+
+def command_over_noise(heard: str) -> bool:
+    """Whether what was heard is a command said over a noisy room rather than the room's own talk:
+    a few words, with an on or off word or a thing people switch in them ("BẬT ĐÈN VU", 开啊皇帝灯).
+    Read from the words alone, so it holds whatever HomeHub made of them."""
+    text = heard.split(' → ')[0].strip()
+    if not text:
+        return False
+    if yue.has_chinese(text):
+        s = yue.syllables(text)
+        return len(s) <= COMMAND_SYLLABLES and bool(
+            yue.read_verb(s)[0] or zh.read_verb(zh.syllables(text))[0] or THING_SOUNDS & set(s))
+    ws = _words(vi.plain(text) if vi.has_vietnamese(text) else text)
+    if not ws or len(ws) > COMMAND_WORDS:
+        return False
+    if vi.has_vietnamese(text) and any(w in VI_COMMAND for w in vi.words(text.lower())):
+        return True
+    return any(w in EN_COMMAND or w in THINGS for w in ws)
+
+
 def looks_like_chatter(heard: str, names: list[str]) -> bool:
     """True when a miss has nothing of a command in it: say nothing rather than "didn't understand"."""
     text = heard.split(' → ')[0].strip()

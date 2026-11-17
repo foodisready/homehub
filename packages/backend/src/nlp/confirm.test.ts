@@ -86,10 +86,32 @@ describe('Did you mean…?', () => {
 
     it('asks in Cantonese and Mandarin, with a time when one was said', () => {
       const yue = asked('開民房燈十分鐘', form({ devices: ['My office lamp'], minutes: 10, lang: 'yue' }));
-      assert.equal(c.askText(yue), '係咪要開My office lamp10分鐘？');
+      // Named as it's said in that language: its Chinese nickname, not My office lamp.
+      assert.equal(c.askText(yue), '係咪要開文房燈10分鐘？');
       const zh = asked('关民房灯', form({ action: 'off', devices: ['My office lamp'], lang: 'zh' }));
-      assert.equal(c.askText(zh), '要关掉My office lamp吗？');
+      assert.equal(c.askText(zh), '要关掉文房燈吗？');
       assert.equal(zh.phrase, '民房灯');
+    });
+
+    it('asks in Vietnamese with the Vietnamese name most like what was said', () => {
+      // Heard on Ava: "BẬT ĐÈN VUA" asked "Bật King's lamp?".
+      db.prepare('INSERT INTO devices (alias, ip, room, driver_type, nicknames, is_protected) VALUES (?, ?, ?, ?, ?, ?)')
+        .run("King's lamp", '10.0.0.7', 'Master bedroom', 'kasa', '["国王的灯","王帝灯","đèn ngủ","đèn của nhà vua"]', 0);
+      const p = asked('BẬT ĐÈN VUA', form({ devices: ["King's lamp"], lang: 'vi' }));
+      assert.equal(c.askText(p), 'Bật đèn của nhà vua?');
+      assert.deepEqual(p.aliases, ["King's lamp"], 'still switched by its own name');
+      // In Cantonese, the Chinese nickname that shares the most characters with what was said.
+      assert.equal(c.askText(asked('開皇帝燈', form({ devices: ["King's lamp"], lang: 'yue' }))), '係咪要開王帝灯？');
+      assert.equal(c.askText(asked('开皇帝灯', form({ devices: ["King's lamp"], lang: 'yue' }))), '要打开王帝灯吗？', 'simplified 开 reads as Mandarin');
+      // In English, and in a language it has no nickname in, its own name.
+      assert.equal(c.askText(asked('turn on the king lamp', form({ devices: ["King's lamp"] }))), "Turn on King's lamp?");
+      assert.equal(c.askText(asked('bật đèn văn phòng', form({ devices: ['My office lamp'], lang: 'vi' }))), 'Bật My office lamp?');
+    });
+
+    it('names a device with no nicknames, or unreadable ones, by its own name', () => {
+      assert.equal(c.nameIn({ alias: 'Porch', nicknames: null }, 'vi', 'bật đèn'), 'Porch');
+      assert.equal(c.nameIn({ alias: 'Porch', nicknames: 'not json' }, 'yue', '開燈'), 'Porch');
+      assert.equal(c.nameIn({ alias: 'Porch', nicknames: '["porch light"]' }, 'vi', 'bật đèn'), 'Porch', 'an English nickname isn\'t Vietnamese');
     });
 
     it('only ever closes a garage door, and asks to close it when that was said', () => {
@@ -159,7 +181,7 @@ describe('Did you mean…?', () => {
       const p = asked('着文房燈', form({ devices: ['My office lamp'], lang: 'yue' }));
       const done = await c.confirm(p);
       assert.equal(done.learned, null);
-      assert.equal(done.response, '開咗My office lamp。');
+      assert.equal(done.response, '開咗文房燈。');
     });
 
     it('doesn\'t learn words that would then mean other devices too', async () => {

@@ -371,6 +371,22 @@ class SpeakerLinkTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(background_talk(8.0, 5.2), 'someone pausing as they speak')
         self.assertFalse(background_talk(3.5, 3.4), 'a command, however much of it is voiced')
 
+    def test_a_few_command_words_over_a_noisy_room_are_answered(self):
+        from homehub_voice.speakers import background_talk
+        # Heard on Ava on 2026-11-17 while a video played: eight seconds every time.
+        tv = "I'm gonna copy, and then you go to here, and you go to cancel this, go to China."
+        self.assertTrue(background_talk(8.0, 7.6, tv), 'seventeen words is the room talking')
+        for said in ('MỞ ĐÈN ÔNG VUS VU', 'MỞ ĐÈN VUS', 'BẬT ĐÈN VU', 'MỞ ĐÈN VÀ VUA', '开啊皇帝灯。',
+                     'mở đèn của nhà vua hai mươi phút', '開主人房燈十分鐘', 'turn on the kitchen lights for ten minutes'):
+            self.assertFalse(background_talk(8.0, 7.6, said), said)
+        # A few words with nothing of a command in them stay quiet, as before.
+        for talk in ('XÍCH VỒN TAY', "I don't want to pay for your drink.", '我哋今日去咗街市'):
+            self.assertTrue(background_talk(8.0, 7.6, talk), talk)
+        # Long talk stays quiet even with a command word in it; Cantonese is counted in syllables.
+        self.assertTrue(background_talk(8.0, 7.6, '我哋今日去咗街市買咗好多嘢返嚟食晏晝開燈'))
+        self.assertTrue(background_talk(8.0, 7.6, 'and then she said turn it off before you go to the shops'))
+        self.assertTrue(background_talk(8.0, 7.6), 'nothing made out at all')
+
     async def test_a_question_keeps_listening_and_its_answer_gets_the_name(self):
         from homehub_voice import speakers
         given, langs = [], []

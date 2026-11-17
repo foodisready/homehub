@@ -73,7 +73,7 @@ systemctl --user status homehub-voice
 journalctl --user -u homehub-voice -f
 ```
 
-Each command is logged with what was heard, HomeHub's reply and how long each step took. A wake that stays quiet says why: no words, talk that didn't stop, nothing like a command ("most likely a TV or a conversation"), or its own reply heard back. Those lines, grouped by wake word, show which one wakes from the TV; its `probability_cutoff`, in the wake word's JSON on the speaker, is then the thing to raise.
+Each command is logged with what was heard, HomeHub's reply and how long each step took. A wake that stays quiet says why: no words, talk that didn't stop (eight seconds of it, unless only a few words with an on or off word or a thing like a light were made out of it, which are answered as a command said over the noise), nothing like a command ("most likely a TV or a conversation"), or its own reply heard back. Those lines, grouped by wake word, show which one wakes from the TV; its `probability_cutoff`, in the wake word's JSON on the speaker, is then the thing to raise.
 
 In Docker, the bridge has four times the CPU share of the other services (`cpu_shares: 4096`), so the chat model working at the same time, as it does for a few minutes after an update, slows hearing a command only a little: on a Pi 4, 0.93 s instead of 1.09 s (0.88 s with nothing else running). The bridge also checks in with HomeHub every minute, so HomeHub's **Health** page shows whether it's running and which speakers are connected. HomeHub's answer tells it when device or scene names have changed, so it fetches them again, and when an admin selected **Restart voice bridge** on the Health page. It then stops with exit code 75, and systemd starts it again.
 

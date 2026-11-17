@@ -30,6 +30,8 @@ export type Lang = 'en' | 'yue' | 'zh' | 'vi';
 export interface Proposal {
   deviceIds: number[];
   aliases:   string[];
+  /** The same devices, named as people say them in `lang` (their nicknames), for saying back. */
+  names?:    string[];
   /** On, or for a garage door, false: close. */
   state:     boolean;
   minutes:   number | null;
@@ -87,7 +89,33 @@ function phraseOf(text: string, rule: RuleReading | null): string | null {
 
 // ── A model's reading, made into a question ─────────────────────
 
-type Row = PowerDevice & { id: number; alias: string; driver_type?: string | null };
+type Row = PowerDevice & { id: number; alias: string; driver_type?: string | null; nicknames?: string | null };
+
+const HAN = /\p{Script=Han}/u;
+
+/**
+ * A device's name in the language it's being asked about: "Bật đèn của nhà vua?", not "Bật King's
+ * lamp?". Of its nicknames in that language, the one most like what was said; its own name when it
+ * has none. Vietnamese names are told by their accented letters, Chinese ones by their characters.
+ */
+export function nameIn(row: { alias: string; nicknames?: string | null }, lang: Lang, said: string): string {
+  if (lang === 'en') return row.alias;
+  let list: unknown = [];
+  try { list = JSON.parse(row.nicknames ?? '[]'); } catch { /* none */ }
+  if (!Array.isArray(list)) return row.alias;
+  const fits = list.filter((n): n is string => typeof n === 'string' && !!n.trim()
+    && (lang === 'vi' ? !HAN.test(n) && /[^\x00-\x7f]/.test(n) : HAN.test(n)));
+  if (!fits.length) return row.alias;
+  const heard = fold(said);
+  const words = new Set(heard.split(' '));
+  const score = (n: string) => {
+    const f = fold(n);
+    return lang === 'vi'
+      ? f.split(' ').filter((w) => w && words.has(w)).length
+      : [...new Set(f)].filter((ch) => HAN.test(ch) && heard.includes(ch)).length;
+  };
+  return fits.reduce((best, n) => (score(n) > score(best) ? n : best), fits[0]);
+}
 
 /**
  * What to ask, given what the model read. Null when the model didn't name any device to switch
@@ -113,6 +141,7 @@ export function propose(text: string, u: Understanding | null): Reading | null {
     proposal: {
       deviceIds: rows.map((r) => r.id).sort((a, b) => a - b),
       aliases:   rows.map((r) => r.alias),
+      names:     rows.map((r) => nameIn(r, lang, text)),
       state,
       minutes:   state && !doors.length ? u.minutes : null,
       door:      doors.length > 0,
@@ -134,7 +163,7 @@ function listNames(names: string[], lang: Lang): string {
 
 /** "Turn off My office lamp?", in the language the command was given in. */
 export function askText(p: Proposal): string {
-  const names = listNames(p.aliases, p.lang);
+  const names = listNames(p.names ?? p.aliases, p.lang);
   const verb = p.door ? 'close' : p.state ? 'on' : 'off';
   const minutes = p.minutes;
   switch (p.lang) {
@@ -238,7 +267,7 @@ export async function confirm(p: Proposal): Promise<Confirmed> {
 
   const said = p.lang === 'en'
     ? done
-    : inLanguage(done, { lang: p.lang, state: p.state, name: listNames(p.aliases, p.lang), verb: p.door ? 'đóng' : undefined });
+    : inLanguage(done, { lang: p.lang, state: p.state, name: listNames(p.names ?? p.aliases, p.lang), verb: p.door ? 'đóng' : undefined });
   const response = learned ? `${said.response} ${REMEMBERED[p.lang](learned)}` : said.response;
   return { response, actions: done.actions, learned };
 }

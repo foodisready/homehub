@@ -14,6 +14,7 @@ from aioesphomeapi.model import VoiceAssistantEventType as E
 from aioesphomeapi.model import VoiceAssistantFeature
 
 from . import confirm
+from .chatter import command_over_noise
 from .config import Speaker
 from .endpoint import MAX_S, Endpointer, loudness
 from .pipeline import Answer, wake_language
@@ -52,8 +53,13 @@ class Run:
 BACKGROUND_VOICED = 0.75
 
 
-def background_talk(seconds: float, voiced: float) -> bool:
-    return seconds >= MAX_S - 0.25 and voiced >= BACKGROUND_VOICED * seconds
+def background_talk(seconds: float, voiced: float, heard: str = '') -> bool:
+    """Whether eight seconds of sound that never stopped was the room talking, not someone talking
+    to the speaker. Unless only a few words were made out of it and they have something of a
+    command in them ("BẬT ĐÈN VU"): that's someone speaking over a TV, a fan or a conversation."""
+    if seconds < MAX_S - 0.25 or voiced < BACKGROUND_VOICED * seconds:
+        return False
+    return not command_over_noise(heard)
 
 
 # A reminder waits this long for a command being answered to finish, then is said anyway.
@@ -296,7 +302,8 @@ class SpeakerLink:
                 # or a conversation that sounded like the wake word, not someone speaking to it.
                 # A question HomeHub would ask about it ("Turn on …?") doesn't make TV talk a command.
                 asks_back = bool(follow_up and follow_up.startswith(confirm.PREFIX))
-                if not a.handled and (not follow_up or asks_back) and background_talk(run.listen.seconds, run.listen.voiced):
+                # A few command words heard over the noise are still answered (see background_talk).
+                if not a.handled and (not follow_up or asks_back) and background_talk(run.listen.seconds, run.listen.voiced, a.heard):
                     log.info('%s #%d (%s) heard %r in %.1fs of talk that didn\'t stop, most likely a TV or a conversation, so it stays quiet',
                              self.who, run.n, run.wake or 'no wake word', a.heard, run.listen.seconds)
                     return
