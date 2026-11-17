@@ -1,6 +1,7 @@
-import { Component, signal, computed, ViewChild, ElementRef, AfterViewChecked, AfterViewInit, NgZone, OnDestroy } from '@angular/core';
+import { Component, inject, signal, computed, ViewChild, ElementRef, AfterViewChecked, AfterViewInit, NgZone, OnDestroy } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { AuthService } from '../../core/auth/auth.service';
+import { AiWarmupService } from '../../core/services/ai-warmup.service';
 import { ChatHistory, type ActionTaken, type ChatEntry } from './chat-history';
 
 // Human-readable labels for tool names
@@ -224,7 +225,7 @@ const TOOL_LABELS: Record<string, string> = {
                   </div>
                 }
                 @if (waitingFor() === 'model' && elapsed() >= 2) {
-                  <div class="answered">AI model{{ waitingModel() ? ' (' + waitingModel() + ')' : '' }} thinking · {{ duration(elapsed()) }}</div>
+                  <div class="answered">AI model{{ waitingModel() ? ' (' + waitingModel() + ')' : '' }} thinking · {{ duration(elapsed()) }}{{ warmup.loading() ? ' · slower while HomeHub loads its AI' : '' }}</div>
                 }
               </div>
             </div>
@@ -257,6 +258,7 @@ export class ChatComponent implements AfterViewInit, AfterViewChecked, OnDestroy
   private refocus = false;
   private resizeWatch?: ResizeObserver;
   private readonly onResize = () => this.fit();
+  readonly warmup = inject(AiWarmupService);
 
   private readonly _loading      = signal(false);
   private readonly _streamingText = signal('');

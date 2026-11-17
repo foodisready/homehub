@@ -21,6 +21,7 @@ import { answerKind, askText, confirm, declined, propose, refusedText, setPendin
 import { understandPrompt, understandWithClaude, understandWithOllama, type HomeNames, type UnderstandResult } from './understand';
 import { CLAUDE_LABEL, claudeErrorText, claudeInUse, recordClaudeFailure, recordClaudeUse } from './ai-choice';
 import { chatWithClaude, ClaudeChatError } from './claude-chat';
+import { warmupDone, warmupStarted, warmupStep } from './warmup';
 
 export interface ChatMessage {
   role: 'user' | 'assistant';
@@ -410,6 +411,21 @@ export async function warmModels(
 ): Promise<string[]> {
   const keep = keepAlive(opts.totalBytes);
   if (keep === '5m' || keep === '0') return [];   // it would be unloaded again before anyone asks
+  warmupStarted();
+  try {
+    const loaded = await warmSteps(keep, opts);
+    warmupDone(loaded.length > 0);
+    return loaded;
+  } catch (err) {
+    warmupDone(false);
+    throw err;
+  }
+}
+
+async function warmSteps(
+  keep: string,
+  opts: { fetchImpl?: typeof fetch; tries?: number; waitMs?: number },
+): Promise<string[]> {
   const url = process.env.OLLAMA_URL ?? 'http://localhost:11434';
   const main = process.env.OLLAMA_MODEL ?? 'llama3.2:3b';
   const models = [...new Set([main, process.env.OLLAMA_REWRITE_MODEL?.trim() || main])];
@@ -434,10 +450,13 @@ export async function warmModels(
   // The rewrite's instructions first: a typed command uses them first, and
   // Ollama answers one request at a time, so a command waits behind these.
   const rewriteModel = models[models.length - 1];
+  if (loaded.length === 0) return loaded;
+  warmupStep(2);
   if (loaded.includes(rewriteModel)) await primeRewrite({ url, model: rewriteModel, keepAlive: keep, fetchImpl: opts.fetchImpl });
 
   // The form's instructions next: an unknown command reaches it before the chat model. On a Pi 4,
   // reading them takes about 100 s, and every command after that about 13 s.
+  warmupStep(3);
   if (loaded.includes(main) && askingOn()) {
     try {
       await doFetch(`${url}/api/chat`, {
@@ -454,6 +473,7 @@ export async function warmModels(
 
   // The chat model's instructions, with and without its tools (the final
   // answer is written without them), read now so they're cached.
+  warmupStep(4);
   if (loaded.includes(main)) {
     for (const tools of [TOOLS, undefined]) {
       try {

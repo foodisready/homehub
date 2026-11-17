@@ -118,6 +118,45 @@ describe('loading the AI model at startup', () => {
     assert.equal(o.primed.length, 0, 'no instructions sent to a model that never loaded');
   });
 
+  describe('telling the app how far it has got', () => {
+    let warmup: typeof import('./warmup');
+    before(async () => { warmup = await import('./warmup'); });
+
+    it('goes through the steps in order and ends ready', async () => {
+      process.env.OLLAMA_MODEL = 'qwen2.5:1.5b';
+      delete process.env.OLLAMA_REWRITE_MODEL;
+      warmup.resetWarmup();
+      const seen: string[] = [];
+      const o = recorder();
+      const impl = (async (url: string, init: any) => {
+        const s = warmup.warmupStatus();
+        seen.push(`${s.state}:${s.step}`);
+        return (o.impl as any)(url, init);
+      }) as unknown as typeof fetch;
+      await nlp.warmModels({ fetchImpl: impl, totalBytes: 8 * GB, waitMs: 1 });
+      assert.equal(seen[0], 'loading:1', 'loading the model is step 1');
+      assert.ok(seen.includes('loading:4'), 'the chat instructions are the last step');
+      const steps = seen.map((x) => Number(x.split(':')[1]));
+      assert.deepEqual(steps, [...steps].sort((a, b) => a - b), 'never goes back a step');
+      const done = warmup.warmupStatus();
+      assert.equal(done.state, 'ready');
+      assert.equal(done.step, warmup.WARMUP_STEPS);
+      assert.ok(done.startedAt && done.readyAt && done.readyAt >= done.startedAt);
+    });
+
+    it('says it failed when no model loads', async () => {
+      warmup.resetWarmup();
+      await nlp.warmModels({ fetchImpl: recorder(99).impl, totalBytes: 8 * GB, tries: 2, waitMs: 1 });
+      assert.equal(warmup.warmupStatus().state, 'failed');
+    });
+
+    it('stays off on a small computer, where nothing is loaded', async () => {
+      warmup.resetWarmup();
+      await nlp.warmModels({ fetchImpl: recorder().impl, totalBytes: 4 * GB, waitMs: 1 });
+      assert.equal(warmup.warmupStatus().state, 'off');
+    });
+  });
+
   it('leaves a small computer alone, which would only unload it again', async () => {
     const o = recorder();
     assert.deepEqual(await nlp.warmModels({ fetchImpl: o.impl, totalBytes: 4 * GB, waitMs: 1 }), []);

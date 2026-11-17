@@ -8,6 +8,8 @@ import { lastBridgeReport, requestBridgeRestart } from '../system/voice-bridge';
 import { setWatchdogUrl, visit, watchdogStatus } from '../system/watchdog';
 import { UpdaterError, VERSION_RE, previousVersion, requestSwitch, switchStatus, updaterAvailable } from '../system/updater';
 import { backupBefore } from '../db/backup';
+import { warmupStatus } from '../nlp/warmup';
+import { claudeInUse } from '../nlp/ai-choice';
 
 /**
  * HomeHub-self update routes — see auraflow/docs/ota-strategy.md
@@ -83,6 +85,12 @@ async function canSwitch(): Promise<boolean> {
   if (Date.now() - switcherCache.at > 30_000) switcherCache = { up: await updaterAvailable(), at: Date.now() };
   return switcherCache.up;
 }
+
+/* GET /api/system/ai-warmup — whether the AI models are still loading after a start, for the
+ * banner that says Chat is slow until they are. claude: Chat uses Claude Haiku, so it doesn't wait. */
+systemRouter.get('/ai-warmup', (_req: Request, res: Response) => {
+  res.json({ ...warmupStatus(), claude: !!claudeInUse() });
+});
 
 systemRouter.get('/version', async (_req: Request, res: Response) => {
   const [latest, switcher] = await Promise.all([getLatestVersion(), canSwitch()]);

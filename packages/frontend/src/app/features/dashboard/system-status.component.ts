@@ -6,7 +6,8 @@ import { HealthReport, SystemService, SystemVersion } from '../../core/services/
 const POLL_IDLE_MS    = 60_000;
 const POLL_UPDATE_MS  = 3_000;
 const UPDATE_DEADLINE = 5 * 60_000;
-const RELOAD_AFTER_MS = 2_500;
+// Long enough to read the note about the AI loading.
+const RELOAD_AFTER_MS = 4_000;
 /** Past the deadline, this many failed checks in a row mean HomeHub really hasn't come back. */
 const FAILED_CHECKS = 3;
 
@@ -125,7 +126,7 @@ type Phase = 'idle' | 'confirm' | 'updating' | 'done' | 'failed';
             @case ('done') {
               <div class="icon ok" aria-hidden="true">✓</div>
               <h2 id="update-title">HomeHub {{ target() }} is ready</h2>
-              <p>Reloading…</p>
+              <p>Reloading… Next it loads its AI, which takes a few minutes. Chat may be slow until then.</p>
             }
             @case ('failed') {
               <div class="icon err" aria-hidden="true">!</div>

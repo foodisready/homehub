@@ -133,6 +133,25 @@ describe('GET /api/system/version', () => {
   });
 });
 
+describe('GET /api/system/ai-warmup', () => {
+  it('tells any signed-in user how far loading the AI has got', async () => {
+    const warmup = await import('../nlp/warmup');
+    warmup.resetWarmup();
+    warmup.warmupStarted(new Date('2026-11-16T12:00:00Z'));
+    warmup.warmupStep(3);
+    const r = await fetch(`${baseUrl}/api/system/ai-warmup`, { headers: { Authorization: `Bearer ${userToken}` } });
+    assert.equal(r.status, 200);
+    assert.deepEqual(await r.json(), {
+      state: 'loading', step: 3, steps: 4, startedAt: '2026-11-16T12:00:00.000Z', readyAt: null, claude: false,
+    });
+    warmup.resetWarmup();
+  });
+
+  it('needs a sign-in', async () => {
+    assert.equal((await fetch(`${baseUrl}/api/system/ai-warmup`)).status, 401);
+  });
+});
+
 describe('GET /api/system/remote-url', () => {
   const get = async () => {
     const r = await fetch(`${baseUrl}/api/system/remote-url`, {
