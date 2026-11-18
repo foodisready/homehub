@@ -70,6 +70,37 @@ describe('commands typed in Vietnamese and Chinese', () => {
       });
     }
 
+    const timed: Array<[string, { name: string; minutes: number }]> = [
+      ['bật đèn bếp 10 phút', { name: 'đèn bếp', minutes: 10 }],
+      ['bật đèn của bà trong hai mươi phút nhé', { name: 'đèn của bà', minutes: 20 }],
+      ['bật đèn bếp mười lăm phút', { name: 'đèn bếp', minutes: 15 }],
+      ['bật đèn bếp một tiếng', { name: 'đèn bếp', minutes: 60 }],
+      ['bật đèn bếp nửa tiếng', { name: 'đèn bếp', minutes: 30 }],
+      ['開廚房燈十分鐘', { name: '廚房燈', minutes: 10 }],
+      ['開書房燈半個鐘啦', { name: '書房燈', minutes: 30 }],
+      ['開書房燈一個半鐘', { name: '書房燈', minutes: 90 }],
+      ['开厨房灯30分钟', { name: '厨房灯', minutes: 30 }],
+      ['把厨房灯打开二十分钟', { name: '厨房灯', minutes: 20 }],
+      ['打开书房灯两小时', { name: '书房灯', minutes: 120 }],
+    ];
+    for (const [text, want] of timed) {
+      it(`reads how long from "${text}"`, () => {
+        const got = native.parseNativeCommand(text);
+        assert.deepEqual(got && { name: got.name, minutes: got.minutes }, want);
+      });
+    }
+
+    // When to do it, not for how long, and "off for a while": the chat model's, as in English.
+    for (const text of ['tắt đèn bếp 10 phút nữa', 'bật đèn bếp sau 10 phút', '十分鐘後熄廚房燈', '熄廚房燈十分鐘後', 'tắt đèn bếp 10 phút', '熄廚房燈十分鐘']) {
+      it(`leaves "${text}" to the chat model`, () => assert.equal(native.parseNativeCommand(text), null));
+    }
+
+    it('takes a number word in a name for the name: "đèn ba" is grandma\'s, not three', () => {
+      assert.equal(native.parseNativeCommand('bật đèn ba')?.minutes, undefined);
+      assert.equal(native.viNumber(['hai', 'mươi', 'lăm']), 25);
+      assert.equal(native.cnNumber('三十五'), 35);
+    });
+
     for (const text of ['turn on the kitchen lights', 'bật', '開', 'what time is it', 'mấy giờ rồi?', '幾點鐘', '今日天氣點']) {
       it(`leaves "${text}" alone`, () => assert.equal(native.parseNativeCommand(text), null));
     }
@@ -97,6 +128,14 @@ describe('commands typed in Vietnamese and Chinese', () => {
       calls.length = 0;
       assert.equal((await native.runNativeCommand('关掉厨房灯'))?.response, '已关掉厨房灯。');
       assert.equal(calls.length, 2);
+    });
+
+    it('turns a light on for a while, and says when it turns off, in the language typed', async () => {
+      assert.equal((await native.runNativeCommand('bật đèn của bà 10 phút'))?.response, 'Đã bật đèn của bà trong 10 phút.');
+      assert.equal((await native.runNativeCommand('開書房燈一個半鐘'))?.response, '開咗書房燈，1個鐘30分鐘之後熄。');
+      assert.equal((await native.runNativeCommand('打开书房灯二十分钟'))?.response, '已打开书房灯，20分钟后关掉。');
+      const timer = db.prepare('SELECT timer_off_at FROM devices WHERE alias = ?').get('My office lamp') as { timer_off_at: string | null };
+      assert.ok(timer.timer_off_at, 'a timer is set, so it turns off by itself');
     });
 
     it('answers Cantonese in Cantonese', async () => {
@@ -142,6 +181,23 @@ describe('commands typed in Vietnamese and Chinese', () => {
       const r = await nlp.processMessage('bật đèn bếp', []);
       assert.equal(r.response, 'Đã bật đèn bếp.');
       assert.equal(calls.length, 2);
+    });
+
+    it('says plainly, in the language typed, when the chat model can’t be reached', async () => {
+      // OLLAMA_URL points nowhere: the network's own words ("fetch failed") never reach the person.
+      const said = async (text: string) => {
+        for await (const e of nlp.processMessageStream(text, [])) if (e.type === 'error') return e.message;
+        return null;
+      };
+      assert.match((await said('tell me a joke'))!, /^HomeHub’s chat model isn’t answering/);
+      assert.match((await said('kể chuyện cười đi'))!, /^Mô hình trò chuyện của HomeHub/);
+      assert.match((await said('講個笑話嚟聽'))!, /對話模型/);
+      assert.match((await said('讲个笑话吧'))!, /对话模型/);
+    });
+
+    it('switches on a timer typed in Cantonese, without the model', async () => {
+      const r = await nlp.processMessage('開書房燈十分鐘', []);
+      assert.equal(r.response, '開咗書房燈，10分鐘之後熄。');
     });
   });
 });

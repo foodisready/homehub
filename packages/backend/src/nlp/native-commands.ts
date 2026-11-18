@@ -26,6 +26,8 @@ export interface NativeCommand {
   name:  string;
   /** Vietnamese only: the verb as typed, with its accents ("mở" for a door, "bật" for a light). */
   verb?: string;
+  /** "bật quạt 30 phút", 開風扇半個鐘: on for this long, then off. */
+  minutes?: number;
 }
 
 type Handled = { response: string; actions: ActionTaken[] };
@@ -91,6 +93,46 @@ function strip(words: string[], phrases: string[], from: 'start' | 'end'): strin
   return out;
 }
 
+// ── Durations ──────────────────────────────────────────────────
+
+const VI_DIGIT: Record<string, number> = { 'một': 1, 'mốt': 1, 'hai': 2, 'ba': 3, 'bốn': 4, 'tư': 4, 'năm': 5, 'lăm': 5, 'sáu': 6, 'bảy': 7, 'tám': 8, 'chín': 9 };
+
+/** "10", "mười", "mười lăm", "hai mươi", "hai mươi lăm" → the number. Words keep their accents: "ba" is three, "bà" grandma. */
+export function viNumber(words: string[]): number | null {
+  if (words.length === 1 && /^\d+$/.test(words[0])) return +words[0];
+  const [a, b, c] = words;
+  if (a === 'mười') return words.length === 1 ? 10 : words.length === 2 && b in VI_DIGIT ? 10 + VI_DIGIT[b] : null;
+  if (b === 'mươi' && a in VI_DIGIT) return words.length === 2 ? VI_DIGIT[a] * 10 : words.length === 3 && c in VI_DIGIT ? VI_DIGIT[a] * 10 + VI_DIGIT[c] : null;
+  return words.length === 1 && a in VI_DIGIT && a !== 'lăm' && a !== 'mốt' ? VI_DIGIT[a] : null;
+}
+
+/**
+ * A duration at the end: "… 30 phút", "… trong hai mươi phút", "… một tiếng", "… nửa tiếng". `later` when
+ * it's when to do it rather than for how long ("10 phút nữa", "sau 10 phút"): that's the chat model's.
+ */
+function viDuration(words: string[]): { rest: string[]; minutes: number } | { later: true } | null {
+  const w = words.map((x) => x.normalize('NFC'));
+  let end = w.length;
+  const after = w[end - 1] === 'nữa';
+  if (after) end--;
+  const unit = w[end - 1];
+  const per = unit === 'phút' ? 1 : unit === 'tiếng' ? 60 : 0;
+  if (!per) return null;
+  let start = end - 1, minutes: number | null = null;
+  if (per === 60 && w[start - 1] === 'nửa') { start--; minutes = 30; }
+  else {
+    for (let n = 3; n >= 1 && minutes === null; n--) {
+      if (start - n < 1) continue;
+      const m = viNumber(w.slice(start - n, start));
+      if (m !== null) { minutes = m * per; start -= n; }
+    }
+  }
+  if (minutes === null) return null;
+  if (after || w[start - 1] === 'sau') return { later: true };
+  if (w[start - 1] === 'trong') start--;
+  return { rest: words.slice(0, start), minutes };
+}
+
 export function parseVietnamese(text: string): NativeCommand | null {
   let words = text.toLowerCase().replace(/[.!?,;:。！？，]+/g, ' ').trim().split(/\s+/).filter(Boolean);
   words = strip(words, VI_BEFORE, 'start');
@@ -100,8 +142,14 @@ export function parseVietnamese(text: string): NativeCommand | null {
   if (!verb) return null;
   let rest = strip(words.slice(1), VI_BETWEEN, 'start');
   rest = strip(rest, VI_AFTER, 'end');
+  let minutes: number | undefined;
+  const d = viDuration(rest);
+  if (d && 'later' in d) return null;
+  if (d) { rest = strip(d.rest, VI_AFTER, 'end'); minutes = d.minutes; }
   if (!rest.length) return null;
-  return { lang: 'vi', state: VI_VERBS[verb], name: rest.join(' '), verb: first in VI_VERBS ? first : undefined };
+  const state = VI_VERBS[verb];
+  if (minutes && !state) return null;   // a timer only turns something off, as in English
+  return { lang: 'vi', state, name: rest.join(' '), verb: first in VI_VERBS ? first : undefined, ...(minutes ? { minutes } : {}) };
 }
 
 // ── Cantonese and Mandarin ─────────────────────────────────────
@@ -121,6 +169,39 @@ export const MANDARIN = /[开关灯厅门帮请这吧么们厨书边头楼区细
 
 export const hasChinese = (text: string) => /[㐀-鿿]/.test(text);
 
+const CN_DIGIT: Record<string, number> = { 一: 1, 二: 2, 兩: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
+/** 十 → 10, 十五 → 15, 二十 → 20, 三十五 → 35, 2 → 2. */
+export function cnNumber(s: string): number | null {
+  if (/^\d+$/.test(s)) return +s;
+  if (s.includes('十')) {
+    const [tens, ones] = s.split('十');
+    if (tens.length > 1 || ones.length > 1 || (tens && !(tens in CN_DIGIT)) || (ones && !(ones in CN_DIGIT))) return null;
+    return (tens ? CN_DIGIT[tens] : 1) * 10 + (ones ? CN_DIGIT[ones] : 0);
+  }
+  return s.length === 1 && s in CN_DIGIT ? CN_DIGIT[s] : null;
+}
+
+const ZH_HOUR = '(?:個鐘頭?|个钟头?|鐘頭?|钟头?|小時|小时)';
+// 十分鐘, 30分钟, 一個鐘, 個半鐘, 半個鐘, 一個半鐘, 两小时; then perhaps 之後 / 后, which makes it "later".
+const ZH_DURATION = new RegExp(
+  `(?:([0-9]+|[一二兩两三四五六七八九十]+)(分鐘|分钟)|([0-9]+|[一二兩两三四五六七八九十]+)?(個半|个半)?${ZH_HOUR}(半)?|半${ZH_HOUR})(之後|之后|以後|以后|後|后)?$`);
+
+/** A duration at the end of a Cantonese or Mandarin command, in minutes; `later` for 十分鐘後. */
+function zhDuration(t: string): { rest: string; minutes: number } | { later: true } | null {
+  const m = t.match(ZH_DURATION);
+  if (!m || m.index === 0) return null;
+  let minutes: number | null;
+  if (m[2]) minutes = cnNumber(m[1]);
+  else if (m[0].startsWith('半')) minutes = 30;
+  else {
+    const hours = m[3] ? cnNumber(m[3]) : m[4] ? 1 : null;
+    minutes = hours === null ? null : hours * 60 + (m[4] || m[5] ? 30 : 0);
+  }
+  if (!minutes) return null;
+  if (m[6]) return { later: true };
+  return { rest: t.slice(0, m.index), minutes };
+}
+
 const takeFirst = (text: string, verbs: string[]) => verbs.find((v) => text.startsWith(v));
 const takeLast = (text: string, verbs: string[]) => verbs.find((v) => text.endsWith(v));
 
@@ -129,13 +210,19 @@ export function parseChinese(text: string): NativeCommand | null {
   const lang: NativeLang = MANDARIN.test(text) ? 'zh' : 'yue';
   let t = text.replace(/[\s.!?,;:。！？，、～~]+/g, '').replace(ZH_BEFORE, '').replace(ZH_AFTER, '');
   if (!t) return null;
+  let minutes: number | undefined;
+  const d = zhDuration(t);
+  if (d && 'later' in d) return null;
+  if (d) { t = d.rest.replace(ZH_AFTER, ''); minutes = d.minutes; }
+  const timed = (c: NativeCommand | null): NativeCommand | null =>
+    !c || !minutes ? c : c.state ? { ...c, minutes } : null;   // a timer only turns something off
 
   const on = takeFirst(t, ZH_ON), off = takeFirst(t, ZH_OFF);
   const first = [on, off].filter(Boolean).sort((a, b) => b!.length - a!.length)[0];
   if (first) {
     // 開下廚房燈, 熄咗個燈: the 下 or 咗 after the verb isn't part of the name.
     const name = t.slice(first.length).replace(/^(?:下|咗|埋|返|個|个|一下)/, '');
-    return name ? { lang, state: first === on, name } : null;
+    return name ? timed({ lang, state: first === on, name }) : null;
   }
 
   t = t.replace(ZH_BA, '');
@@ -143,7 +230,7 @@ export function parseChinese(text: string): NativeCommand | null {
   const last = [onLast, offLast].filter(Boolean).sort((a, b) => b!.length - a!.length)[0];
   if (!last) return null;
   const name = t.slice(0, -last.length);
-  return name ? { lang, state: last === onLast, name } : null;
+  return name ? timed({ lang, state: last === onLast, name }) : null;
 }
 
 export const parseNativeCommand = (text: string): NativeCommand | null =>
@@ -158,6 +245,7 @@ const listOf = (names: string[], lang: NativeLang) => names.join(lang === 'vi' ?
 const SAY = {
   vi: {
     done:       (c: NativeCommand, name: string) => `Đã ${c.verb ?? (c.state ? 'bật' : 'tắt')} ${name}.`,
+    timer:      (c: NativeCommand, name: string, m: number) => `Đã ${c.verb ?? 'bật'} ${name} trong ${[Math.floor(m / 60) && `${Math.floor(m / 60)} tiếng`, m % 60 && `${m % 60} phút`].filter(Boolean).join(' ')}.`,
     closing:    (name: string) => `Đang đóng ${name}.`,
     unreached:  (names: string) => `Không kết nối được ${names}.`,
     which:      (names: string) => `Ý bạn là cái nào: ${names}?`,
@@ -167,6 +255,7 @@ const SAY = {
   },
   yue: {
     done:       (c: NativeCommand, name: string) => `${c.state ? '開' : '熄'}咗${name}。`,
+    timer:      (_c: NativeCommand, name: string, m: number) => `開咗${name}，${m >= 60 ? `${Math.floor(m / 60)}個鐘${m % 60 ? `${m % 60}分鐘` : ''}` : `${m}分鐘`}之後熄。`,
     closing:    (name: string) => `閂緊${name}。`,
     unreached:  (names: string) => `連唔到${names}。`,
     which:      (names: string) => `你指邊個：${names}？`,
@@ -176,6 +265,7 @@ const SAY = {
   },
   zh: {
     done:       (c: NativeCommand, name: string) => `已${c.state ? '打开' : '关掉'}${name}。`,
+    timer:      (_c: NativeCommand, name: string, m: number) => `已打开${name}，${m >= 60 ? `${Math.floor(m / 60)}小时${m % 60 ? `${m % 60}分钟` : ''}` : `${m}分钟`}后关掉。`,
     closing:    (name: string) => `正在关${name}。`,
     unreached:  (names: string) => `连不上${names}。`,
     which:      (names: string) => `你是指哪一个：${names}？`,
@@ -195,7 +285,7 @@ export function inLanguage(result: Handled, command: NativeCommand): Handled {
       if (/^Closing /.test(response)) return { response: say.closing(command.name), actions };
       // A run of protected devices left alone is explained only in English.
       if (/protected/.test(response)) return result;
-      return { response: say.done(command, command.name), actions };
+      return { response: command.minutes ? say.timer(command, command.name, command.minutes) : say.done(command, command.name), actions };
     }
     const parts = [
       ok.length ? say.done(command, listOf(ok.map(aliasOf), command.lang)) : '',
@@ -231,6 +321,7 @@ export async function runNativeCommand(text: string): Promise<Handled | null> {
   if (command.lang === 'vi') command.name = name;
   // "mở cửa ga-ra", "閂車房門": a garage door is closed (and never opened); anything else switched.
   const door = isGarageDoorName(name);
-  const result = await runPowerCommand(door ? `${command.state ? 'open' : 'close'} ${name}` : `turn ${command.state ? 'on' : 'off'} ${name}`);
+  const timer = command.minutes && !door ? ` for ${command.minutes} minutes` : '';
+  const result = await runPowerCommand(door ? `${command.state ? 'open' : 'close'} ${name}` : `turn ${command.state ? 'on' : 'off'} ${name}${timer}`);
   return result ? inLanguage(result, command) : null;
 }

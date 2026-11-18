@@ -42,6 +42,9 @@ export function parseDuration(text: string): number | null {
   return (toNumber(amount) + half) * minutesPerUnit + (extraMinutes ? toNumber(extraMinutes) : 0);
 }
 
+/** How a question starts: "is the porch light on" isn't a command to turn it on. */
+const QUESTION = /^(?:is|are|was|were|what|which|who|why|how|when|where|do|does|did|can|could|will|would|should|has|have|any)\b/;
+
 export function cleanUp(text: string): string {
   return text
     .toLowerCase()
@@ -74,12 +77,19 @@ export function parsePowerCommand(text: string): PowerCommand | null {
   // "Turn of" is a common slip for "turn off": it can't mean anything else here.
   const stateFirst = command.match(/^(?:turn|switch)\s+(?:back\s+)?(on|off?)\s+(.+)$/);
   const stateLast  = command.match(/^(turn|switch|keep|leave)\s+(.+?)(?:\s+back)?\s+(on|off?)$/);
+  // "Porch light on for 10 minutes", "kitchen lights off": the name, then on or off, as people
+  // type it. Not a question: "is the porch light on" asks, it doesn't switch.
+  const bare = !stateFirst && !stateLast && !QUESTION.test(command) && !/^(?:turn|switch|keep|leave|set|put)\b/.test(command)
+    ? command.match(/^(.+?)\s+(on|off)$/) : null;
 
   let name: string;
   let state: boolean;
   if (stateFirst) {
     state = stateFirst[1] === 'on';
     name  = stateFirst[2];
+  } else if (bare) {
+    state = bare[2] === 'on';
+    name  = bare[1];
   } else if (stateLast) {
     state = stateLast[3] === 'on';
     name  = stateLast[2];

@@ -13,7 +13,7 @@ import { applyPower, assistantMaySwitch, isProtectedDevice, type PowerDevice } f
 import { logger } from '../logger';
 import { findDeviceByName, findDeviceGroup, listDeviceNames, NOT_A_LIGHT } from './find-device';
 import { isCamera, isGarageDoor, runGroupCommand, runPowerCommand } from './commands';
-import { runNativeCommand } from './native-commands';
+import { hasChinese, MANDARIN, runNativeCommand } from './native-commands';
 import { recordCommand } from './command-log';
 import { looksLikeToolCall, toolArguments, toolCallInText } from './tool-args';
 import { asksForLater, primeRewrite, rewriteMessage } from './rewrite';
@@ -386,6 +386,22 @@ export function didntSwitch(actions: ActionTaken[]): string {
 }
 
 /** Said instead of a reply the model garbled. */
+/**
+ * The chat model couldn't be reached ("fetch failed", "Ollama error 500"): say so plainly, in the
+ * language typed, and what still works, rather than showing the network's own words.
+ */
+export function chatModelDown(text: string): string {
+  if (hasChinese(text)) {
+    return MANDARIN.test(text)
+      ? 'HomeHub 的对话模型现在没有响应，我暂时只能执行简单指令，例如“打开厨房灯”。详情请看 Health 页面。'
+      : 'HomeHub 嘅對話模型而家冇回應，我暫時只可以做簡單指令，例如「開廚房燈」。詳情可以睇 Health。';
+  }
+  if (/[ăâđêôơưạảấầẩẫậắằẳẵặẹẻẽếềểễệỉịọỏốồổỗộớờởỡợụủứừửữựỳỵỷỹ]/i.test(text)) {
+    return 'Mô hình trò chuyện của HomeHub hiện chưa trả lời, nên tôi chỉ làm được các lệnh đơn giản, như “bật đèn bếp”. Xem chi tiết ở trang Health.';
+  }
+  return 'HomeHub’s chat model isn’t answering right now, so I can only do simple commands, such as “turn on the kitchen lights” or “turn on the fan for 30 minutes”. Health has details.';
+}
+
 export const NOT_UNDERSTOOD = "Sorry, I didn't manage that. Try saying it another way, such as \"turn on the office lights\".";
 
 /**
@@ -887,7 +903,8 @@ export async function* processMessageStream(
   try {
     ({ messages, actions } = await resolveTools(userMessage, history));
   } catch (err: any) {
-    yield { type: 'error', message: err.message };
+    logger.warn({ reason: err?.message }, 'Chat model not answering');
+    yield { type: 'error', message: chatModelDown(userMessage) };
     return;
   }
 
@@ -931,7 +948,8 @@ export async function* processMessageStream(
     });
     if (!streamRes.ok) throw new Error(`Ollama error ${streamRes.status}`);
   } catch (err: any) {
-    yield { type: 'error', message: err.message };
+    logger.warn({ reason: err?.message }, 'Chat model not answering');
+    yield { type: 'error', message: chatModelDown(userMessage) };
     return;
   }
 

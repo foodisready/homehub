@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { processMessage, processMessageStream, type ChatMessage } from '../nlp/nlp.service';
+import { chatModelDown, processMessage, processMessageStream, type ChatMessage } from '../nlp/nlp.service';
 import { getCommandStats } from '../nlp/command-log';
 import { dismissMiss, listMisses, teach, TeachError, type MissSource } from '../nlp/teach';
 import { requireAdmin } from '../middleware/auth';
@@ -93,7 +93,7 @@ nlpRouter.post('/', async (req: Request, res: Response) => {
     res.json(result);
   } catch (err: any) {
     logger.error(err, 'NLP processing failed');
-    res.status(503).json({ error: 'NLP service unavailable. Is Ollama running?', code: 'NLP_ERROR' });
+    res.status(503).json({ error: chatModelDown(message), code: 'NLP_ERROR' });
   }
 });
 
@@ -123,7 +123,7 @@ nlpRouter.post('/stream', async (req: Request, res: Response) => {
     }
   } catch (err: any) {
     logger.error(err, 'NLP stream failed');
-    send({ type: 'error', message: 'NLP service unavailable.' });
+    send({ type: 'error', message: chatModelDown(message) });
   } finally {
     clearInterval(heartbeat);
   }
