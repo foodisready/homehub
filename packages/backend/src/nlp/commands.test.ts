@@ -313,6 +313,14 @@ describe('chat commands', () => {
         assert.deepEqual(calls, []);
       });
 
+      for (const text of ['Turn on Master room light.', 'turn on the master bedroom lights', 'turn on the master lights']) {
+        it(`finds a bedroom's lamps by how people say it: "${text}"`, async () => {
+          db.prepare("UPDATE devices SET room = 'Master bedroom' WHERE alias IN ('My office lamp', 'Media long lamp')").run();
+          await commands.runPowerCommand(text);
+          assert.deepEqual(switched(), ['10.0.0.1=true', '10.0.0.3=true']);
+        });
+      }
+
       it("doesn't take a room for a name without lights or lamps", async () => {
         assert.equal(await commands.runPowerCommand("turn on brenden's"), null);
         assert.deepEqual(calls, []);

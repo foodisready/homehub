@@ -102,10 +102,13 @@ export function findDeviceGroup(name: string): NamedDevice[] {
   return roomLights(wanted, name, devices);
 }
 
-/** A room's name, and the name without "room": "Brenden's room" is also "Brenden's". */
+/**
+ * A room's name, and the name without "room": "Brenden's room" is also "Brenden's". A bedroom is
+ * also a room, as people say it: "Master bedroom" is the "master room" (主人房) and the "master".
+ */
 const roomKeys = (room: string) => {
   const key = normalize(room);
-  return [key, key.replace(/\s+room$/, '')].filter(Boolean);
+  return [key, key.replace(/\s+room$/, ''), key.replace(/\s+bedroom$/, ' room'), key.replace(/\s+bedroom$/, '')].filter(Boolean);
 };
 
 /** Names that say a device isn't a light, so "<room> lights" leaves it alone. */
