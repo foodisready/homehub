@@ -40,6 +40,7 @@ The tests cover reading commands in each language, the replies, timers, schedule
 | `home.js` | The pretend kitchen: lights, scenes, schedules, the sun, what a command does |
 | `commands.js` | Reading a command in English, Cantonese, Mandarin or Vietnamese, and the replies |
 | `demo.test.mjs` | Tests for `commands.js` and `home.js` |
+| `videos/` | Short screen recordings of the real app with a made-up home, and their poster frames |
 
 `commands.js` is a small stand-in for HomeHub's real command reader (`packages/backend/src/nlp`). It knows one room and three lights, so it is much simpler. Its reply wording follows HomeHub's.
 

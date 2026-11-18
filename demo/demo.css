@@ -230,6 +230,15 @@ a { color: #93c5fd; }
 .src-you { background: rgba(148, 163, 184, 0.2); color: #e2e8f0; }
 .src-timer { background: rgba(45, 212, 191, 0.18); color: #5eead4; }
 
+/* ── Videos ─────────────────────────────────────────────── */
+.watch { max-width: 1320px; margin: 8px auto 0; padding: 8px 16px 16px; }
+.watch h2 { font-size: 20px; margin-bottom: 4px; }
+.clips { display: grid; gap: 16px; margin-top: 14px; grid-template-columns: repeat(auto-fill, minmax(240px, 300px)); }
+.clip { margin: 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+.clip video { display: block; width: 100%; height: auto; aspect-ratio: 390 / 844; background: #0a1020; }
+.clip figcaption { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px 12px; }
+@media (max-width: 700px) { .clips { grid-template-columns: minmax(0, 1fr); justify-items: center; } .clip { width: min(100%, 320px); } }
+
 .foot { max-width: 1320px; margin: 0 auto; padding: 4px 16px 28px; color: var(--text-faint); font-size: 13px; }
 
 /* ── Narrower screens ──────────────────────────────────── */
