@@ -139,6 +139,12 @@ devicesRouter.get('/auto-off', (_req: Request, res: Response) => {
 });
 
 // GET /api/devices/nickname-suggestions
+
+/** A nickname as it's said: "\"đèn vua\"" → "đèn vua". Quotes copied from an example aren't part of it. */
+export function cleanNickname(name: string): string {
+  return name.trim().replace(/^["'“”‘’「」『』]+|["'“”‘’「」『』]+$/g, '').replace(/\s+/g, ' ').trim();
+}
+
 // Vietnamese and Cantonese nicknames to offer for each device, in the languages ticked in
 // Settings → Voice control: { languages, suggestions: { [deviceId]: [{ text, lang, from, needsName? }] } }.
 devicesRouter.get('/nickname-suggestions', (_req: Request, res: Response) => {
@@ -378,7 +384,7 @@ devicesRouter.patch('/:id', requireAdmin, (req: Request, res: Response) => {
     : device.driver_config;
   const newMac          = mac         ?? device.mac;
   const newNicknames    = nicknames
-    ? JSON.stringify([...new Set(nicknames.map((n) => n.trim()).filter(Boolean))])
+    ? JSON.stringify([...new Set(nicknames.map(cleanNickname).filter(Boolean))])
     : device.nicknames;
   const newProtected    = isProtected === undefined ? device.is_protected : (isProtected ? 1 : 0);
   const newRoom         = room === undefined ? device.room : cleanRoom(room);

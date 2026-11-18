@@ -1,4 +1,4 @@
-"""Answers to HomeHub's "Did you mean…?": "Turn on Porch light?" → "yes" / "no".
+"""Answers to HomeHub's "Did you mean…?": "Should I turn on Porch light?" → "yes" / "no".
 
 With Claude chosen in Settings → AI, a command HomeHub's rules don't understand can come back as a
 question instead of "Sorry, I didn't understand". The speaker asks it, listens again without the wake

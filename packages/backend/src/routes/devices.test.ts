@@ -78,6 +78,12 @@ describe('device address updates', () => {
     assert.deepEqual(((await res.json()) as any).nicknames, ['desk lamp', 'study']);
   });
 
+  it('drops quotes copied from an example around a nickname', async () => {
+    const id = register('King lamp', '10.0.0.9');
+    const res = await send('PATCH', `/${id}`, { nicknames: ['"đèn vua"', '“đèn của nhà vua”', '「王帝燈」', "King's  lamp"] });
+    assert.deepEqual(((await res.json()) as any).nicknames, ['đèn vua', 'đèn của nhà vua', '王帝燈', "King's lamp"]);
+  });
+
   it('rejects nicknames that are not a list of names', async () => {
     const id = register('Lamp', '10.0.0.1');
 

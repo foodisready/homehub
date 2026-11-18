@@ -346,7 +346,7 @@ describe('plain rewrites', () => {
       globalThis.fetch = ollama.impl;
 
       const asked = await run('turn of ffice liights', 'user:1');
-      assert.equal(asked.said, 'Turn off Office lights?', 'off, from the rules\' reading of "turn of"');
+      assert.equal(asked.said, 'Should I turn off Office lights?', 'off, from the rules\' reading of "turn of"');
       assert.deepEqual(switched, []);
       assert.equal(ollama.asked.length, 1, 'only the form');
       assert.ok(ollama.asked[0].format, 'with the form as its required answer');

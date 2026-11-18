@@ -99,11 +99,11 @@ internalRouter.post('/voice/status', (req: Request, res: Response) => {
 
 // POST /internal/voice/command  { text: string, retry?, ask?, lang? }
 // The rules act at once. Spoken text can be misheard, so a model never switches a device from it:
-// with Claude in use, a miss can become a question ("Turn on Kitchen light?") the bridge asks aloud.
+// with Claude in use, a miss can become a question ("Should I turn on Kitchen light?") the bridge asks aloud.
 internalRouter.post('/voice/command', async (req: Request, res: Response) => {
   // retry: the bridge will try again with a slower, more careful hearing if this isn't understood,
   // so a miss isn't recorded yet. A command that is understood is recorded either way.
-  // ask: the bridge can ask "Turn on …?" and listen for the answer (bridges before it couldn't).
+  // ask: the bridge can ask "Should I turn on …?" and listen for the answer (bridges before it couldn't).
   // lang: the language it heard, for the question's words and voice.
   const { text, retry, ask, lang } = req.body as { text?: unknown; retry?: unknown; ask?: unknown; lang?: unknown };
   if (typeof text !== 'string' || !text.trim()) {
@@ -131,7 +131,7 @@ internalRouter.post('/voice/command', async (req: Request, res: Response) => {
   res.json({ handled: true, ...handled, response: spokenDegrees(handled.response) });
 });
 
-// POST /internal/voice/confirm/:id  { answer: 'yes' | 'no' }: the answer to "Turn on …?" after a
+// POST /internal/voice/confirm/:id  { answer: 'yes' | 'no' }: the answer to "Should I turn on …?" after a
 // voice command. Replies with what to say, in the question's language; 404 once it isn't asking.
 internalRouter.post('/voice/confirm/:id', async (req: Request, res: Response) => {
   const answer = (req.body ?? {}).answer;

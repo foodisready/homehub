@@ -67,14 +67,14 @@ describe('Did you mean…?', () => {
       const p = asked('Tắt hết đèn phòng khách', form({ action: 'on', devices: ['Living room lamps', 'Living room statue'], lang: 'zh' }));
       assert.equal(p.state, false);
       assert.equal(p.lang, 'vi');
-      assert.equal(c.askText(p), 'Tắt Living room lamps và Living room statue?');
+      assert.equal(c.askText(p), 'Có phải bạn muốn tắt Living room lamps và Living room statue không?');
       assert.equal(p.phrase, 'hết đèn phòng khách');
     });
 
     it('reads "turn of" as off, and keeps the misspelt name to learn', () => {
       const p = asked('turn of uffice lighs', form({ action: 'on', devices: ['My office lamp'] }));
       assert.equal(p.state, false);
-      assert.equal(c.askText(p), 'Turn off My office lamp?');
+      assert.equal(c.askText(p), 'Should I turn off My office lamp?');
       assert.equal(p.phrase, 'uffice lighs');
     });
 
@@ -98,14 +98,14 @@ describe('Did you mean…?', () => {
       db.prepare('INSERT INTO devices (alias, ip, room, driver_type, nicknames, is_protected) VALUES (?, ?, ?, ?, ?, ?)')
         .run("King's lamp", '10.0.0.7', 'Master bedroom', 'kasa', '["国王的灯","王帝灯","đèn ngủ","đèn của nhà vua"]', 0);
       const p = asked('BẬT ĐÈN VUA', form({ devices: ["King's lamp"], lang: 'vi' }));
-      assert.equal(c.askText(p), 'Bật đèn của nhà vua?');
+      assert.equal(c.askText(p), 'Có phải bạn muốn bật đèn của nhà vua không?');
       assert.deepEqual(p.aliases, ["King's lamp"], 'still switched by its own name');
       // In Cantonese, the Chinese nickname that shares the most characters with what was said.
       assert.equal(c.askText(asked('開皇帝燈', form({ devices: ["King's lamp"], lang: 'yue' }))), '係咪要開王帝灯？');
       assert.equal(c.askText(asked('开皇帝灯', form({ devices: ["King's lamp"], lang: 'yue' }))), '要打开王帝灯吗？', 'simplified 开 reads as Mandarin');
       // In English, and in a language it has no nickname in, its own name.
-      assert.equal(c.askText(asked('turn on the king lamp', form({ devices: ["King's lamp"] }))), "Turn on King's lamp?");
-      assert.equal(c.askText(asked('bật đèn văn phòng', form({ devices: ['My office lamp'], lang: 'vi' }))), 'Bật My office lamp?');
+      assert.equal(c.askText(asked('turn on the king lamp', form({ devices: ["King's lamp"] }))), "Should I turn on King's lamp?");
+      assert.equal(c.askText(asked('bật đèn văn phòng', form({ devices: ['My office lamp'], lang: 'vi' }))), 'Có phải bạn muốn bật My office lamp không?');
     });
 
     it('names a device with no nicknames, or unreadable ones, by its own name', () => {
@@ -118,7 +118,7 @@ describe('Did you mean…?', () => {
       // The model read "đóng" (close) as open; the rules know better.
       const p = asked('Đóng cửa ga-ra', form({ action: 'open', devices: ['Garage Left'], lang: 'vi' }));
       assert.deepEqual([p.state, p.door], [false, true]);
-      assert.equal(c.askText(p), 'Đóng Garage Left?');
+      assert.equal(c.askText(p), 'Có phải bạn muốn đóng Garage Left không?');
       const open = c.propose('Mở cửa ga-ra', form({ action: 'open', devices: ['Garage Left'], lang: 'vi' }));
       assert.deepEqual(open, { kind: 'refuse', why: 'door-open', lang: 'vi' });
       assert.match(c.refusedText(open as never), /không mở cửa ga-ra/);

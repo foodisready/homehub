@@ -672,7 +672,7 @@ export interface VoiceAsk {
 
 /**
  * A voice command the rules didn't understand, with Claude in use: Claude fills in the form, and the
- * speaker asks "Turn on Kitchen light?" before anything is switched, as Chat does. Null when Claude
+ * speaker asks "Should I turn on Kitchen light?" before anything is switched, as Chat does. Null when Claude
  * isn't in use, couldn't answer, or read nothing to switch: the speaker says it didn't understand.
  *
  * Only Claude, not this HomeHub's model: on heard speech the small model asked the wrong question
@@ -724,7 +724,7 @@ function claudeStyle(): string {
 
 Replies may be read aloud: answer in one or two short sentences of plain text, with no markdown, lists or headings.
 The home's time zone is ${tz}, and it's now ${now} there. Say times in the home's time zone, the way people say them ("5:02 PM").
-Switching a device asks the person first: call set_power_state for what they most likely mean, and HomeHub asks them "Turn on …?" itself. Don't offer to switch something in your own words, and never say something was switched.`;
+Switching a device asks the person first: call set_power_state for what they most likely mean, and HomeHub asks them "Should I turn on …?" itself. Don't offer to switch something in your own words, and never say something was switched.`;
 }
 
 /**

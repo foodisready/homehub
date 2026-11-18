@@ -334,7 +334,7 @@ describe('Claude Haiku option', () => {
     choice.setClaudeKey(KEY); choice.setAiMode('claude');
     const r = await voice('/command', { text: 'make the front brighter', ask: true, lang: 'en' });
     assert.equal(r.body.handled, false);
-    assert.equal(r.body.say, 'Turn on Porch light?');
+    assert.equal(r.body.say, 'Should I turn on Porch light?');
     assert.equal(r.body.lang, 'en');
     assert.ok(r.body.confirmId);
     assert.equal(switched.length, 0, 'nothing switched before a yes');
@@ -351,7 +351,7 @@ describe('Claude Haiku option', () => {
     choice.setClaudeKey(KEY); choice.setAiMode('claude');
     anthropic.form = { action: 'off', target: 'Desk lamp', scene: null, minutes: null, lang: 'en' };
     const r = await voice('/command', { text: 'ván đèn bàn đi', ask: true, lang: 'vi' });
-    assert.equal(r.body.say, 'Tắt Desk lamp?');
+    assert.equal(r.body.say, 'Có phải bạn muốn tắt Desk lamp không?');
     assert.equal(r.body.lang, 'vi');
     const no = await voice(`/confirm/${r.body.confirmId}`, { answer: 'no' });
     assert.equal(no.body.response, 'Được, tôi không thay đổi gì.');

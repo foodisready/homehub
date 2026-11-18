@@ -161,15 +161,17 @@ function listNames(names: string[], lang: Lang): string {
   return names.slice(0, -1).join(sep) + and + names[names.length - 1];
 }
 
-/** "Turn off My office lamp?", in the language the command was given in. */
+/** "Should I turn off My office lamp?", in the language the command was given in. */
 export function askText(p: Proposal): string {
   const names = listNames(p.names ?? p.aliases, p.lang);
   const verb = p.door ? 'close' : p.state ? 'on' : 'off';
   const minutes = p.minutes;
   switch (p.lang) {
+    // Said aloud, "Bật đèn bếp?" and "Turn on Porch light?" sound like HomeHub doing it, not
+    // asking: the voice doesn't rise at the end. So they ask in words, as 係咪 and 吗 already do.
     case 'vi': {
-      const v = { close: 'Đóng', on: 'Bật', off: 'Tắt' }[verb];
-      return `${v} ${names}${minutes ? ` trong ${minutes} phút` : ''}?`;
+      const v = { close: 'đóng', on: 'bật', off: 'tắt' }[verb];
+      return `Có phải bạn muốn ${v} ${names}${minutes ? ` trong ${minutes} phút` : ''} không?`;
     }
     case 'yue': {
       const v = { close: '閂', on: '開', off: '熄' }[verb];
@@ -180,8 +182,8 @@ export function askText(p: Proposal): string {
       return `要${v}${names}${minutes ? `${minutes}分钟` : ''}吗？`;
     }
     default: {
-      const v = { close: 'Close', on: 'Turn on', off: 'Turn off' }[verb];
-      return `${v} ${names}${minutes ? ` for ${minutes} minutes` : ''}?`;
+      const v = { close: 'close', on: 'turn on', off: 'turn off' }[verb];
+      return `Should I ${v} ${names}${minutes ? ` for ${minutes} minutes` : ''}?`;
     }
   }
 }
