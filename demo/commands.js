@@ -1,5 +1,5 @@
 /**
- * Reading a kitchen command in English, Vietnamese, Cantonese or Mandarin, and HomeHub's reply in
+ * Reading a kitchen command in English, Cantonese, Mandarin or Vietnamese, and HomeHub's reply in
  * the same language. A small stand-in for HomeHub's real command reader, for the demo only: it
  * knows one room and three lights.
  *
@@ -365,7 +365,7 @@ const TEXT = {
     statusOn: (list) => `On now: ${list.join(', ')}.`,
     statusOff: 'All the kitchen lights are off.',
     ask: 'On or off?',
-    help: 'Try “turn on the kitchen lights”, “dim the pendants to 30%”, “ceiling lights on for 10 minutes” or “dinner at 7 pm”. Vietnamese, Cantonese and Mandarin work too.',
+    help: 'Try “turn on the kitchen lights”, “dim the pendants to 30%”, “ceiling lights on for 10 minutes” or “dinner at 7 pm”. Cantonese, Mandarin and Vietnamese work too.',
     elsewhere: 'This demo has just the kitchen. Try the ceiling lights, the under-cabinet lights or the island pendants.',
     unknown: 'Sorry, I didn’t understand that. Try “turn on the kitchen lights”.',
   },

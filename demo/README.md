@@ -3,7 +3,7 @@
 A pretend kitchen that runs entirely in the browser, for showing what HomeHub does without a home to try it in:
 
 - **Lights you can see.** Turn the ceiling lights, under-cabinet lights or island pendants on, off or dimmed, and the drawing of the kitchen lights up to match. Tap a light in the picture, or use the cards below it.
-- **Chat in four languages.** “Dim the pendants to 30%”, “bật đèn dưới tủ”, “開吊燈十分鐘”, “关掉顶灯”. Replies come in the language spoken. Times work too: “for 10 minutes”, “in 15 minutes”, “dinner at 7 pm”.
+- **Chat in four languages.** “Dim the pendants to 30%”, “開吊燈十分鐘”, “关掉顶灯”, “bật đèn dưới tủ”. Replies come in the language spoken. Times work too: “for 10 minutes”, “in 15 minutes”, “dinner at 7 pm”.
 - **Schedules.** A clock runs the day (fast, if you like) and the schedules fire as it passes them: breakfast, lights off at daylight, under-cabinet on at sunset, dinner, wind down, goodnight. Drag the timeline to jump to any time.
 - **Motion.** “Someone walks in” turns on the under-cabinet lights when it's dark, then turns them off after five quiet minutes.
 - **Energy.** Watts now and kWh so far today, from each light's wattage.
@@ -38,7 +38,7 @@ The tests cover reading commands in each language, the replies, timers, schedule
 | `demo.js` | The clock, the lights, chat, schedules and activity |
 | `scene.js` | The kitchen drawing, and how the lights are drawn on it |
 | `home.js` | The pretend kitchen: lights, scenes, schedules, the sun, what a command does |
-| `commands.js` | Reading a command in English, Vietnamese, Cantonese or Mandarin, and the replies |
+| `commands.js` | Reading a command in English, Cantonese, Mandarin or Vietnamese, and the replies |
 | `demo.test.mjs` | Tests for `commands.js` and `home.js` |
 
 `commands.js` is a small stand-in for HomeHub's real command reader (`packages/backend/src/nlp`). It knows one room and three lights, so it is much simpler. Its reply wording follows HomeHub's.

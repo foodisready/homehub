@@ -19,9 +19,9 @@ const SHORT = { ceiling: 'ceiling', counter: 'under-cabinet', pendants: 'pendant
 const SOURCE_LABELS = { schedule: 'Schedule', chat: 'Chat', motion: 'Motion', you: 'You', timer: 'Timer' };
 const HTML_LANG = { en: 'en', vi: 'vi', yue: 'zh-HK', zh: 'zh-CN' };
 const SUGGESTIONS = [
-  ['en', 'Turn on the kitchen lights'], ['en', 'Dim the pendants to 30%'], ['vi', 'Bật đèn dưới tủ'], ['yue', '開吊燈十分鐘'],
-  ['en', 'Ceiling lights on for 10 minutes'], ['zh', '打开顶灯'], ['en', 'Goodnight at 11 pm'], ['vi', 'Tắt đèn bếp 15 phút nữa'],
-  ['yue', '熄晒啲燈'], ['en', 'Cooking'], ['zh', '晚上七点吃饭'], ['en', "What's on?"],
+  ['en', 'Turn on the kitchen lights'], ['en', 'Dim the pendants to 30%'], ['yue', '開吊燈十分鐘'], ['zh', '打开顶灯'],
+  ['vi', 'Bật đèn dưới tủ'], ['en', 'Ceiling lights on for 10 minutes'], ['yue', '熄晒啲燈'], ['zh', '晚上七点吃饭'],
+  ['vi', 'Tắt đèn bếp 15 phút nữa'], ['en', 'Goodnight at 11 pm'], ['en', 'Cooking'], ['en', "What's on?"],
 ];
 
 /* ── State ─────────────────────────────────────────────── */
@@ -533,7 +533,7 @@ function send(raw) {
 }
 
 function buildChat() {
-  addMsg('hub', 'Hi, I’m HomeHub. Tell me what to do with the kitchen lights, in English, Tiếng Việt, 廣東話 or 普通话. You can add a time too: “for 10 minutes”, “in 15 minutes” or “at 7 pm”.', 'en');
+  addMsg('hub', 'Hi, I’m HomeHub. Tell me what to do with the kitchen lights, in English, 廣東話, 普通话 or Tiếng Việt. You can add a time too: “for 10 minutes”, “in 15 minutes” or “at 7 pm”.', 'en');
   const box = $('#suggest');
   for (const [lang, text] of SUGGESTIONS) {
     const b = document.createElement('button');
