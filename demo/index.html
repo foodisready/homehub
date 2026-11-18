@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>HomeHub Demo</title>
+  <meta name="description" content="Try HomeHub in your browser: turn a pretend kitchen's lights on and off by chat, in four languages, and watch its schedules run through a day.">
+  <meta name="theme-color" content="#0f172a">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%233b82f6'/%3E%3Cpath d='M8 16 16 9l8 7v8h-5v-5h-6v5H8z' fill='%23fff'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="demo.css">
+  <script type="module" src="demo.js"></script>
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M8 16 16 9l8 7v8h-5v-5h-6v5H8z" fill="#fff"/></svg>
+      <span>HomeHub</span><span class="tag">Demo</span>
+    </div>
+    <p class="lede">A pretend kitchen, running in your browser. Type a command, tap a light, or let the clock run and watch the schedules work.</p>
+  </header>
+
+  <main class="layout">
+    <div class="scene-wrap" id="sceneWrap">
+      <div id="scene"></div>
+      <div class="chips" aria-hidden="true">
+        <span class="chip" id="timeChip"></span>
+        <span class="chip" id="wattChip"></span>
+      </div>
+      <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    </div>
+
+    <section class="card clock" aria-label="Clock">
+      <div class="clock-row">
+        <button class="icon-btn" id="play" type="button" aria-label="Pause the clock">
+          <svg viewBox="0 0 24 24" aria-hidden="true" class="i-pause"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>
+          <svg viewBox="0 0 24 24" aria-hidden="true" class="i-play"><path d="M8 5v14l11-7z"/></svg>
+        </button>
+        <div class="clock-read">
+          <div class="clock-big" id="clockBig"></div>
+          <div class="muted small" id="clockSub"></div>
+        </div>
+        <div class="seg" role="radiogroup" aria-label="Clock speed" id="speeds">
+          <button type="button" role="radio" data-speed="1">Real time</button>
+          <button type="button" role="radio" data-speed="120">1 hour = 30 s</button>
+          <button type="button" role="radio" data-speed="720">1 hour = 5 s</button>
+        </div>
+      </div>
+      <div class="timeline">
+        <div class="track" id="track"><div class="marks" id="marks"></div></div>
+        <input type="range" id="scrub" min="0" max="1439" step="1" aria-label="Time of day. Drag to jump; the lights follow your schedules.">
+        <div class="ticks" aria-hidden="true"><span>12 am</span><span>6 am</span><span>12 pm</span><span>6 pm</span><span>12 am</span></div>
+      </div>
+    </section>
+
+    <section class="card lights" aria-labelledby="lightsTitle">
+      <div class="card-head">
+        <h2 id="lightsTitle">Kitchen</h2>
+        <span class="muted small" id="energy"></span>
+      </div>
+      <div class="light-list" id="lightList"></div>
+      <div class="scene-row">
+        <span class="muted small">Scenes</span>
+        <div class="scene-buttons" id="sceneButtons"></div>
+      </div>
+      <button type="button" class="motion-btn" id="motionBtn">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="13" cy="4" r="2"/><path d="M10.5 8.5 7 10v4h2v-2.7l1.4-.6L9 17l-3 3 1.4 1.4 3.6-3.6.8-2.6 2.2 2.2V22h2v-6l-2.4-2.4.8-3.2A6 6 0 0 0 19 13v-2a4 4 0 0 1-3.5-2.1l-1-1.6a2 2 0 0 0-2.5-.8z"/></svg>
+        Someone walks in
+        <span class="muted small">Motion sensor by the door</span>
+      </button>
+    </section>
+
+    <aside class="card side" aria-label="Chat, schedules and activity">
+      <div class="tabs" role="tablist">
+        <button type="button" role="tab" id="tab-chat" aria-controls="pane-chat" aria-selected="true">Chat</button>
+        <button type="button" role="tab" id="tab-schedules" aria-controls="pane-schedules" aria-selected="false" tabindex="-1">Schedules</button>
+        <button type="button" role="tab" id="tab-activity" aria-controls="pane-activity" aria-selected="false" tabindex="-1">Activity <span class="badge" id="unread" hidden></span></button>
+      </div>
+
+      <div class="pane chat" id="pane-chat" role="tabpanel" aria-labelledby="tab-chat">
+        <ol class="messages" id="messages" aria-live="polite"></ol>
+        <div class="suggest" id="suggest" aria-label="Try saying"></div>
+        <form class="composer" id="composer" autocomplete="off">
+          <input id="say" type="text" placeholder="Type a command…" aria-label="Command" maxlength="140" enterkeyhint="send">
+          <button type="submit" class="send" aria-label="Send">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 20.5 21 12 3 3.5l.1 6.6L15 12 3.1 13.9z"/></svg>
+          </button>
+        </form>
+      </div>
+
+      <div class="pane" id="pane-schedules" role="tabpanel" aria-labelledby="tab-schedules" hidden>
+        <p class="muted small pad">What HomeHub does on its own. Change a time or turn one off, then let the clock run.</p>
+        <ul class="sched-list" id="schedList"></ul>
+        <h3 class="sub-h">Timers and later commands</h3>
+        <ul class="sched-list" id="timerList"></ul>
+      </div>
+
+      <div class="pane" id="pane-activity" role="tabpanel" aria-labelledby="tab-activity" hidden>
+        <ol class="activity" id="activity"></ol>
+      </div>
+    </aside>
+  </main>
+
+  <footer class="foot">
+    <p>Everything here is pretend and stays in your browser. Real HomeHub runs on a small computer in your home, such as a Raspberry Pi, and controls Kasa, Shelly, Tuya, Meross and Matter lights and plugs.
+      <a href="https://github.com/foodisready/homehub">HomeHub on GitHub</a></p>
+  </footer>
+  <noscript><p class="foot">The demo needs JavaScript turned on.</p></noscript>
+</body>
+</html>
