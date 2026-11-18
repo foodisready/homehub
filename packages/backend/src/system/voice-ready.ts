@@ -7,6 +7,9 @@ import { lastBridgeReport, voiceConfig, type BridgeReport } from './voice-bridge
  * takes about a minute. The app says so, then says when a speaker is listening again.
  *
  * - off:      nothing to say: voice is off here, or no speaker has ever been connected.
+ *             A home updating from before this was remembered has no record of a speaker yet;
+ *             if its voice bridge had checked in before, it's told voice is starting, but never
+ *             that a speaker is missing, since it may have none.
  * - starting: since this start, no speaker connected yet. `loading`: the bridge is still
  *             loading its speech models, or hasn't checked in yet.
  * - ready:    a speaker connected, at `readyAt`. A speaker going away later isn't this banner's
@@ -27,8 +30,20 @@ export const MISSING_AFTER_MS = 3 * 60_000;
 /** Remembered across starts: a home where a speaker has never connected doesn't use voice. */
 const HAD_KEY = 'voice_speaker_connected_at';
 
+const BRIDGE_SEEN_KEY = 'voice_bridge_seen_at';
+
 let startedAt = Date.now();
 let readyAt: number | null = null;
+let bridgeBefore = bridgeCheckedIn();
+
+/** Whether a voice bridge had checked in before this start. */
+function bridgeCheckedIn(): boolean {
+  try {
+    return !!getDb().prepare('SELECT 1 FROM settings WHERE key = ?').get(BRIDGE_SEEN_KEY);
+  } catch {
+    return false;
+  }
+}
 
 /** Called with each report from the voice bridge. */
 export function noteBridgeReport(report: BridgeReport, now = Date.now()): void {
@@ -44,15 +59,19 @@ function hadSpeaker(): boolean {
 
 export function voiceReady(now = Date.now()): VoiceReady {
   const base = { startedAt: new Date(startedAt).toISOString(), readyAt: readyAt === null ? null : new Date(readyAt).toISOString() };
-  if (!voiceConfig().enabled || !hadSpeaker()) return { ...base, state: 'off', loading: false };
+  const had = hadSpeaker();
+  if (!voiceConfig().enabled || (!had && !bridgeBefore)) return { ...base, state: 'off', loading: false };
   if (readyAt !== null) return { ...base, state: 'ready', loading: false };
+  const late = now - startedAt >= MISSING_AFTER_MS;
+  if (late && !had) return { ...base, state: 'off', loading: false };
   const report = lastBridgeReport();
   const loading = !report || report.at < startedAt || report.state !== 'running';
-  return { ...base, state: now - startedAt < MISSING_AFTER_MS ? 'starting' : 'missing', loading };
+  return { ...base, state: late ? 'missing' : 'starting', loading };
 }
 
 /** For tests: as if HomeHub had just started. */
 export function resetVoiceReady(now = Date.now()): void {
   startedAt = now;
   readyAt = null;
+  bridgeBefore = bridgeCheckedIn();
 }

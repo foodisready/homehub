@@ -86,6 +86,22 @@ describe('voice ready after a start', () => {
     assert.equal(ready.voiceReady(T0 + 6 * 60_000).state, 'ready');
   });
 
+  it('says voice is starting on the first update after this was added, then that it\'s ready', () => {
+    // Updated from a HomeHub that didn't remember speakers: only the bridge's check-in is known.
+    report(false, 'running', T0 - 60_000);
+    ready.resetVoiceReady(T0);
+    assert.equal(ready.voiceReady(T0 + 5_000).state, 'starting');
+    report(true, 'running', T0 + 50_000);
+    assert.equal(ready.voiceReady(T0 + 51_000).state, 'ready');
+  });
+
+  it('never calls a speaker missing in a home that may have none', () => {
+    report(false, 'running', T0 - 60_000);   // a bridge, but no speaker has ever connected
+    ready.resetVoiceReady(T0);
+    assert.equal(ready.voiceReady(T0 + 60_000).state, 'starting');
+    assert.equal(ready.voiceReady(T0 + ready.MISSING_AFTER_MS).state, 'off');
+  });
+
   it('stays ready when a speaker drops later: that\'s the Health page\'s to say', () => {
     report(true, 'running', T0 - 60_000);
     ready.resetVoiceReady(T0);
