@@ -408,6 +408,8 @@ A scene sets several devices at once, and each one can do something different. F
 
 Run it from the Scenes page, or in Chat or voice with "run Goodnight". Chat and voice skip protected devices.
 
+To change a scene, select **Edit** on its card (administrators only). You can change its name, icon, and what each device does; the scene's devices are listed first. Select **Save Changes**. Other names HomeHub has learned for the scene, in **Teach HomeHub**, still work. After a rename, say the new name in Chat or voice. If you change a scene so it no longer pauses a camera, **Voice may pause cameras** turns off, and you tick it again if you later add a camera pause back.
+
 ### Pause cameras by voice
 
 Chat and voice never pause cameras on their own, because anyone who says the wake word, or a TV, could otherwise turn them off. To pause them by voice anyway, an administrator makes a scene for it:

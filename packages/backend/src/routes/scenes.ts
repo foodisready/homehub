@@ -66,17 +66,71 @@ scenesRouter.post('/', requireAdmin, (req: Request, res: Response) => {
   }
 });
 
-// PATCH /api/scenes/:id  { voiceMayPause: boolean }
+// PATCH /api/scenes/:id  { name?, icon?, actions?, voiceMayPause? }
+// Edits a scene in place: its id, and the nicknames HomeHub has learned for it, stay.
 scenesRouter.patch('/:id', requireAdmin, (req: Request, res: Response) => {
-  const { voiceMayPause } = req.body as { voiceMayPause?: unknown };
-  if (typeof voiceMayPause !== 'boolean') {
+  const { name, icon, actions, voiceMayPause } = req.body as {
+    name?: unknown; icon?: unknown; actions?: unknown; voiceMayPause?: unknown;
+  };
+  if (name === undefined && icon === undefined && actions === undefined && voiceMayPause === undefined) {
+    return res.status(400).json({ error: 'Nothing to change', code: 'VALIDATION_ERROR' });
+  }
+  if (voiceMayPause !== undefined && typeof voiceMayPause !== 'boolean') {
     return res.status(400).json({ error: '`voiceMayPause` must be true or false', code: 'VALIDATION_ERROR' });
   }
+  if (name !== undefined && (typeof name !== 'string' || !name.trim())) {
+    return res.status(400).json({ error: 'A scene needs a name', code: 'VALIDATION_ERROR' });
+  }
+  if (icon !== undefined && icon !== null && (typeof icon !== 'string' || icon.length > 16)) {
+    return res.status(400).json({ error: '`icon` must be a short text', code: 'VALIDATION_ERROR' });
+  }
   const db = getDb();
-  const result = db.prepare('UPDATE scenes SET voice_may_pause = ? WHERE id = ?').run(voiceMayPause ? 1 : 0, req.params.id);
-  if (result.changes === 0) return res.status(404).json({ error: 'Scene not found', code: 'NOT_FOUND' });
-  logger.info({ sceneId: Number(req.params.id), voiceMayPause, by: req.user?.name }, 'Scene voice pause changed');
-  res.json(withActions(db.prepare('SELECT * FROM scenes WHERE id = ?').get(req.params.id) as SceneRow));
+  let list: { deviceId: number; state: boolean }[] | undefined;
+  if (actions !== undefined) {
+    const ok = Array.isArray(actions) && actions.length > 0 && actions.every((a) =>
+      a && Number.isInteger(a.deviceId) && typeof a.state === 'boolean');
+    if (!ok) return res.status(400).json({ error: 'A scene needs at least one device', code: 'VALIDATION_ERROR' });
+    list = [...new Map((actions as { deviceId: number; state: boolean }[]).map((a) => [a.deviceId, a])).values()];
+    const known = db.prepare('SELECT id FROM devices WHERE id = ?');
+    if (list.some((a) => !known.get(a.deviceId))) {
+      return res.status(400).json({ error: 'A device in this scene no longer exists', code: 'VALIDATION_ERROR' });
+    }
+  }
+
+  const scene = db.prepare('SELECT * FROM scenes WHERE id = ?').get(req.params.id) as SceneRow | undefined;
+  if (!scene) return res.status(404).json({ error: 'Scene not found', code: 'NOT_FOUND' });
+
+  try {
+    db.transaction(() => {
+      if (name !== undefined) db.prepare('UPDATE scenes SET name = ? WHERE id = ?').run((name as string).trim(), scene.id);
+      if (icon !== undefined) db.prepare('UPDATE scenes SET icon = ? WHERE id = ?').run(icon, scene.id);
+      if (list) {
+        db.prepare('DELETE FROM scene_actions WHERE scene_id = ?').run(scene.id);
+        const insert = db.prepare('INSERT INTO scene_actions (scene_id, device_id, state) VALUES (?, ?, ?)');
+        for (const a of list) insert.run(scene.id, a.deviceId, a.state ? 1 : 0);
+      }
+      if (voiceMayPause !== undefined) db.prepare('UPDATE scenes SET voice_may_pause = ? WHERE id = ?').run(voiceMayPause ? 1 : 0, scene.id);
+      // A scene that no longer pauses a camera has nothing for voice to pause. Clearing it means
+      // adding a camera pause later asks again, instead of quietly allowing voice to pause it.
+      const pauses = db.prepare(`SELECT 1 FROM scene_actions sa JOIN devices d ON d.id = sa.device_id
+        WHERE sa.scene_id = ? AND sa.state = 0 AND d.driver_type = 'wyze'`).get(scene.id);
+      if (!pauses) db.prepare('UPDATE scenes SET voice_may_pause = 0 WHERE id = ?').run(scene.id);
+    })();
+  } catch (err: any) {
+    if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
+      return res.status(409).json({ error: 'Another scene already has that name', code: 'CONFLICT' });
+    }
+    throw err;
+  }
+
+  const updated = db.prepare('SELECT * FROM scenes WHERE id = ?').get(scene.id) as SceneRow;
+  if (voiceMayPause !== undefined && (updated.voice_may_pause === 1) !== (scene.voice_may_pause === 1)) {
+    logger.info({ sceneId: scene.id, voiceMayPause: updated.voice_may_pause === 1, by: req.user?.name }, 'Scene voice pause changed');
+  }
+  if (name !== undefined || icon !== undefined || list) {
+    logger.info({ sceneId: scene.id, name: updated.name, devices: list?.length, by: req.user?.name }, 'Scene edited');
+  }
+  res.json(withActions(updated));
 });
 
 // DELETE /api/scenes/:id

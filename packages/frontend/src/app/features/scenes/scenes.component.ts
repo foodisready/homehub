@@ -47,6 +47,12 @@ const SCENE_ICONS = ['💡','🌙','🌅','🎬','🏠','🎉','😴','🔒','�
       color:var(--text-muted); font-size:0.85rem; padding:0.2rem 0.4rem;
     }
     .delete-btn:hover { color:var(--red); }
+    .card-tools { display:flex; justify-content:center; gap:0.25rem; flex-wrap:wrap; }
+    .edit-btn {
+      background:transparent; border:none;
+      color:var(--text-muted); font-size:0.85rem; padding:0.2rem 0.4rem;
+    }
+    .edit-btn:hover { color:var(--accent); }
 
     .result-msg { font-size:0.8rem; color:var(--green); margin-top:0.25rem; text-align:center; }
 
@@ -93,7 +99,7 @@ const SCENE_ICONS = ['💡','🌙','🌅','🎬','🏠','🎉','😴','🔒','�
           <h1>Scenes</h1>
         </div>
         @if (canEdit()) {
-          <button class="btn-primary" style="padding:0.5rem 1.1rem;font-weight:600" (click)="showForm.set(true)">+ New Scene</button>
+          <button class="btn-primary" style="padding:0.5rem 1.1rem;font-weight:600" (click)="openNew()">+ New Scene</button>
         }
       </div>
 
@@ -130,7 +136,10 @@ const SCENE_ICONS = ['💡','🌙','🌅','🎬','🏠','🎉','😴','🔒','�
                 </div>
               }
               @if (canEdit()) {
-                <button class="delete-btn" (click)="deleteScene(s)">✕ Delete</button>
+                <div class="card-tools">
+                  <button class="edit-btn" (click)="openEdit(s)" [attr.aria-label]="'Edit ' + s.name">✎ Edit</button>
+                  <button class="delete-btn" (click)="deleteScene(s)" [attr.aria-label]="'Delete ' + s.name">✕ Delete</button>
+                </div>
               }
             </div>
           }
@@ -141,7 +150,7 @@ const SCENE_ICONS = ['💡','🌙','🌅','🎬','🏠','🎉','😴','🔒','�
     @if (showForm()) {
       <div class="form-overlay" (click)="closeForm()">
         <div class="card form-card" (click)="$event.stopPropagation()">
-          <h2>New Scene</h2>
+          <h2>{{ editingId() === null ? 'New Scene' : 'Edit Scene' }}</h2>
 
           <div class="field">
             <label>Name</label>
@@ -159,7 +168,7 @@ const SCENE_ICONS = ['💡','🌙','🌅','🎬','🏠','🎉','😴','🔒','�
 
           <div class="field">
             <label>Device actions</label>
-            @for (d of devices(); track d.id) {
+            @for (d of formDevices(); track d.id) {
               <div class="device-action-row">
                 <span class="device-name">{{ d.alias }}</span>
                 <div class="state-toggle">
@@ -190,7 +199,7 @@ const SCENE_ICONS = ['💡','🌙','🌅','🎬','🏠','🎉','😴','🔒','�
           <div class="form-actions">
             <button class="btn-cancel" (click)="closeForm()">Cancel</button>
             <button class="btn-primary btn-save" [disabled]="saving()" (click)="save()">
-              {{ saving() ? 'Saving…' : 'Save Scene' }}
+              {{ saving() ? 'Saving…' : editingId() === null ? 'Save Scene' : 'Save Changes' }}
             </button>
           </div>
         </div>
@@ -209,6 +218,10 @@ export class ScenesComponent implements OnInit {
   readonly devices   = this._devices.asReadonly();
   readonly runResult = this._runResult.asReadonly();
   readonly showForm  = signal(false);
+  /** The scene being edited, or null for a new one. */
+  readonly editingId = signal<number | null>(null);
+  /** Devices in the form: when editing, the scene's own come first, so they're easy to find. */
+  readonly formDevices = signal<Device[]>([]);
   readonly saving    = signal(false);
   readonly formError = signal('');
   readonly runningId = signal<number | null>(null);
@@ -273,8 +286,27 @@ export class ScenesComponent implements OnInit {
     this.actionsChanged.update((n) => n + 1);
   }
 
+  openNew(): void {
+    this.closeForm();
+    this.formDevices.set(this.devices());
+    this.showForm.set(true);
+  }
+
+  openEdit(scene: Scene): void {
+    this.closeForm();
+    this.editingId.set(scene.id);
+    this.form = { name: scene.name, icon: scene.icon ?? '💡', voiceMayPause: !!scene.voiceMayPause };
+    for (const a of scene.actions) this.actionMap.set(a.deviceId, a.state);
+    this.actionsChanged.update((n) => n + 1);
+    const inScene = new Set(scene.actions.map((a) => a.deviceId));
+    const all = this.devices();
+    this.formDevices.set([...all.filter((d) => inScene.has(d.id)), ...all.filter((d) => !inScene.has(d.id))]);
+    this.showForm.set(true);
+  }
+
   closeForm(): void {
     this.showForm.set(false);
+    this.editingId.set(null);
     this.form = this.blankForm();
     this.actionMap.clear();
     this.actionsChanged.update((n) => n + 1);
@@ -289,12 +321,17 @@ export class ScenesComponent implements OnInit {
     if (!actions.length) { this.formError.set('Add at least one device action.'); return; }
 
     this.saving.set(true);
-    this.http.post<Scene>('/api/scenes', {
+    const body = {
       name: this.form.name.trim(), icon: this.form.icon, actions,
       voiceMayPause: this.formPausesCameras() && this.form.voiceMayPause,
-    }).subscribe({
-      next: (created) => {
-        this._scenes.update((list) => [...list, created].sort((a, b) => a.name.localeCompare(b.name)));
+    };
+    const id = this.editingId();
+    const request = id === null
+      ? this.http.post<Scene>('/api/scenes', body)
+      : this.http.patch<Scene>(`/api/scenes/${id}`, body);
+    request.subscribe({
+      next: (saved) => {
+        this._scenes.update((list) => [...list.filter((s) => s.id !== saved.id), saved].sort((a, b) => a.name.localeCompare(b.name)));
         this.closeForm();
         this.saving.set(false);
       },

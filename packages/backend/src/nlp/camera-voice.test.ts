@@ -204,4 +204,82 @@ describe('cameras by voice', () => {
       assert.equal(list.find((s) => s.id === body.id).voiceMayPause, true, 'still allowed; members can see it');
     });
   });
+
+  describe('editing a scene', () => {
+    const ids = () => Object.fromEntries((db.prepare('SELECT id, alias FROM devices').all() as { id: number; alias: string }[]).map((d) => [d.alias, d.id]));
+    const make = async (name: string, actions: { deviceId: number; state: boolean }[], extra: object = {}) =>
+      (await (await fetch(base, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name, icon: '💡', actions, ...extra }) })).json()) as any;
+    const edit = (id: number, body: object) =>
+      fetch(`${base}/${id}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+
+    it('changes the name, icon and devices, and keeps the scene and its nicknames', async () => {
+      const d = ids();
+      const made = await make('Movie', [{ deviceId: d['Kitchen lamp'], state: true }]);
+      db.prepare('UPDATE scenes SET nicknames = ? WHERE id = ?').run('["film time"]', made.id);
+
+      const r = await edit(made.id, { name: '  Movie night ', icon: '🎬', actions: [
+        { deviceId: d['Kitchen lamp'], state: false }, { deviceId: d['General'], state: true },
+      ] });
+      assert.equal(r.status, 200);
+      const body = await r.json() as any;
+      assert.equal(body.id, made.id);
+      assert.equal(body.name, 'Movie night');
+      assert.equal(body.icon, '🎬');
+      assert.deepEqual(body.actions.map((a: any) => [a.alias, a.state]).sort(), [['General', true], ['Kitchen lamp', false]]);
+      assert.equal((db.prepare('SELECT nicknames FROM scenes WHERE id = ?').get(made.id) as any).nicknames, '["film time"]');
+
+      // Voice finds it by its new name, and runs what it does now.
+      assert.equal((await voice('movie night'))?.response, 'Ran Movie night.');
+      assert.deepEqual(sorted(), ['cam-general=on', 'lamp-kitchen=off']);
+    });
+
+    it('changes just the name, leaving the devices alone', async () => {
+      const d = ids();
+      const made = await make('Reading', [{ deviceId: d['Kitchen lamp'], state: true }]);
+      const body = await (await edit(made.id, { name: 'Reading time' })).json() as any;
+      assert.equal(body.name, 'Reading time');
+      assert.deepEqual(body.actions.map((a: any) => [a.alias, a.state]), [['Kitchen lamp', true]]);
+    });
+
+    it('lists a device once, even if sent twice', async () => {
+      const d = ids();
+      const made = await make('Twice', [{ deviceId: d['Kitchen lamp'], state: true }]);
+      const body = await (await edit(made.id, { actions: [{ deviceId: d['Kitchen lamp'], state: true }, { deviceId: d['Kitchen lamp'], state: false }] })).json() as any;
+      assert.deepEqual(body.actions.map((a: any) => [a.alias, a.state]), [['Kitchen lamp', false]]);
+    });
+
+    it('won\'t take a name another scene has, a blank name, no devices or a missing device', async () => {
+      const d = ids();
+      await make('Taken', [{ deviceId: d['Kitchen lamp'], state: true }]);
+      const made = await make('Mine', [{ deviceId: d['Kitchen lamp'], state: true }]);
+      assert.equal((await edit(made.id, { name: 'Taken' })).status, 409);
+      assert.equal((await edit(made.id, { name: '   ' })).status, 400);
+      assert.equal((await edit(made.id, { actions: [] })).status, 400);
+      assert.equal((await edit(made.id, { actions: [{ deviceId: 99999, state: true }] })).status, 400);
+      assert.equal((await edit(made.id, { actions: [{ deviceId: d['Kitchen lamp'], state: 'on' }] })).status, 400);
+      assert.equal((await edit(made.id, {})).status, 400);
+      assert.equal((await edit(99999, { name: 'Ghost' })).status, 404);
+      const kept = db.prepare('SELECT name FROM scenes WHERE id = ?').get(made.id) as any;
+      assert.equal(kept.name, 'Mine', 'a refused edit changes nothing');
+      assert.equal((db.prepare('SELECT COUNT(*) n FROM scene_actions WHERE scene_id = ?').get(made.id) as any).n, 1);
+    });
+
+    it('stops voice pausing cameras once the scene no longer pauses any', async () => {
+      const d = ids();
+      const made = await make('Private', [{ deviceId: d['General'], state: false }], { voiceMayPause: true });
+      assert.equal(made.voiceMayPause, true);
+      const body = await (await edit(made.id, { actions: [{ deviceId: d['Kitchen lamp'], state: false }], voiceMayPause: true })).json() as any;
+      assert.equal(body.voiceMayPause, false);
+      // Putting a camera pause back asks again; it isn't allowed by itself.
+      const again = await (await edit(made.id, { actions: [{ deviceId: d['General'], state: false }] })).json() as any;
+      assert.equal(again.voiceMayPause, false);
+    });
+
+    it('is for admins only', async () => {
+      const d = ids();
+      const made = await make('Admins', [{ deviceId: d['Kitchen lamp'], state: true }]);
+      role = 'member';
+      assert.equal((await edit(made.id, { name: 'Members' })).status, 403);
+    });
+  });
 });
