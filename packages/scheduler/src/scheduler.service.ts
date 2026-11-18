@@ -1,7 +1,7 @@
 import cron, { type ScheduledTask } from 'node-cron';
 import Database from 'better-sqlite3';
 import pino from 'pino';
-import { getSolarEventTime, type SolarEvent } from './solar';
+import { nextSolarEventTime, type SolarEvent } from './solar';
 import { readSecret } from './secrets';
 
 function isTimezone(tz: string): boolean {
@@ -33,6 +33,14 @@ export class SchedulerService {
   private cronJobs      = new Map<number, ScheduledTask>();
   private solarTimers   = new Map<number, NodeJS.Timeout>();
   private autoOffTimers = new Map<number, NodeJS.Timeout>();
+  /** Works out the day's sunrise and sunset times just after midnight. */
+  private dailyRefresh: ScheduledTask | null = null;
+  /**
+   * The home's time zone, handed to every clock job. node-cron keeps the first
+   * time zone it sees for jobs given none, which is the container's (UTC),
+   * so a later change to process.env.TZ never reached them.
+   */
+  private tz: string | undefined;
 
   private lat = 37.7749;
   private lon = -122.4194;
@@ -72,6 +80,7 @@ export class SchedulerService {
 
     const tz = saved.get('home_timezone') || process.env.TIMEZONE || this.envTz;
     if (tz && isTimezone(tz)) process.env.TZ = tz;   // Node applies a TZ change straight away
+    this.tz = process.env.TZ && isTimezone(process.env.TZ) ? process.env.TZ : undefined;
 
     if (this.lat === 37.7749 && this.lon === -122.4194) {
       logger.warn('No home location set (Settings → Home), so solar schedules use San Francisco times');
@@ -92,6 +101,12 @@ export class SchedulerService {
 
     let autoOffCount = 0;
 
+    // Just after midnight in the home's time zone, set the new day's sunrise and sunset.
+    this.dailyRefresh = cron.schedule('1 0 * * *', () => {
+      logger.info('Midnight tick — refreshing solar schedules');
+      this.refreshSolar();
+    }, this.cronOptions());
+
     for (const row of rows) {
       if (row.trigger_type === 'cron') {
         this.registerCron(row);
@@ -105,16 +120,19 @@ export class SchedulerService {
       }
     }
 
-    logger.info({ cronCount, solarCount, autoOffCount }, 'Schedules loaded');
+    logger.info({ cronCount, solarCount, autoOffCount, timezone: this.tz ?? 'container' }, 'Schedules loaded');
   }
 
   /** Clear all active jobs and timers. */
   clearAll(): void {
+    this.dailyRefresh?.stop();
+    this.dailyRefresh = null;
     for (const task  of this.cronJobs.values())      task.stop();
     for (const timer of this.solarTimers.values())   clearTimeout(timer);
     for (const timer of this.autoOffTimers.values()) clearInterval(timer);
     this.cronJobs.clear();
     this.solarTimers.clear();
+    this.solarTargets.clear();
     this.autoOffTimers.clear();
   }
 
@@ -130,7 +148,7 @@ export class SchedulerService {
       this.execute(row).catch((err) =>
         logger.error({ err: err.message, scheduleId: row.id }, 'Cron execution failed')
       );
-    });
+    }, this.cronOptions());
 
     this.cronJobs.set(row.id, task);
     logger.debug({ id: row.id, label: row.label, expr: row.cron_expression }, 'Cron scheduled');
@@ -138,11 +156,30 @@ export class SchedulerService {
 
   // ── Solar ─────────────────────────────────────────────────────
 
+  private cronOptions(): { timezone?: string } {
+    return this.tz ? { timezone: this.tz } : {};
+  }
+
+  /** When each loaded sunrise/sunset schedule runs next (for tests and logs). */
+  nextSolarRuns(): Map<number, Date> {
+    return new Map(this.solarTargets);
+  }
+  private solarTargets = new Map<number, Date>();
+
+  /** When each loaded clock schedule runs next. */
+  nextCronRuns(): Map<number | 'daily', Date | null> {
+    const runs = new Map<number | 'daily', Date | null>([...this.cronJobs].map(([id, t]) => [id, t.getNextRun()]));
+    if (this.dailyRefresh) runs.set('daily', this.dailyRefresh.getNextRun());
+    return runs;
+  }
+
   private registerSolar(row: ScheduleRow): void {
     if (!row.solar_event) return;
 
     const now    = new Date();
-    const target = getSolarEventTime(now, row.solar_event, row.solar_offset_minutes, this.lat, this.lon);
+    // Today's if still ahead, else tomorrow's: a load after this morning's
+    // sunrise still runs tomorrow, whenever the next daily refresh comes.
+    const target = nextSolarEventTime(now, row.solar_event, row.solar_offset_minutes, this.lat, this.lon);
 
     if (!target) {
       logger.warn({ id: row.id, event: row.solar_event }, 'Solar event time unavailable');
@@ -150,12 +187,11 @@ export class SchedulerService {
     }
 
     const msUntil = target.getTime() - now.getTime();
-    if (msUntil <= 0) {
-      logger.debug({ id: row.id, label: row.label }, 'Solar event already passed today, skipping');
-      return;
-    }
+    this.solarTargets.set(row.id, target);
 
     const timer = setTimeout(() => {
+      this.solarTimers.delete(row.id);
+      this.solarTargets.delete(row.id);
       this.execute(row).catch((err) =>
         logger.error({ err: err.message, scheduleId: row.id }, 'Solar execution failed')
       );
@@ -206,6 +242,7 @@ export class SchedulerService {
       clearTimeout(timer);
       this.solarTimers.delete(id);
     }
+    this.solarTargets.clear();
 
     const rows = this.db.prepare(
       "SELECT * FROM schedules WHERE enabled = 1 AND trigger_type = 'solar'"

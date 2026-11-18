@@ -3,7 +3,6 @@ import path from 'path';
 dotenv.config({ path: path.resolve(process.cwd(), '../../.env') });
 import express from 'express';
 import Database from 'better-sqlite3';
-import cron from 'node-cron';
 import pino from 'pino';
 import { SchedulerService } from './scheduler.service';
 import { readSecret } from './secrets';
@@ -50,12 +49,7 @@ app.listen(PORT, () => {
 // Wait briefly for the DB to be fully ready on first boot
 setTimeout(() => scheduler.load(), 3000);
 
-// ── Midnight solar refresh ─────────────────────────────────────
-// Every day at 00:01, recompute solar event times for the new day
-cron.schedule('1 0 * * *', () => {
-  logger.info('Midnight tick — refreshing solar schedules');
-  scheduler.refreshSolar();
-});
+// The midnight solar refresh is set up by load(), in the home's time zone.
 
 // ── Graceful shutdown ──────────────────────────────────────────
 process.on('SIGTERM', () => {
