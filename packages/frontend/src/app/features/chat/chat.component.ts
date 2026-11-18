@@ -69,8 +69,11 @@ const TOOL_LABELS: Record<string, string> = {
     .avatar-user      { background: var(--accent); color: #fff; }
     .avatar-assistant { background: var(--surface); color: var(--text-muted); border: 1px solid var(--border); }
 
+    /* The column takes the width, not the bubble: 75% of a column already shrunk to its text
+       squeezed short messages onto two lines ("Y / es", "熄廚 / 房燈"). */
+    .bubble-col { max-width: 78%; min-width: 0; }
     .bubble {
-      max-width: 75%;
+      max-width: 100%;
       padding: 0.65rem 0.95rem;
       border-radius: 1rem;
       font-size: 0.9rem;
@@ -192,10 +195,8 @@ const TOOL_LABELS: Record<string, string> = {
               <div class="avatar" [class.avatar-user]="entry.role === 'user'" [class.avatar-assistant]="entry.role === 'assistant'">
                 {{ entry.role === 'user' ? (userInitial()) : 'AI' }}
               </div>
-              <div>
-                <div class="bubble" [class.bubble-user]="entry.role === 'user'" [class.bubble-assistant]="entry.role === 'assistant'" [class.bubble-error]="entry.error">
-                  {{ entry.content }}
-                </div>
+              <div class="bubble-col">
+                <div class="bubble" [class.bubble-user]="entry.role === 'user'" [class.bubble-assistant]="entry.role === 'assistant'" [class.bubble-error]="entry.error">{{ entry.content }}</div>
                 @if (entry.actions?.length) {
                   <div class="actions-list">
                     @for (a of entry.actions!; track $index) {
@@ -216,7 +217,7 @@ const TOOL_LABELS: Record<string, string> = {
               <div class="avatar avatar-assistant">AI</div>
               <div class="bubble bubble-assistant">
                 @if (streamingText()) {
-                  {{ streamingText() }}<span class="cursor">▋</span>
+                  <span>{{ streamingText() }}</span><span class="cursor">▋</span>
                 } @else {
                   <div class="typing">
                     <div class="dot"></div>
