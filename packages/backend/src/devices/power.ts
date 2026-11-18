@@ -32,7 +32,15 @@ export function notifyPowerOff(deviceId: number): void {
 
 async function sendPower(device: PowerDevice, state: boolean): Promise<void> {
   const config = device.driver_config ? JSON.parse(device.driver_config) : undefined;
-  await getDriver(device.driver_type ?? 'kasa').setPower(device.ip, state, config);
+  const started = Date.now();
+  try {
+    await getDriver(device.driver_type ?? 'kasa').setPower(device.ip, state, config);
+  } catch (err) {
+    // Say why, so "couldn't reach" in Chat or from a speaker can be explained afterwards.
+    logger.warn({ deviceId: device.id, alias: device.alias, ip: device.ip, driver: device.driver_type ?? 'kasa', state,
+      ms: Date.now() - started, reason: err instanceof Error ? err.message : String(err) }, 'Could not switch device');
+    throw err;
+  }
   noteState(device.id, state);
 
   const db = getDb();

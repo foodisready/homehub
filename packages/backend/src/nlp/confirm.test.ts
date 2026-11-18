@@ -108,6 +108,18 @@ describe('Did you mean…?', () => {
       assert.equal(c.askText(asked('bật đèn văn phòng', form({ devices: ['My office lamp'], lang: 'vi' }))), 'Có phải bạn muốn bật My office lamp không?');
     });
 
+    it('says a nickname two lamps share once', () => {
+      // Heard in Chat: "bật đèn phòng của chủ và đèn phòng của chủ không?"
+      db.prepare('INSERT INTO devices (alias, ip, room, driver_type, nicknames, is_protected) VALUES (?, ?, ?, ?, ?, ?)')
+        .run('Woman bedside lamp', '10.0.0.8', 'Master bedroom', 'tuya', '["đèn của bà","đèn phòng của chủ"]', 0);
+      db.prepare("DELETE FROM devices WHERE alias = ?").run("King's lamp");
+      db.prepare('INSERT INTO devices (alias, ip, room, driver_type, nicknames, is_protected) VALUES (?, ?, ?, ?, ?, ?)')
+        .run("King's lamp", '10.0.0.7', 'Master bedroom', 'kasa', '["đèn của nhà vua","đèn phòng của chủ"]', 0);
+      const p = asked('bật đèn phòng của chủ', form({ devices: ["King's lamp", 'Woman bedside lamp'], lang: 'vi' }));
+      assert.equal(c.askText(p), 'Có phải bạn muốn bật đèn phòng của chủ không?');
+      assert.deepEqual(p.aliases, ["King's lamp", 'Woman bedside lamp'], 'and still switches both');
+    });
+
     it('names a device with no nicknames, or unreadable ones, by its own name', () => {
       assert.equal(c.nameIn({ alias: 'Porch', nicknames: null }, 'vi', 'bật đèn'), 'Porch');
       assert.equal(c.nameIn({ alias: 'Porch', nicknames: 'not json' }, 'yue', '開燈'), 'Porch');

@@ -724,7 +724,8 @@ function claudeStyle(): string {
 
 Replies may be read aloud: answer in one or two short sentences of plain text, with no markdown, lists or headings.
 The home's time zone is ${tz}, and it's now ${now} there. Say times in the home's time zone, the way people say them ("5:02 PM").
-Switching a device asks the person first: call set_power_state for what they most likely mean, and HomeHub asks them "Should I turn on …?" itself. Don't offer to switch something in your own words, and never say something was switched.`;
+Switching a device asks the person first: call set_power_state for what they most likely mean, and HomeHub asks them "Should I turn on …?" itself. Don't offer to switch something in your own words, and never say something was switched.
+HomeHub learns names: when someone says yes to its question, it remembers the words they used for next time, and an admin can add nicknames on a device's page. Never say HomeHub can't remember a name.`;
 }
 
 /**

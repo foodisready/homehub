@@ -4,6 +4,7 @@ import { emitDeviceState, emitDeviceOnline, emitDeviceEnergy } from '../socket';
 import { sendPushToUsers } from '../push/push.service';
 import { OfflineAlerts } from './offline-alerts';
 import { logger } from '../logger';
+import { isActiveServer } from '../system/role';
 import { lastPowerState, recordOnline, recordPower } from '../activity/activity';
 
 export interface DeviceState {
@@ -56,7 +57,10 @@ async function pollDevice(
   driverType: string,
   driverConfig: Record<string, unknown> | undefined,
 ): Promise<void> {
-  // Throttle Tuya polling to avoid connection lockouts
+  // Throttle Tuya polling to avoid connection lockouts. A backup HomeHub doesn't check them at
+  // all: each check takes the plug's only connection, and the active HomeHub's Chat, voice and
+  // schedules then find it busy. Switching one by hand on the backup still reads it back.
+  if (driverType === 'tuya' && !isActiveServer()) return;
   if (driverType === 'tuya') {
     const last = tuyaLastPolled.get(id) ?? 0;
     if (Date.now() - last < TUYA_POLL_INTERVAL_MS) return;

@@ -154,7 +154,9 @@ export function propose(text: string, u: Understanding | null): Reading | null {
 
 // ── Saying it ───────────────────────────────────────────────────
 
-function listNames(names: string[], lang: Lang): string {
+function listNames(all: string[], lang: Lang): string {
+  // Two lamps sharing a nickname: "đèn phòng của chủ", not "đèn phòng của chủ và đèn phòng của chủ".
+  const names = [...new Set(all)];
   if (names.length < 2) return names.join('');
   const and = { en: ' and ', vi: ' và ', yue: '同', zh: '和' }[lang];
   const sep = lang === 'en' || lang === 'vi' ? ', ' : '、';

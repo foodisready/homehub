@@ -74,6 +74,31 @@ function makeTuyaDevice(deviceId: string, key: string, ip: string, version: stri
   return device;
 }
 
+/**
+ * A Tuya plug takes one local connection at a time, so a switch can find it busy for a moment:
+ * another HomeHub checking it, or the Smart Life app. A healthy connection takes well under a
+ * second, so the first try gives up after 2 s and, after a short wait, a second try gets 3 s:
+ * about as long as one failure took before.
+ */
+export const TUYA_TRIES = [{ connectS: 2 }, { connectS: 3 }];
+export const TUYA_RETRY_WAIT_MS = 700;
+
+export async function withTuyaRetry<T>(
+  attempt: (connectS: number) => Promise<T>,
+  wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms)),
+): Promise<T> {
+  let last: unknown;
+  for (const [i, t] of TUYA_TRIES.entries()) {
+    if (i) await wait(TUYA_RETRY_WAIT_MS);
+    try {
+      return await attempt(t.connectS);
+    } catch (err) {
+      last = err;
+    }
+  }
+  throw last;
+}
+
 export class TuyaDriver implements DeviceDriver {
   readonly type = 'tuya';
 
@@ -81,13 +106,16 @@ export class TuyaDriver implements DeviceDriver {
     const { deviceId, key, version = '3.3' } = (config ?? {}) as unknown as TuyaConfig;
     if (!deviceId || !key) throw new Error('Tuya device requires deviceId and key in driver_config');
 
-    const device = makeTuyaDevice(deviceId, key, ip, version);
-    try {
-      await device.connect();
-      await device.set({ dps: '1', set: on });
-    } finally {
-      try { device.disconnect(); } catch {}
-    }
+    await withTuyaRetry(async (connectS) => {
+      const device = makeTuyaDevice(deviceId, key, ip, version);
+      device._connectTimeout = connectS;   // tuyapi's own wait is 5 s
+      try {
+        await device.connect();
+        await device.set({ dps: '1', set: on });
+      } finally {
+        try { device.disconnect(); } catch {}
+      }
+    });
   }
 
   async getPower(ip: string, config?: Record<string, unknown>): Promise<boolean> {
