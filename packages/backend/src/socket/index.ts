@@ -71,6 +71,14 @@ export function emitDeviceOverride(
   _io?.emit('device:override', { id: deviceId, overrideState, overrideUntil });
 }
 
+/**
+ * A light HomeHub has on is drawing no power, so something past the switch,
+ * like a wall switch on the same circuit, has cut it. Sent when that starts or stops.
+ */
+export function emitDeviceNoPower(deviceId: number, noPower: boolean): void {
+  _io?.emit('device:no-power', { id: deviceId, noPower });
+}
+
 export function emitDeviceEnergy(
   deviceId: number,
   alias: string,

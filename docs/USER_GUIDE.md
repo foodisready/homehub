@@ -72,6 +72,10 @@ HomeHub saves one TP-Link login for all your Kasa plugs, stored as a hash rather
 
 If a Shelly is password-protected, Discover shows **Username** and **Password** fields. To change them later, select **Edit** on the device. A saved password is never shown, so leave the field blank to keep it, or clear the username to remove the login. Shelly needs the real password, so it's stored unencrypted in HomeHub's database, but it isn't sent to anyone's browser.
 
+**Wall switches with a Shelly behind them.** Wire the Shelly so it's the only thing powering the light: its output goes straight to the light, and the wall switch goes to its **SW** input as a signal. For a 3-way pair (two switches for one light), both switches feed **SW**. Then, in the Shelly's own page, open the channel's settings and set **Button type** to **Edge switch**, so every flip of either switch changes the light, whatever position the switches are in. **Toggle switch** follows the switch's position instead, so after HomeHub changes the light, a flip can seem to do nothing.
+
+If a Shelly measures power, such as the Shelly 2.5 or 1PM, HomeHub notices when it has a light on but the light draws no power for about a minute. The light shows **On, but no power** in amber. That usually means a wall switch is still wired into the light's power after the Shelly and is off, so flip it. If it keeps happening, that switch needs rewiring as above. HomeHub only does this for lights it has seen draw power before, so an appliance resting at 0 W isn't flagged.
+
 ### Tuya plugs
 
 Tuya plugs need a **Device ID** and **Local Key**. The easiest way to get them is from a free [Tuya IoT](https://iot.tuya.com) developer account:
@@ -441,7 +445,7 @@ A sensor already used by another rule is marked. Picking it moves it to this rul
 
 A Ring doorbell or camera can be a rule's sensor instead of a Shelly Motion (a rule has one sensor, so choosing Ring replaces the Shelly): choose it under **Ring camera** on the rule's card, after adding it on the Cameras page. Its motion counts, and so does the doorbell ringing, so a porch light can come on for whoever's at the door. Ring sends no "motion over", so the rule hears it a minute after the last motion. Ring has no light reading, so **When the room is dark** needs a Shelly Motion; use **Between sunset and sunrise** instead.
 
-A rule does nothing until its sensor first reports. Its card shows what it's doing, including a countdown to when the light turns off. The countdown clears when the light goes off, within about a minute if you use a wall switch. Clear **Turn on when motion starts** to only turn lights off. You can edit a rule's name, lights and minutes on its card, and test each light with the button next to it.
+A rule does nothing until its sensor first reports. Its card shows what it's doing, including a countdown to when the light turns off. The countdown clears when the light goes off, within about a minute if you use a wall switch. Turning a light off at the wall also ends any timer it had, so motion can turn it back on. Motion leaves a light alone while you've chosen **Keep off for**, and while it's on with a timer, so the timer still turns it off. Clear **Turn on when motion starts** to only turn lights off. You can edit a rule's name, lights and minutes on its card, and test each light with the button next to it.
 
 ### Several lights from one sensor
 

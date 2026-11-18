@@ -105,6 +105,8 @@ function mergeWithCache(
     state:         cached?.state   ?? false,
     wattage:       cached?.wattage ?? null,
     online:        cached?.online  ?? true,   // optimistic until first poll
+    /** On, but drawing no power: a wall switch past HomeHub's may be off. */
+    noPower:       !!cached?.noPower,
     overrideState: device.override_state != null ? device.override_state === 1 : null,
     overrideUntil: device.override_until
       ? device.override_until.replace(' ', 'T') + 'Z'

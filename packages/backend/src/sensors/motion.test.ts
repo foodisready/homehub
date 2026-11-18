@@ -126,12 +126,35 @@ describe('motion rules', () => {
       assert.deepEqual(calls, [{ ip: '10.0.0.1', state: true }]);
     });
 
-    it('leaves a light on a keep-on timer alone', async () => {
+    it('leaves a light on a keep-on timer alone while it is on', async () => {
       setLight({ timer_off_at: sqlite(60) });
+      cache.set(lightId, { state: true, wattage: null, online: true, lastPolled: new Date() });
       await motion.handleMotion(token, true);
       assert.deepEqual(calls, []);
       const row = db.prepare('SELECT timer_off_at FROM devices WHERE id = ?').get(lightId) as any;
       assert.ok(row.timer_off_at);
+    });
+
+    it('turns on a light on a timer that was switched off at the wall', async () => {
+      // This morning's kitchen: on with a timer, off at the wall, and motion found it dark.
+      setLight({ timer_off_at: sqlite(60) });
+      lightOff();
+      await motion.handleMotion(token, true);
+      assert.deepEqual(calls.map((c: any) => c.state), [true]);
+    });
+
+    it('leaves a light someone chose to keep off alone', async () => {
+      setLight({ override_state: 0, override_until: sqlite(60), timer_off_at: null });
+      lightOff();
+      await motion.handleMotion(token, true, new Date(at(0)));
+      assert.deepEqual(calls, []);
+    });
+
+    it('turns on a light whose keep-off has ended', async () => {
+      setLight({ override_state: 0, override_until: sqlite(-1), timer_off_at: null });
+      lightOff();
+      await motion.handleMotion(token, true, new Date(at(0)));
+      assert.deepEqual(calls.map((c: any) => c.state), [true]);
     });
 
     it('does nothing when the clear event arrives', async () => {
@@ -467,11 +490,11 @@ describe('motion rules', () => {
       });
 
       it('leaves a held or protected light alone and turns on the rest', async () => {
-        setLight({ timer_off_at: sqlite(60) });
-        await motion.handleMotion(token, true);
+        setLight({ override_state: 0, override_until: sqlite(60) });
+        await motion.handleMotion(token, true, new Date(at(0)));
         assert.deepEqual(calls, [{ ip: '10.0.0.2', state: true }]);
         calls = [];
-        setLight({ timer_off_at: null, is_protected: 1 });
+        setLight({ override_state: null, override_until: null, is_protected: 1 });
         await motion.handleMotion(token, true);
         assert.deepEqual(calls, [{ ip: '10.0.0.2', state: true }]);
       });

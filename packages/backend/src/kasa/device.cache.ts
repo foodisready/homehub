@@ -1,6 +1,7 @@
 import { getDb } from '../db';
 import { getDriver } from '../drivers/registry';
-import { emitDeviceState, emitDeviceOnline, emitDeviceEnergy } from '../socket';
+import { emitDeviceState, emitDeviceOnline, emitDeviceEnergy, emitDeviceNoPower } from '../socket';
+import { cancelPowerTimer } from '../devices/power';
 import { sendPushToUsers } from '../push/push.service';
 import { OfflineAlerts } from './offline-alerts';
 import { logger } from '../logger';
@@ -12,6 +13,8 @@ export interface DeviceState {
   wattage: number | null;
   online: boolean;
   lastPolled: Date;
+  /** On, but drawing no power for a while: see noPowerNow. */
+  noPower?: boolean;
 }
 
 const cache = new Map<number, DeviceState>();
@@ -39,9 +42,63 @@ export function getAllCachedStates(): Map<number, DeviceState> {
  */
 export function noteState(deviceId: number, state: boolean): void {
   const prev = cache.get(deviceId);
+  // A fresh switch starts the "no power" check again: a light just turned on reads 0 W for a moment.
+  lowSince.delete(deviceId);
+  if (prev?.noPower) emitDeviceNoPower(deviceId, false);
   cache.set(deviceId, { state, wattage: state ? prev?.wattage ?? null : null, online: true, lastPolled: new Date() });
   recordPower(deviceId, state);   // with the cause of the work that made the switch
 }
+
+// ── On, but no power ───────────────────────────────────────────
+// A light whose switch measures power, on, drawing nothing: something past the
+// switch has cut it, like the other switch of a 3-way pair wired in the light's
+// circuit, or a dead bulb. Only lights that normally draw power, and only after
+// a while, since a light just switched on reads 0 W for a moment.
+
+const LIGHT_WORDS = /\b(?:lamps?|lights?|lighting|bulbs?|sconces?|chandeliers?|pendants?|downlights?)\b/i;
+const NO_POWER_BELOW_W = 1;
+const NORMAL_DRAW_MIN_W = 3;
+export const NO_POWER_AFTER_MS = 45_000;
+const lowSince = new Map<number, number>();
+const usualDraw = new Map<number, { watts: number | null; at: number }>();
+
+/** A light, by what HomeHub knows: a wall-switch relay, or a name that says so. */
+export function isLightLike(alias: string, driverType: string, nicknames: string[] = []): boolean {
+  return driverType === 'shelly' || [alias, ...nicknames].some((n) => LIGHT_WORDS.test(n));
+}
+
+/** The median draw while on over the last 30 days, re-read hourly. */
+function normalDraw(id: number, now: number): number | null {
+  const hit = usualDraw.get(id);
+  if (hit && now - hit.at < 3_600_000) return hit.watts;
+  const rows = getDb().prepare(`SELECT wattage FROM energy_readings
+    WHERE device_id = ? AND wattage > 1 AND recorded_at >= datetime('now', '-30 days') ORDER BY wattage`).all(id) as { wattage: number }[];
+  const watts = rows.length >= 3 ? rows[Math.floor(rows.length / 2)].wattage : null;
+  usualDraw.set(id, { watts, at: now });
+  return watts;
+}
+
+/**
+ * Whether a device is on but drawing no power, from this reading. Pure but for
+ * the remembered start of the low readings, so the poll can call it each time.
+ */
+export function noPowerNow(
+  d: { id: number; alias: string; driverType: string; nicknames?: string[] },
+  state: boolean, wattage: number | null, now: number, draw: (id: number, now: number) => number | null = normalDraw,
+): boolean {
+  if (!state || wattage === null || wattage >= NO_POWER_BELOW_W || !isLightLike(d.alias, d.driverType, d.nicknames)) {
+    lowSince.delete(d.id);
+    return false;
+  }
+  const usual = draw(d.id, now);
+  if (usual === null || usual < NORMAL_DRAW_MIN_W) { lowSince.delete(d.id); return false; }
+  const since = lowSince.get(d.id) ?? now;
+  lowSince.set(d.id, since);
+  return now - since >= NO_POWER_AFTER_MS;
+}
+
+/** For tests. */
+export function resetNoPower(): void { lowSince.clear(); usualDraw.clear(); }
 
 /** Poll a single device, update the cache, and emit socket events. */
 // Tuya devices use a stateful TCP connection that gets confused by frequent polling.
@@ -75,12 +132,20 @@ async function pollDevice(
     const energy = hasEmeter ? await driver.getEnergy(ip, driverConfig) : null;
     // A switch landed while this read was in flight: its state is newer, so keep it.
     if ((cache.get(id)?.lastPolled.getTime() ?? 0) > started) return;
-    cache.set(id, { state, wattage: energy?.wattage ?? null, online: true, lastPolled: new Date() });
+    const noPower = hasEmeter ? noPowerNow({ id, alias, driverType }, state, energy?.wattage ?? null, Date.now()) : false;
+    cache.set(id, { state, wattage: energy?.wattage ?? null, online: true, lastPolled: new Date(), ...(noPower ? { noPower } : {}) });
+    if (noPower !== !!prev?.noPower) {
+      emitDeviceNoPower(id, noPower);
+      if (noPower) logger.warn({ id, alias }, 'Light is on but drawing no power; a wall switch may be off');
+    }
 
     // HomeHub records its own switches as it makes them, so a change seen here
     // came from outside: a wall switch, the device's app, or while HomeHub was off.
     if (prev?.online ? prev.state !== state : lastPowerState(id) !== null && lastPowerState(id) !== state) {
       recordPower(id, state, { source: 'outside' });
+      // Turned off by hand: a timer to turn it off has nothing left to do, and
+      // mustn't keep motion from turning it back on.
+      if (!state) cancelPowerTimer(id);
     }
     if (prev && !prev.online) recordOnline(id, true);
     offlineAlerts.reached(id);

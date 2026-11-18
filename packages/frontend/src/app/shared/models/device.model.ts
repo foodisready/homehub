@@ -18,6 +18,8 @@ export interface Device {
   state: boolean;
   wattage: number | null;
   online: boolean;
+  /** On, but drawing no power: a wall switch past HomeHub's may be off. */
+  noPower?: boolean;
   overrideState: boolean | null;
   overrideUntil: string | null;   // ISO datetime string, null = no active override
   driverType:   string;

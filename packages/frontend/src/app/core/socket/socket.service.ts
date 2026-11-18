@@ -111,6 +111,12 @@ export class SocketService implements OnDestroy {
     return () => this.socket?.off('device:online', callback);
   }
 
+  /** A light HomeHub has on started or stopped drawing no power. */
+  onDeviceNoPower(callback: (event: { id: number; noPower: boolean }) => void): () => void {
+    this.socket?.on('device:no-power', callback);
+    return () => this.socket?.off('device:no-power', callback);
+  }
+
   onDeviceOverride(callback: (event: DeviceOverrideEvent) => void): () => void {
     this.socket?.on('device:override', callback);
     return () => this.socket?.off('device:override', callback);

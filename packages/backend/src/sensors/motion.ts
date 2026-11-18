@@ -43,6 +43,8 @@ export interface MotionRuleRow {
 export type RuleWithDevice = MotionRuleRow & PowerDevice & {
   turned_on_at:    string | null;
   override_until:  string | null;
+  /** 0 while someone keeps it off ("Keep off for"), 1 while kept on. */
+  override_state:  number | null;
   timer_off_at:    string | null;
 };
 
@@ -140,9 +142,13 @@ export async function handleMotion(token: string, occupied: boolean, now = new D
   `).get(token) as MotionRuleRow & WhenRule;
   if (!rule.turn_on_with_motion || automationsPaused()) return true;
 
-  // Lights someone chose to hold in their current state, and protected ones, are left alone.
+  // Lights someone chose to keep off, and protected ones, are left alone. So is a light on a
+  // timer while it's on, so its timer still turns it off. One on a timer but off, switched
+  // off at the wall before HomeHub noticed, is turned on: the room is dark.
   const lights = ruleLights(rule.id).filter((light) =>
-    !isProtectedDevice({ ...light, id: light.device_id }) && !light.timer_off_at && toMs(light.override_until) <= now.getTime());
+    !isProtectedDevice({ ...light, id: light.device_id })
+    && !(light.override_state === 0 && toMs(light.override_until) > now.getTime())
+    && !(light.timer_off_at && getCachedState(light.device_id)?.state !== false));
   if (lights.length === 0) return true;
 
   // Daylight, by the sensor's light reading, the sun or the clock, as the rule chose.

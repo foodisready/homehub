@@ -214,6 +214,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
   private unsubState?:  () => void;
   private unsubOnline?: () => void;
+  private unsubNoPower?: () => void;
   private unsubOverride?: () => void;
   private unsubMotion?: () => void;
   private unsubReconnect?: () => void;
@@ -247,6 +248,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
   ngOnDestroy(): void {
     this.unsubState?.();
     this.unsubOnline?.();
+    this.unsubNoPower?.();
     this.unsubOverride?.();
     this.unsubMotion?.();
     this.unsubReconnect?.();
@@ -279,12 +281,16 @@ export class DashboardComponent implements OnInit, OnDestroy {
   private subscribeSocket(): void {
     this.unsubState = this.socket.onDeviceState((ev: DeviceStateEvent) => {
       this._devices.update((list) =>
-        list.map((d) => d.id === ev.id ? { ...d, state: ev.state, wattage: ev.wattage, lastChange: changed(d, ev.state) } : d)
+        list.map((d) => d.id === ev.id ? { ...d, state: ev.state, wattage: ev.wattage, lastChange: changed(d, ev.state), noPower: ev.state ? d.noPower : false } : d)
       );
       this.refreshAutoOff();
     });
 
     this.unsubMotion = this.socket.onMotion(() => this.refreshAutoOff());
+
+    this.unsubNoPower = this.socket.onDeviceNoPower((ev) => {
+      this._devices.update((list) => list.map((d) => d.id === ev.id ? { ...d, noPower: ev.noPower } : d));
+    });
 
     this.unsubOnline = this.socket.onDeviceOnline((ev: DeviceOnlineEvent) => {
       this._devices.update((list) =>

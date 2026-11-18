@@ -24,6 +24,9 @@ export interface OverrideRequest { device: Device; durationMinutes: number; }
     .dot.offline { background: var(--red); }
     .dot.on.door { background: #f59e0b; box-shadow: 0 0 6px #f59e0b; }
     .detail.door-open { color: #fbbf24; }
+    .dot.on.no-power { background: #f59e0b; box-shadow: 0 0 6px #f59e0b; }
+    .detail.no-power { color: #fbbf24; }
+    .no-power-help { font-size: 0.8rem; color: #fbbf24; line-height: 1.4; margin: 0; }
 
     .name {
       flex: 1; min-width: 0; padding: 0.3rem 0; background: transparent; color: var(--text);
@@ -67,10 +70,10 @@ export interface OverrideRequest { device: Device; durationMinutes: number; }
   `],
   template: `
     <div class="row" [class.offline]="!device().online">
-      <span class="dot" [class.on]="device().online && device().state" [class.door]="isDoor()" [class.offline]="!device().online"></span>
+      <span class="dot" [class.on]="device().online && device().state" [class.door]="isDoor()" [class.no-power]="noPower()" [class.offline]="!device().online"></span>
       <button class="name" type="button" [attr.aria-expanded]="open()" (click)="togglePanel()">
         <span class="alias">{{ device().alias }}</span>
-        @if (detail(); as text) { <span class="detail" [class.timer]="device().overrideUntil || autoOffText()" [class.door-open]="isDoor() && device().online && device().state && !device().overrideUntil && !autoOffText()">{{ text }}</span> }
+        @if (detail(); as text) { <span class="detail" [class.timer]="device().overrideUntil || autoOffText()" [class.door-open]="isDoor() && device().online && device().state && !device().overrideUntil && !autoOffText()" [class.no-power]="noPower()">{{ text }}</span> }
       </button>
       <button class="timer-btn" type="button" [class.active]="device().overrideUntil || device().autoOff"
               [attr.aria-label]="'Timer for ' + device().alias" (click)="togglePanel()">⏱</button>
@@ -91,6 +94,11 @@ export interface OverrideRequest { device: Device; durationMinutes: number; }
 
     @if (open()) {
       <div class="panel">
+        @if (noPower()) {
+          <p class="no-power-help">HomeHub has this on, but it isn't drawing any power. A wall switch on the same
+            circuit may be off: flip it to turn the light on. If this keeps happening, that switch is wired
+            into the light's power instead of to HomeHub's switch, and needs rewiring.</p>
+        }
         @if (isThermostat()) { <app-thermostat-control [deviceId]="device().id" /> }
         <span class="panel-label">
           {{ device().model ?? device().driverType }}
@@ -191,9 +199,13 @@ export class DeviceRowComponent implements OnDestroy {
     return `${at} · ${cause}`;
   });
 
+  /** On, but drawing no power: a wall switch past HomeHub's has cut it. */
+  readonly noPower = computed(() => { const d = this.device(); return d.online && d.state && !!d.noPower; });
+
   readonly detail = computed(() => {
     const device = this.device();
     if (!device.online) return 'Offline';
+    if (this.noPower()) return 'On, but no power';
     const autoOff = this.autoOffText();
     if (autoOff) return autoOff;
     if (device.overrideUntil) {
