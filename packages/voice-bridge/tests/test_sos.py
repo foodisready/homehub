@@ -2,7 +2,7 @@
 import unittest
 
 from homehub_voice import sos
-from homehub_voice.homehub import CommandResult, HomeHubError
+from homehub_voice.homehub import CommandResult, HomeHub, HomeHubError
 from homehub_voice.pipeline import answer
 
 
@@ -139,6 +139,39 @@ class PipelineTest(unittest.TestCase):
         self.assertEqual(hub.calls[0][0], 'cancel')
         self.assertIn('Cancel.', hub.sent, 'goes on to HomeHub as a command')
         self.assertFalse(a.handled)
+
+
+
+class AddressTest(unittest.TestCase):
+    """v0.1.86 to v0.2.7 sent calls for help to /internal/voice/family/sos, which HomeHub doesn't
+    answer: every one failed. HomeHub's address is /internal/voice/sos."""
+
+    def test_a_call_for_help_goes_to_homehubs_address(self):
+        import io, json, urllib.request
+        sent = []
+
+        def fake_urlopen(req, timeout=None):
+            sent.append((req.full_url, json.loads(req.data)))
+            return io.BytesIO(b'{"state": "raised"}')
+
+        real = urllib.request.urlopen
+        urllib.request.urlopen = fake_urlopen
+        try:
+            res = HomeHub('http://localhost:3000', 'k').sos('raise', 'Kitchen', 'en', 'I need help')
+        finally:
+            urllib.request.urlopen = real
+        self.assertEqual(res, {'state': 'raised'})
+        self.assertEqual(sent[0][0], 'http://localhost:3000/internal/voice/sos')
+        self.assertEqual(sent[0][1]['action'], 'raise')
+
+    def test_a_failed_call_for_help_is_logged(self):
+        class Down:
+            def sos(self, *a):
+                raise HomeHubError('HomeHub answered 404')
+        with self.assertLogs('homehub-voice', 'ERROR') as logs:
+            r = sos.run(sos.RAISE, 'I need help', 'en', Down(), 'Kitchen')
+        self.assertIn("HomeHub didn't take it: HomeHub answered 404", logs.output[0])
+        self.assertTrue(r.handled)
 
 
 if __name__ == '__main__':

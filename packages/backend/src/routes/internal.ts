@@ -150,7 +150,9 @@ internalRouter.post('/voice/confirm/:id', async (req: Request, res: Response) =>
 // A call for help heard by a speaker, or "cancel" after one. The bridge says the reply in the
 // language it heard, from `state`: raised, already (one is going), cancelled, or nothing (no call
 // to cancel, so "cancel" wasn't meant for this).
-internalRouter.post('/voice/sos', async (req: Request, res: Response) => {
+// Bridges from v0.1.86 to v0.2.7 sent it to /internal/voice/family/sos, which HomeHub didn't
+// answer, so their calls for help failed: that address works too, for one left on an old image.
+internalRouter.post(['/voice/sos', '/voice/family/sos'], async (req: Request, res: Response) => {
   const { action, where, lang, heard } = (req.body ?? {}) as { action?: unknown; where?: unknown; lang?: unknown; heard?: unknown };
   const str = (v: unknown) => (typeof v === 'string' ? v : null);
   const language = (VOICE_LANGUAGES as readonly string[]).includes(str(lang) ?? '') ? (lang as VoiceLanguage) : null;

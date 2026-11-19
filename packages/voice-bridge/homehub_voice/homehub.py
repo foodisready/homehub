@@ -115,7 +115,7 @@ class HomeHub:
 
     def sos(self, action: str, where: str, lang: str, heard: str) -> dict:
         """A call for help ('raise') or 'cancel', heard by the speaker `where`. Returns HomeHub's answer: its state."""
-        return self._call('/family/sos', {'action': action, 'where': where, 'lang': lang, 'heard': heard})
+        return self._call('/sos', {'action': action, 'where': where, 'lang': lang, 'heard': heard})
 
     def answer_confirm(self, confirm_id: str, answer: str) -> dict | None:
         """The yes or no to HomeHub's "Turn on …?". Its answer says what to say; None if it isn't asking any more."""

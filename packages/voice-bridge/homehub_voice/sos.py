@@ -9,6 +9,7 @@ how to cancel, or who is coming once someone is on it.
 """
 from __future__ import annotations
 
+import logging
 import re
 import time
 from dataclasses import dataclass
@@ -16,6 +17,8 @@ from dataclasses import dataclass
 from . import cantonese as yue
 from . import mandarin as zh
 from . import vietnamese as vi
+
+log = logging.getLogger('homehub-voice')
 
 RAISE, CANCEL = 'raise', 'cancel'
 
@@ -172,7 +175,9 @@ def run(k: str, heard: str, lang: str, homehub, where: str) -> SosResult | None:
     t = time.monotonic()
     try:
         res = homehub.sos(k, where, lang, heard)
-    except HomeHubError:
+    except HomeHubError as e:
+        # Never quietly: a call for help that HomeHub didn't take is the worst thing to miss.
+        log.error('call for help (%s) heard on %s, but HomeHub didn\'t take it: %s', k, where, e)
         if k == CANCEL:
             return None
         # Said whatever the speaker's filters think: someone may need to hear it.

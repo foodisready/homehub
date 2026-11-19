@@ -323,6 +323,40 @@ describe('/internal/voice', () => {
     db.prepare('DELETE FROM checkins WHERE id = ?').run(checkin);
   });
 
+  it('takes a call for help from a speaker, at its address and at the one older bridges used', async () => {
+    const sos = await import('../family/sos');
+    const pushed: string[] = [];
+    sos.setSendersForTests({ push: (title) => { pushed.push(title); }, email: async () => 0, texts: async () => 0, announce: () => {} });
+    try {
+      for (const p of ['/internal/voice/sos', '/internal/voice/family/sos']) {
+        getDb().exec('DELETE FROM sos_alerts');
+        const res = await fetch(`${baseUrl}${p}`, { method: 'POST', headers: key, body: JSON.stringify({ action: 'raise', where: 'Kitchen', lang: 'en', heard: 'I need help' }) });
+        assert.equal(res.status, 200, p);
+        assert.equal(((await res.json()) as { state: string }).state, 'raised', p);
+        const cancel = await fetch(`${baseUrl}${p}`, { method: 'POST', headers: key, body: JSON.stringify({ action: 'cancel' }) });
+        assert.equal(((await cancel.json()) as { state: string }).state, 'cancelled', p);
+      }
+      assert.equal(pushed.length >= 2, true, 'the family was told each time');
+    } finally {
+      sos.setSendersForTests(null);
+      getDb().exec('DELETE FROM sos_alerts');
+    }
+  });
+
+  it('answers every address the voice bridge calls', () => {
+    // The bridge's client, next to this package in the repository. A path HomeHub doesn't answer
+    // fails quietly on the speaker: that's how calls for help by voice failed for a week.
+    const client = path.join(__dirname, '../../../voice-bridge/homehub_voice/homehub.py');
+    if (!fs.existsSync(client)) return;   // built on its own, without the bridge's source
+    const called = [...fs.readFileSync(client, 'utf8').matchAll(/self\._call\(f?'(\/[^'{]*)/g)].map((m) => m[1].replace(/\/$/, ''));
+    assert.ok(called.length >= 8, `found ${called.length} addresses`);
+    const routes = (internalRouter as unknown as { stack: { route?: { path: string | string[] } }[] }).stack
+      .flatMap((l) => (l.route ? [l.route.path].flat() : []))
+      .filter((r) => r.startsWith('/voice/'))
+      .map((r) => r.slice('/voice'.length).replace(/\/:[^/]+$/, ''));
+    for (const c of called) assert.ok(routes.includes(c), `the bridge calls /internal/voice${c}, which HomeHub doesn't answer`);
+  });
+
   it('gives the bridge its settings, and a new version when they change', async () => {
     const vb = await import('../system/voice-bridge');
     const config = async () => (await fetch(`${baseUrl}/internal/voice/config`, { headers: key })).json() as Promise<{ enabled: boolean; languages: string[]; version: string }>;
