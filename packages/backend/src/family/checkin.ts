@@ -5,6 +5,8 @@ import { isActiveServer } from '../system/role';
 import { awayPausesFamily } from '../home/away-state';
 import { sendPushToAll } from '../push/push.service';
 import { emailConfigured, emailRecipients, sendEmail } from '../notifications/providers/email';
+import { getVoiceSettings, type VoiceLanguage } from '../system/voice-bridge';
+import { announce, announcementStatus, voiceFor, type ReminderLanguage } from './reminders';
 
 /**
  * A daily check-in for someone who lives alone: if nothing at home shows they're up and about
@@ -18,6 +20,11 @@ import { emailConfigured, emailRecipients, sendEmail } from '../notifications/pr
  * - a voice command that was understood. A miss doesn't count: a TV left on wakes the speaker.
  * - water starting to run, from a flow sensor: a tap, a toilet, the kettle.
  * - motion from a motion sensor. Ring cameras don't count by default: they see the street.
+ *
+ * It can ask at home first: at the check time a speaker asks "亞娘，你冇事吖嘛？" and listens. "冇事"
+ * (any "I'm OK", in the person's language) means no alert; "唔舒服" (I'm not OK) tells the family at
+ * once; no answer, and it asks once more 5 minutes later, then tells them. Any other sign while it
+ * waits counts too. Speakers that can't listen straight after need the wake word first.
  *
  * Checked by the active server only, so a paired backup doesn't send the same alert again.
  * Days and times are local: the process clock runs in the home's time zone.
@@ -35,18 +42,24 @@ export interface Checkin {
   appUsers: string[] | null;
   voice: boolean;
   water: boolean;
+  /** Ask at home before telling the family. */
+  askFirst: boolean;
+  /** The language to ask in: 'auto' reads it from the name. */
+  askLang: ReminderLanguage;
   pausedUntil: string | null;
   lastDay: string | null;
-  lastResult: 'ok' | 'alerted' | 'all-clear' | 'missed' | null;
+  lastResult: 'ok' | 'asking' | 'alerted' | 'all-clear' | 'missed' | null;
   lastSignAt: string | null;
   lastSign: string | null;
   alertedAt: string | null;
+  /** The question asked at home on lastDay, if it asked. */
+  lastAsk: CheckinAsk | null;
 }
 
 interface Row {
   id: number; name: string; enabled: number; from_time: string; by_time: string; days: string;
   devices: string | null; motion: string | null; app_users: string | null; voice: number; water: number;
-  paused_until: string | null; last_day: string | null; last_result: string | null;
+  ask_first: number; ask_lang: string; paused_until: string | null; last_day: string | null; last_result: string | null;
   last_sign_at: string | null; last_sign: string | null; alerted_at: string | null;
 }
 
@@ -82,8 +95,10 @@ function toCheckin(r: Row): Checkin {
     id: r.id, name: r.name, enabled: !!r.enabled, from: r.from_time, by: r.by_time,
     days: [...r.days].map(Number), devices: json<number[]>(r.devices), motion: json<number[]>(r.motion),
     appUsers: json<string[]>(r.app_users), voice: !!r.voice, water: !!r.water,
+    askFirst: !!r.ask_first, askLang: (r.ask_lang || 'auto') as ReminderLanguage,
     pausedUntil: r.paused_until, lastDay: r.last_day, lastResult: r.last_result as Checkin['lastResult'],
     lastSignAt: r.last_sign_at, lastSign: r.last_sign, alertedAt: r.alerted_at,
+    lastAsk: r.last_day ? todaysAsk(r.id, r.last_day) : null,
   };
 }
 
@@ -141,27 +156,33 @@ export function saveCheckin(input: unknown, id?: number): Checkin {
     throw new CheckinError('days must be a list of weekdays, 0 (Sunday) to 6');
   }
   const enabled = 'enabled' in b ? b['enabled'] === true : existing?.enabled ?? true;
+  const askFirst = 'askFirst' in b ? b['askFirst'] === true : existing?.askFirst ?? false;
+  const askLang = (b['askLang'] ?? existing?.askLang ?? 'auto') as ReminderLanguage;
+  if (!ASK_LANGUAGES.includes(askLang)) throw new CheckinError(`askLang must be one of ${ASK_LANGUAGES.join(', ')}`);
+  if (askFirst && !askLanguage(name, askLang)) {
+    throw new CheckinError('To ask at home, turn on voice control and the language to ask in, in Settings → Voice control');
+  }
   const paused = 'pausedUntil' in b ? b['pausedUntil'] : existing?.pausedUntil ?? null;
   if (paused !== null && (typeof paused !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(paused))) throw new CheckinError('pausedUntil must be a day, YYYY-MM-DD, or null');
   const values = [
     name, enabled ? 1 : 0, s.from, s.by, [...new Set(days as number[])].sort().join(''),
     s.devices ? JSON.stringify(s.devices) : null, s.motion ? JSON.stringify(s.motion) : null,
-    s.appUsers ? JSON.stringify(s.appUsers) : null, s.voice ? 1 : 0, s.water ? 1 : 0, paused,
+    s.appUsers ? JSON.stringify(s.appUsers) : null, s.voice ? 1 : 0, s.water ? 1 : 0, paused, askFirst ? 1 : 0, askLang,
   ];
   const db = getDb();
   if (existing) {
     // A new check time today is checked again, unless an alert already went out.
     const recheck = existing.lastDay === dayKey(new Date()) && existing.lastResult !== 'alerted' && existing.lastResult !== 'all-clear'
-      && (existing.by !== s.by || existing.from !== s.from);
+      && existing.lastResult !== 'asking' && (existing.by !== s.by || existing.from !== s.from);
     db.prepare(`UPDATE checkins SET name = ?, enabled = ?, from_time = ?, by_time = ?, days = ?, devices = ?, motion = ?,
-      app_users = ?, voice = ?, water = ?, paused_until = ?${recheck ? ', last_day = NULL, last_result = NULL' : ''} WHERE id = ?`).run(...values, existing.id);
+      app_users = ?, voice = ?, water = ?, paused_until = ?, ask_first = ?, ask_lang = ?${recheck ? ', last_day = NULL, last_result = NULL' : ''} WHERE id = ?`).run(...values, existing.id);
     return getCheckin(existing.id)!;
   }
   // A new check-in starts tomorrow if today's check time has passed: no alert for a morning it wasn't watching.
   const today = dayKey(new Date());
   const startsLater = Date.now() >= localTime(today, s.by);
-  const r = db.prepare(`INSERT INTO checkins (name, enabled, from_time, by_time, days, devices, motion, app_users, voice, water, paused_until, last_day, last_result)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(...values, startsLater ? today : null, null);
+  const r = db.prepare(`INSERT INTO checkins (name, enabled, from_time, by_time, days, devices, motion, app_users, voice, water, paused_until,
+    ask_first, ask_lang, last_day, last_result) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(...values, startsLater ? today : null, null);
   return getCheckin(Number(r.lastInsertRowid))!;
 }
 
@@ -266,8 +287,12 @@ export function audience(): Audience {
   return { phones, people: rows.map((r) => r.name), emails: emailConfigured() ? emailRecipients().length : 0 };
 }
 
-let tell = async (title: string, body: string): Promise<void> => {
-  sendPushToAll(title, body, { url: '/family' });
+/**
+ * Push and email. An alert is urgent: it reaches a sleeping phone at once, buzzes longer and stays on
+ * screen. The all-clear after it takes its place on the phone.
+ */
+let tell = async (title: string, body: string, urgent = false): Promise<void> => {
+  sendPushToAll(title, body, { url: '/family', tag: 'homehub-checkin', ...(urgent ? { urgent: true } : {}) });
   if (emailConfigured()) {
     await sendEmail({ subject: title, text: `${body}\n\n— HomeHub` }).catch((err) => logger.warn({ err }, 'Check-in email failed'));
   }
@@ -275,7 +300,7 @@ let tell = async (title: string, body: string): Promise<void> => {
 export function setTellForTests(fn: typeof tell): void { tell = fn; }
 
 export async function sendTest(c: Checkin): Promise<Audience> {
-  await tell(`Test: daily check-in for ${c.name}`, `This is how HomeHub will tell you if there's no sign of ${c.name} by ${clock(localTime(dayKey(new Date()), c.by))}. Nothing is wrong.`);
+  await tell(`Test: daily check-in for ${c.name}`, `This is how HomeHub will tell you if there's no sign of ${c.name} by ${clock(localTime(dayKey(new Date()), c.by))}. Nothing is wrong.`, true);
   return audience();
 }
 
@@ -295,9 +320,10 @@ function setResult(id: number, fields: Partial<Record<'last_day' | 'last_result'
 }
 
 /** One check of one check-in. Returns what it did, for tests and the log. */
-export async function checkOne(c: Checkin, now = Date.now()): Promise<'waiting' | 'ok' | 'alerted' | 'all-clear' | 'missed' | 'skipped'> {
+export async function checkOne(c: Checkin, now = Date.now()): Promise<'waiting' | 'ok' | 'asking' | 'alerted' | 'all-clear' | 'missed' | 'skipped'> {
   const today = dayKey(new Date(now));
   if (!c.enabled) return 'skipped';
+  if (c.lastDay === today && c.lastResult === 'asking') return whileAsking(c, today, now);
   // After an alert, the rest of the day is watched for the first sign, to say all is well.
   if (c.lastDay === today && c.lastResult === 'alerted') {
     const since = localTime(today, c.by);
@@ -330,22 +356,157 @@ export async function checkOne(c: Checkin, now = Date.now()): Promise<'waiting' 
     setResult(c.id, { last_day: today, last_result: 'ok', last_sign_at: sign.at, last_sign: sign.what });
     return 'ok';
   }
+  if (c.askFirst) {
+    const lang = askLanguage(c.name, c.askLang);
+    if (lang) {
+      startAsking(c, today, lang, now);
+      setResult(c.id, { last_day: today, last_result: 'asking', last_sign_at: null, last_sign: null });
+      logger.info({ checkin: c.name, lang }, 'Check-in: no activity, asking at home first');
+      return 'asking';
+    }
+    return alert(c, today, now, ' HomeHub couldn\'t ask at home: voice control, or the language to ask in, is off.');
+  }
+  return alert(c, today, now);
+}
+
+async function alert(c: Checkin, today: string, now: number, note = '', title?: string): Promise<'alerted'> {
+  const from = localTime(today, c.from);
+  const by = localTime(today, c.by);
   const share = runningShare(from, by);
   const off = share < MOSTLY_RUNNING ? ' HomeHub was off for part of that time, so it may have missed something.' : '';
   setResult(c.id, { last_day: today, last_result: 'alerted', last_sign_at: null, last_sign: null, alerted_at: new Date(now).toISOString() });
-  logger.warn({ checkin: c.name, running: Math.round(share * 100) }, 'Check-in: no activity, telling the family');
+  logger.warn({ checkin: c.name, running: Math.round(share * 100), note: note.trim() || undefined }, 'Check-in: no activity, telling the family');
   await tell(
-    `No sign of ${c.name} this morning`,
-    `Nothing at home since ${clock(from)}: ${nothingSeen(c)}.${off} You may want to call ${c.name}. HomeHub will tell you when it sees activity.`,
+    title ?? `No sign of ${c.name} this morning`,
+    `Nothing at home since ${clock(from)}: ${nothingSeen(c)}.${off}${note} You may want to call ${c.name}. HomeHub will tell you when it sees activity.`,
+    true,
   );
   return 'alerted';
 }
 
-export async function checkAll(now = Date.now()): Promise<void> {
-  if (!isActiveServer()) return;
-  for (const c of listCheckins()) {
-    try { await checkOne(c, now); } catch (err) { logger.error({ err, checkin: c.name }, 'Check-in failed'); }
+// ── Asking at home first ────────────────────────────────────────
+
+export const ASK_LANGUAGES: ReminderLanguage[] = ['auto', 'en', 'yue', 'zh', 'vi'];
+/** How long to wait for an answer before asking again, and how many times to ask. */
+export const CHECKIN_ASK_AGAIN_MS = 5 * 60_000;
+export const CHECKIN_MAX_ASKS = 2;
+
+/** The language to ask in, if voice control is on and has it. 'auto' reads it from the name: 亞娘 is Cantonese. */
+export function askLanguage(name: string, lang: ReminderLanguage): VoiceLanguage | null {
+  const voice = getVoiceSettings();
+  if (!voice.enabled) return null;
+  return voiceFor(name, lang, voice.languages);
+}
+
+/** "亞娘，你冇事吖嘛？冇事就講「冇事」。" The answer it suggests is one the speaker understands. */
+export function askText(name: string, lang: VoiceLanguage): string {
+  switch (lang) {
+    case 'yue': return `${name}，你冇事吖嘛？冇事就講「冇事」。`;
+    case 'zh': return `${name}，你还好吗？没事就说“没事”。`;
+    case 'vi': return `${name} ơi, có khỏe không? Không sao thì nói “không sao” nhé.`;
+    default: return `${name}, are you OK? If you're fine, say "I'm OK".`;
   }
+}
+
+interface AskRow { id: number; checkin_id: number; day: string; lang: string; first_at: string; last_at: string; asks: number; said: number; answer: string | null; answered_at: string | null; closed_at: string | null }
+
+/** Today's question, if it asked. */
+export interface CheckinAsk { firstAt: string; asks: number; said: number; answer: 'yes' | 'no' | null; answeredAt: string | null; closed: boolean }
+
+export function todaysAsk(checkinId: number, today: string): CheckinAsk | null {
+  const a = getDb().prepare('SELECT * FROM checkin_asks WHERE checkin_id = ? AND day = ?').get(checkinId, today) as AskRow | undefined;
+  return a ? { firstAt: a.first_at, asks: a.asks, said: a.said, answer: a.answer as CheckinAsk['answer'], answeredAt: a.answered_at, closed: !!a.closed_at } : null;
+}
+
+/** The announcement saying each question, to learn whether a speaker said it. */
+const saying = new Map<number, string>();
+
+function startAsking(c: Checkin, today: string, lang: VoiceLanguage, now: number): void {
+  const at = new Date(now).toISOString();
+  const db = getDb();
+  db.prepare('DELETE FROM checkin_asks WHERE checkin_id = ? AND day = ?').run(c.id, today);
+  const id = Number(db.prepare('INSERT INTO checkin_asks (checkin_id, day, lang, first_at, last_at) VALUES (?, ?, ?, ?, ?)')
+    .run(c.id, today, lang, at, at).lastInsertRowid);
+  saying.set(id, announce(askText(c.name, lang), lang, null, Date.now(), id, 'checkin'));
+}
+
+function closeAsk(id: number, now: number): void {
+  saying.delete(id);
+  getDb().prepare('UPDATE checkin_asks SET closed_at = ? WHERE id = ?').run(new Date(now).toISOString(), id);
+}
+
+/** Whether a speaker said the last question: true, false (none could), or null (not known yet, or forgotten after a restart). */
+function lastSaid(a: AskRow): boolean | null {
+  const announcement = saying.get(a.id);
+  const st = announcement ? announcementStatus(announcement) : null;
+  if (!st || st.state === 'waiting') return null;
+  saying.delete(a.id);
+  if (st.state === 'said') getDb().prepare('UPDATE checkin_asks SET said = said + 1 WHERE id = ?').run(a.id);
+  return st.state === 'said';
+}
+
+async function whileAsking(c: Checkin, today: string, now: number): Promise<'asking' | 'ok' | 'alerted'> {
+  const a = getDb().prepare('SELECT * FROM checkin_asks WHERE checkin_id = ? AND day = ?').get(c.id, today) as AskRow | undefined;
+  if (!a) return alert(c, today, now);
+  const first = Date.parse(a.first_at);
+  // Something at home while it waited, or since the morning began: they're up.
+  const sign = signsBetween(c, localTime(today, c.from), now, 1)[0];
+  if (sign || a.answer === 'yes') {
+    closeAsk(a.id, now);
+    const what = sign ? sign.what : `said they're OK when asked at home`;
+    setResult(c.id, { last_result: 'ok', last_sign_at: sign ? sign.at : a.answered_at, last_sign: what });
+    logger.info({ checkin: c.name, sign: what }, 'Check-in: fine after asking at home');
+    return 'ok';
+  }
+  if (a.answer === 'no') {
+    closeAsk(a.id, now);
+    return alert(c, today, now, ` When HomeHub asked at home at ${clock(first)}, ${c.name} said they're not OK.`, `${c.name} said they're not OK`);
+  }
+  const said = lastSaid(a);
+  const saidAny = a.said + (said ? 1 : 0) > 0;
+  if (said === false && !saidAny) {
+    closeAsk(a.id, now);
+    return alert(c, today, now, ' HomeHub tried to ask at home first, but no speaker could say it.');
+  }
+  if (now - Date.parse(a.last_at) < CHECKIN_ASK_AGAIN_MS) return 'asking';
+  if (a.asks < CHECKIN_MAX_ASKS) {
+    const lang = a.lang as VoiceLanguage;
+    getDb().prepare('UPDATE checkin_asks SET asks = asks + 1, last_at = ? WHERE id = ?').run(new Date(now).toISOString(), a.id);
+    saying.set(a.id, announce(askText(c.name, lang), lang, null, Date.now(), a.id, 'checkin'));
+    return 'asking';
+  }
+  closeAsk(a.id, now);
+  const times = [first, Date.parse(a.last_at)].filter((t, i, all) => all.indexOf(t) === i).map(clock).join(' and ');
+  return alert(c, today, now, saidAny
+    ? ` HomeHub asked at home at ${times} and nobody answered.`
+    : ' HomeHub tried to ask at home first, but it isn\'t known whether a speaker said it.');
+}
+
+/** Questions waiting for an answer, for the bridge: "冇事" or "唔舒服" heard now answers one. */
+export function openCheckinAsks(): { id: number; lang: VoiceLanguage; kind: 'checkin' }[] {
+  const rows = getDb().prepare('SELECT id, lang FROM checkin_asks WHERE closed_at IS NULL AND answer IS NULL').all() as { id: number; lang: string }[];
+  return rows.map((r) => ({ id: r.id, lang: r.lang as VoiceLanguage, kind: 'checkin' }));
+}
+
+/** An answer heard: yes (I'm OK) or no (I'm not). The next check acts on it, straight away. False if it isn't asking. */
+export function answerCheckinAsk(id: number, answer: 'yes' | 'no', now = Date.now()): boolean {
+  const r = getDb().prepare('UPDATE checkin_asks SET answer = ?, answered_at = ? WHERE id = ? AND closed_at IS NULL AND answer IS NULL')
+    .run(answer, new Date(now).toISOString(), id);
+  if (!r.changes) return false;
+  void checkAll(now);
+  return true;
+}
+
+/** One check at a time: an answer heard checks straight away, and mustn't race the minute's check. */
+let checking: Promise<void> = Promise.resolve();
+export function checkAll(now?: number): Promise<void> {
+  checking = checking.then(async () => {
+    if (!isActiveServer()) return;
+    for (const c of listCheckins()) {
+      try { await checkOne(c, now ?? Date.now()); } catch (err) { logger.error({ err, checkin: c.name }, 'Check-in failed'); }
+    }
+  });
+  return checking;
 }
 
 let timer: ReturnType<typeof setInterval> | undefined;

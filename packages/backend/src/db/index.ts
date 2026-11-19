@@ -617,4 +617,25 @@ function migrate(db: Database.Database): void {
     );
   `);
   try { db.exec('ALTER TABLE reminders ADD COLUMN ask INTEGER NOT NULL DEFAULT 0'); } catch {}
+
+  // A check-in can ask at home before telling the family: "亞娘，你冇事吖嘛？"
+  try { db.exec('ALTER TABLE checkins ADD COLUMN ask_first INTEGER NOT NULL DEFAULT 0'); } catch {}
+  try { db.exec("ALTER TABLE checkins ADD COLUMN ask_lang TEXT NOT NULL DEFAULT 'auto'"); } catch {}
+  db.exec(`
+    -- A check-in's question at home, one row a day: answer 'yes' (I'm OK) or 'no' (I'm not).
+    CREATE TABLE IF NOT EXISTS checkin_asks (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      checkin_id   INTEGER NOT NULL REFERENCES checkins(id) ON DELETE CASCADE,
+      day          TEXT    NOT NULL,
+      lang         TEXT    NOT NULL,
+      first_at     TEXT    NOT NULL,
+      last_at      TEXT    NOT NULL,
+      asks         INTEGER NOT NULL DEFAULT 1,
+      said         INTEGER NOT NULL DEFAULT 0,   -- how many of the asks a speaker said
+      answer       TEXT,
+      answered_at  TEXT,
+      closed_at    TEXT,
+      UNIQUE(checkin_id, day)
+    );
+  `);
 }

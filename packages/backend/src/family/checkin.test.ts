@@ -211,6 +211,114 @@ describe('daily check-in', () => {
   });
 
   describe('the last two weeks', () => {
+    describe('asking at home first', () => {
+      let r: typeof import('./reminders');
+      const voice = (on: boolean, languages = ['en', 'yue']) => db.prepare("INSERT INTO settings (key, value) VALUES ('voice_settings', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+        .run(JSON.stringify({ enabled: on, languages }));
+      const asked = () => r.pendingAnnouncements().filter((a) => a.askKind === 'checkin');
+      const sayIt = (said: string[] = ['Living room']) => { for (const a of asked()) r.announcementDone(a.id, { said }); };
+      const make = (s: Record<string, unknown> = {}) => {
+        const made = c.saveCheckin({ name: 'Mom', ...base, ...s });
+        db.prepare('UPDATE checkins SET last_day = NULL, last_result = NULL WHERE id = ?').run(made.id);
+        return c.getCheckin(made.id)!;
+      };
+      const askIt = () => make({ name: '亞娘', askFirst: true });
+
+      before(async () => { r = await import('./reminders'); });
+      beforeEach(() => { voice(true); r.clearQueueForTests(); db.exec('DELETE FROM checkin_asks'); });
+
+      it('asks in Cantonese at the check time instead of telling the family, and "冇事" means all is well', async () => {
+        const ci = askIt();
+        running(at(16, 0), at(16, 12));
+        assert.equal(await c.checkOne(ci, at(16, 10)), 'asking');
+        assert.equal(told.length, 0);
+        assert.deepEqual(asked().map((a) => [a.text, a.lang]), [['亞娘，你冇事吖嘛？冇事就講「冇事」。', 'yue']]);
+        const open = c.openCheckinAsks();
+        assert.equal(open.length, 1);
+        assert.deepEqual([open[0].lang, open[0].kind], ['yue', 'checkin']);
+        assert.equal(asked()[0].ask, open[0].id, 'the speaker listens for the answer to this question');
+        sayIt();
+        assert.equal(await c.checkOne(c.getCheckin(ci.id)!, at(16, 10, 1)), 'asking');
+
+        assert.equal(c.answerCheckinAsk(open[0].id, 'yes', at(16, 10, 2)), true);
+        assert.equal(c.answerCheckinAsk(open[0].id, 'yes', at(16, 10, 2)), false, 'answered already');
+        assert.equal(await c.checkOne(c.getCheckin(ci.id)!, at(16, 10, 2)), 'ok');
+        const saved = c.getCheckin(ci.id)!;
+        assert.equal(saved.lastSign, "said they're OK when asked at home");
+        assert.equal(saved.lastAsk?.answer, 'yes');
+        assert.deepEqual(c.openCheckinAsks(), []);
+        assert.equal(told.length, 0);
+      });
+
+      it('"I\'m not OK" tells the family at once, urgently', async () => {
+        const ci = askIt();
+        running(at(16, 0), at(16, 12));
+        await c.checkOne(ci, at(16, 10));
+        sayIt();
+        c.answerCheckinAsk(c.openCheckinAsks()[0].id, 'no', at(16, 10, 1));
+        assert.equal(await c.checkOne(c.getCheckin(ci.id)!, at(16, 10, 1)), 'alerted');
+        assert.equal(told[0].title, "亞娘 said they're not OK");
+        assert.match(told[0].body, /When HomeHub asked at home at 10:00\sAM, 亞娘 said they're not OK\./);
+      });
+
+      it('asks once more after 5 minutes, then tells the family nobody answered', async () => {
+        const ci = askIt();
+        running(at(16, 0), at(16, 12));
+        await c.checkOne(ci, at(16, 10));
+        sayIt();
+        assert.equal(await c.checkOne(c.getCheckin(ci.id)!, at(16, 10, 4)), 'asking');
+        assert.equal(await c.checkOne(c.getCheckin(ci.id)!, at(16, 10, 5)), 'asking');
+        assert.equal(asked().length, 1, 'asked again');
+        sayIt();
+        assert.equal(await c.checkOne(c.getCheckin(ci.id)!, at(16, 10, 9)), 'asking');
+        assert.equal(told.length, 0);
+        assert.equal(await c.checkOne(c.getCheckin(ci.id)!, at(16, 10, 10)), 'alerted');
+        assert.equal(told[0].title, 'No sign of 亞娘 this morning');
+        assert.match(told[0].body, /HomeHub asked at home at 10:00\sAM and 10:05\sAM and nobody answered\./);
+        assert.deepEqual(c.openCheckinAsks(), [], 'a "冇事" now is too late to stop the alert; activity still sends the all-clear');
+        event(1, 'outside', at(16, 10, 20));
+        assert.equal(await c.checkOne(c.getCheckin(ci.id)!, at(16, 10, 21)), 'all-clear');
+      });
+
+      it('any other sign while it asks counts: the kettle, a lamp', async () => {
+        const ci = askIt();
+        running(at(16, 0), at(16, 12));
+        await c.checkOne(ci, at(16, 10));
+        sayIt();
+        db.prepare('INSERT INTO flow_events (sensor_id, start_time, end_time) VALUES (1, ?, ?)').run(sql(at(16, 10, 2)), sql(at(16, 10, 3)));
+        assert.equal(await c.checkOne(c.getCheckin(ci.id)!, at(16, 10, 3)), 'ok');
+        assert.equal(c.getCheckin(ci.id)!.lastSign, 'water used');
+        assert.equal(told.length, 0);
+      });
+
+      it('tells the family at once when no speaker could ask, or voice is off', async () => {
+        const ci = askIt();
+        running(at(16, 0), at(16, 12));
+        await c.checkOne(ci, at(16, 10));
+        sayIt([]);
+        assert.equal(await c.checkOne(c.getCheckin(ci.id)!, at(16, 10, 1)), 'alerted');
+        assert.match(told[0].body, /HomeHub tried to ask at home first, but no speaker could say it\./);
+
+        told.length = 0;
+        const other = make({ name: 'Grandpa', askFirst: true });
+        voice(false);
+        assert.equal(await c.checkOne(other, at(16, 10)), 'alerted');
+        assert.match(told[0].body, /HomeHub couldn't ask at home: voice control, or the language to ask in, is off\./);
+      });
+
+      it('asks in the language chosen, and needs it on in Voice control', () => {
+        assert.equal(c.askText('Mom', 'en'), 'Mom, are you OK? If you\'re fine, say "I\'m OK".');
+        assert.equal(c.askLanguage('亞娘', 'auto'), 'yue');
+        assert.equal(c.askLanguage('Bà Nội', 'auto'), null, 'Vietnamese is off');
+        assert.equal(c.askLanguage('Mom', 'yue'), 'yue');
+        assert.throws(() => c.saveCheckin({ name: 'Bà', ...base, askFirst: true, askLang: 'vi' }), /turn on voice control and the language/);
+        assert.throws(() => c.saveCheckin({ name: 'Bà', ...base, askLang: 'fr' }), /askLang must be one of/);
+        voice(false);
+        assert.throws(() => c.saveCheckin({ name: '亞娘', ...base, askFirst: true }), /turn on voice control/);
+        assert.equal(c.saveCheckin({ name: '亞娘', ...base, askFirst: false }).askFirst, false, 'off needs nothing');
+      });
+    });
+
     it('shows the first sign each day, which days would alert, and mornings HomeHub was off', () => {
       const now = new Date(2026, 10, 15, 12);
       // Nov 1 to 14. HomeHub ran every day but Nov 3.

@@ -1,5 +1,6 @@
 import { announcementDone, answerAsk, openAsks, pendingAnnouncements } from '../family/reminders';
 import { cancel as cancelSos, openAlert as openSos, raise as raiseSos, reach as sosReach } from '../family/sos';
+import { answerCheckinAsk, openCheckinAsks } from '../family/checkin';
 import { Router, Request, Response } from 'express';
 import { reply } from '../nlp/replies';
 import { answerStatusQuestion } from '../nlp/status';
@@ -66,15 +67,18 @@ internalRouter.get('/voice/device-names', (_req: Request, res: Response) => {
 // announcements: reminders due now, for the bridge to say on its speakers; asking: reminders waiting
 // for a yes or no. Neither is part of `version`, which the bridge restarts for.
 internalRouter.get('/voice/config', (_req: Request, res: Response) => {
-  res.json({ ...voiceConfig(), namesVersion: voiceNames().version, announcements: pendingAnnouncements(), asking: openAsks() });
+  res.json({ ...voiceConfig(), namesVersion: voiceNames().version, announcements: pendingAnnouncements(), asking: [...openCheckinAsks(), ...openAsks()] });
 });
 
-// POST /internal/voice/asks/:id  { answer: 'yes' | 'no' }: the answer to a reminder's "done yet?".
-// asking in /voice/config lists the open ones, so a yes or no heard now answers them.
+// POST /internal/voice/asks/:id  { answer: 'yes' | 'no', kind? }: the answer to a reminder's "done yet?",
+// or with kind 'checkin', to a check-in's "are you OK?". asking in /voice/config lists the open ones
+// with their kind, so a yes or no heard now answers them.
 internalRouter.post('/voice/asks/:id', (req: Request, res: Response) => {
-  const answer = (req.body ?? {}).answer;
+  const { answer, kind } = req.body ?? {};
   if (answer !== 'yes' && answer !== 'no') return res.status(400).json({ error: '`answer` must be yes or no', code: 'VALIDATION_ERROR' });
-  if (!answerAsk(Number(req.params['id']), answer, 'voice')) return res.status(404).json({ error: 'Not asking', code: 'NOT_FOUND' });
+  const id = Number(req.params['id']);
+  const done = kind === 'checkin' ? answerCheckinAsk(id, answer) : answerAsk(id, answer, 'voice');
+  if (!done) return res.status(404).json({ error: 'Not asking', code: 'NOT_FOUND' });
   res.json({ ok: true });
 });
 

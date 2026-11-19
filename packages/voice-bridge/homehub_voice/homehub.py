@@ -103,10 +103,10 @@ class HomeHub:
         """How saying a reminder went."""
         self._call(f'/announcements/{urllib.parse.quote(announcement_id)}', {'said': said, **({'error': error} if error else {})})
 
-    def answer_ask(self, ask_id: int, answer: str) -> bool:
-        """The answer to a reminder's "done yet?". False if HomeHub isn't asking it any more."""
+    def answer_ask(self, ask_id: int, answer: str, kind: str = 'reminder') -> bool:
+        """The answer to a reminder's "done yet?", or a check-in's "are you OK?". False if HomeHub isn't asking it any more."""
         try:
-            self._call(f'/asks/{int(ask_id)}', {'answer': answer})
+            self._call(f'/asks/{int(ask_id)}', {'answer': answer, **({'kind': kind} if kind != 'reminder' else {})})
             return True
         except HomeHubError as e:
             if 'answered 404' in str(e):

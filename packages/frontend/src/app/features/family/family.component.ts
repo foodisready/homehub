@@ -81,7 +81,7 @@ type Tone = 'good' | 'bad' | 'warn' | 'plain';
             <div class="card">
               <div class="who">
                 <h3>{{ c.name }}</h3>
-                <span class="muted">{{ c.enabled ? 'Checked by ' + clock(c.by) + ' · ' + days(c.days) : 'Turned off' }}</span>
+                <span class="muted">{{ c.enabled ? 'Checked by ' + clock(c.by) + ' · ' + days(c.days) + (c.askFirst ? ' · Asks at home first' : '') : 'Turned off' }}</span>
               </div>
               @if (today(c); as t) {
                 <div class="today" [class]="'today ' + t.tone">
@@ -268,10 +268,19 @@ export class FamilyComponent implements OnInit, OnDestroy {
     }
     if (c.lastDay === today) {
       const sign = c.lastSignAt ? `${timeIn(c.lastSignAt, tz)}: ${c.lastSign}` : '';
+      const ask = c.lastAsk;
+      const told = `The family was told at ${c.alertedAt ? timeIn(c.alertedAt, tz) : by}.`;
       switch (c.lastResult) {
-        case 'ok': return { tone: 'good', text: `Today: up and about. First activity at ${sign}.` };
+        case 'ok':
+          if (ask?.answer === 'yes') return { tone: 'good', text: `Today: no activity by ${by}, so HomeHub asked at home. ${c.name} said they’re OK at ${ask.answeredAt ? timeIn(ask.answeredAt, tz) : by}.` };
+          if (ask) return { tone: 'good', text: `Today: no activity by ${by}, so HomeHub asked at home. Then activity at ${sign}.` };
+          return { tone: 'good', text: `Today: up and about. First activity at ${sign}.` };
+        case 'asking': return { tone: 'warn', text: `Today: no activity by ${by}, so HomeHub is asking at home${ask && ask.asks > 1 ? ' again' : ''}. The family is told if nobody says they’re OK.` };
         case 'all-clear': return { tone: 'good', text: `Today: no activity by ${by}, so the family was told. Then activity at ${sign}.` };
-        case 'alerted': return { tone: 'bad', text: `Today: no activity by ${by}. The family was told at ${c.alertedAt ? timeIn(c.alertedAt, tz) : by}. HomeHub will say when it sees activity.` };
+        case 'alerted':
+          if (ask?.answer === 'no') return { tone: 'bad', text: `Today: ${c.name} said they’re not OK when HomeHub asked at home. ${told}` };
+          if (ask) return { tone: 'bad', text: `Today: no activity by ${by}, and nobody answered when HomeHub asked at home. ${told} HomeHub will say when it sees activity.` };
+          return { tone: 'bad', text: `Today: no activity by ${by}. ${told} HomeHub will say when it sees activity.` };
         case 'missed': return { tone: 'warn', text: `Today: HomeHub was off at ${by}, so it couldn’t check.` };
         case 'away': return { tone: 'plain', text: 'Today: not checked, Away mode was on.' };
         default: return { tone: 'plain', text: `Checks at ${by} tomorrow.` };

@@ -402,6 +402,32 @@ With a day back, Away mode ends by itself an hour before (or the time you choose
 
 The day back is in your home's time zone, even when you set it from a phone somewhere else. While automations are paused (**Pause automations**), Away mode changes no devices.
 
+## Daily check-in
+
+For someone who lives alone. Open **Family**, then **Daily check-in**, enter who it's for, a time to start looking and a time to check by, and the days. If nothing at home shows they're up by that time, everyone with HomeHub notifications on, and the email addresses for alerts, are told. They're told again at the first sign of activity after that.
+
+Signs they're up: lights and plugs switched by a person (at the wall, by voice or in an app, not by schedules or timers), voice commands HomeHub understood, water used (with a water sensor) and motion sensors. The last two weeks show what the check-in would have done each day, so you can pick a time that wouldn't have raised a false alarm.
+
+### Ask at home first
+
+Tick **Ask at home first** and, at the check time, the speakers ask before anyone is told, such as "亞娘，你冇事吖嘛？冇事就講「冇事」。" The language comes from the name, or choose one under **Ask in**. It has to be on in **Settings → Voice control**.
+
+- **"I'm OK"** in that language (冇事, 没事, không sao, "I'm fine") means nobody is told.
+- **"I'm not OK"** (唔舒服, 不舒服, mệt, "I don't feel well") tells the family at once.
+- **No answer:** it asks once more 5 minutes later, then tells the family. Any other sign meanwhile, such as a lamp switched or the kettle filled, counts too.
+- If no speaker could say the question, the family is told straight away.
+
+On a speaker that can listen straight after speaking, the person just answers. On others, they say the wake word first, then the answer.
+
+### Make the alert hard to miss
+
+A check-in alert, like a call for help, reaches a sleeping phone at once, buzzes longer and stays on screen until it's opened. To have it ring even when the phone is on Do Not Disturb:
+
+- **Android:** open **Settings → Apps → HomeHub → Notifications** and turn on **Override Do Not Disturb**. If HomeHub isn't listed as an app, it's under Chrome's notifications, as the HomeHub site. Some phones call it **Priority** or **Allow interruptions**.
+- **iPhone:** open **Settings → Focus → Do Not Disturb → Apps** and add **HomeHub** (from the Home Screen).
+
+Then select **Send a test alert** on the check-in to see how it arrives.
+
 ## Scenes
 
 A scene sets several devices at once, and each one can do something different. For example, "Goodnight" could turn off the living room but turn on the porch light.

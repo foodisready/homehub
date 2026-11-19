@@ -62,8 +62,8 @@ class Hub:
         self.accept = accept
         self.answers, self.sent = [], []
 
-    def answer_ask(self, ask_id, answer):
-        self.answers.append((ask_id, answer))
+    def answer_ask(self, ask_id, answer, kind='reminder'):
+        self.answers.append((ask_id, answer) if kind == 'reminder' else (ask_id, answer, kind))
         return self.accept
 
     def sos(self, *a):
@@ -129,6 +129,64 @@ class PipelineTest(unittest.TestCase):
         answer(AUDIO, True, NoWhisper(), hub, Ears('en', 'Turn on the office lamp.'))
         self.assertEqual(hub.answers, [])
         self.assertEqual(hub.sent, ['Turn on the office lamp.'])
+
+
+
+class CheckinKindTest(unittest.TestCase):
+    """"亞娘，你冇事吖嘛？": I'm fine, or I'm not."""
+
+    def test_fine(self):
+        for t, lang in [('冇事', 'yue'), ('我冇事呀', 'yue'), ('冇事冇事', 'yue'), ('好好', 'yue'), ('幾好', 'yue'), ('冇問題', 'yue'),
+                        ('我起咗身喇', 'yue'), ('没事', 'zh'), ('我很好', 'zh'), ('还好', 'zh'), ('Không sao.', 'vi'), ('Tôi khỏe.', 'vi'),
+                        ('Dạ', 'vi'), ('Không sao ạ', 'vi'), ("I'm OK.", 'en'), ("I'm fine, thanks.", 'en'), ('Yes.', 'en'), ('Okay.', 'en')]:
+            self.assertEqual(ask.kind(t, lang, ask.CHECKIN), ask.YES, t)
+
+    def test_not_fine(self):
+        for t, lang in [('唔舒服', 'yue'), ('我好唔舒服', 'yue'), ('我有事', 'yue'), ('不舒服', 'zh'), ('Tôi mệt.', 'vi'), ('Không khỏe', 'vi'),
+                        ("I'm not OK.", 'en'), ("I don't feel well.", 'en'), ('No.', 'en')]:
+            self.assertEqual(ask.kind(t, lang, ask.CHECKIN), ask.NO, t)
+
+    def test_fine_to_a_checkin_is_not_done_to_a_reminder(self):
+        self.assertEqual(ask.kind('冇事', 'yue', ask.CHECKIN), ask.YES)
+        self.assertIsNone(ask.kind('冇事', 'yue'), "冇事 isn't an answer to 食咗藥未呀")
+        self.assertEqual(ask.kind('Không sao', 'vi', ask.CHECKIN), ask.YES)
+        self.assertIsNone(ask.kind('Không sao', 'vi'))
+
+    def test_loose_straight_after(self):
+        self.assertEqual(ask.loose_kind('佢冇事喎', 'yue', ask.CHECKIN), ask.YES)
+        self.assertEqual(ask.loose_kind('有啲唔舒服', 'yue', ask.CHECKIN), ask.NO)
+        self.assertEqual(ask.loose_kind("I'm not okay really", 'en', ask.CHECKIN), ask.NO, '"not OK" has an OK in it')
+        self.assertEqual(ask.loose_kind("yeah I'm doing okay", 'en', ask.CHECKIN), ask.YES)
+        self.assertIsNone(ask.loose_kind('今日天氣好好，我哋出去行吓街啦', 'yue', ask.CHECKIN), 'a long sentence is talk, not an answer')
+        self.assertIsNone(ask.loose_kind('the weather is fine and the kids are good at school today', 'en', ask.CHECKIN))
+
+
+class CheckinPipelineTest(unittest.TestCase):
+    def test_fine_straight_after_the_question(self):
+        hub = Hub(asking=[{'id': 9, 'lang': 'yue', 'kind': 'checkin'}])
+        a = answer(AUDIO, True, NoWhisper(), hub, Ears('yue', '我冇事呀'), asked='ask:9', prefer='yue')
+        self.assertEqual(hub.answers, [(9, 'yes', 'checkin')])
+        self.assertEqual((a.reply, a.handled), ('好，多謝你。', True))
+        self.assertEqual(hub.sent, [])
+
+    def test_not_fine_later_with_the_wake_word(self):
+        hub = Hub(asking=[{'id': 9, 'lang': 'yue', 'kind': 'checkin'}])
+        a = answer(AUDIO, True, NoWhisper(), hub, Ears('yue', '唔舒服'))
+        self.assertEqual(hub.answers, [(9, 'no', 'checkin')])
+        self.assertEqual(a.reply, '我而家通知屋企人。')
+
+    def test_a_checkin_before_a_reminder(self):
+        hub = Hub(asking=[{'id': 3, 'lang': 'yue'}, {'id': 9, 'lang': 'yue', 'kind': 'checkin'}])
+        answer(AUDIO, True, NoWhisper(), hub, Ears('yue', '好'))
+        self.assertEqual(hub.answers, [(9, 'yes', 'checkin')], '好 answers the check-in')
+        hub = Hub(asking=[{'id': 3, 'lang': 'yue'}, {'id': 9, 'lang': 'yue', 'kind': 'checkin'}])
+        answer(AUDIO, True, NoWhisper(), hub, Ears('yue', '食咗喇'))
+        self.assertEqual(hub.answers, [(3, 'yes')], "食咗 is the reminder's")
+
+    def test_no_checkin_waiting(self):
+        hub = Hub(asking=[{'id': 3, 'lang': 'yue'}])
+        answer(AUDIO, True, NoWhisper(), hub, Ears('yue', '冇事'))
+        self.assertEqual(hub.answers, [], "冇事 doesn't answer a reminder")
 
 
 if __name__ == '__main__':

@@ -5,8 +5,12 @@ export interface Checkin {
   from: string; by: string; days: number[];
   devices: number[] | null; motion: number[] | null; appUsers: string[] | null;
   voice: boolean; water: boolean; pausedUntil: string | null;
-  lastDay: string | null; lastResult: 'ok' | 'alerted' | 'all-clear' | 'missed' | 'away' | null;
+  /** Ask at home ("亞娘，你冇事吖嘛？") before telling the family, in this language. */
+  askFirst: boolean; askLang: 'auto' | VoiceLanguage;
+  lastDay: string | null; lastResult: 'ok' | 'asking' | 'alerted' | 'all-clear' | 'missed' | 'away' | null;
   lastSignAt: string | null; lastSign: string | null; alertedAt: string | null;
+  /** The question asked at home on lastDay, if it asked. */
+  lastAsk: { firstAt: string; asks: number; said: number; answer: 'yes' | 'no' | null; answeredAt: string | null; closed: boolean } | null;
 }
 
 export type VoiceLanguage = 'en' | 'yue' | 'zh' | 'vi';

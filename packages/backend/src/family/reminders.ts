@@ -47,7 +47,7 @@ export interface AskDay { id: number; day: string; answer: 'yes' | 'no' | null; 
 interface Row { id: number; text: string; language: string; at_time: string; days: string; enabled: number; last_day: string | null; last_status: string | null; last_said_at: string | null; ask: number }
 
 /** ask: the reminder_asks row this one asks about, so the speaker listens for the answer. */
-export interface Announcement { id: string; text: string; lang: VoiceLanguage; reminderId: number | null; queuedAt: number; ask: number | null }
+export interface Announcement { id: string; text: string; lang: VoiceLanguage; reminderId: number | null; queuedAt: number; ask: number | null; askKind?: 'checkin' }
 
 export class ReminderError extends Error {}
 
@@ -157,16 +157,17 @@ function setStatus(reminderId: number | null, status: string, said: boolean): vo
 }
 
 /** Puts something in the queue for the speakers. Returns its id. */
-export function announce(text: string, lang: VoiceLanguage, reminderId: number | null = null, now = Date.now(), ask: number | null = null): string {
+export function announce(text: string, lang: VoiceLanguage, reminderId: number | null = null, now = Date.now(), ask: number | null = null,
+  askKind?: 'checkin'): string {
   const id = randomUUID();
-  queue.set(id, { id, text, lang, reminderId, queuedAt: now, ask });
+  queue.set(id, { id, text, lang, reminderId, queuedAt: now, ask, ...(askKind ? { askKind } : {}) });
   result(id, { state: 'waiting', said: [], error: null }, now);
   setStatus(reminderId, 'waiting for the speakers', false);
   return id;
 }
 
 /** What the bridge should say now. Old ones it never took are given up on. */
-export function pendingAnnouncements(now = Date.now()): (Pick<Announcement, 'id' | 'text' | 'lang'> & { ask?: number })[] {
+export function pendingAnnouncements(now = Date.now()): (Pick<Announcement, 'id' | 'text' | 'lang' | 'askKind'> & { ask?: number })[] {
   for (const a of queue.values()) {
     if (now - a.queuedAt > ANSWER_WITHIN_MS) {
       queue.delete(a.id);
@@ -175,7 +176,7 @@ export function pendingAnnouncements(now = Date.now()): (Pick<Announcement, 'id'
       logger.warn({ text: a.text }, 'Reminder not said: the voice bridge did not take it');
     }
   }
-  return [...queue.values()].map(({ id, text, lang, ask }) => ({ id, text, lang, ...(ask !== null ? { ask } : {}) }));
+  return [...queue.values()].map(({ id, text, lang, ask, askKind }) => ({ id, text, lang, ...(ask !== null ? { ask } : {}), ...(askKind ? { askKind } : {}) }));
 }
 
 /** The bridge's answer: how many speakers said it, or why none did. */

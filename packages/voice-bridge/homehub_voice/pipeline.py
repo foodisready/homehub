@@ -478,7 +478,7 @@ def special_kind(text: str, lang: str, homehub: Commander) -> str | None:
     """A call for help or "cancel" (sos), or, while a reminder is waiting for one, a yes or no (ask)."""
     if _confirming.get() and confirm.loose_kind(text, lang):
         return CONFIRMED
-    return sos.kind(text, lang) or (ask.kind(text, lang) if getattr(homehub, 'asking', None) else None)
+    return sos.kind(text, lang) or (ask.any_kind(text, lang, homehub) if getattr(homehub, 'asking', None) else None)
 
 
 def special(text: str, lang: str, homehub: Commander, t0: float, where: str, just_asked: bool = False) -> Answer | None:
@@ -498,12 +498,14 @@ def special(text: str, lang: str, homehub: Commander, t0: float, where: str, jus
         # Answered: a second pass of the same words mustn't answer it again.
         _confirming.set(None)
         return Answer(f'{text} → {k}', r.reply, r.handled, t1 - t0, r.homehub_s, lang=r.lang)
-    waiting = ask.waiting(homehub, None)
-    if waiting and (k := (ask.loose_kind if just_asked else ask.kind)(text, lang)):
-        t1 = time.monotonic()
-        r = ask.run(k, lang, homehub, waiting)
-        if r:
-            return Answer(f'{text} → reminder {k}', r.reply, True, t1 - t0, r.homehub_s, lang=lang)
+    # A check-in's "are you OK?" before a reminder's "done yet?": "好" answers the check-in.
+    for what in ask.kinds_waiting(homehub):
+        waiting = ask.waiting(homehub, None, what)
+        if waiting and (k := (ask.loose_kind if just_asked else ask.kind)(text, lang, what)):
+            t1 = time.monotonic()
+            r = ask.run(k, lang, homehub, waiting, what)
+            if r:
+                return Answer(f'{text} → {what} {k}', r.reply, True, t1 - t0, r.homehub_s, lang=lang)
     return None
 
 

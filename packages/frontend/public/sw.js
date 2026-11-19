@@ -21,8 +21,9 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('push', (event) => {
   if (!event.data) return;
   const { title, body, data } = event.data.json();
-  // A call for help stays on screen until it's dealt with, and buzzes longer.
+  // A call for help or a missed check-in stays on screen until it's dealt with, and buzzes longer.
   const urgent = !!(data && data.urgent);
+  const tag = data && typeof data.tag === 'string' ? data.tag : 'homehub-sos';
   event.waitUntil(
     self.registration.showNotification(title, {
       body,
@@ -31,7 +32,7 @@ self.addEventListener('push', (event) => {
       data,
       vibrate: urgent ? [500, 200, 500, 200, 500] : [200, 100, 200],
       requireInteraction: urgent,
-      ...(urgent ? { tag: 'homehub-sos', renotify: true } : {}),
+      ...(urgent ? { tag, renotify: true } : {}),
     })
   );
 });

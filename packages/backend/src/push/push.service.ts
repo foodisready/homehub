@@ -33,6 +33,8 @@ function dispatchToSubs(subs: PushSubRow[], title: string, body: string, data?: 
     webpush.sendNotification(
       { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
       payload,
+      // Urgent ones (a call for help, a missed check-in) reach a sleeping phone straight away.
+      data?.['urgent'] ? { urgency: 'high' } : {},
     ).catch((err: any) => {
       // 410 Gone = subscription expired, remove it
       if (err.statusCode === 410) {

@@ -306,6 +306,23 @@ describe('/internal/voice', () => {
     assert.equal(after.version, config.version);
   });
 
+  it("lists a check-in's question with its kind, and takes the answer to it", async () => {
+    const r = await import('../family/reminders');
+    r.clearQueueForTests();
+    const db = getDb();
+    const checkin = Number(db.prepare("INSERT INTO checkins (name, last_day, last_result) VALUES ('亞娘', '2026-11-19', 'asking')").run().lastInsertRowid);
+    const ask = Number(db.prepare("INSERT INTO checkin_asks (checkin_id, day, lang, first_at, last_at) VALUES (?, '2026-11-19', 'yue', ?, ?)")
+      .run(checkin, new Date().toISOString(), new Date().toISOString()).lastInsertRowid);
+    const config = await (await fetch(`${baseUrl}/internal/voice/config`, { headers: key })).json() as { asking: unknown[] };
+    assert.deepEqual(config.asking, [{ id: ask, lang: 'yue', kind: 'checkin' }]);
+    const answer = (body: unknown) => fetch(`${baseUrl}/internal/voice/asks/${ask}`, { method: 'POST', headers: key, body: JSON.stringify(body) });
+    assert.equal((await answer({ answer: 'yes' })).status, 404, "without its kind, it's a reminder's, and there's no such reminder question");
+    assert.equal((await answer({ answer: 'yes', kind: 'checkin' })).status, 200);
+    assert.equal((db.prepare('SELECT answer FROM checkin_asks WHERE id = ?').get(ask) as { answer: string }).answer, 'yes');
+    assert.equal((await answer({ answer: 'yes', kind: 'checkin' })).status, 404, 'answered already');
+    db.prepare('DELETE FROM checkins WHERE id = ?').run(checkin);
+  });
+
   it('gives the bridge its settings, and a new version when they change', async () => {
     const vb = await import('../system/voice-bridge');
     const config = async () => (await fetch(`${baseUrl}/internal/voice/config`, { headers: key })).json() as Promise<{ enabled: boolean; languages: string[]; version: string }>;

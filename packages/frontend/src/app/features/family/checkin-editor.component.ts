@@ -3,7 +3,7 @@ import { HttpClient } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
 import { Subject, debounceTime, switchMap, catchError, of } from 'rxjs';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { WEEKDAYS, clockText, errorText, minutes, timeIn, type Checkin, type Family, type PreviewDay } from './family.types';
+import { LANGUAGE_NAME, WEEKDAYS, clockText, errorText, minutes, timeIn, type Checkin, type Family, type PreviewDay, type VoiceLanguage } from './family.types';
 
 interface DeviceLite { id: number; alias: string; room: string | null; power?: { excluded: string | null } }
 
@@ -35,6 +35,12 @@ interface DeviceLite { id: number; alias: string; room: string | null; power?: {
     .pick label { display: inline-flex; align-items: center; gap: 0.35rem; white-space: nowrap; }
     .pick input { width: auto; flex: none; margin: 0; }
     .link { background: none; border: none; padding: 0; color: var(--accent); font-size: 0.8rem; }
+    .hint { color: var(--text-muted); font-size: 0.78rem; margin: 0.35rem 0 0 1.55rem; line-height: 1.4; }
+    .ask { margin: 0.5rem 0 0 1.55rem; display: flex; flex-direction: column; gap: 0.4rem; }
+    .ask .f { max-width: 16rem; }
+    .ask .hint { margin-left: 0; }
+    .hint.warn { color: #fcd34d; }
+    .question { margin: 0; padding: 0.55rem 0.75rem; border-radius: 0.5rem; background: var(--bg); font-size: 0.95rem; line-height: 1.45; }
 
     .preview { margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid var(--border); }
     .preview h3 { font-size: 0.95rem; margin: 0 0 0.2rem; }
@@ -73,7 +79,7 @@ interface DeviceLite { id: number; alias: string; room: string | null; power?: {
         <form (submit)="$event.preventDefault(); save()">
           <div class="grid">
             <label class="f wide">Who is it for?
-              <input [(ngModel)]="name" name="name" maxlength="60" placeholder="e.g. Mom, 亞娘" required />
+              <input [(ngModel)]="name" name="name" maxlength="60" placeholder="e.g. Mom, 亞娘" required (ngModelChange)="askFirst && changed()" />
             </label>
             <label class="f">Start looking at
               <input type="time" [(ngModel)]="from" name="from" (ngModelChange)="changed()" required />
@@ -146,6 +152,37 @@ interface DeviceLite { id: number; alias: string; room: string | null; power?: {
             </div>
           </fieldset>
 
+          <fieldset>
+            <legend>Before telling the family</legend>
+            <label class="check">
+              <input type="checkbox" [(ngModel)]="askFirst" name="askFirst" [disabled]="!data().voice.enabled && !askFirst" />
+              <span>Ask at home first
+                <small>At the check time the speakers ask, and listen for the answer. If {{ who() }} says they’re OK, nobody is told. If they say they’re not, the family is told at once. No answer, and it asks again 5 minutes later, then tells the family.</small></span>
+            </label>
+            @if (!data().voice.enabled) {
+              <p class="hint">Needs voice control, in Settings → Voice control.</p>
+            } @else if (askFirst) {
+              <div class="ask">
+                <label class="f">Ask in
+                  <select [(ngModel)]="askLang" name="askLang" (ngModelChange)="changed()">
+                    <option value="auto">From the name</option>
+                    @for (l of data().voice.languages; track l) { <option [value]="l">{{ languageName(l) }}</option> }
+                  </select>
+                </label>
+                @if (question(); as q) {
+                  <p class="question" [attr.lang]="htmlLang(q.lang)">“{{ q.text }}”</p>
+                } @else if (preview()) {
+                  <p class="hint">That language is off in Settings → Voice control.</p>
+                }
+                @if (noSpeakerCanAsk()) {
+                  <p class="hint warn">None of the speakers can speak by themselves, so HomeHub would tell the family straight away.</p>
+                } @else {
+                  <p class="hint">On a speaker that can’t listen straight after speaking, they say the wake word first, then the answer.</p>
+                }
+              </div>
+            }
+          </fieldset>
+
           <section class="preview" aria-live="polite">
             <h3>The last two weeks</h3>
             @if (preview(); as p) {
@@ -205,6 +242,10 @@ export class CheckinEditorComponent implements OnInit {
   useDevices = true;
   voice = true;
   water = true;
+  askFirst = false;
+  askLang: 'auto' | VoiceLanguage = 'auto';
+  /** The question the speakers would ask, from the preview: null when its language is off. */
+  readonly question = signal<{ lang: VoiceLanguage; text: string } | null>(null);
   readonly days = signal<number[]>([0, 1, 2, 3, 4, 5, 6]);
   readonly devices = signal<number[]>([]);
   readonly pickDevices = signal(false);
@@ -230,6 +271,7 @@ export class CheckinEditorComponent implements OnInit {
     if (c) {
       this.name = c.name; this.from = c.from; this.by = c.by; this.days.set(c.days);
       this.voice = c.voice; this.water = c.water;
+      this.askFirst = c.askFirst; this.askLang = c.askLang;
       this.useDevices = !(c.devices && c.devices.length === 0);
       if (c.devices?.length) { this.devices.set(c.devices); this.pickDevices.set(true); }
       if (c.appUsers) this.appUsers.set(c.appUsers);
@@ -237,11 +279,12 @@ export class CheckinEditorComponent implements OnInit {
     }
     this.ask.pipe(
       debounceTime(350),
-      switchMap(() => this.http.post<{ days: PreviewDay[] }>('/api/family/checkins/preview', { ...this.settings(), days: this.days() }).pipe(
+      switchMap(() => this.http.post<{ days: PreviewDay[]; question: { lang: VoiceLanguage; text: string } | null }>('/api/family/checkins/preview',
+        { ...this.settings(), days: this.days(), name: this.name.trim(), askLang: this.askLang }).pipe(
         catchError((e) => { this.previewError.set(errorText(e, 'The last two weeks couldn’t be looked at.')); return of(null); }),
       )),
       takeUntilDestroyed(this.destroyRef),
-    ).subscribe((r) => { if (r) { this.preview.set(r.days); this.previewError.set(''); } else this.preview.set(null); });
+    ).subscribe((r) => { if (r) { this.preview.set(r.days); this.question.set(r.question); this.previewError.set(''); } else this.preview.set(null); });
     this.changed();
   }
 
@@ -265,6 +308,13 @@ export class CheckinEditorComponent implements OnInit {
       voice: this.voice, water: this.water,
     };
   }
+
+  /** The name as typed, for the sentence about asking. */
+  who(): string { return this.name.trim() || 'they'; }
+  languageName(l: VoiceLanguage): string { return LANGUAGE_NAME[l]; }
+  htmlLang(l: VoiceLanguage): string { return { en: 'en', yue: 'zh-HK', zh: 'zh-CN', vi: 'vi' }[l]; }
+  /** Every speaker the bridge knows says it can't announce. None known says nothing either way. */
+  noSpeakerCanAsk(): boolean { const sp = this.data().voice.speakers; return sp.length > 0 && sp.every((s) => s.announce === false); }
 
   toggleDay(d: number): void {
     const has = this.days().includes(d);
@@ -308,7 +358,7 @@ export class CheckinEditorComponent implements OnInit {
   save(): void {
     this.saving.set(true);
     this.error.set('');
-    const body = { name: this.name.trim(), days: this.days(), ...this.settings() };
+    const body = { name: this.name.trim(), days: this.days(), ...this.settings(), askFirst: this.askFirst, askLang: this.askLang };
     const c = this.existing();
     const req = c ? this.http.put(`/api/family/checkins/${c.id}`, body) : this.http.post('/api/family/checkins', body);
     req.subscribe({

@@ -4,7 +4,7 @@ import { getDb } from '../db';
 import { getHomeSettings } from '../home/home-settings';
 import { getVoiceSettings, lastBridgeReport } from '../system/voice-bridge';
 import {
-  audience, CheckinError, deleteCheckin, getCheckin, listCheckins, preview, readSettings, saveCheckin, sendTest,
+  ASK_LANGUAGES, askLanguage, askText, audience, CheckinError, deleteCheckin, getCheckin, listCheckins, preview, readSettings, saveCheckin, sendTest,
 } from '../family/checkin';
 import {
   acknowledge, addButton, cancel, deleteButton, getSosSettings, listButtons, openAlert, personName, raise, recentAlerts,
@@ -114,13 +114,17 @@ sosButtonRouter.get('/:token/:what', async (req: Request, res: Response) => {
 
 // ── Check-ins ───────────────────────────────────────────────────
 
-// POST /api/family/checkins/preview  { from, by, devices, motion, appUsers, voice, water, days? }
-// What these settings would have done on each of the last 14 days.
+// POST /api/family/checkins/preview  { from, by, devices, motion, appUsers, voice, water, days?, name?, askLang? }
+// What these settings would have done on each of the last 14 days, and the question the speakers
+// would ask at home in askLang (null if voice control or that language is off).
 familyRouter.post('/checkins/preview', requireAdmin, (req: Request, res: Response) => {
   try {
     const s = readSettings(req.body ?? {});
     const days = Array.isArray(req.body?.days) ? (req.body.days as unknown[]).filter((d): d is number => Number.isInteger(d)) : undefined;
-    res.json({ days: preview(s, days) });
+    const name = typeof req.body?.name === 'string' && req.body.name.trim() ? req.body.name.trim().slice(0, 60) : 'Mom';
+    const askLang = ASK_LANGUAGES.includes(req.body?.askLang) ? req.body.askLang as ReminderLanguage : 'auto';
+    const lang = askLanguage(name, askLang);
+    res.json({ days: preview(s, days), question: lang ? { lang, text: askText(name, lang) } : null });
   } catch (err) { bad(res, err); }
 });
 
