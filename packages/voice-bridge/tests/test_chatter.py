@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import unittest
 
-from homehub_voice.chatter import looks_like_chatter
+from homehub_voice.chatter import english_talk, looks_like_chatter
 from homehub_voice.speakers import own_words
 
 NAMES = ['Kitchen lights', 'Woman statue', 'Woman bedside lamp', 'hallway lamp', 'đèn bếp', 'đèn của bà', 'đèn bàn brenden',
@@ -30,6 +30,40 @@ class ChatterTest(unittest.TestCase):
 
     def test_only_what_was_heard_counts_not_what_was_sent(self):
         self.assertFalse(looks_like_chatter('Turn on the kitchen → turn on Kitchen lights', NAMES))
+
+
+class EnglishTalkTest(unittest.TestCase):
+    # From the voice log, 2026-11-18: 老友 woke to English TV nine times in twelve minutes.
+    TV = ['Thank you very much. Thank you.', 'But check because I need to actually put it. Very good.',
+          'Better day outside. Healthy. Mm-hmm. Wow.', 'Good night. Thank you.', "It's pretty tight."]
+
+    def test_english_tv_after_a_chinese_or_vietnamese_wake_word_stays_quiet(self):
+        for wake in ('老友', '喂老友', 'Xin Chào', 'xin chao'):
+            for text in self.TV:
+                with self.subTest(wake=wake, text=text):
+                    self.assertTrue(english_talk(text, wake))
+
+    def test_on_the_second_try_after_a_miss_in_another_language(self):
+        self.assertTrue(english_talk('Yeah, good night then.', '', 'yue'))
+        self.assertTrue(english_talk('Yeah, good night then.', '', 'vi'))
+        self.assertFalse(english_talk('Yeah, good night then.', '', 'en'))
+        self.assertFalse(english_talk('Yeah, good night then.', '', None))
+
+    def test_after_an_english_wake_word_it_is_left_to_the_usual_checks(self):
+        for wake in ('Hey Woman', 'Okay Nabu', ''):
+            with self.subTest(wake=wake):
+                self.assertFalse(english_talk('Better day outside. Healthy. Mm-hmm. Wow.', wake))
+
+    def test_a_command_or_a_short_miss_is_still_answered(self):
+        for text in ['Turn on the kitchen lights.', 'switch the hallway lamp off please', 'the office corner lamp',
+                     'Sick.', 'Hoi chu',                       # short: 熄 or 開 cut off, maybe
+                     'bat den bep di', 'tat den phong khach nhe',  # Vietnamese without its accents
+                     '開廚房燈', 'Bật đèn bếp', '']:
+            with self.subTest(text=text):
+                self.assertFalse(english_talk(text, '老友'))
+
+    def test_only_what_was_heard_counts_not_what_was_sent(self):
+        self.assertTrue(english_talk('Thank you very much. → nothing', '老友'))
 
 
 class OwnWordsTest(unittest.TestCase):

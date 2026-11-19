@@ -14,7 +14,7 @@ from aioesphomeapi.model import VoiceAssistantEventType as E
 from aioesphomeapi.model import VoiceAssistantFeature
 
 from . import confirm
-from .chatter import command_over_noise
+from .chatter import command_over_noise, english_talk
 from .config import Speaker
 from .endpoint import MAX_S, Endpointer, loudness
 from .pipeline import Answer, wake_language
@@ -315,6 +315,12 @@ class SpeakerLink:
                 if not follow_up and getattr(a, 'chatter', False) is True:
                     log.info('%s #%d (%s) heard %r, nothing like a command, most likely a TV or a conversation, so it stays quiet',
                              self.who, run.n, run.wake or 'no wake word', a.heard)
+                    return
+                # English with nothing of a command in it, after a Cantonese, Mandarin or Vietnamese wake word
+                # (or on the second try after one): a TV or a conversation. No reply, and no second try.
+                if not a.handled and not follow_up and not recent and english_talk(a.heard, run.wake, again[1] if again and not run.wake else None):
+                    log.info('%s #%d (%s) heard %r, English with nothing of a command after a wake word in another language, '
+                             'most likely a TV or a conversation, so it stays quiet', self.who, run.n, run.wake or 'no wake word', a.heard)
                     return
                 # Not understood: one more try, with no wake word. Only one, so a misheard TV can't keep it listening.
                 try_again = not a.handled and not follow_up and not again

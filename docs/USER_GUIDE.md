@@ -659,6 +659,8 @@ To turn it on, an administrator opens **Settings → Voice control**, ticks **Vo
 
 If two speakers hear the same command, only the one that heard you loudest, usually the nearest, answers, and the command is carried out once. If a speaker wakes but hears no words, usually because something on TV or in a conversation sounded like the wake word, it stops listening without saying anything. It also stays quiet when what it hears has nothing of a command in it, such as a line from a show ("I don't want to pay for your drink"): no on or off word, nothing that's part of a device's name, and more than a couple of words. A short miss, such as a command cut off, still gets an answer, so you know to say it again. It never takes its own reply, heard back as it listens again, for a command.
 
+After a wake word in Cantonese, Mandarin or Vietnamese, such as 老友 or Xin Chào, the speaker also stays quiet when it hears English with no on or off word and no light or lamp in it, even if a device's name is in it. That is almost always the TV. An English command, such as "turn on the kitchen lights", is still answered, and so is a short miss.
+
 If a TV, a video or a conversation keeps going while you speak, the speaker listens for its full eight seconds. It then answers only if it made out a few words with an on or off word or a thing like a light in them, such as "mở đèn của nhà vua" said over a video; longer talk is taken for the room and gets no answer. For the quickest answer, speak when the room is quiet.
 
 When the speaker asks "Did you mean…?", it uses the name you'd say in your language: "Có phải bạn muốn bật đèn của nhà vua không?" rather than "…bật King's lamp…", when the device has a Vietnamese or Chinese nickname.

@@ -82,3 +82,34 @@ def looks_like_chatter(heard: str, names: list[str]) -> bool:
     shortest = 3 if vi.has_vietnamese(text) else 4
     name_words = {w for n in names for w in _words(vi.plain(n) if vi.has_vietnamese(n) else n) if len(w) >= shortest}
     return not any(w in name_words for w in ws)
+
+
+def expects_another_language(wake: str, again_lang: str | None = None) -> bool:
+    """Whether the person is expected to speak Cantonese, Mandarin or Vietnamese: the wake word is
+    written in Chinese characters (老友) or Vietnamese (Xin Chào), or this is the second try after a
+    miss in one of them. Unlike pipeline.wake_language, it doesn't need to know which one."""
+    wake = wake or ''
+    if yue.has_chinese(wake) or vi.has_vietnamese(wake) or 'xin chao' in vi.plain(wake):
+        return True
+    return again_lang in ('yue', 'zh', 'vi')
+
+
+def english_talk(heard: str, wake: str, again_lang: str | None = None) -> bool:
+    """English with nothing of a command in it, after a Cantonese, Mandarin or Vietnamese wake word:
+    a TV or a conversation, not someone speaking to HomeHub. On 2026-11-18, 老友 woke nine times in
+    twelve minutes to English TV ("Better day outside. Healthy."), and the room's names in it
+    ("outside", "good night") kept looks_like_chatter from calling it talk.
+
+    A short miss is still answered: "Sick." may be 熄 cut off. So is anything with an on or off word
+    or a thing people switch in it, in English or in Vietnamese written without its accents."""
+    if not expects_another_language(wake, again_lang):
+        return False
+    text = heard.split(' → ')[0].strip()
+    if not text or yue.has_chinese(text) or vi.has_vietnamese(text) or not re.search('[A-Za-z]', text):
+        return False
+    ws = _words(text)
+    if len(ws) < MIN_WORDS:
+        return False
+    if any(w in VI_COMMAND for w in vi.words(text.lower())):
+        return False
+    return not any(w in EN_COMMAND or w in THINGS for w in ws)
