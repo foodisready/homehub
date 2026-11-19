@@ -1,4 +1,4 @@
-"""The time, the date and the weather, asked in Vietnamese, Cantonese or Mandarin.
+"""The time, the date, the weather and what to wear, asked in Vietnamese, Cantonese or Mandarin.
 
 HomeHub answers these in English ("what time is it", "what's the weather"), with
 the numbers alongside; the reply is said here in the language that was spoken:
@@ -19,7 +19,13 @@ ENGLISH = {
     'tomorrow': "what's the weather tomorrow",
     'rain-today': 'will it rain today',
     'rain-tomorrow': 'will it rain tomorrow',
+    'wear-today': 'what should I wear today',
+    'wear-tomorrow': 'what should I wear tomorrow',
 }
+
+
+def _wear_kind(tomorrow: bool) -> str:
+    return 'wear-tomorrow' if tomorrow else 'wear-today'
 
 
 def _weather_kind(rain: bool, weather: bool, tomorrow: bool) -> str | None:
@@ -34,6 +40,7 @@ def _weather_kind(rain: bool, weather: bool, tomorrow: bool) -> str | None:
 
 VI_TIME = ('may gio',)                                           # mấy giờ (rồi)
 VI_DATE = ('thu may', 'ngay may', 'ngay bao nhieu', 'mung may')  # thứ mấy, ngày mấy, ngày bao nhiêu
+VI_WEAR = ('mac gi', 'mac ao', 'nen mac', 'mac the nao', 'mac sao', 'ao khoac', 'ao am')  # mặc gì, áo khoác, áo ấm
 VI_WEATHER = ('thoi tiet', 'nhiet do', 'bao nhieu do', 'may do', 'nong khong', 'lanh khong', 'troi nong', 'troi lanh')
 
 
@@ -50,6 +57,8 @@ def vi_kind(text: str) -> str | None:
         return 'time'
     if has(VI_DATE):
         return 'date'
+    if has(VI_WEAR):
+        return _wear_kind(' ngay mai ' in p)
     # "mưa" (rain) only with its accent: "mua" is "buy".
     return _weather_kind('mưa' in ws, has(VI_WEATHER), ' ngay mai ' in p)
 
@@ -83,6 +92,34 @@ def _vi_rain(day: dict, when: str) -> str:
     return f'{when.capitalize()} ít khả năng mưa, {n} phần trăm.'
 
 
+VI_WEAR_WORDS = {
+    'heavy': 'Mặc áo khoác dày, đội mũ, đeo găng tay và quàng khăn.', 'warm': 'Mặc áo khoác ấm, đội mũ và đeo găng tay.',
+    'jacket': 'Mặc áo khoác.', 'light': 'Áo len hoặc áo khoác mỏng là đủ.', 'tshirt': 'Mặc áo thun là được.',
+    'hot': 'Mặc đồ nhẹ, thoáng và nhớ uống nhiều nước.',
+}
+
+
+def _vi_wear(w: dict, unit: str) -> str:
+    today = w['when'] == 'today'
+    head = (f'Bây giờ cảm giác như {_vi_num(w["feels"])} độ{unit}, hôm nay cao nhất {_vi_num(w["high"])} độ.' if today
+            else f'Ngày mai thấp nhất {_vi_num(w["low"])}, cao nhất {_vi_num(w["high"])} độ{unit}.')
+    out = f'{head} {VI_WEAR_WORDS.get(w["warmth"], "")}'
+    if w.get('warmsTo') is not None:
+        out += f' {"Sau đó" if today else "Buổi chiều"} lên tới {_vi_num(w["warmsTo"])} độ, nên mặc nhiều lớp.'
+    if w.get('umbrella') is not None:
+        out += ' Nhớ mang ô, trời đang mưa.' if w.get('raining') else f' Nhớ mang ô, khả năng mưa {_vi_num(w["umbrella"])} phần trăm.'
+    if w.get('snow'):
+        out += ' Có tuyết, nên đi ủng.'
+    return out
+
+
+def _wear_or_weather(kind: str, info: dict) -> tuple[str, dict | None]:
+    """A clothes question, and what to wear; an older HomeHub sends no advice, so the weather is said instead."""
+    if kind.startswith('wear-'):
+        return ('tomorrow' if kind == 'wear-tomorrow' else 'today'), info.get('wear')
+    return kind, None
+
+
 def vi_reply(kind: str, info: dict | None) -> str:
     if not info:
         return vi.NOT_UNDERSTOOD
@@ -95,6 +132,9 @@ def vi_reply(kind: str, info: dict | None) -> str:
         return ('HomeHub chưa biết nhà bạn ở đâu. Hãy đặt vị trí trong phần Cài đặt.' if info.get('code') == 'NOT_LOCATED'
                 else 'Hiện không lấy được thông tin thời tiết.')
     unit = ' F' if info.get('unit') == 'F' else ''
+    kind, wear = _wear_or_weather(kind, info)
+    if wear:
+        return _vi_wear(wear, unit)
     cond = lambda code: VI_WEATHER_WORDS.get(describe(code), 'thời tiết thay đổi')  # noqa: E731
     if kind == 'rain-today':
         return 'Có, trời đang mưa.' if raining(info['now']['code']) else _vi_rain(info['today'], 'hôm nay')
@@ -113,8 +153,11 @@ def vi_reply(kind: str, info: dict | None) -> str:
 
 YUE_TIME = [('gei', 'dim')]                                                    # 幾點
 YUE_DATE = [('gei', 'hou'), ('sing', 'kei', 'gei'), ('lai', 'baai', 'gei')]     # 幾號, 星期幾, 禮拜幾
-YUE_WEATHER = [('tin', 'hei'), ('gei', 'dou'), ('wan', 'dou'), ('jit', 'm', 'jit'), ('dung', 'm', 'dung')]  # 天氣 幾度 溫度 熱唔熱 凍唔凍
+YUE_WEATHER = [('tin', 'hei'), ('gei', 'dou'), ('wan', 'dou'), ('hei', 'wan'), ('jit', 'm', 'jit'), ('dung', 'm', 'dung')]  # 天氣 幾度 溫度 氣溫 熱唔熱 凍唔凍
 YUE_RAIN = [('lok', 'jyu')]                                                    # 落雨
+# 著咩衫, 著乜嘢, 着啲咩, 著幾多衫, 著多啲, 外套, 著褸, 帶褸, 穿咩. 褸 (coat) alone sounds like 樓 (floor).
+YUE_WEAR = [('zoek', 'me'), ('zoek', 'mat'), ('zoek', 'di', 'me'), ('zoek', 'di', 'mat'), ('zoek', 'gei', 'do'), ('zoek', 'do', 'di'), ('ngoi', 'tou'), ('zoek', 'lau'),
+            ('daai', 'lau'), ('cyun', 'me'), ('me', 'saam'), ('mat', 'je', 'saam')]
 YUE_TOMORROW = [('ting', 'jat'), ('ming', 'tin'), ('ting', 'ji'), ('ting', 'dit')]   # 聽日, 明天
 
 
@@ -127,6 +170,9 @@ def yue_kind(text: str) -> str | None:
     if not text or not yue.has_chinese(text):
         return None
     s = yue.syllables(text)
+    # Before commands: 着 in "着乜嘢衫" also switches things on.
+    if _has(s, YUE_WEAR):
+        return _wear_kind(_has(s, YUE_TOMORROW))
     if yue.read_verb(s)[0] is not None:
         return None
     if _has(s, YUE_TIME):
@@ -181,6 +227,26 @@ def _yue_rain(day: dict, when: str) -> str:
     return f'{when}唔多會落雨，機會百分之{n}。'
 
 
+YUE_WEAR_WORDS = {
+    'heavy': '著厚羽絨，戴帽、手套同頸巾。', 'warm': '著厚褸，戴帽同手套。', 'jacket': '著件外套。',
+    'light': '著件冷衫或者薄外套就夠。', 'tshirt': '著短袖衫就得。', 'hot': '著輕便啲，記得飲多啲水。',
+}
+
+
+def _yue_wear(w: dict, unit: str) -> str:
+    today = w['when'] == 'today'
+    out = (f'而家體感{unit}{yue_number(w["feels"])}度，今日最高{yue_number(w["high"])}度。' if today
+           else f'聽日最低{unit}{yue_number(w["low"])}度，最高{yue_number(w["high"])}度。')
+    out += YUE_WEAR_WORDS.get(w['warmth'], '')
+    if w.get('warmsTo') is not None:
+        out += f'{"之後" if today else "下晝"}會升到{yue_number(w["warmsTo"])}度，最好著多幾層，熱就除。'
+    if w.get('umbrella') is not None:
+        out += '記得帶遮，而家落緊雨。' if w.get('raining') else f'記得帶遮，落雨機會百分之{yue_number(w["umbrella"])}。'
+    if w.get('snow'):
+        out += '會落雪，著靴啦。'
+    return out
+
+
 def yue_reply(kind: str, info: dict | None) -> str:
     if not info:
         return yue.NOT_UNDERSTOOD
@@ -192,6 +258,9 @@ def yue_reply(kind: str, info: dict | None) -> str:
         return ('HomeHub未知你屋企喺邊，請喺設定度揀位置。' if info.get('code') == 'NOT_LOCATED'
                 else '而家攞唔到天氣資料。')
     unit = '華氏' if info.get('unit') == 'F' else ''
+    kind, wear = _wear_or_weather(kind, info)
+    if wear:
+        return _yue_wear(wear, unit)
     cond = lambda code: YUE_WEATHER_WORDS.get(describe(code), '天氣多變')  # noqa: E731
     if kind == 'rain-today':
         return '係，而家落緊雨。' if raining(info['now']['code']) else _yue_rain(info['today'], '今日')
@@ -210,8 +279,10 @@ def yue_reply(kind: str, info: dict | None) -> str:
 
 ZH_TIME = [('ji', 'dian')]                                                     # 几点
 ZH_DATE = [('ji', 'hao'), ('xing', 'qi', 'ji'), ('li', 'bai', 'ji')]            # 几号, 星期几, 礼拜几
-ZH_WEATHER = [('tian', 'qi'), ('ji', 'du'), ('wen', 'du'), ('re', 'bu', 're'), ('leng', 'bu', 'leng')]  # 天气 几度 温度 热不热 冷不冷
+ZH_WEATHER = [('tian', 'qi'), ('ji', 'du'), ('wen', 'du'), ('qi', 'wen'), ('re', 'bu', 're'), ('leng', 'bu', 'leng')]  # 天气 几度 温度 气温 热不热 冷不冷
 ZH_RAIN = [('xia', 'yu')]                                                      # 下雨
+# 穿什么, 穿啥, 穿多少, 穿几件, 外套, 衣服
+ZH_WEAR = [('chuan', 'shen', 'me'), ('chuan', 'sha'), ('chuan', 'duo', 'shao'), ('chuan', 'ji', 'jian'), ('wai', 'tao'), ('yi', 'fu')]
 ZH_TOMORROW = [('ming', 'tian')]                                               # 明天
 
 
@@ -220,6 +291,8 @@ def zh_kind(text: str) -> str | None:
     if not text or not yue.has_chinese(text):
         return None
     s = zh.syllables(text)
+    if _has(s, ZH_WEAR):
+        return _wear_kind(_has(s, ZH_TOMORROW))
     if zh.read_verb(s)[0] is not None:
         return None
     if _has(s, ZH_TIME):
@@ -256,6 +329,26 @@ def _zh_rain(day: dict, when: str) -> str:
     return f'{when}不太会下雨，概率百分之{n}。'
 
 
+ZH_WEAR_WORDS = {
+    'heavy': '穿厚羽绒服，戴帽子、手套和围巾。', 'warm': '穿厚外套，戴帽子和手套。', 'jacket': '穿件外套。',
+    'light': '穿件毛衣或薄外套就够了。', 'tshirt': '穿短袖就可以。', 'hot': '穿轻薄宽松的衣服，记得多喝水。',
+}
+
+
+def _zh_wear(w: dict, unit: str) -> str:
+    today = w['when'] == 'today'
+    out = (f'现在体感{unit}{zh.number(w["feels"])}度，今天最高{zh.number(w["high"])}度。' if today
+           else f'明天最低{unit}{zh.number(w["low"])}度，最高{zh.number(w["high"])}度。')
+    out += ZH_WEAR_WORDS.get(w['warmth'], '')
+    if w.get('warmsTo') is not None:
+        out += f'{"之后" if today else "下午"}会升到{zh.number(w["warmsTo"])}度，最好多穿几层，热了可以脱。'
+    if w.get('umbrella') is not None:
+        out += '记得带伞，现在正在下雨。' if w.get('raining') else f'记得带伞，下雨概率百分之{zh.number(w["umbrella"])}。'
+    if w.get('snow'):
+        out += '会下雪，穿靴子吧。'
+    return out
+
+
 def zh_reply(kind: str, info: dict | None) -> str:
     if not info:
         return zh.NOT_UNDERSTOOD
@@ -267,6 +360,9 @@ def zh_reply(kind: str, info: dict | None) -> str:
         return ('HomeHub还不知道你家在哪里，请在设置里选择位置。' if info.get('code') == 'NOT_LOCATED'
                 else '现在获取不到天气信息。')
     unit = '华氏' if info.get('unit') == 'F' else ''
+    kind, wear = _wear_or_weather(kind, info)
+    if wear:
+        return _zh_wear(wear, unit)
     cond = lambda code: ZH_WEATHER_WORDS.get(describe(code), '天气多变')  # noqa: E731
     if kind == 'rain-today':
         return '是的，现在正在下雨。' if raining(info['now']['code']) else _zh_rain(info['today'], '今天')

@@ -98,6 +98,64 @@ describe('time, date and weather questions', () => {
     for (const [text, kind] of cases) assert.equal(q.weatherQuestion(text), kind, text);
   });
 
+  describe('what to wear', () => {
+    it('is only answered when asked', () => {
+      const cases: Array<[string, string]> = [
+        ['What should I wear?', 'wear-today'], ['what should i wear today', 'wear-today'], ['What should I wear tomorrow?', 'wear-tomorrow'],
+        ['Do I need a jacket?', 'wear-today'], ["Should I wear a coat tomorrow?", 'wear-tomorrow'], ['How should I dress today?', 'wear-today'],
+        ['What to wear', 'wear-today'], ['Hey HomeHub, what do I wear tomorrow', 'wear-tomorrow'], ['Is it jacket weather?', 'wear-today'],
+        // Weather questions without clothes stay as they were.
+        ["What's the weather?", 'today'], ['Do I need an umbrella?', 'rain-today'], ["What's the forecast for tomorrow?", 'tomorrow'],
+      ];
+      for (const [text, kind] of cases) assert.equal(q.weatherQuestion(text), kind, text);
+      assert.equal(q.weatherQuestion('turn on the closet light'), null);
+    });
+
+    it('picks clothes by the feels-like temperature, in °F', () => {
+      const cases: Array<[number, string]> = [[10, 'heavy'], [25, 'heavy'], [26, 'warm'], [39, 'warm'], [40, 'jacket'], [54, 'jacket'],
+        [55, 'light'], [64, 'light'], [65, 'tshirt'], [79, 'tshirt'], [80, 'hot'], [95, 'hot']];
+      for (const [f, warmth] of cases) assert.equal(q.warmthFor(f), warmth, String(f));
+    });
+
+    it('says what to wear today and tomorrow, with an umbrella when rain is likely', async () => {
+      const f = fakeFetch();
+      assert.equal((await q.answerQuestion('What should I wear?', { fetchImpl: f.impl }))?.response,
+        'It feels like 60°F now, with a high of 68°F today. A sweater or a light jacket is enough.');
+      const a = await q.answerQuestion('What should I wear tomorrow?', { fetchImpl: f.impl });
+      // Tomorrow is dressed for the cool part of the day: 48 + (59 − 48) / 3 ≈ 52°F.
+      assert.equal(a?.response, "Tomorrow: a low of 48°F and a high of 59°F. Wear a jacket. Take an umbrella: there's a 70% chance of rain.");
+      assert.deepEqual((a?.actions[0].result as any).wear,
+        { when: 'tomorrow', feels: 52, high: 59, low: 48, warmth: 'jacket', warmsTo: null, umbrella: 70, raining: false, snow: false });
+      assert.equal(((await q.answerQuestion("What's the weather?", { fetchImpl: f.impl }))?.actions[0].result as any).wear, undefined);
+    });
+
+    it('uses the unit chosen in Settings, with the same advice', async () => {
+      home.saveHomeSettings({ temperatureUnit: 'C' });
+      try {
+        const cold = {
+          current: { temperature_2m: 1, apparent_temperature: -4, weather_code: 3 },
+          daily: { time: ['2026-11-13', '2026-11-14'], temperature_2m_max: [9, 3], temperature_2m_min: [-1, -6],
+            precipitation_probability_max: [50, 80], weather_code: [61, 73] },
+        };
+        const f = fakeFetch(cold);
+        // −4 °C feels like 25 °F: the heaviest coat. Up 8 °C later: layers.
+        assert.equal((await q.answerQuestion('What should I wear?', { fetchImpl: f.impl }))?.response,
+          'It feels like −4°C now, with a high of 9°C today. Wear a heavy winter coat, a hat, gloves and a scarf. '
+          + "It warms up to 9°C later, so dress in layers. Take an umbrella: there's a 50% chance of rain.");
+        // Snow tomorrow: boots, not an umbrella.
+        assert.equal((await q.answerQuestion('What should I wear tomorrow?', { fetchImpl: f.impl }))?.response,
+          'Tomorrow: a low of −6°C and a high of 3°C. Wear a warm coat, a hat and gloves. '
+          + 'It warms up to 3°C in the afternoon, so dress in layers. Wear boots: snow is expected.');
+      } finally { home.saveHomeSettings({ temperatureUnit: 'auto' }); }
+    });
+
+    it('says when it is raining now', async () => {
+      const f = fakeFetch({ ...FORECAST, current: { temperature_2m: 84, apparent_temperature: 88, weather_code: 63 } });
+      assert.equal((await q.answerQuestion('Do I need a jacket?', { fetchImpl: f.impl }))?.response,
+        "It feels like 88°F now, with a high of 68°F today. Wear light, loose clothes and drink plenty of water. Take an umbrella: it's raining now.");
+    });
+  });
+
   it('answers the weather in °F in the United States, from a rounded location', async () => {
     const f = fakeFetch();
     const a = await q.answerQuestion("What's the weather?", { fetchImpl: f.impl });
@@ -180,12 +238,17 @@ describe('time, date and weather questions', () => {
         ['Mấy giờ rồi?', 'vi', 'time'], ['may gio roi', 'vi', 'time'], ['Hôm nay thứ mấy?', 'vi', 'date'],
         ['Thời tiết hôm nay thế nào?', 'vi', 'today'], ['thoi tiet ngay mai', 'vi', 'tomorrow'], ['Ngày mai có mưa không?', 'vi', 'rain-tomorrow'],
         ['Hôm nay có mưa không', 'vi', 'rain-today'],
+        ['今日著咩衫', 'yue', 'wear-today'], ['聽日要著咩衫', 'yue', 'wear-tomorrow'], ['使唔使著外套', 'yue', 'wear-today'],
+        ['要唔要著褸', 'yue', 'wear-today'], ['着乜嘢衫好', 'yue', 'wear-today'], ['今天穿什么', 'zh', 'wear-today'],
+        ['明天要不要穿外套', 'zh', 'wear-tomorrow'], ['Hôm nay mặc gì?', 'vi', 'wear-today'],
+        ['Ngày mai có cần áo khoác không', 'vi', 'wear-tomorrow'], ['我應該着啲咩', 'yue', 'wear-today'],
+        ['聽日應該著啲乜', 'yue', 'wear-tomorrow'], ['氣溫係幾多', 'yue', 'today'],
       ];
       for (const [text, lang, asked] of cases) assert.deepEqual(nq.nativeQuestion(text), { lang, asked }, text);
     });
 
     it('leaves commands, English and other things alone', () => {
-      for (const text of ['開廳燈', '关厨房灯', 'bật đèn bếp', 'tắt đèn', 'mua sữa', 'what time is it', '你好', 'xin chào', '']) {
+      for (const text of ['開樓上燈', '開廳燈', '关厨房灯', 'bật đèn bếp', 'tắt đèn', 'mua sữa', 'what time is it', '你好', 'xin chào', '']) {
         assert.equal(nq.nativeQuestion(text), null, text);
       }
     });
@@ -216,6 +279,16 @@ describe('time, date and weather questions', () => {
       assert.equal(await ask('Hôm nay có mưa không'), 'Hôm nay ít khả năng mưa, 10%.');
       const a = await nq.answerNativeQuestion('今日天氣點', { fetchImpl: f.impl });
       assert.equal(a?.actions[0].tool, 'get_weather');
+    });
+
+    it('says what to wear in the language asked', async () => {
+      const f = fakeFetch();
+      const ask = async (text: string) => (await nq.answerNativeQuestion(text, { fetchImpl: f.impl }))?.response;
+      assert.equal(await ask('今日著咩衫'), '而家體感60°F，今日最高68°F。著件冷衫或者薄外套就夠。');
+      assert.equal(await ask('聽日著咩衫'), '聽日最低48°F，最高59°F。著件外套。記得帶遮，落雨機會70%。');
+      assert.equal(await ask('明天穿什么'), '明天最低48°F，最高59°F。穿件外套。记得带伞，下雨概率70%。');
+      assert.equal(await ask('Hôm nay mặc gì?'), 'Bây giờ cảm giác như 60°F, hôm nay cao nhất 68°F. Áo len hoặc áo khoác mỏng là đủ.');
+      assert.equal(await ask('Ngày mai mặc gì'), 'Ngày mai thấp nhất 48°F, cao nhất 59°F. Mặc áo khoác. Nhớ mang ô, khả năng mưa 70%.');
     });
 
     it('says what is wrong in the language asked', async () => {

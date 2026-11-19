@@ -49,11 +49,15 @@ export function answerClock(asked: 'time' | 'date', at: Date): Handled {
   return { response, actions: [{ tool: 'get_time', args: { asked }, result: { asked, ...clock } }] };
 }
 
-export type WeatherAsked = 'today' | 'tomorrow' | 'rain-today' | 'rain-tomorrow';
+export type WeatherAsked = 'today' | 'tomorrow' | 'rain-today' | 'rain-tomorrow' | 'wear-today' | 'wear-tomorrow';
+
+// "What should I wear?", "do I need a jacket?", "how should I dress tomorrow?"
+const WEAR = new RegExp(String.raw`\b(?:what\s+(?:should|do|shall|can|could|would)\s+(?:i|we|you)\s+wear|what\s+(?:to|i\s+should|we\s+should)\s+wear|how\s+(?:should|do)\s+(?:i|we)\s+dress|dress\s+(?:for|warm(?:ly)?)\b|(?:do|should|will|would)\s+(?:i|we)\s+(?:need|want|wear|bring|take)\s+(?:a\s+|an\s+|my\s+|some\s+)?(?:jacket|coat|sweater|jumper|hoodie|gloves|hat|scarf|boots|layers|shorts|sweatshirt|parka)|(?:jacket|coat|sweater|shorts)\s+weather)\b`);
 
 /** Which weather question this is, or null when it isn't one. */
 export function weatherQuestion(text: string): WeatherAsked | null {
   const said = cleanUp(text).replace(/[’]/g, "'").replace(/\?+$/, '').trim();
+  if (WEAR.test(said.replace(/'/g, ''))) return /\btomorrow\b/.test(said) ? 'wear-tomorrow' : 'wear-today';
   if (!WEATHER_WORDS.test(said) || !QUESTION_START.test(said.replace(/'/g, '')) || NOT_WEATHER.test(said)) return null;
   const tomorrow = /\btomorrow\b/.test(said);
   const rain = PRECIPITATION.test(said) && !OVERVIEW.test(said);
@@ -72,7 +76,84 @@ export const degrees = (n: number, unit: 'F' | 'C') => `${n < 0 ? '−' : ''}${M
 /** For a speaker: "35°F" read aloud as "35 degrees", as before the unit was written. */
 export const spokenDegrees = (text: string) => text.replace(/(−?)(\d+)°[FC]/g, (_m, minus: string, n: string) => `${minus ? 'minus ' : ''}${n} degrees`);
 
+export type Warmth = 'heavy' | 'warm' | 'jacket' | 'light' | 'tshirt' | 'hot';
+
+/** What to wear, worked out from the forecast: the voice bridge says it in Cantonese, Mandarin or Vietnamese. */
+export interface Wear {
+  when: 'today' | 'tomorrow';
+  /** The temperature dressed for, in the home's unit: feels-like now for today, the cool part of the day for tomorrow. */
+  feels: number;
+  high: number;
+  low: number;
+  warmth: Warmth;
+  /** The warmer temperature later on, when it climbs enough that layers help; else null. */
+  warmsTo: number | null;
+  /** Take an umbrella: the chance of rain (100 while it's raining now), or null. */
+  umbrella: number | null;
+  raining: boolean;
+  /** Snow is expected: boots. */
+  snow: boolean;
+}
+
+const toF = (n: number, unit: 'F' | 'C') => (unit === 'C' ? n * 9 / 5 + 32 : n);
+const SNOW_CODE = (code: number) => (code >= 71 && code <= 77) || code === 85 || code === 86;
+
+/** The clothes for a temperature in °F (feels-like): a coat below 40, a jacket below 55, a T-shirt from 65. */
+export function warmthFor(f: number): Warmth {
+  if (f <= 25) return 'heavy';
+  if (f < 40) return 'warm';
+  if (f < 55) return 'jacket';
+  if (f < 65) return 'light';
+  if (f < 80) return 'tshirt';
+  return 'hot';
+}
+
+/**
+ * What to wear today or tomorrow. The thresholds are in °F and the home's unit is converted, so °C homes
+ * get the same advice. Tomorrow is dressed for the cool part of the day, a third of the way from the low to
+ * the high, since people dress in the morning; a climb of 15 °F (8 °C) or more adds layers.
+ */
+export function clothing(w: Weather, when: 'today' | 'tomorrow'): Wear {
+  const day = when === 'today' ? w.today : w.tomorrow;
+  const swing = w.unit === 'C' ? 8 : 15;
+  const feels = when === 'today' ? w.now.feelsLike : Math.round(day.low + (day.high - day.low) / 3);
+  const from = when === 'today' ? w.now.temperature : day.low;
+  const raining = when === 'today' && NOW_RAINING(w.now.code) && !NOW_SNOWING(w.now.code);
+  const snow = SNOW_CODE(day.code) || (when === 'today' && NOW_SNOWING(w.now.code));
+  return {
+    when, feels, high: day.high, low: day.low,
+    warmth: warmthFor(toF(feels, w.unit)),
+    warmsTo: day.high - from >= swing ? day.high : null,
+    umbrella: raining ? 100 : !snow && day.rain >= 40 ? day.rain : null,
+    raining,
+    snow,
+  };
+}
+
+const WEAR_EN: Record<Warmth, string> = {
+  heavy: 'Wear a heavy winter coat, a hat, gloves and a scarf.',
+  warm: 'Wear a warm coat, a hat and gloves.',
+  jacket: 'Wear a jacket.',
+  light: 'A sweater or a light jacket is enough.',
+  tshirt: 'A T-shirt is fine.',
+  hot: 'Wear light, loose clothes and drink plenty of water.',
+};
+
+export function wearReply(wear: Wear, unit: 'F' | 'C'): string {
+  const deg = (n: number) => degrees(n, unit);
+  const head = wear.when === 'today'
+    ? `It feels like ${deg(wear.feels)} now, with a high of ${deg(wear.high)} today.`
+    : `Tomorrow: a low of ${deg(wear.low)} and a high of ${deg(wear.high)}.`;
+  const layers = wear.warmsTo === null ? ''
+    : ` It warms up to ${deg(wear.warmsTo)} ${wear.when === 'today' ? 'later' : 'in the afternoon'}, so dress in layers.`;
+  const umbrella = wear.umbrella === null ? ''
+    : wear.raining ? " Take an umbrella: it's raining now." : ` Take an umbrella: there's a ${wear.umbrella}% chance of rain.`;
+  const boots = wear.snow ? ' Wear boots: snow is expected.' : '';
+  return `${head} ${WEAR_EN[wear.warmth]}${layers}${umbrella}${boots}`;
+}
+
 export function weatherReply(w: Weather, asked: WeatherAsked, snow = false): string {
+  if (asked === 'wear-today' || asked === 'wear-tomorrow') return wearReply(clothing(w, asked === 'wear-today' ? 'today' : 'tomorrow'), w.unit);
   const word = snow ? 'snow' : 'rain';
   if (asked === 'rain-today') {
     if (!snow && NOW_RAINING(w.now.code)) return "Yes, it's raining now.";
@@ -92,12 +173,15 @@ export function weatherReply(w: Weather, asked: WeatherAsked, snow = false): str
   return `Right now it's ${deg(w.now.temperature)}${feels} and ${describeWeather(w.now.code)}. Today's high is ${deg(t.high)} and the low is ${deg(t.low)}.${rain}`;
 }
 
+const wearOf = (w: Weather, asked: WeatherAsked) =>
+  asked === 'wear-today' || asked === 'wear-tomorrow' ? { wear: clothing(w, asked === 'wear-today' ? 'today' : 'tomorrow') } : {};
+
 export async function answerWeather(asked: WeatherAsked, snow: boolean, fetchImpl?: typeof fetch): Promise<Handled> {
   try {
     const w = await getWeather({ fetchImpl });
     return {
       response: weatherReply(w, asked, snow),
-      actions: [{ tool: 'get_weather', args: { asked }, result: { asked, snow, ...w } }],
+      actions: [{ tool: 'get_weather', args: { asked }, result: { asked, snow, ...w, ...wearOf(w, asked) } }],
     };
   } catch (err) {
     const message = err instanceof WeatherError ? err.message : "I can't get the weather right now.";
