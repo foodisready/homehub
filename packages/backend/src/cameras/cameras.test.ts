@@ -45,6 +45,11 @@ const fake = {
   noPtz: false,
   /** The camera doesn't answer pan and tilt commands. */
   ptzSilent: false,
+  /** Camera addresses the bridge has, where they differ from cameras(). */
+  ips: {} as Record<string, string>,
+  /** Camera addresses Wyze lists, which the bridge takes on a rediscovery. */
+  wyzeIps: {} as Record<string, string>,
+  discovers: 0,
 };
 
 function restartIfNeeded(): void {
@@ -58,6 +63,10 @@ function restartIfNeeded(): void {
 }
 
 function cameras() {
+  return camerasListed().map((c) => ({ ...c, ip: fake.ips[c.name] ?? c.ip }));
+}
+
+function camerasListed() {
   return [
     { name: 'front_door', nickname: 'Front Door', model: 'WYZE_CAKP2JFUS', model_name: 'V3', ip: '192.168.1.40', mac: '2CAA8E000001', state: 'streaming' },
     { name: 'living_pan', nickname: 'Living Pan', model: 'HL_PAN3', model_name: 'Pan V3', ip: '192.168.0.32', mac: '80482C000002', state: 'connecting' },
@@ -91,6 +100,11 @@ const bridgeServer = http.createServer((req, res) => {
   }
   if (req.headers.authorization !== `Bearer ${KEY}`) { res.writeHead(401); return res.end('Unauthorized'); }
   if (url.pathname === '/api/cameras') return json(200, fake.signedIn ? cameras() : []);
+  if (url.pathname === '/api/discover' && req.method === 'POST') {
+    fake.discovers++;
+    Object.assign(fake.ips, fake.wyzeIps);
+    return json(200, { status: 'ok' });
+  }
   const restart = url.pathname.match(/^\/api\/cameras\/([^/]+)\/restart$/);
   if (restart && req.method === 'POST') { fake.restarts.push(restart[1]); return json(200, { status: 'ok' }); }
   const snap = url.pathname.match(/^\/api\/snapshot\/([^/]+)$/);
@@ -220,6 +234,7 @@ describe('Wyze cameras', () => {
     process.env.WYZE_BRIDGE_API_KEY = KEY;
     process.env.WYZE_SIGNIN_DIR = SIGNIN;
     process.env.WYZE_RECONNECT_AFTER_MS = '30';
+    process.env.WYZE_MOVE_WAIT_MS = '50';
 
     db = (await import('../db')).getDb();
     bridge = await import('./bridge');
@@ -265,7 +280,7 @@ describe('Wyze cameras', () => {
     db.pragma('foreign_keys = ON');
     fs.rmSync(snaps.snapshotDir(), { recursive: true, force: true });
     fs.rmSync(SIGNIN, { recursive: true, force: true });
-    Object.assign(fake, { up: true, frozen: false, version: '', signedIn: false, emptyShots: 0, calls: [], restarts: [], ptz: [], noPtz: false, ptzSilent: false });
+    Object.assign(fake, { up: true, frozen: false, version: '', signedIn: false, emptyShots: 0, calls: [], restarts: [], ptz: [], noPtz: false, ptzSilent: false, ips: {}, wyzeIps: {}, discovers: 0 });
     ptz.resetPtz();
     process.env.WYZE_BRIDGE_API_KEY = KEY;
     watch.resetMotionState();
@@ -726,6 +741,43 @@ describe('Wyze cameras', () => {
       assert.equal(await watch.repairIfStuck(front, null), false, 'not again so soon');
       assert.equal(await watch.repairIfStuck(front, null, Date.now() + 11 * 60_000), true, 'still stuck ten minutes on: try again');
       assert.deepEqual(fake.restarts, ['front_door', 'front_door']);
+      assert.equal(fake.discovers, 0, 'same address as the bridge has: no need to ask Wyze');
+    });
+
+    it('has the bridge learn the new address of a camera that moved, before restarting it', async () => {
+      const id = addCamera('Front Door', 'front_door', '192.168.1.40', '2CAA8E000001');
+      const front = { id, alias: 'Front Door', cam: 'front_door', mac: '2CAA8E000001' };
+      arpTable([['192.168.86.59', '2c:aa:8e:00:00:01']]);   // joined the other Wi-Fi
+      fake.wyzeIps = { front_door: '192.168.86.59' };
+      fake.emptyShots = 4;
+      await assert.rejects(bridge.snapshot('front_door', 2));
+      await assert.rejects(bridge.snapshot('front_door', 2));
+      fake.calls = [];
+      assert.equal(await watch.repairIfStuck(front, null), true);
+      assert.equal(fake.discovers, 1);
+      assert.deepEqual(fake.calls.filter((c) => c.startsWith('POST')), ['POST /api/discover', 'POST /api/cameras/front_door/restart'],
+        'the restart dials the new address');
+      assert.equal((db.prepare('SELECT ip FROM devices WHERE id = ?').get(id) as { ip: string }).ip, '192.168.86.59');
+    });
+
+    it("restarts a moved camera anyway when Wyze doesn't list its new address yet, and keeps an address another device has", async () => {
+      const id = addCamera('Front Door', 'front_door', '192.168.1.40', '2CAA8E000001');
+      addCamera('Living Pan', 'living_pan', '192.168.86.59', '80482C000002');
+      const front = { id, alias: 'Front Door', cam: 'front_door', mac: '2CAA8E000001' };
+      arpTable([['192.168.86.59', '2c:aa:8e:00:00:01']]);
+      fake.emptyShots = 4;
+      await assert.rejects(bridge.snapshot('front_door', 2));
+      await assert.rejects(bridge.snapshot('front_door', 2));
+      assert.equal(await watch.repairIfStuck(front, null), true);
+      assert.equal(fake.discovers, 1);
+      assert.deepEqual(fake.restarts, ['front_door']);
+      assert.equal((db.prepare('SELECT ip FROM devices WHERE id = ?').get(id) as { ip: string }).ip, '192.168.1.40');
+
+      fake.wyzeIps = { front_door: '192.168.86.59' };
+      assert.equal(await watch.repairIfStuck(front, null, Date.now() + 11 * 60_000), true);
+      assert.equal(fake.discovers, 2);
+      assert.equal((db.prepare('SELECT ip FROM devices WHERE id = ?').get(id) as { ip: string }).ip, '192.168.1.40',
+        'another device has that address, so the list keeps the old one');
     });
 
     it("doesn't restart a camera that isn't on the network, which a restart can't fix", async () => {

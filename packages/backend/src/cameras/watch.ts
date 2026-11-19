@@ -7,7 +7,7 @@ import * as cloud from './wyze-cloud';
 import { capture, getSettings } from './snapshots';
 import { automationsPaused } from '../automation/pause';
 import { getCachedState } from '../kasa/device.cache';
-import { lastAsked, onLocalNetwork, pictureHealth } from './picture-status';
+import { lastAsked, localAddress, onLocalNetwork, pictureHealth } from './picture-status';
 
 /**
  * Watches for motion through the Wyze account: every few seconds HomeHub asks
@@ -212,12 +212,47 @@ export async function repairIfStuck(device: CameraDevice, ip: string | null, now
   if (device.mac && (await onLocalNetwork(device.mac, ip)) === false) return false;
   lastRepair.set(device.cam, now);
   try {
+    if (device.mac) await followMove(device, device.mac).catch((err) => bridge.logBridgeError(err, `Couldn't check ${device.alias}'s address`));
     await bridge.restartStream(device.cam);
     return true;
   } catch (err) {
     bridge.logBridgeError(err, `Couldn't restart ${device.alias}'s stream`);
     return false;
   }
+}
+
+/** How long to wait for the bridge to hear a moved camera's new address from Wyze, and how often to look. */
+const MOVE_WAIT_MS = Number(process.env.WYZE_MOVE_WAIT_MS) || 20_000;
+const MOVE_LOOK_MS = Math.min(1000, MOVE_WAIT_MS);
+
+/**
+ * A camera that joined another Wi-Fi, or got a new address from the router,
+ * answers at an address the bridge doesn't know yet: the bridge learns it
+ * from Wyze only every 30 minutes, and restarting the stream would dial the
+ * old one. So when the camera answers somewhere else, the bridge asks Wyze
+ * now, and HomeHub notes the new address. Wyze may not know it yet either;
+ * then the restart goes ahead as before and the next repair tries again.
+ */
+async function followMove(device: CameraDevice, mac: string): Promise<void> {
+  const at = localAddress(mac);
+  if (!at) return;
+  const known = async () => (await bridge.listCameras()).find((c) => c.id === device.cam)?.ip ?? null;
+  const before = await known();
+  if (!before || before === at) return;
+
+  await bridge.rediscover();
+  let now: string | null = before;
+  for (const until = Date.now() + MOVE_WAIT_MS; now !== at && Date.now() < until;) {
+    await new Promise((r) => setTimeout(r, MOVE_LOOK_MS));
+    now = await known();
+  }
+  if (now !== at) {
+    logger.warn({ cam: device.cam, bridgeIp: now, answersAt: at }, `${device.alias} answers at a new address that Wyze doesn't list yet`);
+    return;
+  }
+  // The device list shows the new address too, unless another device has it.
+  getDb().prepare('UPDATE devices SET ip = ? WHERE id = ? AND NOT EXISTS (SELECT 1 FROM devices WHERE ip = ?)').run(at, device.id, at);
+  logger.info({ cam: device.cam, from: before, to: at }, `${device.alias} moved to a new address; the bridge has it now`);
 }
 
 /**

@@ -108,6 +108,11 @@ export async function onLocalNetwork(mac: string, ip: string | null): Promise<bo
   return arpTable()?.has(want) ?? null;
 }
 
+/** The address a device with this hardware address answers at on HomeHub's own network, if it's in the table. */
+export function localAddress(mac: string): string | null {
+  return arpTable()?.get(mac.replace(/[^0-9a-f]/gi, '').toUpperCase()) ?? null;
+}
+
 // ── Is the camera's address on one of HomeHub's networks? ───────
 
 export interface LocalNetwork { address: string; netmask: string }

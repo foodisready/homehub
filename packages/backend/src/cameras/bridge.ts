@@ -286,6 +286,16 @@ export async function snapshot(cam: string, attempts = 2): Promise<Buffer> {
 }
 
 /**
+ * Has the bridge ask Wyze for the camera list again, which carries each
+ * camera's current address. The bridge does this by itself every 30
+ * minutes; it answers at once and fetches in the background.
+ */
+export async function rediscover(): Promise<void> {
+  const res = await call('/api/discover', { method: 'POST' });
+  if (!res.ok) throw new BridgeError(`The bridge couldn't ask Wyze for the cameras (HTTP ${res.status})`);
+}
+
+/**
  * Has the bridge connect to the camera afresh. go2rtc can stay stuck on a
  * dead connection, such as after the camera was turned off and on, and
  * this clears it. The camera itself isn't touched.
