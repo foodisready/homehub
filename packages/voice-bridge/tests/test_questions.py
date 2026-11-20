@@ -42,6 +42,9 @@ class KindTest(unittest.TestCase):
         for text, kind in [('今天穿什么', 'wear-today'), ('明天穿什么衣服', 'wear-tomorrow'), ('要不要穿外套', 'wear-today')]:
             self.assertEqual(q.zh_kind(text), kind, text)
         self.assertEqual(q.yue_kind('氣溫係幾多'), 'today')
+        self.assertEqual(q.yue_kind('而家幾多度'), 'today')
+        self.assertEqual(q.yue_kind('聽日幾多度'), 'tomorrow')
+        self.assertEqual(q.zh_kind('现在多少度'), 'today')
         self.assertEqual(q.zh_kind('现在气温多少'), 'today')
         # 樓上 (upstairs) is not 褸 (a coat).
         self.assertIsNone(q.yue_kind('開樓上燈'))

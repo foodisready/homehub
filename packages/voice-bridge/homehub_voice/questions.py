@@ -153,7 +153,7 @@ def vi_reply(kind: str, info: dict | None) -> str:
 
 YUE_TIME = [('gei', 'dim')]                                                    # 幾點
 YUE_DATE = [('gei', 'hou'), ('sing', 'kei', 'gei'), ('lai', 'baai', 'gei')]     # 幾號, 星期幾, 禮拜幾
-YUE_WEATHER = [('tin', 'hei'), ('gei', 'dou'), ('wan', 'dou'), ('hei', 'wan'), ('jit', 'm', 'jit'), ('dung', 'm', 'dung')]  # 天氣 幾度 溫度 氣溫 熱唔熱 凍唔凍
+YUE_WEATHER = [('tin', 'hei'), ('gei', 'dou'), ('gei', 'do', 'dou'), ('wan', 'dou'), ('hei', 'wan'), ('jit', 'm', 'jit'), ('dung', 'm', 'dung')]  # 天氣 幾度 幾多度 溫度 氣溫 熱唔熱 凍唔凍
 YUE_RAIN = [('lok', 'jyu')]                                                    # 落雨
 # 著咩衫, 著乜嘢, 着啲咩, 著幾多衫, 著多啲, 外套, 著褸, 帶褸, 穿咩. 褸 (coat) alone sounds like 樓 (floor).
 YUE_WEAR = [('zoek', 'me'), ('zoek', 'mat'), ('zoek', 'di', 'me'), ('zoek', 'di', 'mat'), ('zoek', 'gei', 'do'), ('zoek', 'do', 'di'), ('ngoi', 'tou'), ('zoek', 'lau'),
@@ -279,7 +279,7 @@ def yue_reply(kind: str, info: dict | None) -> str:
 
 ZH_TIME = [('ji', 'dian')]                                                     # 几点
 ZH_DATE = [('ji', 'hao'), ('xing', 'qi', 'ji'), ('li', 'bai', 'ji')]            # 几号, 星期几, 礼拜几
-ZH_WEATHER = [('tian', 'qi'), ('ji', 'du'), ('wen', 'du'), ('qi', 'wen'), ('re', 'bu', 're'), ('leng', 'bu', 'leng')]  # 天气 几度 温度 气温 热不热 冷不冷
+ZH_WEATHER = [('tian', 'qi'), ('ji', 'du'), ('duo', 'shao', 'du'), ('wen', 'du'), ('qi', 'wen'), ('re', 'bu', 're'), ('leng', 'bu', 'leng')]  # 天气 几度 多少度 温度 气温 热不热 冷不冷
 ZH_RAIN = [('xia', 'yu')]                                                      # 下雨
 # 穿什么, 穿啥, 穿多少, 穿几件, 外套, 衣服
 ZH_WEAR = [('chuan', 'shen', 'me'), ('chuan', 'sha'), ('chuan', 'duo', 'shao'), ('chuan', 'ji', 'jian'), ('wai', 'tao'), ('yi', 'fu')]

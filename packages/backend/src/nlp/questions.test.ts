@@ -233,7 +233,7 @@ describe('time, date and weather questions', () => {
         ['幾點', 'yue', 'time'], ['而家幾點呀？', 'yue', 'time'], ['现在几点', 'zh', 'time'], ['几点了', 'zh', 'time'],
         ['今日幾號', 'yue', 'date'], ['今天星期几', 'zh', 'date'], ['今日禮拜幾', 'yue', 'date'],
         ['今日天氣點', 'yue', 'today'], ['今日天氣點？', 'yue', 'today'], ['今天天气怎么样', 'zh', 'today'], ['外面幾度', 'yue', 'today'],
-        ['熱唔熱', 'yue', 'today'], ['聽日天氣點', 'yue', 'tomorrow'], ['明天天气', 'zh', 'tomorrow'],
+        ['熱唔熱', 'yue', 'today'], ['而家幾多度', 'yue', 'today'], ['聽日幾多度', 'yue', 'tomorrow'], ['现在多少度', 'zh', 'today'], ['聽日天氣點', 'yue', 'tomorrow'], ['明天天气', 'zh', 'tomorrow'],
         ['聽日會唔會落雨', 'yue', 'rain-tomorrow'], ['今日會唔會落雨', 'yue', 'rain-today'], ['明天会下雨吗', 'zh', 'rain-tomorrow'],
         ['Mấy giờ rồi?', 'vi', 'time'], ['may gio roi', 'vi', 'time'], ['Hôm nay thứ mấy?', 'vi', 'date'],
         ['Thời tiết hôm nay thế nào?', 'vi', 'today'], ['thoi tiet ngay mai', 'vi', 'tomorrow'], ['Ngày mai có mưa không?', 'vi', 'rain-tomorrow'],
