@@ -250,7 +250,8 @@ describe('Questions Claude reads', () => {
     const r = await say({ text: "what's the weather today", heard: '紐約天氣點', lang: 'yue', questions: true });
     assert.equal(r.handled, true);
     assert.equal(r.lang, 'yue');
-    assert.match(r.say, /^紐約：而家30°F/);
+    assert.match(r.say, /^紐約：而家華氏三十度，/);
+    assert.doesNotMatch(r.say, /[0-9°F%]/, 'a speaker reads numbers written out, not "30F"');
     assert.deepEqual({ ...db.prepare('SELECT text, understood FROM voice_commands').get() as any }, { text: '紐約天氣點', understood: 1 });
   });
 

@@ -5,6 +5,7 @@ import { Router, Request, Response } from 'express';
 import { reply } from '../nlp/replies';
 import { answerStatusQuestion } from '../nlp/status';
 import { spokenDegrees } from '../nlp/questions';
+import { spokenAnswer } from '../nlp/spoken';
 import { answerAsked, answerMissed, FOLLOW_UP_MS, type Answered } from '../nlp/question-reader';
 import { requireInternalKey } from '../middleware/internal';
 import { getDb } from '../db';
@@ -159,7 +160,7 @@ internalRouter.post('/voice/command', async (req: Request, res: Response) => {
 
 /** An answer for the bridge to say as it is, in `lang`. */
 function sayIt(answer: { response: string; actions: unknown[] }, lang: VoiceLanguage) {
-  const say = lang === 'en' ? spokenDegrees(answer.response) : answer.response;
+  const say = spokenAnswer(answer.response, lang);
   return { handled: true, response: say, say, lang, actions: answer.actions };
 }
 
