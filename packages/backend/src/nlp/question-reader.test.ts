@@ -261,7 +261,7 @@ describe('Questions Claude reads', () => {
     const r = await say({ text: "what's the weather", heard: '今日New约天气点啊', lang: 'yue', questions: true });
     assert.equal(r.handled, true);
     assert.doesNotMatch(r.say, /约/);
-    assert.match(r.say, /^New York：/);
+    assert.match(r.say, /^而家華氏/, 'the English name is left unsaid by the Cantonese voice');
   });
 
   it('by voice, answers a missed English question on the first try, in spoken degrees', async () => {

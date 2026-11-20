@@ -62,6 +62,8 @@ export function spokenAnswer(text: string, lang: QuestionLang | 'en'): string {
   const yue = lang === 'yue';
   const fahrenheit = yue ? '華氏' : '华氏';
   return text
+    // A city in English letters ("New York：") is beyond a Chinese voice, and slows it badly: left unsaid.
+    .replace(/^[A-Za-z][A-Za-z .'-]*：/, '')
     .replace(TEMPERATURE, temps((n, unit, once) => `${once && unit === 'F' ? fahrenheit : ''}${chineseNumber(n)}度`))
     .replace(/(\d+)%/g, (_m, n: string) => `百分之${chineseNumber(Number(n))}`)
     // 2點 is 兩點 (两点); 8點05分 is 八點零五分.

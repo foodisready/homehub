@@ -31,6 +31,11 @@ describe('spokenAnswer', () => {
     assert.equal(spokenAnswer('Bây giờ trời −1°C.', 'vi'), 'Bây giờ trời âm một độ C.');
   });
 
+  it('leaves a city in English letters unsaid in Chinese', () => {
+    assert.equal(spokenAnswer('New York：聽日應該唔會落雨。', 'yue'), '聽日應該唔會落雨。');
+    assert.equal(spokenAnswer('紐約：聽日應該唔會落雨。', 'yue'), '紐約：聽日應該唔會落雨。');
+  });
+
   it('keeps English as spoken degrees', () => {
     assert.equal(spokenAnswer("It's 40°F.", 'en'), "It's 40 degrees.");
   });
