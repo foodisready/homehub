@@ -91,13 +91,14 @@ export async function readQuestion(text: string, before: string[], opts: { apiKe
   const { default: Anthropic } = await import('@anthropic-ai/sdk');
   const client = new Anthropic({ apiKey: opts.apiKey, timeout: opts.timeoutMs, maxRetries: 1 });
   try {
+    // One deadline for the whole read, its retry included: someone is waiting at a speaker.
     const res = await client.messages.create({
       model: opts.model ?? CLAUDE_MODEL,
       max_tokens: 1024,
       system: QUESTION_PROMPT,
       messages: [{ role: 'user', content: questionInput(text, before) }],
       output_config: { effort: 'low', format: { type: 'json_schema', schema: QUESTION_SCHEMA as unknown as Record<string, unknown> } },
-    });
+    }, { signal: AbortSignal.timeout(opts.timeoutMs) });
     const usage = { inputTokens: res.usage.input_tokens, outputTokens: res.usage.output_tokens };
     if (res.stop_reason === 'refusal') return { reading: null, ms: Date.now() - t0, error: 'refused', ...usage };
     const raw = res.content.map((b) => (b.type === 'text' ? b.text : '')).join('');

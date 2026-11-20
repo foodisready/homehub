@@ -25,7 +25,7 @@ let appServer: http.Server;
 let voice = '';
 
 /** The fake Anthropic API: question forms are answered from `readings` by the words said, last line first. */
-const anthropic = { questions: [] as string[], forms: 0, chats: 0, readings: {} as Record<string, unknown>, status: 200 };
+const anthropic = { questions: [] as string[], forms: 0, chats: 0, readings: {} as Record<string, unknown>, status: 200, delayMs: 0 };
 const NONE = { ask: 'none', day: 'today', place: null, place_said: null };
 const message = (text: string) => ({ id: 'msg_1', type: 'message', role: 'assistant', model: 'claude-haiku-5-5',
   content: [{ type: 'text', text }], stop_reason: 'end_turn', usage: { input_tokens: 900, output_tokens: 25 } });
@@ -46,7 +46,8 @@ function startFake(): Promise<number> {
         const said = String(json.messages[0].content);
         anthropic.questions.push(said);
         const words = said.split('Now they say: ').pop()!.trim();
-        return res.end(JSON.stringify(message(JSON.stringify(anthropic.readings[words] ?? NONE))));
+        const answer = () => { if (!res.destroyed) res.end(JSON.stringify(message(JSON.stringify(anthropic.readings[words] ?? NONE)))); };
+        return anthropic.delayMs ? void setTimeout(answer, anthropic.delayMs) : answer();
       }
       if (schema) {
         anthropic.forms++;
@@ -128,7 +129,7 @@ describe('Questions Claude reads', () => {
   });
 
   beforeEach(() => {
-    anthropic.questions = []; anthropic.forms = 0; anthropic.chats = 0; anthropic.readings = {}; anthropic.status = 200;
+    anthropic.questions = []; anthropic.forms = 0; anthropic.chats = 0; anthropic.readings = {}; anthropic.status = 200; anthropic.delayMs = 0;
     meteo.forecasts = []; meteo.lookups = []; meteo.down = false;
     weather.clearWeatherCache();
     qr.forgetQuestions();
@@ -181,6 +182,20 @@ describe('Questions Claude reads', () => {
   });
 
   // ── Chat ──────────────────────────────────────────────────────
+
+  it('gives up on a slow read by its deadline, retry included, and the rules answer', async () => {
+    anthropic.delayMs = 1_000;
+    const t0 = Date.now();
+    const r = await qr.readQuestion('今日凍唔凍', [], { apiKey: KEY, timeoutMs: 300 });
+    assert.ok(Date.now() - t0 < 700, `took ${Date.now() - t0} ms`);
+    assert.equal(r.reading, null);
+    assert.ok(r.error);
+    useClaude();
+    const t1 = Date.now();
+    const v = await qr.answerAsked("what's the weather", { who: 'voice', lang: 'en', timeoutMs: 300, windowMs: 60_000 });
+    assert.ok(Date.now() - t1 < 700, `took ${Date.now() - t1} ms`);
+    assert.match(v!.response, /52°F/, 'the rules\' answer, for home');
+  });
 
   it('without a key, the rules answer as before and nothing is sent to Anthropic', async () => {
     const r = await ask('紐約嘅氣溫係幾多');
