@@ -54,10 +54,11 @@ ask, what they want to know:
 
 day, for weather, rain and wear: "today" (also "now"), "tomorrow", or "other" for any other day. Use "today" when no day is said.
 
-place: the city they ask about, written in English (New York, Hong Kong, Hanoi, Ho Chi Minh City, Beijing...), or null for here at home. Leave it null unless a city is named.
-place_said: that city as they wrote it, in their own words and script (紐約, Hà Nội), or null.
+place: the city they ask about, written in English (New York, Hong Kong, Hanoi, Ho Chi Minh City, Beijing...), or null for here at home. Null unless these words name a city, or are a fragment that only carries on the question before (see below).
+place_said: that city's name in their language and script, spelled correctly (紐約, 東京, Hà Nội), or null. Speech recognition can mix scripts or mishear a name ("New约", "Hà Lội"): write the city's proper name instead.
 
-The conversation so far may come first. A follow-up can carry on from it: after "the weather in New York?", "what should I wear?" is still about New York, and "and tomorrow?" asks the same thing for tomorrow. A new question that names its own city or day uses that instead.`;
+The conversation so far may come first. Most questions stand on their own: a question with its own verb that names no city is about here at home, place null, even straight after a question about a city. After "紐約嘅氣溫係幾多" (New York), "我應該着啲咩", "聽日會唔會落雨", "听日会，唔会落雨", "do I need an umbrella" and "what should I wear" are all about home: place null.
+Only a fragment carries the earlier city or question on: after "the weather in New York?", "and tomorrow?" (聽日呢, 明天呢, ngày mai thì sao) asks the same thing about New York for tomorrow, and "what about Hong Kong?" (咁香港呢) asks it about Hong Kong.`;
 
 /** What the model is given: the words, after the questions asked just before them. */
 export function questionInput(text: string, before: string[] = []): string {
@@ -166,7 +167,8 @@ const CHINESE = /[一-鿿]/;
 function placeName(r: Reading, place: Place, lang: AnswerLang): string {
   const said = r.placeSaid;
   if (lang === 'en' || !said) return place.name;
-  if (lang === 'yue' || lang === 'zh') return CHINESE.test(said) ? said : place.name;
+  // A name mixing scripts ("New约") is a mishearing, not a name a Chinese voice can say.
+  if (lang === 'yue' || lang === 'zh') return CHINESE.test(said) && !/[A-Za-z]/.test(said) ? said : place.name;
   return CHINESE.test(said) ? place.name : said;
 }
 const withPlace = (name: string, text: string, lang: AnswerLang) => `${name}${lang === 'yue' || lang === 'zh' ? '：' : ': '}${text}`;

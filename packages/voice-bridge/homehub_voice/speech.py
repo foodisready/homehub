@@ -125,9 +125,11 @@ class VietnameseEars:
 
 
 class CantoneseVoice:
-    """Spoken Cantonese replies (sherpa-onnx VITS). Its dictionary knows simplified characters best."""
+    """Spoken Cantonese replies (sherpa-onnx VITS). Its dictionary knows simplified characters best.
+    Slower than real time on a Pi 4 even on all four cores (a weather answer: 21 s on two, 11 s on four),
+    and a reply is made after the words are recognised, so it takes them all."""
 
-    def __init__(self, folder: Path, threads: int = 2) -> None:
+    def __init__(self, folder: Path, threads: int = 4) -> None:
         import opencc
         import sherpa_onnx
 

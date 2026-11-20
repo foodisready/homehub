@@ -89,6 +89,12 @@ class ReplyTest(unittest.TestCase):
         self.assertEqual(q.yue_reply('tomorrow', WEATHER), '聽日有雨，最高華氏五十九度，最低四十八度。落雨機會百分之七十。')
         self.assertEqual(q.yue_reply('rain-today', {**WEATHER, 'now': {'temperature': 50, 'feelsLike': 48, 'code': 61}}), '係，而家落緊雨。')
 
+    def test_no_number_when_rain_is_not_expected(self):
+        dry = {**WEATHER, 'tomorrow': {**WEATHER['tomorrow'], 'rain': 0}}
+        self.assertEqual(q.yue_reply('rain-tomorrow', dry), '聽日應該唔會落雨。')
+        self.assertEqual(q.zh_reply('rain-tomorrow', dry), '明天应该不会下雨。')
+        self.assertEqual(q.vi_reply('rain-tomorrow', dry), 'Ngày mai chắc không mưa.')
+
     def test_what_to_wear(self):
         self.assertEqual(q.yue_reply('wear-today', {**WEATHER, 'wear': WEAR_TODAY}),
                          '而家體感華氏六十度，今日最高六十八度。著件冷衫或者薄外套就夠。')

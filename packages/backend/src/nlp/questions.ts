@@ -67,7 +67,10 @@ export function weatherQuestion(text: string): WeatherAsked | null {
 function chance(day: DayForecast, word: string, when: string): string {
   if (day.rain >= 60) return `Yes, ${word} is likely ${when}: a ${day.rain}% chance.`;
   if (day.rain >= 30) return `Maybe: there's a ${day.rain}% chance of ${word} ${when}.`;
-  return `${word[0].toUpperCase()}${word.slice(1)} isn't likely ${when}: a ${day.rain}% chance.`;
+  const Word = `${word[0].toUpperCase()}${word.slice(1)}`;
+  // Below 10%, no number: "isn't likely: a 0% chance" is clumsy to hear.
+  if (day.rain < 10) return `${Word} isn't expected ${when}.`;
+  return `${Word} isn't likely ${when}: a ${day.rain}% chance.`;
 }
 
 /** 35°F, −2°C: as written in Chat. */

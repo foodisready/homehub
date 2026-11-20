@@ -179,6 +179,17 @@ describe('time, date and weather questions', () => {
     assert.equal(f.urls.length, 1);
   });
 
+  it('says rain isn\'t expected below a 10% chance, with no number', async () => {
+    const dry = { ...FORECAST, daily: { ...FORECAST.daily, precipitation_probability_max: [0, 5] } };
+    const ask = async (text: string) => (await q.answerQuestion(text, { fetchImpl: fakeFetch(dry).impl }))?.response;
+    weather.clearWeatherCache();
+    assert.equal(await ask('Will it rain tomorrow?'), "Rain isn't expected tomorrow.");
+    const native = async (text: string) => { weather.clearWeatherCache(); return (await nq.answerNativeQuestion(text, { fetchImpl: fakeFetch(dry).impl }))?.response; };
+    assert.equal(await native('聽日會唔會落雨'), '聽日應該唔會落雨。');
+    assert.equal(await native('明天会下雨吗'), '明天应该不会下雨。');
+    assert.equal(await native('Ngày mai có mưa không'), 'Ngày mai chắc không mưa.');
+  });
+
   it('uses °C outside the United States', async () => {
     setHome(10.82302, 106.62965, 'Asia/Ho_Chi_Minh');
     const f = fakeFetch();

@@ -255,6 +255,15 @@ describe('Questions Claude reads', () => {
     assert.deepEqual({ ...db.prepare('SELECT text, understood FROM voice_commands').get() as any }, { text: '紐約天氣點', understood: 1 });
   });
 
+  it('never says back a city name in mixed scripts, as speech recognition wrote it ("New约")', async () => {
+    useClaude();
+    anthropic.readings['今日New约天气点啊'] = { ask: 'weather', day: 'today', place: 'New York', place_said: 'New约' };
+    const r = await say({ text: "what's the weather", heard: '今日New约天气点啊', lang: 'yue', questions: true });
+    assert.equal(r.handled, true);
+    assert.doesNotMatch(r.say, /约/);
+    assert.match(r.say, /^New York：/);
+  });
+
   it('by voice, answers a missed English question on the first try, in spoken degrees', async () => {
     useClaude();
     anthropic.readings["what's the weather in New York"] = { ask: 'weather', day: 'today', place: 'New York', place_said: 'New York' };

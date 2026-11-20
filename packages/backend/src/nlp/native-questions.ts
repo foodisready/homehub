@@ -118,17 +118,21 @@ function rainText(lang: QuestionLang, day: DayForecast, tomorrow: boolean): stri
     const when = tomorrow ? 'ngày mai' : 'hôm nay';
     if (day.rain >= 60) return `Có, ${when} nhiều khả năng mưa, ${n}.`;
     if (day.rain >= 30) return `Có thể, ${when} khả năng mưa ${n}.`;
+    // Below 10%, no number: "not likely, 0%" is clumsy to hear.
+    if (day.rain < 10) return `${when[0].toUpperCase()}${when.slice(1)} chắc không mưa.`;
     return `${when[0].toUpperCase()}${when.slice(1)} ít khả năng mưa, ${n}.`;
   }
   if (lang === 'yue') {
     const when = tomorrow ? '聽日' : '今日';
     if (day.rain >= 60) return `會，${when}好大機會落雨，機會${n}。`;
     if (day.rain >= 30) return `可能會，${when}落雨機會${n}。`;
+    if (day.rain < 10) return `${when}應該唔會落雨。`;
     return `${when}唔多會落雨，機會${n}。`;
   }
   const when = tomorrow ? '明天' : '今天';
   if (day.rain >= 60) return `会，${when}很可能下雨，概率${n}。`;
   if (day.rain >= 30) return `可能会，${when}下雨的概率是${n}。`;
+  if (day.rain < 10) return `${when}应该不会下雨。`;
   return `${when}不太会下雨，概率${n}。`;
 }
 

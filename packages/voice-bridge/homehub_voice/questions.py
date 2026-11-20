@@ -89,6 +89,8 @@ def _vi_rain(day: dict, when: str) -> str:
         return f'Có, {when} nhiều khả năng mưa, {n} phần trăm.'
     if day['rain'] >= 30:
         return f'Có thể, {when} khả năng mưa {n} phần trăm.'
+    if day['rain'] < 10:   # no number: "not likely, 0%" is clumsy to hear
+        return f'{when.capitalize()} chắc không mưa.'
     return f'{when.capitalize()} ít khả năng mưa, {n} phần trăm.'
 
 
@@ -224,6 +226,8 @@ def _yue_rain(day: dict, when: str) -> str:
         return f'會，{when}好大機會落雨，機會百分之{n}。'
     if day['rain'] >= 30:
         return f'可能會，{when}落雨機會百分之{n}。'
+    if day['rain'] < 10:
+        return f'{when}應該唔會落雨。'
     return f'{when}唔多會落雨，機會百分之{n}。'
 
 
@@ -326,6 +330,8 @@ def _zh_rain(day: dict, when: str) -> str:
         return f'会，{when}很可能下雨，概率百分之{n}。'
     if day['rain'] >= 30:
         return f'可能会，{when}下雨的概率是百分之{n}。'
+    if day['rain'] < 10:
+        return f'{when}应该不会下雨。'
     return f'{when}不太会下雨，概率百分之{n}。'
 
 
