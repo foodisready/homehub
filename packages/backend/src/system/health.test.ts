@@ -214,6 +214,22 @@ describe('checkHealth', () => {
     });
   });
 
+  it('gives Settings the speakers and a restart in progress', async () => {
+    const { bridgeForSettings, requestBridgeRestart, bridgeInstructions } = await import('./voice-bridge');
+    recordBridgeReport({ speakers: [{ name: 'Ava', address: '10.0.0.20', connected: true }, { name: 'Kitchen', address: '10.0.0.21', connected: false }],
+      kind: 'docker', id: 'a', state: 'running' }, NOW - 5_000);
+    let b = bridgeForSettings(NOW, 90_000);
+    assert.deepEqual(b?.speakers, [{ name: 'Ava', connected: true }, { name: 'Kitchen', connected: false }]);
+    assert.equal(b?.restart, null);
+    requestBridgeRestart(NOW);
+    assert.equal(bridgeForSettings(NOW, 90_000)?.restart, 'asked');
+    bridgeInstructions(NOW + 1_000);   // the bridge checks in and is told to restart
+    assert.equal(bridgeForSettings(NOW, 90_000)?.restart, 'restarting');
+    bridgeInstructions(NOW + 60_000);  // back, checking in again
+    b = bridgeForSettings(NOW, 90_000);
+    assert.equal(b?.restart, null);
+  });
+
   it('notices a bridge that stopped checking in, even after a restart', async () => {
     recordBridgeReport({ speakers: [] }, NOW - 20 * 60_000);
     let r = await checkHealth({ probe: up, now: NOW, dataDir: TMP });

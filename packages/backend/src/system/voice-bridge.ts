@@ -52,12 +52,20 @@ export function recentBridges(now = Date.now()): { id: string; kind: BridgeRepor
  * comes with HomeHub spoke last, so the admin is told to stop the old one.
  */
 export function bridgeForSettings(now = Date.now(), lateMs: number):
-  (Pick<BridgeReport, 'state' | 'kind' | 'version' | 'languages' | 'detail'> & { applying: boolean }) | null {
+  (Pick<BridgeReport, 'state' | 'kind' | 'version' | 'languages' | 'detail'> & {
+    applying: boolean;
+    /** Each speaker and whether it's connected, so Settings can show them beside Restart. */
+    speakers: { name: string; connected: boolean }[];
+    /** 'asked' until the bridge picks up a restart, then 'restarting' until it checks in again. */
+    restart: 'asked' | 'restarting' | null;
+  }) | null {
   if (!last || now - last.at > lateMs) return null;
   const service = recentBridges(now).some((b) => b.kind === 'service');
   return {
     state: last.state, kind: service ? 'service' : last.kind, version: last.version,
     languages: last.languages, detail: last.detail, applying: languagesPending(),
+    speakers: last.speakers.map((sp) => ({ name: sp.name, connected: sp.connected })),
+    restart: bridgeRestartState(),
   };
 }
 

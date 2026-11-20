@@ -673,7 +673,7 @@ HomeHub checks its computer's temperature every minute, so Health also says how 
 
 ### Restart the voice bridge
 
-If speakers stop answering, administrators can select **Restart voice bridge** under **Voice**. The bridge restarts when it next checks in, within a minute, and the page shows it restarting. You don't need it for new nicknames: the bridge picks those up by itself within a minute.
+If speakers stop answering, administrators can select **Restart voice bridge** under **Voice**, here or in **Settings → Voice control**, which also lists each speaker as Connected or Not connected. The bridge restarts when it next checks in, within a minute, and the page shows it restarting. You don't need it for new nicknames: the bridge picks those up by itself within a minute.
 
 ### Go back a version
 
@@ -685,7 +685,7 @@ If Health says to run the installer once more, your HomeHub was installed before
 
 Say a command to a speaker or tablet, and HomeHub does it and answers, with no cloud. It needs a voice speaker on the same network, such as the Ava app on an Android tablet.
 
-To turn it on, an administrator opens **Settings → Voice control**, ticks **Voice control** and saves. The first time, HomeHub downloads its speech models, about 200 MB, which takes a few minutes; the card says when it's running. Speakers on the network are found by themselves, and appear under **Health**. The [voice bridge](../packages/voice-bridge/README.md) that does this comes with HomeHub and updates with it. See the [voice control plan](./VOICE_CONTROL.md) for what's still to come.
+To turn it on, an administrator opens **Settings → Voice control**, ticks **Voice control** and saves. The first time, HomeHub downloads its speech models, about 200 MB, which takes a few minutes; the card says when it's running. Speakers on the network are found by themselves, and appear on the card and under **Health**. If one stops answering or shows Not connected, select **Restart voice bridge** on the card: speakers reconnect in about a minute. If one still doesn't, open the voice app on it again, or restart the tablet. The [voice bridge](../packages/voice-bridge/README.md) that does this comes with HomeHub and updates with it. See the [voice control plan](./VOICE_CONTROL.md) for what's still to come.
 
 If two speakers hear the same command, only the one that heard you loudest, usually the nearest, answers, and the command is carried out once. If a speaker wakes but hears no words, usually because something on TV or in a conversation sounded like the wake word, it stops listening without saying anything. It also stays quiet when what it hears has nothing of a command in it, such as a line from a show ("I don't want to pay for your drink"): no on or off word, nothing that's part of a device's name, and more than a couple of words. A short miss, such as a command cut off, still gets an answer, so you know to say it again. It never takes its own reply, heard back as it listens again, for a command.
 

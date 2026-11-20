@@ -2,6 +2,7 @@ import { Component, OnDestroy, OnInit, computed, inject, output, signal } from '
 import { HttpClient } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
 import { AutomationsService } from '../../core/services/automations.service';
+import { SystemService } from '../../core/services/system.service';
 import { NicknameReviewComponent } from './nickname-review.component';
 
 interface BridgeStatus {
@@ -10,6 +11,10 @@ interface BridgeStatus {
   detail?: string | null;
   /** Running with other languages than the ones saved: it's about to restart to load them. */
   applying?: boolean;
+  /** Each speaker and whether it's connected. From v0.2.10. */
+  speakers?: { name: string; connected: boolean }[];
+  /** A restart an admin asked for: 'asked' until the bridge picks it up, then 'restarting'. From v0.2.10. */
+  restart?: 'asked' | 'restarting' | null;
 }
 interface VoiceSettings { enabled: boolean; languages: string[]; bridge: BridgeStatus | null }
 
@@ -41,6 +46,16 @@ const POLL_MS = 5_000;
     .msg.ok { color:var(--green); }
     .msg.err { color:var(--red); }
     code { font-size:0.78rem; overflow-wrap:anywhere; }
+    .btn-sm { padding:0.3rem 0.75rem; font-size:0.8rem; }
+    .speakers { margin:0.9rem 0 0; padding:0.75rem 0 0; border-top:1px solid var(--border); }
+    .speakers h3 { font-size:0.84rem; font-weight:600; margin:0 0 0.45rem; color:var(--text); }
+    .speakers ul { list-style:none; margin:0; padding:0; }
+    .speakers li { display:flex; gap:0.5rem; align-items:flex-start; font-size:0.84rem; margin:0 0 0.35rem; line-height:1.45; }
+    .speakers .name { overflow-wrap:anywhere; }
+    .speakers .state { color:var(--text-muted); }
+    .speakers .none { font-size:0.82rem; color:var(--text-muted); margin:0; }
+    .restart { display:flex; gap:0.6rem; align-items:center; flex-wrap:wrap; margin-top:0.7rem; }
+    .restart .hint { font-size:0.78rem; color:var(--text-muted); flex:1 1 14rem; line-height:1.4; }
   `],
   template: `
     <p class="intro">
@@ -93,6 +108,36 @@ const POLL_MS = 5_000;
         <span>{{ status().text }} @if (status().command) { <code>{{ status().command }}</code> }</span>
       </div>
 
+      @if (canRestart()) {
+        <section class="speakers" aria-labelledby="speakers-title">
+          <h3 id="speakers-title">Speakers</h3>
+          @if (speakers() === null) {
+            <p class="none">Each speaker's status is under More → Health.</p>
+          } @else if (speakers()!.length) {
+            <ul>
+              @for (sp of speakers(); track $index) {
+                <li>
+                  <span class="dot" [class.ok]="sp.connected" [class.busy]="!sp.connected"></span>
+                  <span><span class="name">{{ sp.name }}</span> · <span class="state">{{ sp.connected ? 'Connected' : 'Not connected' }}</span></span>
+                </li>
+              }
+            </ul>
+          } @else {
+            <p class="none">No speakers found. Check the speaker or tablet is on, and the voice app is open.</p>
+          }
+          <div class="restart">
+            <button class="btn-sm btn-ghost" type="button" (click)="restart()" [disabled]="restarting()">
+              {{ asking() ? 'Asking…' : restartState() ? 'Restarting…' : 'Restart voice bridge' }}
+            </button>
+            <span class="hint">
+              If a speaker stops answering or shows Not connected. Speakers reconnect in about a minute.
+              If one still doesn't, open the voice app on it again, or restart the tablet.
+            </span>
+          </div>
+          @if (restartError()) { <p class="msg err" style="margin-top:0.5rem">{{ restartError() }}</p> }
+        </section>
+      }
+
       @if (otherLanguages().length) {
         <app-nickname-review [languages]="otherLanguages()" (changed)="nicknamesChanged.emit()" />
       }
@@ -104,6 +149,7 @@ const POLL_MS = 5_000;
 export class VoiceControlComponent implements OnInit, OnDestroy {
   private readonly http = inject(HttpClient);
   private readonly automations = inject(AutomationsService);
+  private readonly system = inject(SystemService);
   readonly standby = computed(() => { const r = this.automations.role()?.role; return r === 'backup' || r === 'dev'; });
   readonly loaded = signal(false);
   readonly loadError = signal('');
@@ -121,6 +167,18 @@ export class VoiceControlComponent implements OnInit, OnDestroy {
   vietnamese = false;
   mandarin = false;
   private timer?: ReturnType<typeof setInterval>;
+  readonly asking = signal(false);
+  readonly restartError = signal('');
+  /** Null from a HomeHub before v0.2.10, which doesn't send them. */
+  readonly speakers = computed(() => this.saved()?.bridge?.speakers ?? null);
+  readonly restartState = computed(() => this.saved()?.bridge?.restart ?? null);
+  readonly restarting = computed(() => this.asking() || this.restartState() !== null);
+  /** The bridge is checking in and running (or restarting at an admin's request): it can be asked to restart. */
+  readonly canRestart = computed(() => {
+    const s = this.saved();
+    const b = s?.bridge;
+    return !!s?.enabled && !this.standby() && !!b && (b.state === 'running' || b.restart != null);
+  });
 
   /** What the voice bridge is doing, in words. */
   readonly status = computed((): { text: string; tone: 'ok' | 'busy' | 'none'; command?: string } => {
@@ -133,6 +191,8 @@ export class VoiceControlComponent implements OnInit, OnDestroy {
       };
     }
     if (!s?.enabled) return { text: 'Voice is off.', tone: 'none' };
+    if (b?.restart === 'asked') return { text: 'Asked to restart. It restarts when it next checks in, within a minute.', tone: 'busy' };
+    if (b?.restart === 'restarting') return { text: 'Restarting…', tone: 'busy' };
     if (!b) return { text: 'Turning on. The voice bridge checks in within a minute.', tone: 'busy' };
     if (b.state === 'off') return { text: 'Turning on…', tone: 'busy' };
     if (b.state === 'starting') {
@@ -143,7 +203,7 @@ export class VoiceControlComponent implements OnInit, OnDestroy {
     if (b.applying) {
       return { text: 'Applying your change: the voice bridge restarts to load the new languages.', tone: 'busy' };
     }
-    return { text: `Running${b.version ? ` (${b.version})` : ''}. Speakers are listed under More → Health.`, tone: 'ok' };
+    return { text: `Running${b.version ? ` (${b.version})` : ''}.`, tone: 'ok' };
   });
 
   ngOnInit(): void {
@@ -169,6 +229,18 @@ export class VoiceControlComponent implements OnInit, OnDestroy {
         this.loaded.set(true);
       },
       error: () => { if (first) this.loadError.set("Couldn't load the voice settings."); },
+    });
+  }
+
+  restart(): void {
+    this.asking.set(true);
+    this.restartError.set('');
+    this.system.restartVoiceBridge().subscribe({
+      next: () => { this.asking.set(false); this.load(false); },
+      error: (err) => {
+        this.asking.set(false);
+        this.restartError.set(err?.error?.error ?? "Couldn't ask the voice bridge to restart. Try again.");
+      },
     });
   }
 
