@@ -526,11 +526,16 @@ def answer_question(heard: str, kind: str, lang: str, homehub: Commander, t0: fl
     t1 = time.monotonic()
     send = questions.ENGLISH[kind]
     try:
-        res = homehub.command(send)
+        # What was heard goes too, so HomeHub's Claude (when chosen) can find a city or a follow-up in it
+        # and answer in words of its own. A HomeHub that can't ask is sent the question alone, as before.
+        res = homehub.command(send, lang=lang, heard=heard) if getattr(homehub, 'can_ask', False) is True else homehub.command(send)
     except HomeHubError as e:
         log.warning('%s', e)
         return Answer(heard, vi.NO_HOMEHUB if lang == 'vi' else WAYS[lang].no_homehub, False, t1 - t0,
                       time.monotonic() - t1, lang=lang, passes=passes)
+    if res.handled and res.say:
+        return Answer(f'{heard} → {send}', res.say, True, t1 - t0, time.monotonic() - t1,
+                      lang=res.say_lang or lang, passes=passes)
     say = {'vi': questions.vi_reply, 'zh': questions.zh_reply}.get(lang, questions.yue_reply)
     reply = say(kind, res.info if res.handled else None)
     return Answer(f'{heard} → {send}', reply, res.handled and res.info is not None, t1 - t0,

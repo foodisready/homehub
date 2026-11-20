@@ -160,6 +160,33 @@ class PipelineTest(unittest.TestCase):
         self.assertEqual((a.lang, a.handled, a.passes, hub.sent), ('yue', True, 1, ["what's the weather tomorrow"]))
         self.assertTrue(a.reply.startswith('聽日有雨'))
 
+    class ClaudeHub(Hub):
+        """HomeHub with Claude chosen: it reads what was heard and may answer in its own words."""
+        can_ask = True
+
+        def __init__(self, say=None):
+            super().__init__()
+            self.say, self.calls = say, []
+
+        def command(self, text, retry=False, lang=None, ask=False, heard=None):
+            self.calls.append((text, lang, heard))
+            res = PipelineTest.Hub.command(self, text, retry)
+            if self.say:
+                return CommandResult(True, self.say, [], res.info, self.say, lang)
+            return res
+
+    def test_a_city_is_answered_in_homehubs_words(self):
+        hub = self.ClaudeHub('紐約：而家華氏三十度，多雲。')
+        a = answer(b'\0' * 32000, True, self.NoWhisper(), hub, self.Ears('yue', '紐約天氣點呀？'), vi_ears=self.Ears('', 'NIU JEK'))
+        self.assertEqual(hub.calls, [("what's the weather", 'yue', '紐約天氣點呀？')])
+        self.assertEqual((a.lang, a.handled, a.reply), ('yue', True, '紐約：而家華氏三十度，多雲。'))
+
+    def test_without_homehubs_words_the_numbers_are_said_as_before(self):
+        hub = self.ClaudeHub()
+        a = answer(b'\0' * 32000, True, self.NoWhisper(), hub, self.Ears('yue', '聽日天氣點呀？'), vi_ears=self.Ears('', 'TING DẬT'))
+        self.assertEqual(hub.calls, [("what's the weather tomorrow", 'yue', '聽日天氣點呀？')])
+        self.assertTrue(a.reply.startswith('聽日有雨'))
+
     def test_what_to_wear_in_cantonese(self):
         hub = self.Hub()
         a = answer(b'\0' * 32000, True, self.NoWhisper(), hub, self.Ears('yue', '聽日著咩衫好？'), vi_ears=self.Ears('', 'TING DẬT'))

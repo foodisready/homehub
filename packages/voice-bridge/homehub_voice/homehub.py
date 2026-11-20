@@ -126,16 +126,23 @@ class HomeHub:
                 return None
             raise
 
-    def command(self, text: str, retry: bool = False, lang: str | None = None, ask: bool = False) -> CommandResult:
+    def command(self, text: str, retry: bool = False, lang: str | None = None, ask: bool = False,
+                heard: str | None = None) -> CommandResult:
         """retry: if this isn't understood, the bridge will try again, so HomeHub doesn't list it as missed yet.
         ask: HomeHub may answer a command its rules don't know with a question (with Claude chosen), which the
-        speaker can ask and listen for. lang: the language heard.
+        speaker can ask and listen for. lang: the language heard. heard: what was said, when `text` is the
+        bridge's English for a question it read ("what's the weather today" for 紐約天氣點), so HomeHub's
+        Claude can find a city in it.
+
+        Every request says the bridge speaks HomeHub's `say` as it is (questions): with Claude chosen, HomeHub
+        may answer a question itself, in the language heard, on a retry too.
 
         Also for what the bridge would take for talk in the room ("make the front brighter" has no on or off
         word): Claude asks only about a device it can name, and when it can't, the speaker stays quiet as before."""
         ask = ask and not retry
-        res = self._call('/command', {'text': text, **({'retry': True} if retry else {}),
-                                      **({'ask': True} if ask else {}), **({'lang': lang} if lang else {})})
+        res = self._call('/command', {'text': text, 'questions': True, **({'retry': True} if retry else {}),
+                                      **({'ask': True} if ask else {}), **({'lang': lang} if lang else {}),
+                                      **({'heard': heard} if heard else {})})
         failed = [str((a.get('args') or {}).get('alias', '')) for a in res.get('actions') or []
                   if isinstance(a, dict) and isinstance(a.get('result'), dict) and a['result'].get('error')]
         info = next((a['result'] for a in res.get('actions') or [] if isinstance(a, dict)

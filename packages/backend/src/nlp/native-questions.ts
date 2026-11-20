@@ -61,6 +61,14 @@ export function nativeQuestion(text: string): { lang: QuestionLang; asked: Asked
   return asked ? { lang: 'vi', asked } : null;
 }
 
+const VI_LETTERS = /[ăâđêôơưàáạảãầấậẩẫằắặẳẵèẹẻẽềếệểễìíịỉĩòóọỏõồốộổỗờớợởỡùúụủũừứựửữỳýỵỷỹ]/i;
+
+/** The language a question was typed in, for its answer: Cantonese, Mandarin, Vietnamese or English. */
+export function questionLang(text: string): QuestionLang | 'en' {
+  if (hasChinese(text)) return MANDARIN.test(text) || ZH_ONLY.test(text) ? 'zh' : 'yue';
+  return VI_LETTERS.test(text) ? 'vi' : 'en';
+}
+
 // ── Saying it ───────────────────────────────────────────────────
 
 const CONDITIONS: Record<QuestionLang, Record<string, string>> = {
@@ -84,7 +92,7 @@ const WEEKDAYS_ZH = '日一二三四五六';
 const WEEKDAYS_VI = ['Chủ nhật', 'thứ hai', 'thứ ba', 'thứ tư', 'thứ năm', 'thứ sáu', 'thứ bảy'];
 const raining = (code: number) => (code >= 51 && code <= 67) || (code >= 80 && code <= 82) || code >= 95;
 
-function clockText(lang: QuestionLang, hour: number, minute: number): string {
+export function clockText(lang: QuestionLang, hour: number, minute: number): string {
   const h = hour % 12 || 12;
   if (lang === 'vi') {
     const period = hour === 0 || hour >= 22 ? 'đêm' : hour < 11 ? 'sáng' : hour < 13 ? 'trưa' : hour < 18 ? 'chiều' : 'tối';
@@ -97,7 +105,7 @@ function clockText(lang: QuestionLang, hour: number, minute: number): string {
   return `${yue ? '而家係' : '现在是'}${period}${h}${dian}${mins}。`;
 }
 
-function dateText(lang: QuestionLang, c: { weekday: number; day: number; month: number }): string {
+export function dateText(lang: QuestionLang, c: { weekday: number; day: number; month: number }): string {
   if (lang === 'vi') return `Hôm nay là ${WEEKDAYS_VI[c.weekday]}, ngày ${c.day} tháng ${c.month}.`;
   return lang === 'yue'
     ? `今日係${c.month}月${c.day}號，星期${WEEKDAYS_ZH[c.weekday]}。`
@@ -194,12 +202,12 @@ export function weatherText(lang: QuestionLang, w: Weather, asked: WeatherAsked)
     : `现在${deg(w.now.temperature)}，${cond(w.now.code)}。今天最高${deg(day.high)}，最低${deg(day.low)}。${chance}`;
 }
 
-const NOT_LOCATED = {
+export const NOT_LOCATED = {
   yue: 'HomeHub未知你屋企喺邊，請喺設定 → Home度揀位置。',
   zh: 'HomeHub还不知道你家在哪里，请在设置 → Home里选择位置。',
   vi: 'HomeHub chưa biết nhà bạn ở đâu. Hãy đặt vị trí trong Cài đặt → Home.',
 };
-const UNREACHABLE = { yue: '而家攞唔到天氣資料。', zh: '现在获取不到天气信息。', vi: 'Hiện không lấy được thông tin thời tiết.' };
+export const UNREACHABLE = { yue: '而家攞唔到天氣資料。', zh: '现在获取不到天气信息。', vi: 'Hiện không lấy được thông tin thời tiết.' };
 
 /** The answer in the language typed, or null when the text isn't one of these questions. */
 export async function answerNativeQuestion(text: string, opts: { now?: Date; fetchImpl?: typeof fetch } = {}): Promise<Handled | null> {

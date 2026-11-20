@@ -191,7 +191,7 @@ class HomeHubClientTest(unittest.TestCase):
         self.assertEqual(h.names_version, 'v1')
         self.assertEqual(h.command('turn on garage').failed, ['Garage'])
         self.assertEqual(h.command('turn on office lamp'), CommandResult(True, 'Done.'))
-        self.assertEqual(StubHomeHub.seen[-1], ('/internal/voice/command', 'k', {'text': 'turn on office lamp'}))
+        self.assertEqual(StubHomeHub.seen[-1], ('/internal/voice/command', 'k', {'text': 'turn on office lamp', 'questions': True}))
 
     def test_report(self):
         res = HomeHub(self.url, 'k').report('0.1.0', [{'name': 'Tablet', 'address': '10.0.0.20', 'connected': True}])

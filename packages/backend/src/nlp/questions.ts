@@ -5,7 +5,7 @@
  * `actions`, so the voice bridge can say them in Vietnamese or Cantonese.
  */
 import { getHomeSettings } from '../home/home-settings';
-import { describeWeather, getWeather, WeatherError, type DayForecast, type Weather } from '../home/weather';
+import { describeWeather, getWeather, WeatherError, type DayForecast, type Place, type Weather } from '../home/weather';
 import { cleanUp } from './commands';
 import type { ActionTaken } from './nlp.service';
 
@@ -40,8 +40,8 @@ export function homeClock(at = new Date(), timezone = getHomeSettings().timezone
   };
 }
 
-export function answerClock(asked: 'time' | 'date', at: Date): Handled {
-  const { timezone } = getHomeSettings();
+/** The time or date at home, or with `timezone`, in a city asked about. */
+export function answerClock(asked: 'time' | 'date', at: Date, timezone = getHomeSettings().timezone): Handled {
   const clock = homeClock(at, timezone);
   const response = asked === 'time'
     ? `It's ${at.toLocaleTimeString('en-US', { timeZone: timezone, hour: 'numeric', minute: '2-digit' })}.`
@@ -176,9 +176,9 @@ export function weatherReply(w: Weather, asked: WeatherAsked, snow = false): str
 const wearOf = (w: Weather, asked: WeatherAsked) =>
   asked === 'wear-today' || asked === 'wear-tomorrow' ? { wear: clothing(w, asked === 'wear-today' ? 'today' : 'tomorrow') } : {};
 
-export async function answerWeather(asked: WeatherAsked, snow: boolean, fetchImpl?: typeof fetch): Promise<Handled> {
+export async function answerWeather(asked: WeatherAsked, snow: boolean, fetchImpl?: typeof fetch, place?: Place): Promise<Handled> {
   try {
-    const w = await getWeather({ fetchImpl });
+    const w = await getWeather({ fetchImpl, ...(place ? { place } : {}) });
     return {
       response: weatherReply(w, asked, snow),
       actions: [{ tool: 'get_weather', args: { asked }, result: { asked, snow, ...w, ...wearOf(w, asked) } }],
@@ -188,6 +188,14 @@ export async function answerWeather(asked: WeatherAsked, snow: boolean, fetchImp
     const code = err instanceof WeatherError ? err.code : 'UNREACHABLE';
     return { response: message, actions: [{ tool: 'get_weather', args: { asked }, result: { asked, error: message, code } }] };
   }
+}
+
+/** Which English question this is (the time, the date or the weather), or null. */
+export function englishQuestion(text: string): 'time' | 'date' | WeatherAsked | null {
+  const said = cleanUp(text).replace(/[’]/g, "'").replace(/\?+$/, '').trim();
+  if (TIME.test(said)) return 'time';
+  if (DATE.test(said)) return 'date';
+  return weatherQuestion(said);
 }
 
 /** The answer, or null when the text isn't a question about the time, the date or the weather. */

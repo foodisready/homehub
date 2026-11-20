@@ -4,7 +4,8 @@ import { answerCheckinAsk, openCheckinAsks } from '../family/checkin';
 import { Router, Request, Response } from 'express';
 import { reply } from '../nlp/replies';
 import { answerStatusQuestion } from '../nlp/status';
-import { answerQuestion, spokenDegrees } from '../nlp/questions';
+import { spokenDegrees } from '../nlp/questions';
+import { answerAsked, answerMissed, FOLLOW_UP_MS, type Answered } from '../nlp/question-reader';
 import { requireInternalKey } from '../middleware/internal';
 import { getDb } from '../db';
 import { getDriver } from '../drivers/registry';
@@ -101,15 +102,19 @@ internalRouter.post('/voice/status', (req: Request, res: Response) => {
   res.json({ ok: true, ...bridgeInstructions() });
 });
 
-// POST /internal/voice/command  { text: string, retry?, ask?, lang? }
+// POST /internal/voice/command  { text: string, retry?, ask?, lang?, heard?, questions? }
 // The rules act at once. Spoken text can be misheard, so a model never switches a device from it:
 // with Claude in use, a miss can become a question ("Should I turn on Kitchen light?") the bridge asks aloud.
+// With Claude, a question is read by it too (question-reader.ts): "the weather in New York?", or a follow-up.
 internalRouter.post('/voice/command', async (req: Request, res: Response) => {
   // retry: the bridge will try again with a slower, more careful hearing if this isn't understood,
   // so a miss isn't recorded yet. A command that is understood is recorded either way.
   // ask: the bridge can ask "Should I turn on …?" and listen for the answer (bridges before it couldn't).
   // lang: the language it heard, for the question's words and voice.
-  const { text, retry, ask, lang } = req.body as { text?: unknown; retry?: unknown; ask?: unknown; lang?: unknown };
+  // heard: what was said, when `text` is the bridge's English for a question it read itself.
+  // questions: the bridge says an answer's `say` as it is, on a retry too (bridges from v0.2.12).
+  const { text, retry, ask, lang, heard, questions } = req.body as
+    { text?: unknown; retry?: unknown; ask?: unknown; lang?: unknown; heard?: unknown; questions?: unknown };
   if (typeof text !== 'string' || !text.trim()) {
     return res.status(400).json({ error: '`text` is required', code: 'VALIDATION_ERROR' });
   }
@@ -117,23 +122,46 @@ internalRouter.post('/voice/command', async (req: Request, res: Response) => {
   // The wake word can swallow the first word, leaving "off my office lamp" or "Off, kitchen light.",
   // and speech recognition can put a comma after the verb: "Turn off, Office light."
   const spoken = text.trim().replace(/^(?:(?:turn|switch)\s+)?(on|off)(?:\s*,\s*|\s+)/i, 'turn $1 ');
+  const language = (VOICE_LANGUAGES as readonly string[]).includes(String(lang)) ? (lang as VoiceLanguage) : null;
+  // Bridges that can ask also say HomeHub's `say` as it is: an answer in the language heard.
+  const canSay = questions === true || (ask === true && retry !== true);
+  const said = typeof heard === 'string' && heard.trim() ? heard.trim() : null;
+  const reading = { who: 'voice', lang: language, heard: said, timeoutMs: 4_000, windowMs: FOLLOW_UP_MS.voice };
 
-  const handled = await withActivity({ source: 'voice' }, () => runPowerCommand(spoken)) ?? answerStatusQuestion(spoken) ?? await answerQuestion(spoken);
-  if (handled || retry !== true) recordVoiceCommand(text.trim(), handled !== null);
-  if (!handled) {
-    // With Claude in use, HomeHub asks before doing what it read. Not on a first try the bridge will
-    // hear again more carefully. Claude reading nothing to switch leaves it not understood, as before.
-    const language = (VOICE_LANGUAGES as readonly string[]).includes(String(lang)) ? (lang as VoiceLanguage) : null;
-    const asked = ask === true && retry !== true ? await askForVoice(spoken, language) : null;
-    if (asked) {
-      return res.json({ handled: false, response: asked.say, say: asked.say, lang: asked.lang, actions: [],
-        ...(asked.confirmId ? { confirmId: asked.confirmId } : {}) });
-    }
-    return res.json({ handled: false, response: reply('not_understood', {}), actions: [] });
+  const handled = await withActivity({ source: 'voice' }, () => runPowerCommand(spoken)) ?? answerStatusQuestion(spoken)
+    ?? await answerAsked(spoken, { ...reading, read: canSay });
+  if (handled) {
+    recordVoiceCommand(said ?? text.trim(), true);
+    const own = (handled as Answered).said;
+    if (own && canSay) return res.json(sayIt(handled, own.lang));
+    return res.json({ handled: true, ...handled, response: spokenDegrees(handled.response) });
   }
 
-  res.json({ handled: true, ...handled, response: spokenDegrees(handled.response) });
+  // With Claude in use, HomeHub asks before doing what it read. Not on a first try the bridge will
+  // hear again more carefully. Claude reading nothing to switch leaves it not understood, as before.
+  // A question Claude reads is answered, on a first try too: an English one then needn't wait for Whisper.
+  const [asked, answer] = await Promise.all([
+    ask === true && retry !== true ? askForVoice(spoken, language) : null,
+    canSay ? answerMissed(spoken, reading) : null,
+  ]);
+  if (asked) {
+    if (retry !== true) recordVoiceCommand(text.trim(), false);
+    return res.json({ handled: false, response: asked.say, say: asked.say, lang: asked.lang, actions: [],
+      ...(asked.confirmId ? { confirmId: asked.confirmId } : {}) });
+  }
+  if (answer) {
+    recordVoiceCommand(text.trim(), true);
+    return res.json(sayIt(answer, answer.said!.lang));
+  }
+  if (retry !== true) recordVoiceCommand(text.trim(), false);
+  return res.json({ handled: false, response: reply('not_understood', {}), actions: [] });
 });
+
+/** An answer for the bridge to say as it is, in `lang`. */
+function sayIt(answer: { response: string; actions: unknown[] }, lang: VoiceLanguage) {
+  const say = lang === 'en' ? spokenDegrees(answer.response) : answer.response;
+  return { handled: true, response: say, say, lang, actions: answer.actions };
+}
 
 // POST /internal/voice/confirm/:id  { answer: 'yes' | 'no' }: the answer to "Should I turn on …?" after a
 // voice command. Replies with what to say, in the question's language; 404 once it isn't asking.

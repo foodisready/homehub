@@ -5,8 +5,7 @@ import os from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { getCachedState } from '../kasa/device.cache';
 import { answerStatusQuestion } from './status';
-import { answerQuestion } from './questions';
-import { answerNativeQuestion } from './native-questions';
+import { answerAsked, answerMissed, FOLLOW_UP_MS } from './question-reader';
 import { describeWeather, getWeather, WeatherError } from '../home/weather';
 import { getDriver } from '../drivers/registry';
 import { applyPower, assistantMaySwitch, isProtectedDevice, type PowerDevice } from '../devices/power';
@@ -602,8 +601,24 @@ export async function resolveTools(
 
 type Handled = { response: string; actions: ActionTaken[] };
 
-const byRules = async (text: string): Promise<Handled | null> =>
-  await runPowerCommand(text) ?? await runNativeCommand(text) ?? answerStatusQuestion(text) ?? await answerQuestion(text) ?? await answerNativeQuestion(text);
+const CHAT_QUESTION = { timeoutMs: 6_000, windowMs: FOLLOW_UP_MS.chat };
+
+const byRules = async (text: string, who: string): Promise<Handled | null> =>
+  await runPowerCommand(text) ?? await runNativeCommand(text) ?? answerStatusQuestion(text) ?? await answerAsked(text, { who, ...CHAT_QUESTION });
+
+/** A question the rules missed, read by Claude with the household's key (question-reader.ts). */
+const byQuestion = (text: string, who: string): Promise<Handled | null> => answerMissed(text, { who, ...CHAT_QUESTION });
+
+/**
+ * After the rules: the command form and, with a key, the question reader, at the same time. A device the
+ * form would ask about comes first; then a question; else null and the chat model has it, as before.
+ * Recorded as the model's, but not listed in Teach HomeHub when a question was answered.
+ */
+async function byModelReading(text: string, who: string) {
+  const [asked, question] = await Promise.all([byForm(text, who), byQuestion(text, who)]);
+  recordCommand(text, 'model', { resolved: !isHandled(asked) && question !== null });
+  return { asked, answer: isHandled(asked) ? asked : question };
+}
 
 // ── "Did you mean…?" (confirm.ts) ───────────────────────────────
 
@@ -798,7 +813,7 @@ async function byClaudeChat(text: string, history: ChatMessage[], who: string, l
 
 async function byRewrite(text: string): Promise<Handled | null> {
   const plain = await rewriteMessage(text, { keepAlive: keepAlive() });
-  return plain ? byRules(plain) : null;
+  return plain ? byRules(plain, 'rewrite') : null;
 }
 
 // ── Non-streaming entry point ───────────────────────────────────
@@ -811,12 +826,14 @@ export async function processMessage(
   const answered = await byAnswer(userMessage, who);
   if (answered) return answered;
 
-  const handled = await byRules(userMessage);
-  recordCommand(userMessage, handled ? 'rules' : 'model');
-  if (handled) return handled;
+  const handled = await byRules(userMessage, who);
+  if (handled) {
+    recordCommand(userMessage, 'rules');
+    return handled;
+  }
 
-  const asked = await byForm(userMessage, who);
-  if (isHandled(asked)) return asked;
+  const { asked, answer } = await byModelReading(userMessage, who);
+  if (answer) return answer;
 
   const claude = await byClaudeChat(userMessage, history, who, asked?.lang);
   if (claude) return claude;
@@ -860,8 +877,8 @@ export async function* processMessageStream(
     return;
   }
 
-  const handled = await byRules(userMessage);
-  recordCommand(userMessage, handled ? 'rules' : 'model');
+  const handled = await byRules(userMessage, who);
+  if (handled) recordCommand(userMessage, 'rules');
   if (handled) {
     yield { type: 'meta', by: 'rules' };
     for (const action of handled.actions) yield { type: 'action', action };
@@ -874,9 +891,10 @@ export async function* processMessageStream(
   const model     = process.env.OLLAMA_MODEL ?? 'llama3.2:3b';
   yield { type: 'meta', by: 'model', model: claudeInUse() ? CLAUDE_LABEL : model };
 
-  const asked = await byForm(userMessage, who);
-  if (isHandled(asked)) {
-    yield { type: 'token', content: asked.response };
+  const { asked, answer } = await byModelReading(userMessage, who);
+  if (answer) {
+    for (const action of answer.actions) yield { type: 'action', action };
+    yield { type: 'token', content: answer.response };
     yield { type: 'done' };
     return;
   }

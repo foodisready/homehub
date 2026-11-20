@@ -240,7 +240,7 @@ class ClientTest(unittest.TestCase):
         h = HomeHub(self.url, 'k')
         h.names = ['Porch light']
         res = h.command('make the front brighter', lang='en', ask=True)
-        self.assertEqual(Stub.seen[-1], ('/internal/voice/command', {'text': 'make the front brighter', 'ask': True, 'lang': 'en'}))
+        self.assertEqual(Stub.seen[-1], ('/internal/voice/command', {'text': 'make the front brighter', 'questions': True, 'ask': True, 'lang': 'en'}))
         self.assertEqual((res.say, res.say_lang, res.confirm_id), ('Turn on Porch light?', 'en', 'a/b'))
         self.assertEqual(h.answer_confirm('a/b', 'yes')['response'], 'Turned on Porch light.')
         self.assertEqual(Stub.seen[-1][1], {'answer': 'yes'})
@@ -250,7 +250,12 @@ class ClientTest(unittest.TestCase):
         h = HomeHub(self.url, 'k')
         h.names = ['Porch light']
         h.command('make the front brighter', retry=True, lang='en', ask=True)
-        self.assertEqual(Stub.seen[-1][1], {'text': 'make the front brighter', 'retry': True, 'lang': 'en'})
+        self.assertEqual(Stub.seen[-1][1], {'text': 'make the front brighter', 'questions': True, 'retry': True, 'lang': 'en'})
+
+    def test_a_question_goes_with_what_was_heard(self):
+        h = HomeHub(self.url, 'k')
+        h.command("what's the weather today", lang='yue', heard='紐約天氣點')
+        self.assertEqual(Stub.seen[-1][1], {'text': "what's the weather today", 'questions': True, 'lang': 'yue', 'heard': '紐約天氣點'})
 
 
 if __name__ == '__main__':

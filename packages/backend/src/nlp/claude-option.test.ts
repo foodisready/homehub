@@ -30,6 +30,7 @@ const switched: { ip: string; state: boolean }[] = [];
 /** What the fake Anthropic API saw and will answer. */
 const anthropic = {
   requests: [] as any[],
+  questions: [] as any[],
   keys: [] as string[],
   status: 200,
   form: { action: 'on', target: 'Porch light', scene: null, minutes: null, lang: 'en' } as Record<string, unknown>,
@@ -47,6 +48,12 @@ function startFake(): Promise<number> {
     req.on('end', () => {
       const json = body ? JSON.parse(body) : {};
       if (req.url?.startsWith('/v1/messages')) {
+        // The question reader (question-reader.ts) reads each miss too: nothing was asked, here.
+        if (json.output_config?.format?.schema?.properties?.place_said) {
+          anthropic.questions.push(json);
+          res.writeHead(200, { 'content-type': 'application/json' });
+          return res.end(JSON.stringify(message([{ type: 'text', text: JSON.stringify({ ask: 'none', day: 'today', place: null, place_said: null }) }])));
+        }
         anthropic.requests.push(json);
         anthropic.keys.push(String(req.headers['x-api-key'] ?? req.headers.authorization ?? '').replace(/^Bearer /, ''));
         if (anthropic.status !== 200) {
@@ -110,7 +117,7 @@ describe('Claude Haiku option', () => {
   });
 
   beforeEach(() => {
-    anthropic.requests = []; anthropic.keys = []; anthropic.status = 200; anthropic.chat = [];
+    anthropic.requests = []; anthropic.questions = []; anthropic.keys = []; anthropic.status = 200; anthropic.chat = [];
     anthropic.form = { action: 'on', target: 'Porch light', scene: null, minutes: null, lang: 'en' };
     ollama.requests = [];
     switched.length = 0;
@@ -187,10 +194,12 @@ describe('Claude Haiku option', () => {
     await nlp.processMessage('yes', [], 't3');
     assert.deepEqual(switched, [{ ip: '192.0.2.10', state: true }]);
     const u = usage();
-    assert.equal(u.requests, 1);
-    assert.equal(u.inputTokens, 2000);
-    assert.equal(u.outputTokens, 100);
-    assert.ok(Math.abs(choice.costUsd(u) - 0.00025) < 1e-9);
+    // The form, and the question reader's look at the same words: both cost.
+    assert.equal(anthropic.questions.length, 1);
+    assert.equal(u.requests, 2);
+    assert.equal(u.inputTokens, 4000);
+    assert.equal(u.outputTokens, 200);
+    assert.ok(Math.abs(choice.costUsd(u) - 0.0005) < 1e-9);
   });
 
   it('with Claude: a question is answered by Claude with HomeHub’s tools, not the Pi', async () => {
@@ -210,7 +219,7 @@ describe('Claude Haiku option', () => {
     assert.equal(results[0].type, 'tool_result');
     assert.equal(results[0].tool_use_id, 'tu_1');
     assert.ok(Array.isArray(JSON.parse(results[0].content).offline), 'HomeHub’s own device list went back');
-    assert.equal(usage().requests, 2, 'the form and the chat');
+    assert.equal(usage().requests, 3, 'the form, the question reader and the chat');
   });
 
   it('with Claude: a switch Claude picks in chat is asked about first, never done', async () => {
@@ -338,7 +347,7 @@ describe('Claude Haiku option', () => {
     assert.equal(r.body.lang, 'en');
     assert.ok(r.body.confirmId);
     assert.equal(switched.length, 0, 'nothing switched before a yes');
-    assert.equal(usage().requests, 1, 'counted with Chat’s use');
+    assert.equal(usage().requests, 2, 'the form and the question reader, counted with Chat’s use');
     const yes = await voice(`/confirm/${r.body.confirmId}`, { answer: 'yes' });
     assert.equal(yes.status, 200);
     assert.equal(yes.body.handled, true);

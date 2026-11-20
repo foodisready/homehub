@@ -4,7 +4,10 @@ import { logger } from '../logger';
 /**
  * The weather at home, from Open-Meteo (open-meteo.com): free, with no account
  * or key. Only the home's location leaves the house, rounded to two decimal
- * places (about a kilometre). Asked at most every ten minutes.
+ * places (about a kilometre). Asked at most every ten minutes per place.
+ *
+ * A question about another city ("the weather in New York?") looks the city up
+ * with Open-Meteo's geocoding first: only the city's name is sent.
  */
 
 export type { TemperatureUnit } from './home-settings';
@@ -32,6 +35,15 @@ export class WeatherError extends Error {
   constructor(message: string, readonly code: 'NOT_LOCATED' | 'UNREACHABLE') { super(message); }
 }
 
+/** A city asked about, found by name. */
+export interface Place {
+  /** As Open-Meteo names it, in English: "New York", "Hong Kong". */
+  name:      string;
+  latitude:  number;
+  longitude: number;
+  timezone:  string;
+}
+
 /** How the home shows temperatures: chosen in Settings → Home, else TEMPERATURE_UNIT, else by time zone. */
 export function temperatureUnit(): TemperatureUnit {
   return getHomeSettings().temperatureUnit;
@@ -56,30 +68,60 @@ export function describeWeather(code: number): string {
 }
 
 const CACHE_MS = 10 * 60_000;
-let cached: { key: string; at: number; weather: Weather } | null = null;
+const cached = new Map<string, { at: number; weather: Weather }>();
+const places = new Map<string, Place | null>();
 
 /** For tests. */
-export function clearWeatherCache(): void { cached = null; }
+export function clearWeatherCache(): void { cached.clear(); places.clear(); }
+
+/**
+ * A city by its name in English, or null when Open-Meteo knows no place by that name.
+ * Throws WeatherError when Open-Meteo can't be reached. Remembered while HomeHub runs.
+ */
+export async function findPlace(name: string, opts: { fetchImpl?: typeof fetch } = {}): Promise<Place | null> {
+  const key = name.trim().toLowerCase();
+  if (places.has(key)) return places.get(key)!;
+  const url = 'https://geocoding-api.open-meteo.com/v1/search?' + new URLSearchParams({ name: name.trim(), count: '1', language: 'en', format: 'json' });
+  let data: any;
+  try {
+    const res = await (opts.fetchImpl ?? fetch)(url, { signal: AbortSignal.timeout(8000) });
+    if (!res.ok) throw new Error(`Open-Meteo geocoding answered ${res.status}`);
+    data = await res.json();
+  } catch (err: any) {
+    logger.warn({ err: err?.message }, 'Place lookup unavailable');
+    throw new WeatherError("I can't get the weather right now.", 'UNREACHABLE');
+  }
+  const r = Array.isArray(data?.results) ? data.results[0] : null;
+  const place: Place | null = r && Number.isFinite(r.latitude) && Number.isFinite(r.longitude) && typeof r.timezone === 'string'
+    ? { name: String(r.name ?? name), latitude: r.latitude, longitude: r.longitude, timezone: r.timezone }
+    : null;
+  places.set(key, place);
+  return place;
+}
 
 const round = (n: unknown) => Math.round(Number(n));
 
-export async function getWeather(opts: { fetchImpl?: typeof fetch; now?: number } = {}): Promise<Weather> {
+/** The weather at home, or with `place`, in that city: in the home's unit, with "today" as the city's day. */
+export async function getWeather(opts: { fetchImpl?: typeof fetch; now?: number; place?: Place } = {}): Promise<Weather> {
   const home = getHomeSettings();
-  if (home.latitude === null || home.longitude === null) {
+  const where = opts.place ?? (home.latitude === null || home.longitude === null ? null
+    : { latitude: home.latitude, longitude: home.longitude, timezone: home.timezone });
+  if (!where) {
     throw new WeatherError("HomeHub doesn't know where your home is yet. Set it in Settings → Home.", 'NOT_LOCATED');
   }
   const unit = home.temperatureUnit;
-  const lat = home.latitude.toFixed(2), lon = home.longitude.toFixed(2);
-  const key = `${lat},${lon},${unit},${home.timezone}`;
+  const lat = where.latitude.toFixed(2), lon = where.longitude.toFixed(2);
+  const key = `${lat},${lon},${unit},${where.timezone}`;
   const now = opts.now ?? Date.now();
-  if (cached && cached.key === key && now - cached.at < CACHE_MS) return cached.weather;
+  const hit = cached.get(key);
+  if (hit && now - hit.at < CACHE_MS) return hit.weather;
 
   const url = 'https://api.open-meteo.com/v1/forecast?' + new URLSearchParams({
     latitude: lat, longitude: lon,
     current: 'temperature_2m,apparent_temperature,weather_code',
     daily: 'temperature_2m_max,temperature_2m_min,precipitation_probability_max,weather_code',
     temperature_unit: unit === 'F' ? 'fahrenheit' : 'celsius',
-    timezone: home.timezone,
+    timezone: where.timezone,
     forecast_days: '2',
   });
   let data: any;
@@ -109,6 +151,7 @@ export async function getWeather(opts: { fetchImpl?: typeof fetch; now?: number 
     tomorrow: day(1),
     fetchedAt: new Date(now).toISOString(),
   };
-  cached = { key, at: now, weather };
+  cached.set(key, { at: now, weather });
+  if (cached.size > 20) cached.delete(cached.keys().next().value!);
   return weather;
 }

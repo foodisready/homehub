@@ -8,11 +8,12 @@ const MAX_LENGTH = 200;
 const RECENT     = 50;
 
 /** Keep a short local history, to show how often the rules miss. Never blocks a command. */
-export function recordCommand(text: string, handledBy: CommandHandler): void {
+/** resolved: answered after all (a question Claude read), so Teach HomeHub doesn't list it. */
+export function recordCommand(text: string, handledBy: CommandHandler, opts: { resolved?: boolean } = {}): void {
   try {
     const db = getDb();
-    db.prepare('INSERT INTO chat_commands (text, handled_by) VALUES (?, ?)')
-      .run(text.slice(0, MAX_LENGTH), handledBy);
+    db.prepare('INSERT INTO chat_commands (text, handled_by, resolved) VALUES (?, ?, ?)')
+      .run(text.slice(0, MAX_LENGTH), handledBy, opts.resolved ? 1 : 0);
     db.prepare(
       'DELETE FROM chat_commands WHERE id NOT IN (SELECT id FROM chat_commands ORDER BY id DESC LIMIT ?)'
     ).run(MAX_ROWS);
