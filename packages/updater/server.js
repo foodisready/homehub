@@ -7,6 +7,9 @@
  * backend made in the data volume. It does one thing: fetch that release's
  * docker-compose.yml and images, record the version in .env as HOMEHUB_TAG,
  * and bring HomeHub's services up with them, creating any the release adds.
+ * Then it removes HomeHub's images but the new release's and the one it
+ * replaced (kept for going back): each release is a few GB, and a Pi's disk
+ * filled with every version ever installed.
  * Nothing outside HomeHub's compose project is touched, and it doesn't
  * recreate itself: the installer updates the updater.
  */
@@ -109,10 +112,44 @@ function compose(args, version, file = 'docker-compose.yml') {
   });
 }
 
+/** Runs docker itself; resolves with its exit code and output. */
+function docker(args) {
+  return new Promise((resolve) => {
+    const child = spawn('docker', args);
+    let output = '';
+    const keep = (d) => { output += d.toString(); };
+    child.stdout.on('data', keep);
+    child.stderr.on('data', keep);
+    child.on('error', (err) => resolve({ code: 127, output: String(err.message) }));
+    child.on('close', (code) => resolve({ code: code ?? 1, output }));
+  });
+}
+
+/** HomeHub's images (repository:tag, one per line) other than the `keep` versions. Never the updater's own. */
+function oldImages(listing, keep) {
+  return listing.split('\n').map((l) => l.trim()).filter((image) => {
+    const at = image.lastIndexOf(':');
+    if (at < 0) return false;
+    const repo = image.slice(0, at), tag = image.slice(at + 1);
+    return /(^|\/)homehub-[a-z0-9-]+$/.test(repo) && !/(^|\/)homehub-updater$/.test(repo)
+      && tag !== '<none>' && !keep.includes(tag);
+  });
+}
+
+/** Removes HomeHub's older images. Docker refuses to remove one a container uses, so nothing running goes. */
+async function cleanUp(keep, dock = docker) {
+  const listed = await dock(['images', '--format', '{{.Repository}}:{{.Tag}}']);
+  if (listed.code !== 0) return `old versions not removed: ${listed.output.trim()}`;
+  const old = oldImages(listed.output, keep);
+  if (old.length) await dock(['rmi', ...old]);
+  await dock(['image', 'prune', '-f']);   // the layers they left behind
+  return old.length ? `removed ${old.length} older HomeHub images` : 'no older HomeHub images to remove';
+}
+
 const state = { busy: false, last: null };
 const tail = (s) => s.trim().split('\n').slice(-LOG_LINES).join('\n');
 
-async function switchTo(version, run = compose, get = fetch) {
+async function switchTo(version, run = compose, get = fetch, dock = docker) {
   const from = currentTag(readEnv());
   const started = new Date().toISOString();
   const finish = (ok, step, output) => {
@@ -153,7 +190,12 @@ async function switchTo(version, run = compose, get = fetch) {
   }
   // Every service but this one: new ones are created, unchanged ones left running.
   const up = await run(['up', '-d', '--no-deps', ...services], version);
-  finish(up.code === 0, up.code === 0 ? 'done' : 'restart', up.output);
+  if (up.code !== 0) return finish(false, 'restart', up.output);
+  // Only after a good switch: the release it replaced stays, for going back.
+  let cleaned;
+  try { cleaned = await cleanUp([version, from], dock); } catch (err) { cleaned = `old versions not removed: ${err.message}`; }
+  console.log(cleaned);
+  finish(true, 'done', `${up.output}\n${cleaned}`);
 }
 
 function send(res, status, body) {
@@ -161,7 +203,7 @@ function send(res, status, body) {
   res.end(JSON.stringify(body));
 }
 
-function handler(run = compose, get = fetch) {
+function handler(run = compose, get = fetch, dock = docker) {
   return (req, res) => {
     const url = new URL(req.url, 'http://updater');
     if (req.method === 'GET' && url.pathname === '/health') {
@@ -185,7 +227,7 @@ function handler(run = compose, get = fetch) {
         if (state.busy) return send(res, 409, { error: 'A switch is already running', code: 'BUSY' });
         state.busy = true;
         send(res, 202, { started: true, version });
-        switchTo(version, run, get).catch((err) => {
+        switchTo(version, run, get, dock).catch((err) => {
           state.busy = false;
           state.last = { version, ok: false, step: 'error', log: String(err?.message ?? err) };
         });
@@ -201,4 +243,4 @@ if (require.main === module) {
   process.on('SIGTERM', () => process.exit(0));
 }
 
-module.exports = { withTag, currentTag, handler, switchTo, state, SERVICES, MARK };
+module.exports = { withTag, currentTag, handler, switchTo, state, SERVICES, MARK, oldImages, cleanUp };

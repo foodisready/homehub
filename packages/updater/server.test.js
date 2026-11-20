@@ -9,7 +9,7 @@ const http = require('http');
 const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'homehub-updater-'));
 process.env.PROJECT_DIR = DIR;
 process.env.UPDATER_TOKEN = 'secret-token';
-const { withTag, currentTag, handler, state, SERVICES, MARK } = require('./server');
+const { withTag, currentTag, handler, state, SERVICES, MARK, oldImages } = require('./server');
 
 describe('.env', () => {
   it('sets HOMEHUB_TAG and keeps everything else', () => {
@@ -23,14 +23,37 @@ describe('.env', () => {
   });
 });
 
+describe('old images', () => {
+  it('picks HomeHub\'s images but the versions kept, never the updater\'s or anyone else\'s', () => {
+    const listing = [
+      'ghcr.io/foodisready/homehub-backend:v0.2.16', 'ghcr.io/foodisready/homehub-backend:v0.2.15',
+      'ghcr.io/foodisready/homehub-backend:v0.2.14', 'ghcr.io/foodisready/homehub-voice-bridge:v0.1.29',
+      'ghcr.io/foodisready/homehub-backend:latest', 'ghcr.io/foodisready/homehub-updater:latest',
+      'ghcr.io/foodisready/homehub-updater:v0.2.1', 'ollama/ollama:0.35.1', 'alexxit/go2rtc:<none>',
+      'ghcr.io/foodisready/homehub-frontend:<none>', 'someone/homehub-backend:v0.1.0', 'myhomehub-thing:v1.0.0', '',
+    ].join('\n');
+    assert.deepEqual(oldImages(listing, ['v0.2.16', 'v0.2.15']), [
+      'ghcr.io/foodisready/homehub-backend:v0.2.14', 'ghcr.io/foodisready/homehub-voice-bridge:v0.1.29',
+      'ghcr.io/foodisready/homehub-backend:latest', 'someone/homehub-backend:v0.1.0',
+    ]);
+  });
+});
+
 describe('API', () => {
-  let server, base, calls, failPull, composeText, fetched;
+  let server, base, calls, failPull, composeText, fetched, dockerCalls, failUp;
   const NEW = 'name: homehub\nservices:\n  backend: {}\n';
   const fakeCompose = async (args, version, file = 'docker-compose.yml') => {
     calls.push({ args, version, file });
     if (args[0] === 'config' && args[1] === '--services') return { code: 0, output: 'ollama\nbackend\nfrontend\nmcp-server\nscheduler\nupdater\nwatchtower\nnew-thing\n' };
     if (args[0] === 'pull' && failPull) return { code: 1, output: 'manifest unknown' };
+    if (args[0] === 'up' && failUp) return { code: 1, output: 'port in use' };
     return { code: 0, output: 'ok' };
+  };
+  const IMAGES = 'ghcr.io/foodisready/homehub-backend:v0.1.12\nghcr.io/foodisready/homehub-backend:v0.1.11\n'
+    + 'ghcr.io/foodisready/homehub-backend:v0.1.10\nghcr.io/foodisready/homehub-scheduler:latest\nghcr.io/foodisready/homehub-updater:latest\nollama/ollama:0.35.1\n';
+  const fakeDocker = async (args) => {
+    dockerCalls.push(args);
+    return args[0] === 'images' ? { code: 0, output: IMAGES } : { code: 0, output: '' };
   };
   const fakeGet = async (url) => { fetched = url; return new Response(composeText, { status: composeText ? 200 : 404 }); };
   const req = (method, p, body, auth = 'Bearer secret-token') => new Promise((resolve, reject) => {
@@ -44,13 +67,13 @@ describe('API', () => {
   const settle = async () => { for (let i = 0; i < 50 && state.busy; i++) await new Promise((r) => setTimeout(r, 10)); };
 
   before(async () => {
-    server = http.createServer(handler(fakeCompose, fakeGet));
+    server = http.createServer(handler(fakeCompose, fakeGet, fakeDocker));
     await new Promise((r) => server.listen(0, '127.0.0.1', r));
     base = `http://127.0.0.1:${server.address().port}`;
   });
   after(() => { server.close(); fs.rmSync(DIR, { recursive: true, force: true }); });
   beforeEach(() => {
-    calls = []; failPull = false; state.last = null; composeText = NEW; fetched = null;
+    calls = []; failPull = false; failUp = false; dockerCalls = []; state.last = null; composeText = NEW; fetched = null;
     fs.writeFileSync(path.join(DIR, '.env'), 'TZ=America/New_York\n');
     fs.writeFileSync(path.join(DIR, 'docker-compose.yml'), 'name: homehub\nservices: {old: {}}\n');
   });
@@ -88,6 +111,32 @@ describe('API', () => {
     assert.equal(s.body.current, 'v0.1.12');
     assert.equal(s.body.last.ok, true);
     assert.equal(s.body.last.from, 'latest');
+  });
+
+  it('after a good switch, removes older HomeHub images but keeps the one it replaced', async () => {
+    fs.writeFileSync(path.join(DIR, '.env'), 'HOMEHUB_TAG=v0.1.11\n');
+    await req('POST', '/switch', { version: 'v0.1.12' });
+    await settle();
+    assert.equal(state.last.ok, true);
+    assert.deepEqual(dockerCalls, [
+      ['images', '--format', '{{.Repository}}:{{.Tag}}'],
+      ['rmi', 'ghcr.io/foodisready/homehub-backend:v0.1.10', 'ghcr.io/foodisready/homehub-scheduler:latest'],
+      ['image', 'prune', '-f'],
+    ]);
+    assert.match(state.last.log, /removed 2 older HomeHub images/);
+  });
+
+  it('removes nothing when the switch fails', async () => {
+    failUp = true;
+    await req('POST', '/switch', { version: 'v0.1.12' });
+    await settle();
+    assert.equal(state.last.ok, false);
+    assert.equal(state.last.step, 'restart');
+    assert.deepEqual(dockerCalls, []);
+    failPull = true; failUp = false;
+    await req('POST', '/switch', { version: 'v0.1.12' });
+    await settle();
+    assert.deepEqual(dockerCalls, []);
   });
 
   it('changes nothing when the release\'s compose file can\'t be had', async () => {
