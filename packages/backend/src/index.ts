@@ -30,6 +30,8 @@ import { scenesRouter } from './routes/scenes';
 import { tuyaRouter }   from './routes/tuya';
 import { kasaRouter }   from './routes/kasa';
 import { merossRouter } from './routes/meross';
+import { honeywellRouter } from './routes/honeywell';
+import { startHoneywell } from './honeywell/honeywell';
 import { motionEventsRouter, motionRouter } from './routes/motion';
 import { sensorsRouter } from './routes/sensors';
 import { firmwareApiRouter, firmwarePublicRouter } from './routes/firmware';
@@ -135,6 +137,7 @@ app.use('/api/devices',   energyRouter);   // history sub-routes: /api/devices/:
 app.use('/api/tuya',      tuyaRouter);
 app.use('/api/kasa',      requireAdmin, kasaRouter);
 app.use('/api/meross',    requireAdmin, merossRouter);
+app.use('/api/honeywell', requireAdmin, honeywellRouter);
 app.use('/api/motion',    requireAdmin, motionRouter);
 app.use('/api/sensors',   sensorsRouter);
 app.use('/api/firmware',  firmwareApiRouter);
@@ -181,6 +184,7 @@ httpServer.listen(PORT, async () => {
   startLocalName();          // answer for homehub.local (or <name>-backup.local) on the home network
   noteRunningVersion();   // remember the version before this one, to go back to
   startMatter().catch(() => undefined);   // connect to Matter devices, if there are any
+  startHoneywell();          // read Honeywell thermostats on Total Connect Comfort each minute, once signed in
   // Energy: HomeHub's running times, and each device's daily hours on, for estimates.
   void import('./energy/usage').then(({ startEnergy }) => startEnergy());
   // Thermostat history: samples every 5 minutes, outdoor temperatures hourly, once there's a thermostat.

@@ -34,6 +34,8 @@ import { describeNext, describeTargets } from './schedule-text';
     .history { font-size: 0.85rem; color: var(--accent); align-self: flex-start; padding: 0.2rem 0; }
     .links { display: flex; flex-wrap: wrap; gap: 0.2rem 1.2rem; }
     .scheduled { font-size: 0.85rem; color: var(--text-muted); margin: 0; }
+    .own { display: flex; align-items: center; flex-wrap: wrap; gap: 0.3rem 0.8rem; }
+    .resume { background: none; border: none; padding: 0.2rem 0; color: var(--accent); font-size: 0.85rem; }
   `],
   template: `
     @if (view(); as t) {
@@ -60,6 +62,14 @@ import { describeNext, describeTargets } from './schedule-text';
           }
           @if (t.mode === 'off') { <p class="note">Off: it won't heat or cool. Choose a mode to start it.</p> }
           @if (t.mode === 'other') { <p class="note">It's in a mode set on the thermostat that HomeHub doesn't change, such as emergency heat. Choose a mode to take over.</p> }
+          @if (holdText(); as h) {
+            <div class="own">
+              <p class="note">{{ h }}</p>
+              @if (t.hold !== 'schedule' && !hasSchedule()) {
+                <button type="button" class="resume" (click)="resume()" [disabled]="resuming()">{{ resuming() ? 'Going back…' : 'Back to its schedule' }}</button>
+              }
+            </div>
+          }
           @if (outsideComfort()) {
             <p class="note warn">Outside your comfortable {{ deg(t.comfort.low) }}–{{ deg(t.comfort.high) }}, which is fine for nights and time away.</p>
           }
@@ -126,6 +136,28 @@ export class ThermostatControlComponent implements OnInit, OnDestroy {
     const doing = { heating: 'Heating', cooling: 'Cooling', fan: 'Fan only', idle: 'Idle' } as const;
     return `Inside${t.running ? ' · ' + doing[t.running] : ''}`;
   });
+
+  /** For a thermostat with its own schedule: whether it's following it. */
+  readonly holdText = computed(() => {
+    const hold = this.view()?.hold;
+    if (hold === 'schedule') return this.hasSchedule() ? null : 'Following the thermostat’s own schedule.';
+    if (hold === 'temporary') return 'Held until the thermostat’s next scheduled change.';
+    if (hold === 'permanent') return this.hasSchedule() ? null : 'Held here until changed; the thermostat’s own schedule is paused.';
+    return null;
+  });
+
+  readonly resuming = signal(false);
+
+  resume(): void {
+    const t = this.view();
+    if (!t) return;
+    this.error.set('');
+    this.resuming.set(true);
+    this.svc.resume(t.id).subscribe({
+      next: () => this.resuming.set(false),
+      error: (e) => { this.resuming.set(false); this.error.set(e?.error?.error ?? 'It couldn’t go back to its schedule.'); },
+    });
+  }
 
   readonly outsideComfort = computed(() => {
     const t = this.view();

@@ -9,7 +9,7 @@ import { applyPower, isProtectedDevice, type PowerDevice } from '../devices/powe
 import { getCachedState } from '../kasa/device.cache';
 import { sendPushToAll } from '../push/push.service';
 import {
-  ThermostatError, changeThermostat, getThermostat, lastKnown, rangesOf, thermostatIds, type ThermostatView,
+  ThermostatError, changeThermostat, getThermostat, lastKnown, rangesOf, resumeOwnSchedule, thermostatIds, type ThermostatView,
 } from '../thermostat/thermostat';
 import { latestDue, schedulePoints } from '../thermostat/schedule';
 import { AWAY_SETTINGS_KEY, AWAY_STATE_KEY, awayActive } from './away-state';
@@ -53,7 +53,12 @@ export const MAX_WARM_UP = 240;
 const TICK_MS = 30_000;
 const RESTORE_GIVE_UP_MS = 24 * 3600_000;
 
-interface Targets { heat: number | null; cool: number | null }
+interface Targets {
+  heat: number | null;
+  cool: number | null;
+  /** It was following its own schedule (a Honeywell thermostat), so ending Away mode lets it again. */
+  ownSchedule?: boolean;
+}
 
 interface AwayState {
   since: string;
@@ -226,8 +231,10 @@ async function runLights(s: AwayState, settings: AwaySettings, now: Date): Promi
 export interface AwayDeps {
   read: (id: number) => Promise<ThermostatView>;
   change: (id: number, change: { heat?: number; cool?: number }) => Promise<unknown>;
+  /** Lets a thermostat follow its own schedule again; false if it has none. */
+  resume?: (id: number) => Promise<boolean>;
 }
-const realDeps: AwayDeps = { read: getThermostat, change: (id, c) => changeThermostat(id, c, 'away') };
+const realDeps: AwayDeps = { read: getThermostat, change: (id, c) => changeThermostat(id, c, 'away'), resume: resumeOwnSchedule };
 let deps: AwayDeps = realDeps;
 /** For tests. */
 export function setAwayDeps(d: AwayDeps | null): void { deps = d ?? realDeps; }
@@ -261,7 +268,7 @@ async function applyThermostats(s: AwayState, settings: AwaySettings): Promise<b
     if (s.applied.includes(id)) continue;
     const view = await deps.read(id);
     if (!view.online) continue;
-    s.before[String(id)] ??= { heat: view.heat, cool: view.cool };
+    s.before[String(id)] ??= { heat: view.heat, cool: view.cool, ...(view.hold === 'schedule' ? { ownSchedule: true } : {}) };
     if (await setTargets(id, awayTargets(id, settings), view)) {
       s.applied.push(id);
       changed = true;
@@ -281,6 +288,18 @@ export function backTo(id: number, before: Targets | undefined, now: Date): Targ
   return before ?? null;
 }
 
+/** Back to following its own schedule: true once done, false while it's offline, null if it has none. */
+async function resumeOwn(id: number): Promise<boolean | null> {
+  if (!deps.resume) return null;
+  try {
+    return (await deps.resume(id)) ? true : null;
+  } catch (err) {
+    if (err instanceof ThermostatError && err.status === 503) return false;
+    logger.warn({ id, err: String((err as Error)?.message ?? err) }, 'Away mode: thermostat couldn’t go back to its own schedule');
+    return null;
+  }
+}
+
 async function runRestore(now: Date): Promise<void> {
   const r = read<Restore>(RESTORE_KEY);
   if (!r) return;
@@ -291,7 +310,14 @@ async function runRestore(now: Date): Promise<void> {
   const left: number[] = [];
   for (const id of r.ids) {
     if (!thermostatIds().includes(id)) continue;
-    const target = backTo(id, r.before[String(id)], now);
+    const before = r.before[String(id)];
+    // No HomeHub schedule to go back to, and it was following its own: it follows that again.
+    if (before?.ownSchedule && !latestDue(schedulePoints(id), new Date(0), now)) {
+      const resumed = await resumeOwn(id);
+      if (resumed === false) { left.push(id); continue; }
+      if (resumed) { logger.info({ id }, 'Away mode: thermostat back on its own schedule'); continue; }
+    }
+    const target = backTo(id, before, now);
     if (!target) continue;
     const view = await deps.read(id);
     if (!view.online || !(await setTargets(id, target, view))) { left.push(id); continue; }

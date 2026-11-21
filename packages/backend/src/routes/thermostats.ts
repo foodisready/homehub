@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { requireAdmin } from '../middleware/auth';
-import { changeThermostat, getThermostat, listThermostats, saveRanges, ThermostatError } from '../thermostat/thermostat';
+import { changeThermostat, getThermostat, listThermostats, resumeOwnSchedule, saveRanges, ThermostatError } from '../thermostat/thermostat';
 import { day, months, reportsRunning } from '../thermostat/history';
 import { getHomeSettings } from '../home/home-settings';
 import { DEFAULT_SIZE, hvacSystem, saveHvacSystem } from '../energy/usage';
@@ -29,6 +29,15 @@ thermostatsRouter.get('/:id', async (req: Request, res: Response) => {
 // PATCH /api/thermostats/:id  { mode?, heat?, cool? } — from the card, so only the thermostat's own limits apply
 thermostatsRouter.patch('/:id', async (req: Request, res: Response) => {
   try { res.json(await changeThermostat(Number(req.params.id), req.body ?? {}, 'app')); } catch (err) { fail(res, err); }
+});
+
+// POST /api/thermostats/:id/resume — a thermostat with its own schedule (Honeywell) follows it again
+thermostatsRouter.post('/:id/resume', async (req: Request, res: Response) => {
+  try {
+    const id = Number(req.params.id);
+    if (!(await resumeOwnSchedule(id))) return res.status(400).json({ error: 'That thermostat has no schedule of its own.', code: 'THERMOSTAT' });
+    res.json(await getThermostat(id));
+  } catch (err) { fail(res, err); }
 });
 
 // GET /api/thermostats/:id/months?count=12 — running hours and degree-days by month, oldest first

@@ -16,6 +16,7 @@ import { MailProvider, providerForAddress, providerForHost } from './email-provi
 import { InviteQrComponent } from '../welcome/invite-qr.component';
 import { MatterPairComponent } from './matter-pair.component';
 import { MerossLoginComponent } from './meross-login.component';
+import { HoneywellLoginComponent } from './honeywell-login.component';
 import { OtherNetworksComponent } from './other-networks.component';
 import { HomeSettingsComponent } from './home-settings.component';
 import { AiConnectionComponent } from './ai-connection.component';
@@ -75,12 +76,13 @@ const DRIVER_LABEL: Record<string, string> = {
   meross: 'Meross',
   wyze:   'Wyze',
   matter: 'Matter',
+  honeywell: 'Honeywell',
 };
 
 @Component({
   selector: 'app-settings',
   standalone: true,
-  imports: [SecretInputDirective, NicknameChipsComponent, ThermostatRangesComponent, FormsModule, RouterLink, InviteQrComponent, MatterPairComponent, DeviceFilterComponent, BackupsComponent, BackupSyncComponent, ServerRoleComponent, MerossLoginComponent, OtherNetworksComponent, HomeSettingsComponent, AiConnectionComponent, AiChoiceComponent, CamerasToggleComponent, TeachCommandsComponent, VoiceRepliesComponent, VoiceControlComponent],
+  imports: [SecretInputDirective, NicknameChipsComponent, ThermostatRangesComponent, FormsModule, RouterLink, InviteQrComponent, MatterPairComponent, DeviceFilterComponent, BackupsComponent, BackupSyncComponent, ServerRoleComponent, MerossLoginComponent, HoneywellLoginComponent, OtherNetworksComponent, HomeSettingsComponent, AiConnectionComponent, AiChoiceComponent, CamerasToggleComponent, TeachCommandsComponent, VoiceRepliesComponent, VoiceControlComponent],
   styles: [`
     .topbar { display:flex; align-items:center; justify-content:space-between; margin-bottom:1.5rem; }
     .topbar h1 { font-size:1.4rem; font-weight:700; }
@@ -151,6 +153,7 @@ const DRIVER_LABEL: Record<string, string> = {
     .driver-badge.shelly { border-color:#b45309; color:#fbbf24; }
     .driver-badge.tuya   { border-color:#15803d; color:#4ade80; }
     .driver-badge.meross { border-color:#7c3aed; color:#c4b5fd; }
+    .driver-badge.honeywell { border-color:#dc2626; color:#fca5a5; }
     .driver-badge.wyze   { border-color:#0e7490; color:#67e8f9; }
     .driver-badge.matter { border-color:#be185d; color:#f9a8d4; }
     .matter-panel { margin-top:0.75rem; padding:0.9rem; border:1px solid var(--border); border-radius:var(--radius); }
@@ -286,7 +289,7 @@ const DRIVER_LABEL: Record<string, string> = {
                     <div class="form-head">
                       <div>
                         <h2 id="dev-edit-title">{{ d.alias }}</h2>
-                        <span class="row-meta">{{ driverLabel(d.driverType) }}{{ d.driverType === 'matter' ? '' : ' · ' + d.ip }}{{ d.room ? ' · ' + d.room : '' }}</span>
+                        <span class="row-meta">{{ driverLabel(d.driverType) }}{{ noAddress(d) ? '' : ' · ' + d.ip }}{{ d.room ? ' · ' + d.room : '' }}</span>
                       </div>
                       <button type="button" class="close" (click)="cancelDeviceEdit()" aria-label="Close without saving">
                         <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>
@@ -296,7 +299,7 @@ const DRIVER_LABEL: Record<string, string> = {
                       <label class="f">Name
                         <input type="text" [(ngModel)]="editAlias" placeholder="Name" />
                       </label>
-                      @if (d.driverType !== 'matter') {
+                      @if (!noAddress(d)) {
                         <label class="f">IP address
                           <input type="text" [(ngModel)]="editIp"    placeholder="IP address" />
                         </label>
@@ -397,7 +400,7 @@ const DRIVER_LABEL: Record<string, string> = {
                   <div class="row-label">
                     <span class="row-name">{{ d.alias }}</span>
                     <span class="row-meta row-sub">
-                      {{ d.driverType === 'matter' ? matterModel(d) : d.ip }}
+                      {{ d.driverType === 'matter' ? matterModel(d) : d.driverType === 'honeywell' ? 'Honeywell · Total Connect Comfort' : d.ip }}
                       @if (d.hasEmeter) { · ⚡ }
                       @if (!d.online && d.isProtected) { <span class="offline"> · Offline</span> }
                     </span>
@@ -652,6 +655,11 @@ const DRIVER_LABEL: Record<string, string> = {
             <!-- ── Meross ────────────────────────────────────────────── -->
             <div class="card">
               <app-meross-login [openRequest]="merossOpenRequest()" (signedInChange)="onMerossSignIn($event)" />
+            </div>
+
+            <!-- ── Honeywell (Total Connect Comfort) ─────────────────── -->
+            <div class="card">
+              <app-honeywell-login (devicesChanged)="reloadDevices()" />
             </div>
 
             <!-- ── Email (BYOK SMTP) ────────────────────────────────── -->
@@ -1493,6 +1501,11 @@ export class SettingsComponent implements OnInit, OnDestroy {
 
   reloadDevices(): void {
     this.http.get<Device[]>('/api/devices').subscribe((d) => this._devices.set(d));
+  }
+
+  /** Matter and Honeywell devices have no network address to show or edit. */
+  noAddress(d: Device): boolean {
+    return d.driverType === 'matter' || d.driverType === 'honeywell';
   }
 
   /** "Eve Energy" for a Matter device, which has no address worth showing. */

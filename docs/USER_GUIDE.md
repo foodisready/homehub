@@ -17,6 +17,7 @@ HomeHub controls devices directly over your home network. All of them are switch
 | **Ring** | Doorbells and cameras: doorbell presses, motion, snapshots and live view | Through your Ring account. See [Ring doorbells and cameras](#ring-doorbells-and-cameras) |
 | **IP cameras** | Reolink, Amcrest and other cameras with ONVIF or RTSP: live video, snapshots, motion snapshots and turning | Local, no cloud. See [IP cameras](#ip-cameras-reolink-amcrest-and-others) |
 | **Any Matter brand** | Plugs, lights, switches and power strips (on and off), and thermostats | Shared from Google Home, Apple Home, Alexa or SmartThings. See [Matter devices](#matter-devices) |
+| **Honeywell** | RedLINK thermostats, such as Prestige, through a RedLINK Internet Gateway | Through your Total Connect Comfort account. See [Honeywell thermostats](#honeywell-thermostats-redlink) |
 
 Zigbee devices aren't supported. "Works with Google or Alexa" on a box doesn't mean it works with HomeHub, but the **Matter** logo does.
 
@@ -132,7 +133,7 @@ Each thermostat has its own card at the top of **Schedules**: a list of changes,
 - A change made on the thermostat, its card, Chat or by voice holds until the next scheduled one.
 - Every target has to be inside **Never beyond**. If you narrow that range later, scheduled changes stop at its edge.
 - If HomeHub was off or restarting when a change came due, it makes the latest one it missed as soon as it's back, so the house isn't left at the night temperature all day. Changes that came due while automations were paused are skipped.
-- Turn off the thermostat's own schedule and learning, such as Nest's Auto-Schedule. Otherwise it changes the targets back.
+- Turn off the thermostat's own schedule and learning, such as Nest's Auto-Schedule. Otherwise it changes the targets back. A Honeywell thermostat's own schedule doesn't need turning off: HomeHub's schedule holds each target until its next change.
 
 Matter thermostats share only the basics with other apps: temperatures, mode and targets. Features of the thermostat's own app, such as Nest's Eco mode and learning, stay in that app.
 
@@ -149,6 +150,23 @@ Running hours come from the thermostat's own reports of starting and stopping. A
 HomeHub keeps 5-minute temperatures for 400 days, and running hours and outdoor temperatures for as long as it runs.
 
 HomeHub keeps its Matter pairings in its database, so backups include them and a restore brings them back. Keep backups private: they hold HomeHub's Matter keys.
+
+### Honeywell thermostats (RedLINK)
+
+Honeywell RedLINK thermostats, such as the Prestige, work with HomeHub through a **RedLINK Internet Gateway** (THM6000R7001) and Honeywell's **Total Connect Comfort** service.
+
+1. Connect the gateway to your router or a mesh Wi-Fi point with an Ethernet cable.
+2. On each thermostat, open **Menu → Installer Options → Wireless Device Manager → Add Device**, then press **Connect** on the gateway. The thermostat says **Gateway added**; answer **No** to more accessories. Installer Options asks for a password, usually the thermostat's date code. In Wireless Device Manager, only add: removing a device can disconnect the thermostat from your heating and cooling.
+3. Register the gateway at mytotalconnectcomfort.com or in the Total Connect Comfort app with the MAC ID and CRC on its sticker, and check you can see each thermostat there.
+4. In HomeHub, open **Settings → Integrations → Honeywell**, enter your Total Connect Comfort email and password, and select **Sign in**. Each thermostat is added, named from Total Connect Comfort, such as "Basement Thermostat". Rename it or give it a room in **Settings → Devices**.
+
+They then work like any thermostat in HomeHub: the card, Chat and voice, temperature schedules, Away mode, and the heating and cooling history. A few things differ:
+
+- Changes go through Honeywell's servers, so they need the internet and take up to about a minute to reach the thermostat, and a minute or so to show as confirmed. The card shows a change as soon as you make it.
+- HomeHub reads each thermostat once a minute, which is as often as Honeywell allows. A change made at the wall shows up within a minute.
+- Total Connect Comfort asks for the password every time HomeHub signs in, so HomeHub keeps it, and never shows it again. Backups include it, hidden when a backup is viewed. If you change the password in the Total Connect Comfort app, HomeHub tries the old one once, stops, and **Settings → Integrations → Honeywell** asks you to sign in again. It doesn't keep retrying, so it can't lock your account.
+- The thermostat keeps its own schedule. The card says whether it's following it. A change from the card, Chat or voice holds until the thermostat's next scheduled change, as a change at the wall does; **Back to its schedule** ends it sooner. A HomeHub temperature schedule or Away mode holds its target until it changes it. When Away mode ends, a thermostat that was following its own schedule goes back to it, unless it has a HomeHub schedule.
+- Honeywell doesn't say this works with other software. It's how Honeywell's own Total Connect Comfort website talks to its servers, and Honeywell could change that.
 
 ## Cameras
 

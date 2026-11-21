@@ -26,6 +26,11 @@ export interface ThermostatView extends Ranges {
   heatLimits: [number, number] | null;
   coolLimits: [number, number] | null;
   deadband: number;
+  /**
+   * A thermostat with its own schedule (Honeywell): following it, holding a target until its
+   * next scheduled change, or holding until changed. Absent or null for one without (Matter).
+   */
+  hold?: 'schedule' | 'temporary' | 'permanent' | null;
 }
 
 /** °C to the home's unit: whole degrees in °F, halves in °C. */
@@ -111,6 +116,11 @@ export class ThermostatService {
   /** Mode or targets, in °C. */
   change(id: number, patch: { mode?: ThermostatMode; heat?: number; cool?: number }): Observable<ThermostatView> {
     return this.http.patch<ThermostatView>(`/api/thermostats/${id}`, patch).pipe(tap((v) => this.put(v)));
+  }
+
+  /** Back to the thermostat's own schedule, ending a hold. */
+  resume(id: number): Observable<ThermostatView> {
+    return this.http.post<ThermostatView>(`/api/thermostats/${id}/resume`, {}).pipe(tap((v) => this.put(v)));
   }
 
   schedule(id: number): Observable<ScheduleView> {

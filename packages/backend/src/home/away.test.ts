@@ -101,6 +101,58 @@ describe('Away mode', () => {
       assert.equal(await sched.runThermostatSchedule(thermostatId, at(17, 8, 1), { read: async () => view, change: async () => assert.fail('made twice') }), 'none');
     });
 
+    it('one following its own schedule (Honeywell) follows it again when it ends; a HomeHub schedule still wins', async () => {
+      const resumed: number[] = [];
+      const deps = (resume: boolean | 'offline') => a.setAwayDeps({
+        read: async () => view,
+        change: async (_id, c) => { sent.push(c); view = { ...view, ...c }; },
+        resume: async (id) => {
+          if (resume === 'offline') { const { ThermostatError } = await import('../thermostat/thermostat'); throw new ThermostatError('offline', 503); }
+          resumed.push(id);
+          return resume;
+        },
+      });
+      try {
+        deps(true);
+        view = fresh({ hold: 'schedule' });
+        await a.startAway({}, null, at(16, 9));
+        assert.equal(sent.length, 1);
+        await a.endAway('person', at(16, 18));
+        assert.deepEqual(resumed, [thermostatId]);
+        assert.equal(sent.length, 1, 'no targets sent: its own schedule takes over');
+
+        // Offline when it ends: tried again on the next check.
+        resumed.length = 0;
+        view = fresh({ hold: 'schedule' });
+        await a.startAway({}, null, at(17, 9));
+        deps('offline');
+        await a.endAway('person', at(17, 18));
+        deps(true);
+        await a.tick(at(17, 18, 1));
+        assert.deepEqual(resumed, [thermostatId]);
+
+        // Holding a target before Away mode: that target comes back.
+        resumed.length = 0;
+        sent.length = 0;
+        view = fresh({ hold: 'temporary' });
+        await a.startAway({}, null, at(18, 9));
+        await a.endAway('person', at(18, 18));
+        assert.deepEqual(resumed, []);
+        assert.ok(near(sent[sent.length - 1].heat, f(68)));
+
+        // A HomeHub schedule is what it goes back to, even if it followed its own before.
+        sent.length = 0;
+        await sched.saveSchedule(thermostatId, { points: [{ days: [0, 1, 2, 3, 4, 5, 6], time: '06:30', heat: f(70) }] }, async () => view);
+        view = fresh({ hold: 'schedule' });
+        await a.startAway({}, null, at(19, 9));
+        await a.endAway('person', at(20, 8));
+        assert.deepEqual(resumed, []);
+        assert.ok(near(sent[sent.length - 1].heat, f(70)));
+      } finally {
+        a.setAwayDeps({ read: async () => view, change: async (_id, c) => { sent.push(c); view = { ...view, ...c }; } });
+      }
+    });
+
     it('uses away temperatures saved in its settings, and only what the thermostat has', async () => {
       a.saveAwaySettings({ thermostats: { [thermostatId]: { heat: f(62), cool: null } } });
       view = fresh({ coolLimits: null });

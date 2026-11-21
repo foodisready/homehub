@@ -6,7 +6,8 @@ import type { ThermostatMode, ThermostatReading } from '../matter/controller';
 import { noteRunning } from './history';
 
 /**
- * Matter thermostats, each a HomeHub device (driver_config.kind 'thermostat').
+ * Thermostats, each a HomeHub device (driver_config.kind 'thermostat'): Matter ones,
+ * and Honeywell ones on Total Connect Comfort (driver_type 'honeywell').
  *
  * Each has two ranges, in °C:
  * - comfort: where the home should be when people are in and awake. It shapes
@@ -18,6 +19,7 @@ import { noteRunning } from './history';
 
 // matter.js loads only when Matter is used.
 const matter = () => import('../matter/controller');
+const honeywell = () => import('../honeywell/honeywell');
 
 export type ChangeSource = 'app' | 'chat' | 'voice' | 'schedule' | 'scene' | 'assistant' | 'away';
 
@@ -33,6 +35,11 @@ export const DEFAULT_RANGES: Ranges = {
 };
 
 export interface ThermostatView extends ThermostatReading, Ranges {
+  /**
+   * For a thermostat with its own schedule (Honeywell): following it, holding a target until
+   * its next schedule period, or holding until changed. null for one without (Matter).
+   */
+  hold?: 'schedule' | 'temporary' | 'permanent' | null;
   id: number;
   alias: string;
   room: string | null;
@@ -47,14 +54,14 @@ export class ThermostatError extends Error {
 
 export function fToC(f: number): number { return Math.round(((f - 32) * 5 / 9) * 1000) / 1000; }
 
-interface Row { id: number; alias: string; room: string | null; ip: string; driver_config: string | null }
+interface Row { id: number; alias: string; room: string | null; ip: string; driver_type: string; driver_config: string | null }
 
-const configOf = (row: Row): { nodeId?: string; endpoint?: number; kind?: string } => {
+const configOf = (row: Row): { nodeId?: string; endpoint?: number; kind?: string; deviceId?: number } => {
   try { return row.driver_config ? JSON.parse(row.driver_config) : {}; } catch { return {}; }
 };
 
 function rows(): Row[] {
-  return (getDb().prepare("SELECT id, alias, room, ip, driver_config FROM devices WHERE driver_type = 'matter'").all() as Row[])
+  return (getDb().prepare("SELECT id, alias, room, ip, driver_type, driver_config FROM devices WHERE driver_type IN ('matter', 'honeywell')").all() as Row[])
     .filter((r) => configOf(r).kind === 'thermostat');
 }
 
@@ -102,7 +109,9 @@ export async function getThermostat(id: number): Promise<ThermostatView> {
   const c = configOf(r);
   const base = { id, alias: r.alias, room: r.room, unit: temperatureUnit(), ...rangesOf(id) };
   try {
-    const reading = await (await matter()).readThermostat(c.nodeId!, c.endpoint!);
+    const reading: ThermostatReading & { hold?: ThermostatView['hold'] } = r.driver_type === 'honeywell'
+      ? (await honeywell()).readThermostat(Number(c.deviceId))
+      : await (await matter()).readThermostat(c.nodeId!, c.endpoint!);
     const view: ThermostatView = { ...reading, ...base, online: true };
     if (reading.mode !== 'off' && reading.mode !== 'other') rememberMode(id, reading.mode);
     // Every report passes through here, so a run starts and ends when the thermostat says.
@@ -129,9 +138,42 @@ export async function refresh(id: number): Promise<void> {
   try { emitThermostatState(await getThermostat(id)); } catch { /* deleted meanwhile */ }
 }
 
+/** The thermostat device for a Honeywell DeviceID. */
+export function thermostatIdForHoneywell(deviceId: number): number | null {
+  return rows().find((r) => r.driver_type === 'honeywell' && Number(configOf(r).deviceId) === deviceId)?.id ?? null;
+}
+
+/**
+ * Lets a thermostat with its own schedule follow it again, ending any hold. False for one
+ * without a schedule of its own (Matter).
+ */
+export async function resumeOwnSchedule(id: number): Promise<boolean> {
+  const r = row(id);
+  if (r.driver_type !== 'honeywell') return false;
+  const now = await getThermostat(id);
+  if (!now.online) throw new ThermostatError(`${now.alias} isn’t connected.`, 503);
+  if (now.hold === 'schedule') return true;
+  try {
+    await (await honeywell()).resumeSchedule(Number(configOf(r).deviceId));
+  } catch (err) {
+    throw await asThermostatError(err, now.alias);
+  }
+  logger.info({ id, alias: now.alias }, 'Thermostat back on its own schedule');
+  void refresh(id);
+  return true;
+}
+
+/** A Honeywell failure as a ThermostatError: 503 while it can't be reached, so callers try again later. */
+async function asThermostatError(err: unknown, alias: string): Promise<unknown> {
+  const { TccError } = await import('../honeywell/tcc');
+  if (!(err instanceof TccError)) return err;
+  if (err.kind === 'refused') return new ThermostatError(`${alias}: ${err.message}`, 422);
+  return new ThermostatError(err.kind === 'rejected' ? err.message : `${alias} can’t be reached through Total Connect Comfort right now.`, 503);
+}
+
 /** The thermostat device for a Matter address, for the controller's change reports. */
 export function thermostatIdFor(nodeId: string, endpoint: number): number | null {
-  return rows().find((r) => { const c = configOf(r); return c.nodeId === nodeId && c.endpoint === endpoint; })?.id ?? null;
+  return rows().find((r) => { const c = configOf(r); return r.driver_type === 'matter' && c.nodeId === nodeId && c.endpoint === endpoint; })?.id ?? null;
 }
 
 /** What a thermostat last reported, if it has since HomeHub started. */
@@ -214,8 +256,16 @@ export async function changeThermostat(id: number, change: { mode?: unknown; hea
     else throw new ThermostatError(`In auto, cooling must be at least ${now.deadband} °C above heating.`);
   }
 
-  const c = configOf(row(id));
-  await (await matter()).setThermostat(c.nodeId!, c.endpoint!, out);
+  const r = row(id);
+  const c = configOf(r);
+  if (r.driver_type === 'honeywell') {
+    // HomeHub's schedules and Away mode hold a target until they change it; anything else holds
+    // it until the thermostat's next schedule period, as a change at the wall does.
+    const hold = source === 'schedule' || source === 'away' ? 'permanent' : 'temporary';
+    try { await (await honeywell()).setThermostat(Number(c.deviceId), out, hold); } catch (err) { throw await asThermostatError(err, now.alias); }
+  } else {
+    await (await matter()).setThermostat(c.nodeId!, c.endpoint!, out);
+  }
   logger.info({ id, alias: now.alias, source, ...out }, 'Thermostat changed');
   // The thermostat confirms through the live subscription a moment later; until then, show what was set.
   const view = { ...(await getThermostat(id)), ...out };
