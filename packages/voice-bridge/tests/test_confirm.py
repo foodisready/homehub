@@ -177,6 +177,22 @@ class PipelineTest(unittest.TestCase):
         self.assertEqual(hub.answers, [('c1', 'no')])
         self.assertEqual(b.reply, 'OK, I left everything as it was.')
 
+    def test_the_wake_word_goes_with_a_miss(self):
+        # From the Pi, 2026-11-21: "冇有熄啊亮灯" after 老友, its end heard as 冇有. HomeHub's Claude is told
+        # the wake word, so it can leave it out.
+        class Woken(Hub):
+            def command(self, text, retry=False, lang=None, ask=False, wake=None):
+                self.wakes.append(wake)
+                return super().command(text, retry, lang, ask)
+        hub = Woken()
+        hub.wakes = []
+        answer(AUDIO, True, Whisper(''), hub, Ears('yue', '冇有熄啊亮灯。'), wake='老友')
+        self.assertIn('老友', hub.wakes)
+        # Listening again with no wake word, none is sent.
+        hub.wakes.clear()
+        answer(AUDIO, True, Whisper(''), hub, Ears('yue', '冇有熄啊亮灯。'))
+        self.assertEqual(set(hub.wakes), {None})
+
     def test_talk_in_the_room_claude_cant_place_stays_quiet(self):
         class Nothing(Hub):
             def command(self, text, retry=False, lang=None, ask=False):

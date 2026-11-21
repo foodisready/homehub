@@ -356,6 +356,29 @@ describe('Claude Haiku option', () => {
     assert.equal((await voice(`/confirm/${r.body.confirmId}`, { answer: 'yes' })).status, 404);
   });
 
+  it('voice: Claude is told the wake word, and whether each device is on now', async () => {
+    // From the Pi, 2026-11-21: "冇有熄啊亮灯" after 老友, its end heard as 冇有; and "欧亮灯", its 熄 lost,
+    // of a lamp that was on.
+    choice.setClaudeKey(KEY); choice.setAiMode('claude');
+    const { getAllCachedStates } = await import('../kasa/device.cache');
+    const porch = (db.prepare("SELECT id FROM devices WHERE alias = 'Porch light'").get() as { id: number }).id;
+    getAllCachedStates().set(porch, { state: true, wattage: null, online: true, lastPolled: new Date() });
+    try {
+      await voice('/command', { text: '冇有熄啊亮灯', ask: true, lang: 'yue', wake: '老友' });
+      const system = anthropic.requests.at(-1).system as string;
+      assert.match(system, /straight after its wake word, "老友"/);
+      assert.match(system, /- Porch light \(room: Front; now on\)/);
+      // No wake word (listening again), none said; offline, no state.
+      getAllCachedStates().set(porch, { state: true, wattage: null, online: false, lastPolled: new Date() });
+      await voice('/command', { text: '欧亮灯', ask: true, lang: 'yue' });
+      const again = anthropic.requests.at(-1).system as string;
+      assert.doesNotMatch(again, /wake word/);
+      assert.match(again, /- Porch light \(room: Front\)/);
+    } finally {
+      getAllCachedStates().delete(porch);
+    }
+  });
+
   it('voice: a no leaves everything, said in the language heard', async () => {
     choice.setClaudeKey(KEY); choice.setAiMode('claude');
     anthropic.form = { action: 'off', target: 'Desk lamp', scene: null, minutes: null, lang: 'en' };

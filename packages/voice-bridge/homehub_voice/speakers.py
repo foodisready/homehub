@@ -120,7 +120,7 @@ class SpeakerLink:
     def __init__(
         self,
         speaker: Speaker,
-        answer: Callable[[bytes, bool, str | None, str | None], Answer],
+        answer: Callable[[bytes, bool, str | None, str | None, str], Answer],
         speak: Callable[[str, str, str], str],
         listed: bool,
         on_change: Callable[[], None] = lambda: None,
@@ -290,7 +290,7 @@ class SpeakerLink:
                 # The answer to a question is in the question's language; otherwise the wake word's, if it says;
                 # a second try with no wake word is in the first try's language.
                 prefer = recent[2] if recent else wake_language(run.wake, self.languages) or (again[1] if again else None)
-                a = await loop.run_in_executor(None, self.answer, bytes(run.listen.audio), run.listen.spoke, asked, prefer)
+                a = await loop.run_in_executor(None, self.answer, bytes(run.listen.audio), run.listen.spoke, asked, prefer, run.wake)
                 # No words at all: most often the wake word heard in a noise or a conversation, so the
                 # speaker goes quiet instead of saying "Sorry, I didn't hear anything" to nobody.
                 if not a.heard.strip(' 。，.,!?！？') and not a.handled:

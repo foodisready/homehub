@@ -59,13 +59,17 @@ class Commander(Protocol):
 
 # The id of HomeHub's "Turn on …?" this command may be the answer to, while it's being answered.
 _confirming: ContextVar[str | None] = ContextVar('confirming', default=None)
+# The wake word the speaker was woken with, while its command is answered: HomeHub's Claude is told,
+# since speech recognition can catch its end at the start of the command (老友 heard as 冇有).
+_woken: ContextVar[str] = ContextVar('woken', default='')
 
 
 def to_homehub(homehub: Commander, text: str, lang: str, retry: bool = False, may_ask: bool = True) -> CommandResult:
     """A command for HomeHub. One it doesn't know may come back as a question to ask (with Claude
     chosen in Settings), when may_ask and HomeHub can."""
     if may_ask and getattr(homehub, 'can_ask', False) is True:
-        return homehub.command(text, retry=retry, lang=lang, ask=True)
+        wake = _woken.get()
+        return homehub.command(text, retry=retry, lang=lang, ask=True, **({'wake': wake} if wake else {}))
     return homehub.command(text, retry) if retry else homehub.command(text)
 
 
@@ -149,12 +153,15 @@ FOR_HOW_LONG = re.compile(r'\s+for\s+\S.*$', re.I)
 
 def answer(audio: bytes, spoke: bool, listener: Transcriber, homehub: Commander,
            ears: CantoneseEars | None = None, asked: str | None = None,
-           vi_ears: VietnameseEars | None = None, prefer: str | None = None, where: str = '') -> Answer:
-    """What was heard and what to say back; a miss with nothing of a command in it is marked chatter."""
+           vi_ears: VietnameseEars | None = None, prefer: str | None = None, where: str = '', wake: str = '') -> Answer:
+    """What was heard and what to say back; a miss with nothing of a command in it is marked chatter.
+    wake: the wake word the speaker heard, if it was woken by one."""
     token = _confirming.set(asked[len(confirm.PREFIX):] if asked and asked.startswith(confirm.PREFIX) else None)
+    woken = _woken.set(wake or '')
     try:
         a = _answer(audio, spoke, listener, homehub, ears, asked, vi_ears, prefer, where)
     finally:
+        _woken.reset(woken)
         _confirming.reset(token)
     if not a.handled and a.asked is None and not asked and looks_like_chatter(a.heard, list(getattr(homehub, 'names', []))):
         a.chatter = True
@@ -214,6 +221,18 @@ def _answer(audio: bytes, spoke: bool, listener: Transcriber, homehub: Commander
         second = _second.submit(heard_again, ears, audio, first) if not in_vietnamese and not en_which else None
         lang, quick = hearing.result() if hearing is not None else ears.hear(audio)
         if in_vietnamese and lang != 'en':
+            # The Vietnamese wake word can fire on Cantonese: 熄阿亮燈 woke "Xin Chào", and the Vietnamese
+            # model wrote "XÍCH A LƯỢM TĂNG", no command, so the speaker stayed quiet. When the Vietnamese
+            # words aren't a command (they'd have been answered above) and SenseVoice heard Chinese, the same
+            # recording is read as Chinese too, with a second pass set to the language, about 2 s more, only
+            # then. Understood, it's answered in that language; otherwise in Vietnamese, as before.
+            if not which and lang in CANTONESE and not asked:
+                way = WAYS[lang if lang in chinese else chinese[0]]
+                r = read_chinese(way, audio, ears, homehub, None, quick, None)
+                if r.understood:
+                    a = send_chinese(way, r, homehub, t0, where)
+                    a.label = lang
+                    return a
             return answer_vietnamese(heard_vi, homehub, t0, asked)
         if lang in CANTONESE and not en_which:
             order = tuple(dict.fromkeys(x for x in (prefer, lang, *chinese) if x in chinese))

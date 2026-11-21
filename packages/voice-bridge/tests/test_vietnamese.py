@@ -320,6 +320,24 @@ class PipelineTest(unittest.TestCase):
         e = answer(b'\0' * 32000, True, FakeWhisper(''), FakeHomeHub(), None, vi_ears=FakeVietnamese(''), prefer='vi')
         self.assertEqual(e.lang, 'en')
 
+    def test_cantonese_that_woke_xin_chao_is_still_answered(self):
+        # From the Pi, 2026-11-21: 熄阿亮燈 woke "Xin Chào", the Vietnamese model wrote "XÍCH A LƯỢM TĂNG",
+        # and the speaker stayed quiet. SenseVoice heard Cantonese: read as Cantonese, it's a command.
+        hub = FakeHomeHub()
+        yue = FakeCantonese('yue', '熄廚房燈。')
+        a = answer(b'\0' * 32000, True, FakeWhisper(), hub, yue, vi_ears=FakeVietnamese('XÍCH A LƯỢM TĂNG'), prefer='vi')
+        self.assertEqual((a.lang, a.handled, hub.sent), ('yue', True, ['turn off 廚房燈']))
+        # Vietnamese words that are a command are still Vietnamese's, whatever SenseVoice thought.
+        hub = FakeHomeHub()
+        b = answer(b'\0' * 32000, True, FakeWhisper(), hub, FakeCantonese('yue', '熄廚房燈。'),
+                   vi_ears=FakeVietnamese('TẮT ĐÈN NHÀ BẾP'), prefer='vi')
+        self.assertEqual(b.lang, 'vi')
+        # Answering a Vietnamese question, the answer stays Vietnamese.
+        hub = FakeHomeHub(handled=False)
+        c = answer(b'\0' * 32000, True, FakeWhisper(), hub, FakeCantonese('yue', '熄廚房燈。'),
+                   vi_ears=FakeVietnamese('XÍCH A LƯỢM TĂNG'), prefer='vi', asked='Kitchen')
+        self.assertEqual(c.lang, 'vi')
+
     def test_english_after_xin_chao_is_still_english(self):
         # From the tablet, 2026-11-13: "Xin chào" is said before English too, and the Vietnamese model
         # writes English as letters with no Vietnamese accents. Whisper still gets its turn.

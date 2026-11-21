@@ -25,7 +25,7 @@ export interface Understanding {
 
 export interface HomeNames {
   /** light: whether "<room> lights" includes it (not a camera, door, valve or protected device). */
-  devices: { alias: string; nicknames: string[]; room: string | null; light?: boolean }[];
+  devices: { alias: string; nicknames: string[]; room: string | null; light?: boolean; on?: boolean }[];
   scenes:  { name: string; nicknames: string[] }[];
 }
 
@@ -40,7 +40,8 @@ export function targets(home: HomeNames): Target[] {
   const list: Target[] = home.devices.map((d) => ({
     label:   d.alias,
     devices: [d.alias],
-    about:   [d.room ? `room: ${d.room}` : '', d.nicknames.length ? `also called: ${d.nicknames.join(', ')}` : ''].filter(Boolean).join('; '),
+    about:   [d.room ? `room: ${d.room}` : '', d.nicknames.length ? `also called: ${d.nicknames.join(', ')}` : '',
+      d.on === undefined ? '' : d.on ? 'now on' : 'now off'].filter(Boolean).join('; '),
   }));
   const taken = new Set(list.map((t) => t.label.toLowerCase()));
   const rooms = [...new Set(home.devices.map((d) => d.room).filter((r): r is string => !!r))];
@@ -78,6 +79,15 @@ export function catalog(home: HomeNames): string {
   return `Targets:\n${lines.join('\n')}\n\nScenes:\n${scenes.length ? scenes.join('\n') : '(none)'}`;
 }
 
+/**
+ * For a spoken command: the wake word was said just before it, and speech recognition can catch its
+ * end at the start of the words, misheard. Heard on the Pi: "冇有熄啊亮灯" after 老友, which Claude read
+ * as "didn't turn off A-Leung's lamp", unclear. Told this, it reads 熄啊亮灯, off.
+ */
+export function wakeNote(wake: string): string {
+  return `\n\nThis message was spoken to a speaker straight after its wake word, "${wake}". Speech recognition sometimes catches the end of the wake word at the start of the message, misheard: after 老友 it can come out as 冇有 or 老有, after Xin Chào as chào. Words at the start that sound like the wake word are not part of the message: "冇有熄啊亮灯" after 老友 is 熄啊亮灯, off. Only those: 有冇, the other way round, is the usual way to ask, so 有冇 with any on or off word ("有冇開廚房燈？", "有冇熄啊亮燈呀？", "有冇閂燈？") asks whether a light is on or off, a question.`;
+}
+
 export function understandPrompt(home: HomeNames): string {
   return `You read one message to a smart home and fill in a form saying what it asks for. Messages come in English, Cantonese, Mandarin or Vietnamese, often from speech recognition, so expect misheard words and simplified characters for Cantonese.
 
@@ -89,6 +99,7 @@ action:
 - unclear: anything else, or you can't tell what is meant
 
 target: the one device, or the one room's lights, that the message means, written exactly as in the list. A device's other names and its room count. null for a question, a scene, or unclear.
+"now on" or "now off" in the list is how a device is at the moment. A clear on or off word is read as said, even if it's already so. When the word for on or off was misheard and can't be made out, but the device is clear, the person most likely wants to change it: "欧亮灯" (啊亮燈, its word lost) is off when that lamp is now on, and on when it's now off.
 minutes: only if a length of time is said ("for 10 minutes", 十分鐘, mười phút), else null.
 lang: the language of the message: en, yue (Cantonese), zh (Mandarin), vi (Vietnamese).
 
@@ -191,7 +202,7 @@ async function* ollamaChunks(res: Response): AsyncGenerator<string> {
 export async function understandWithClaude(
   text: string,
   home: HomeNames,
-  opts: { model?: string; apiKey?: string; timeoutMs?: number } = {},
+  opts: { model?: string; apiKey?: string; timeoutMs?: number; wake?: string } = {},
 ): Promise<UnderstandResult & { inputTokens?: number; outputTokens?: number; status?: number }> {
   const t0 = Date.now();
   const { default: Anthropic } = await import('@anthropic-ai/sdk');
@@ -206,7 +217,7 @@ export async function understandWithClaude(
     const res = await client.messages.create({
       model: opts.model ?? 'claude-haiku-5-5',
       max_tokens: 1024,
-      system: understandPrompt(home),
+      system: understandPrompt(home) + (opts.wake ? wakeNote(opts.wake) : ''),
       messages: [{ role: 'user', content: text }],
       output_config: { effort: 'low', format: { type: 'json_schema', schema } },
     });

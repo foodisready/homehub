@@ -127,12 +127,13 @@ class HomeHub:
             raise
 
     def command(self, text: str, retry: bool = False, lang: str | None = None, ask: bool = False,
-                heard: str | None = None) -> CommandResult:
+                heard: str | None = None, wake: str | None = None) -> CommandResult:
         """retry: if this isn't understood, the bridge will try again, so HomeHub doesn't list it as missed yet.
         ask: HomeHub may answer a command its rules don't know with a question (with Claude chosen), which the
         speaker can ask and listen for. lang: the language heard. heard: what was said, when `text` is the
         bridge's English for a question it read ("what's the weather today" for 紐約天氣點), so HomeHub's
-        Claude can find a city in it.
+        Claude can find a city in it. wake: the wake word the speaker was woken with, for the Claude that
+        reads a command HomeHub's rules missed (its end can be heard at the start: 老友 as 冇有).
 
         Every request says the bridge speaks HomeHub's `say` as it is (questions): with Claude chosen, HomeHub
         may answer a question itself, in the language heard, on a retry too.
@@ -142,7 +143,8 @@ class HomeHub:
         ask = ask and not retry
         res = self._call('/command', {'text': text, 'questions': True, **({'retry': True} if retry else {}),
                                       **({'ask': True} if ask else {}), **({'lang': lang} if lang else {}),
-                                      **({'heard': heard} if heard else {})})
+                                      **({'heard': heard} if heard else {}),
+                                      **({'wake': wake} if wake and ask else {})})
         failed = [str((a.get('args') or {}).get('alias', '')) for a in res.get('actions') or []
                   if isinstance(a, dict) and isinstance(a.get('result'), dict) and a['result'].get('error')]
         info = next((a['result'] for a in res.get('actions') or [] if isinstance(a, dict)

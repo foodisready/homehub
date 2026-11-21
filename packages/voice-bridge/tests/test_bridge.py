@@ -265,7 +265,7 @@ class SpeakerLinkTest(unittest.IsolatedAsyncioTestCase):
     async def test_one_command(self):
         heard = []
 
-        def answer_fn(audio, spoke, asked=None, prefer=None):
+        def answer_fn(audio, spoke, asked=None, prefer=None, wake=''):
             heard.append((len(audio), spoke))
             return mock.Mock(heard='turn on office lamp', reply='Office Lamp is on.', handled=True, stt_s=0.1, homehub_s=0.1, lang='en', asked=None)
 
@@ -306,7 +306,7 @@ class SpeakerLinkTest(unittest.IsolatedAsyncioTestCase):
     async def test_a_vietnamese_wake_word_asks_for_vietnamese(self):
         langs = []
 
-        def answer_fn(audio, spoke, asked=None, prefer=None):
+        def answer_fn(audio, spoke, asked=None, prefer=None, wake=''):
             langs.append(prefer)
             return mock.Mock(heard='bật đèn bếp', reply='Đã bật đèn bếp.', handled=True, stt_s=0, homehub_s=0, lang='vi', asked=None)
 
@@ -322,7 +322,7 @@ class SpeakerLinkTest(unittest.IsolatedAsyncioTestCase):
         # answered "I heard words, just not ones I know. Try again?".
         handled = [False]
 
-        def answer_fn(audio, spoke, asked=None, prefer=None):
+        def answer_fn(audio, spoke, asked=None, prefer=None, wake=''):
             return mock.Mock(heard="I don't want to pay for your drink.", reply="Sorry, I didn't understand that.",
                              handled=handled[0], stt_s=0, homehub_s=0, lang='en', asked=None)
 
@@ -391,7 +391,7 @@ class SpeakerLinkTest(unittest.IsolatedAsyncioTestCase):
         from homehub_voice import speakers
         given, langs = [], []
 
-        def answer_fn(audio, spoke, asked=None, prefer=None):
+        def answer_fn(audio, spoke, asked=None, prefer=None, wake=''):
             given.append(asked)
             langs.append(prefer)
             if asked is None:   # the light's name alone: ask
@@ -420,7 +420,7 @@ class SpeakerLinkTest(unittest.IsolatedAsyncioTestCase):
         from homehub_voice import speakers
         langs, handled = [], [False]
 
-        def answer_fn(audio, spoke, asked=None, prefer=None):
+        def answer_fn(audio, spoke, asked=None, prefer=None, wake=''):
             langs.append(prefer)
             return mock.Mock(heard='熄阿亮床头灯', reply='唔好意思，我聽唔明。' if not handled[0] else '熄咗亞娘床頭燈。',
                              handled=handled[0], stt_s=0, homehub_s=0, lang='yue', asked=None)
@@ -453,7 +453,7 @@ class SpeakerLinkTest(unittest.IsolatedAsyncioTestCase):
         # Cantonese and Mandarin both on, and neither understood: the reply's language was a guess.
         langs = []
 
-        def answer_fn(audio, spoke, asked=None, prefer=None):
+        def answer_fn(audio, spoke, asked=None, prefer=None, wake=''):
             langs.append(prefer)
             return mock.Mock(heard='今日食乜嘢', reply='唔好意思，我聽唔明。', handled=False, stt_s=0, homehub_s=0,
                              lang='yue', asked=None, unsure=True, label='zh', passes=2)
@@ -466,7 +466,7 @@ class SpeakerLinkTest(unittest.IsolatedAsyncioTestCase):
         link.task.cancel()
 
     async def test_talk_with_nothing_of_a_command_in_it_gets_no_reply(self):
-        def answer_fn(audio, spoke, asked=None, prefer=None):
+        def answer_fn(audio, spoke, asked=None, prefer=None, wake=''):
             return mock.Mock(heard="I don't want to pay for your drink.", reply="Sorry, I didn't understand that.",
                              handled=False, stt_s=0, homehub_s=0, lang='en', asked=None, chatter=True)
 
@@ -481,7 +481,7 @@ class SpeakerLinkTest(unittest.IsolatedAsyncioTestCase):
         # listened again without the wake word, heard more TV, and said it again.
         heard = ['Better day outside. Healthy. Mm-hmm. Wow.']
 
-        def answer_fn(audio, spoke, asked=None, prefer=None):
+        def answer_fn(audio, spoke, asked=None, prefer=None, wake=''):
             return mock.Mock(heard=heard[0], reply="I heard words, just not ones I know. Try again?",
                              handled=False, stt_s=0, homehub_s=0, lang='en', asked=None, chatter=False)
 
@@ -529,7 +529,7 @@ class SpeakerLinkTest(unittest.IsolatedAsyncioTestCase):
         link.task.cancel()
 
     async def test_woken_by_a_noise_it_stays_quiet(self):
-        def answer_fn(audio, spoke, asked=None, prefer=None):
+        def answer_fn(audio, spoke, asked=None, prefer=None, wake=''):
             return mock.Mock(heard='', reply="Sorry, I didn't catch that.", handled=False, stt_s=0, homehub_s=0, lang='en', asked=None)
 
         link, c = await self.connected_link(answer_fn)
@@ -540,7 +540,7 @@ class SpeakerLinkTest(unittest.IsolatedAsyncioTestCase):
         link.task.cancel()
 
     async def test_failure_still_ends_run(self):
-        def boom(audio, spoke, asked=None, prefer=None):
+        def boom(audio, spoke, asked=None, prefer=None, wake=''):
             raise RuntimeError('whisper crashed')
 
         link, c = await self.connected_link(boom)
@@ -560,7 +560,7 @@ class SpeakerLinkTest(unittest.IsolatedAsyncioTestCase):
 
         answered = []
 
-        def answer_fn(audio, spoke, asked=None, prefer=None):
+        def answer_fn(audio, spoke, asked=None, prefer=None, wake=''):
             answered.append(len(audio))
             return mock.Mock(heard='turn on office lamp', reply='Office Lamp is on.', handled=True, stt_s=0, homehub_s=0, lang='en', asked=None)
 

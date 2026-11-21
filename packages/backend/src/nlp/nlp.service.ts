@@ -628,8 +628,8 @@ const askingOn = () => process.env.CHAT_ASK?.trim().toLowerCase() !== 'off';
 /** The home's devices, rooms and scenes, as the form offers them. */
 export function homeNames(): HomeNames {
   const db = getDb();
-  const devices = db.prepare('SELECT alias, nicknames, room, driver_type, is_protected FROM devices').all() as
-    (PowerDevice & { alias: string; nicknames: string | null; room: string | null; driver_type: string | null })[];
+  const devices = db.prepare('SELECT id, alias, nicknames, room, driver_type, is_protected FROM devices').all() as
+    (PowerDevice & { id: number; alias: string; nicknames: string | null; room: string | null; driver_type: string | null })[];
   const scenes = db.prepare('SELECT name, nicknames FROM scenes').all() as { name: string; nicknames: string | null }[];
   const list = (v: string | null): string[] => { try { const a = JSON.parse(v ?? '[]'); return Array.isArray(a) ? a.map(String) : []; } catch { return []; } };
   return {
@@ -637,6 +637,12 @@ export function homeNames(): HomeNames {
       alias: d.alias, nicknames: list(d.nicknames), room: d.room,
       // As "<room> lights" reads elsewhere: not a camera, a door, a valve or a protected device.
       light: !isCamera(d) && !isGarageDoor(d) && !isProtectedDevice(d) && !NOT_A_LIGHT.test(d.alias),
+      // On or off now, so a misheard verb can be read as the likely change (understandPrompt). Not for a
+      // camera or a garage door, and not when it's offline or not yet known.
+      ...(() => {
+        const c = isCamera(d) || isGarageDoor(d) ? undefined : getCachedState(d.id);
+        return c?.online ? { on: c.state } : {};
+      })(),
     })),
     scenes: scenes.map((sc) => ({ name: sc.name, nicknames: list(sc.nicknames) })),
   };
@@ -707,14 +713,15 @@ export interface VoiceAsk {
  * isn't in use, couldn't answer, or read nothing to switch: the speaker says it didn't understand.
  *
  * Only Claude, not this HomeHub's model: on heard speech the small model asked the wrong question
- * too often (the command test set) to be worth a question out loud.
+ * too often (the command test set) to be worth a question out loud. wake: the wake word the speaker
+ * was woken with, which Claude is told about (see understandPrompt).
  */
-export async function askForVoice(text: string, lang: Lang | null): Promise<VoiceAsk | null> {
+export async function askForVoice(text: string, lang: Lang | null, wake = ''): Promise<VoiceAsk | null> {
   if (!askingOn() || asksForLater(text)) return null;
   const key = claudeInUse();
   if (!key) return null;
   // Shorter than Chat's: someone is standing at the speaker waiting.
-  const r = await understandWithClaude(text, homeNames(), { apiKey: key, timeoutMs: 6_000 });
+  const r = await understandWithClaude(text, homeNames(), { apiKey: key, timeoutMs: 6_000, ...(wake ? { wake } : {}) });
   if (r.inputTokens) recordClaudeUse(r.inputTokens, r.outputTokens ?? 0);
   if (r.error) {
     logger.warn({ err: r.error }, 'Claude form not filled for voice');

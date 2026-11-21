@@ -103,7 +103,7 @@ internalRouter.post('/voice/status', (req: Request, res: Response) => {
   res.json({ ok: true, ...bridgeInstructions() });
 });
 
-// POST /internal/voice/command  { text: string, retry?, ask?, lang?, heard?, questions? }
+// POST /internal/voice/command  { text: string, retry?, ask?, lang?, heard?, questions?, wake? }
 // The rules act at once. Spoken text can be misheard, so a model never switches a device from it:
 // with Claude in use, a miss can become a question ("Should I turn on Kitchen light?") the bridge asks aloud.
 // With Claude, a question is read by it too (question-reader.ts): "the weather in New York?", or a follow-up.
@@ -114,8 +114,9 @@ internalRouter.post('/voice/command', async (req: Request, res: Response) => {
   // lang: the language it heard, for the question's words and voice.
   // heard: what was said, when `text` is the bridge's English for a question it read itself.
   // questions: the bridge says an answer's `say` as it is, on a retry too (bridges from v0.2.12).
-  const { text, retry, ask, lang, heard, questions } = req.body as
-    { text?: unknown; retry?: unknown; ask?: unknown; lang?: unknown; heard?: unknown; questions?: unknown };
+  // wake: the wake word the speaker was woken with, for Claude's reading of a miss (bridges from v0.2.18).
+  const { text, retry, ask, lang, heard, questions, wake } = req.body as
+    { text?: unknown; retry?: unknown; ask?: unknown; lang?: unknown; heard?: unknown; questions?: unknown; wake?: unknown };
   if (typeof text !== 'string' || !text.trim()) {
     return res.status(400).json({ error: '`text` is required', code: 'VALIDATION_ERROR' });
   }
@@ -142,7 +143,7 @@ internalRouter.post('/voice/command', async (req: Request, res: Response) => {
   // hear again more carefully. Claude reading nothing to switch leaves it not understood, as before.
   // A question Claude reads is answered, on a first try too: an English one then needn't wait for Whisper.
   const [asked, answer] = await Promise.all([
-    ask === true && retry !== true ? askForVoice(spoken, language) : null,
+    ask === true && retry !== true ? askForVoice(spoken, language, typeof wake === 'string' ? wake.trim().slice(0, 40) : '') : null,
     canSay ? answerMissed(spoken, reading) : null,
   ]);
   if (asked) {

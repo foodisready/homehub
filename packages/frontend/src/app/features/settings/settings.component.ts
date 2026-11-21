@@ -259,7 +259,7 @@ const DRIVER_LABEL: Record<string, string> = {
 
       <!-- ── Devices ───────────────────────────────────────────── -->
       <div class="section">
-        <button type="button" class="section-title section-toggle" (click)="toggleSection('devices')" [attr.aria-expanded]="isSectionOpen('devices')">
+        <button type="button" id="section-devices" class="section-title section-toggle" (click)="toggleSection('devices')" [attr.aria-expanded]="isSectionOpen('devices')">
           <span class="chev">{{ isSectionOpen('devices') ? '▾' : '▸' }}</span> Devices
         </button>
         @if (isSectionOpen('devices')) {
@@ -581,7 +581,7 @@ const DRIVER_LABEL: Record<string, string> = {
       <!-- ── Home location and time zone (admin only) ─────────── -->
       @if (isAdmin() && !automations.readOnly()) {
         <div class="section">
-          <button type="button" class="section-title section-toggle" (click)="toggleSection('home')" [attr.aria-expanded]="isSectionOpen('home')">
+          <button type="button" id="section-home" class="section-title section-toggle" (click)="toggleSection('home')" [attr.aria-expanded]="isSectionOpen('home')">
             <span class="chev">{{ isSectionOpen('home') ? '▾' : '▸' }}</span> Home
           </button>
           @if (isSectionOpen('home')) {
@@ -598,7 +598,7 @@ const DRIVER_LABEL: Record<string, string> = {
       <!-- ── Integrations (admin only) ────────────────────────── -->
       @if (isAdmin() && !automations.readOnly()) {
         <div class="section">
-          <button type="button" class="section-title section-toggle" (click)="toggleSection('integrations')" [attr.aria-expanded]="isSectionOpen('integrations')">
+          <button type="button" id="section-integrations" class="section-title section-toggle" (click)="toggleSection('integrations')" [attr.aria-expanded]="isSectionOpen('integrations')">
             <span class="chev">{{ isSectionOpen('integrations') ? '▾' : '▸' }}</span> Integrations
           </button>
           @if (isSectionOpen('integrations')) {
@@ -785,7 +785,7 @@ const DRIVER_LABEL: Record<string, string> = {
       <!-- ── Users (admin only) ────────────────────────────────── -->
       @if (isAdmin()) {
         <div class="section">
-          <button type="button" class="section-title section-toggle" (click)="toggleSection('users')" [attr.aria-expanded]="isSectionOpen('users')">
+          <button type="button" id="section-users" class="section-title section-toggle" (click)="toggleSection('users')" [attr.aria-expanded]="isSectionOpen('users')">
             <span class="chev">{{ isSectionOpen('users') ? '▾' : '▸' }}</span> Users
           </button>
           @if (isSectionOpen('users')) {
@@ -832,7 +832,7 @@ const DRIVER_LABEL: Record<string, string> = {
 
       <!-- ── Notifications ─────────────────────────────────────── -->
       <div class="section">
-        <button type="button" class="section-title section-toggle" (click)="toggleSection('notifications')" [attr.aria-expanded]="isSectionOpen('notifications')">
+        <button type="button" id="section-notifications" class="section-title section-toggle" (click)="toggleSection('notifications')" [attr.aria-expanded]="isSectionOpen('notifications')">
           <span class="chev">{{ isSectionOpen('notifications') ? '▾' : '▸' }}</span> Notifications
         </button>
         @if (isSectionOpen('notifications')) {
@@ -858,7 +858,7 @@ const DRIVER_LABEL: Record<string, string> = {
       <!-- ── AI for Chat and voice (admin only) ─────────────────────────── -->
       @if (isAdmin() && !automations.readOnly()) {
         <div class="section" id="ai-choice">
-          <button type="button" class="section-title section-toggle" (click)="toggleSection('ai')" [attr.aria-expanded]="isSectionOpen('ai')">
+          <button type="button" id="section-ai" class="section-title section-toggle" (click)="toggleSection('ai')" [attr.aria-expanded]="isSectionOpen('ai')">
             <span class="chev">{{ isSectionOpen('ai') ? '▾' : '▸' }}</span> AI for Chat and voice
           </button>
           @if (isSectionOpen('ai')) {
@@ -870,7 +870,7 @@ const DRIVER_LABEL: Record<string, string> = {
       <!-- ── Voice control (admin only) ─────────────────────────── -->
       @if (isAdmin() && !automations.readOnly()) {
         <div class="section">
-          <button type="button" class="section-title section-toggle" (click)="toggleSection('voice')" [attr.aria-expanded]="isSectionOpen('voice')">
+          <button type="button" id="section-voice" class="section-title section-toggle" (click)="toggleSection('voice')" [attr.aria-expanded]="isSectionOpen('voice')">
             <span class="chev">{{ isSectionOpen('voice') ? '▾' : '▸' }}</span> Voice control
           </button>
           @if (isSectionOpen('voice')) {
@@ -882,7 +882,7 @@ const DRIVER_LABEL: Record<string, string> = {
       <!-- ── Teach HomeHub (admin only) ───────────────────────── -->
       @if (isAdmin() && !automations.readOnly()) {
         <div class="section" id="teach-homehub">
-          <button type="button" class="section-title section-toggle" (click)="toggleSection('teach')" [attr.aria-expanded]="isSectionOpen('teach')">
+          <button type="button" id="section-teach" class="section-title section-toggle" (click)="toggleSection('teach')" [attr.aria-expanded]="isSectionOpen('teach')">
             <span class="chev">{{ isSectionOpen('teach') ? '▾' : '▸' }}</span> Teach HomeHub
           </button>
           @if (isSectionOpen('teach')) {
@@ -894,7 +894,7 @@ const DRIVER_LABEL: Record<string, string> = {
       <!-- ── Voice replies (admin only) ─────────────────────────── -->
       @if (isAdmin() && !automations.readOnly()) {
         <div class="section">
-          <button type="button" class="section-title section-toggle" (click)="toggleSection('replies')" [attr.aria-expanded]="isSectionOpen('replies')">
+          <button type="button" id="section-replies" class="section-title section-toggle" (click)="toggleSection('replies')" [attr.aria-expanded]="isSectionOpen('replies')">
             <span class="chev">{{ isSectionOpen('replies') ? '▾' : '▸' }}</span> Voice replies
           </button>
           @if (isSectionOpen('replies')) {
@@ -904,7 +904,7 @@ const DRIVER_LABEL: Record<string, string> = {
       }
 
       <div class="section">
-        <button type="button" class="section-title section-toggle" (click)="toggleSection('chat-commands')" [attr.aria-expanded]="isSectionOpen('chat-commands')">
+        <button type="button" id="section-chat-commands" class="section-title section-toggle" (click)="toggleSection('chat-commands')" [attr.aria-expanded]="isSectionOpen('chat-commands')">
           <span class="chev">{{ isSectionOpen('chat-commands') ? '▾' : '▸' }}</span> Chat commands
         </button>
         @if (isSectionOpen('chat-commands')) {
@@ -933,7 +933,7 @@ const DRIVER_LABEL: Record<string, string> = {
       @if (chatStats()?.voice; as voice) {
         @if (voice.total > 0) {
           <div class="section">
-            <button type="button" class="section-title section-toggle" (click)="toggleSection('voice-commands')" [attr.aria-expanded]="isSectionOpen('voice-commands')">
+            <button type="button" id="section-voice-commands" class="section-title section-toggle" (click)="toggleSection('voice-commands')" [attr.aria-expanded]="isSectionOpen('voice-commands')">
               <span class="chev">{{ isSectionOpen('voice-commands') ? '▾' : '▸' }}</span> Voice commands
             </button>
             @if (isSectionOpen('voice-commands')) {
@@ -960,7 +960,7 @@ const DRIVER_LABEL: Record<string, string> = {
       <!-- ── Backups (admin only) ──────────────────────────────── -->
       @if (isAdmin()) {
         <div class="section">
-          <button type="button" class="section-title section-toggle" (click)="toggleSection('backups')" [attr.aria-expanded]="isSectionOpen('backups')">
+          <button type="button" id="section-backups" class="section-title section-toggle" (click)="toggleSection('backups')" [attr.aria-expanded]="isSectionOpen('backups')">
             <span class="chev">{{ isSectionOpen('backups') ? '▾' : '▸' }}</span> Backups
           </button>
           @if (isSectionOpen('backups')) {
@@ -973,7 +973,7 @@ const DRIVER_LABEL: Record<string, string> = {
       }
 
       <div class="section">
-        <button type="button" class="section-title section-toggle" (click)="toggleSection('preferences')" [attr.aria-expanded]="isSectionOpen('preferences')">
+        <button type="button" id="section-preferences" class="section-title section-toggle" (click)="toggleSection('preferences')" [attr.aria-expanded]="isSectionOpen('preferences')">
           <span class="chev">{{ isSectionOpen('preferences') ? '▾' : '▸' }}</span> Preferences
         </button>
         @if (isSectionOpen('preferences')) {
@@ -1061,15 +1061,17 @@ export class SettingsComponent implements OnInit, OnDestroy {
   }
 
   // ── Collapsible sections ───────────────────────────────────
-  // Devices starts open and the rest closed; choices are remembered on this browser.
-  private static readonly SECTIONS_KEY = 'homehub.settings.sections';
-  private readonly openSections = signal<Record<string, boolean>>(SettingsComponent.loadSections());
+  // One open at a time, so the page stays short enough to find things in, on a phone above all. Devices
+  // starts open; the one open last is remembered on this browser.
+  private static readonly SECTION_KEY = 'homehub.settings.open';
+  private readonly openSection = signal<string | null>(SettingsComponent.loadSection());
 
-  private static loadSections(): Record<string, boolean> {
+  private static loadSection(): string | null {
     try {
-      return JSON.parse(localStorage.getItem(SettingsComponent.SECTIONS_KEY) ?? '{}') ?? {};
+      const saved = localStorage.getItem(SettingsComponent.SECTION_KEY);
+      return saved === null ? 'devices' : saved || null;
     } catch {
-      return {};
+      return 'devices';
     }
   }
 
@@ -1104,7 +1106,7 @@ export class SettingsComponent implements OnInit, OnDestroy {
   private readonly route = inject(ActivatedRoute);
 
   isSectionOpen(key: string): boolean {
-    return this.openSections()[key] ?? key === 'devices';
+    return this.openSection() === key;
   }
 
   /** From a list of misses: opens Teach HomeHub, where each one can be taught or ignored. */
@@ -1113,9 +1115,28 @@ export class SettingsComponent implements OnInit, OnDestroy {
     setTimeout(() => document.getElementById('teach-homehub')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
   }
 
+  /**
+   * Opening a section closes the one that was open. When that one was above it, the page gets shorter
+   * above the section just opened and its title can end up off the top of the screen: it's scrolled
+   * back into view, just below the top bar. A title still in view isn't moved.
+   */
   toggleSection(key: string, open = !this.isSectionOpen(key)): void {
-    this.openSections.update((s) => ({ ...s, [key]: open }));
-    try { localStorage.setItem(SettingsComponent.SECTIONS_KEY, JSON.stringify(this.openSections())); } catch { /* private window */ }
+    if (!open && !this.isSectionOpen(key)) return;
+    this.openSection.set(open ? key : null);
+    try { localStorage.setItem(SettingsComponent.SECTION_KEY, open ? key : ''); } catch { /* private window */ }
+    // Once the page has been laid out again, after the closed section is gone.
+    if (open) requestAnimationFrame(() => requestAnimationFrame(() => this.bringIntoView(key)));
+  }
+
+  private bringIntoView(key: string): void {
+    const title = document.getElementById(`section-${key}`);
+    if (!title) return;
+    // The top bar on a wide screen stays at the top; on a phone the menu is at the bottom.
+    const bar = Math.max(document.querySelector('.top')?.getBoundingClientRect().bottom ?? 0, 0);
+    const top = title.getBoundingClientRect().top;
+    // At once, not smoothly: the page has just jumped anyway, and a smooth scroll is cut short by the
+    // new section's content as it loads.
+    if (top < bar + 8) window.scrollTo({ top: window.scrollY + top - bar - 12 });
   }
   readonly currentUser = computed(() => this.auth.user()?.name ?? '');
 
@@ -1329,9 +1350,14 @@ export class SettingsComponent implements OnInit, OnDestroy {
   ngOnDestroy(): void {
     this.stopWatchingDevices?.();
     this.stopWatchingOnline?.();
+    document.documentElement.style.overflowAnchor = '';
   }
 
   ngOnInit(): void {
+    // No scroll anchoring on this page: when a section opens and the one above it closes, the page is
+    // shorter, and the browser would then scroll again as the new section's content loads (Voice control's
+    // settings), pushing its title off the top of the screen.
+    document.documentElement.style.overflowAnchor = 'none';
     if (this.route.snapshot.queryParamMap.get('welcome')) {
       this.welcome.set(true);
       this.toggleSection('home', true);
@@ -1669,7 +1695,7 @@ export class SettingsComponent implements OnInit, OnDestroy {
           this.newDeviceAlias = result.alias && result.alias !== ip ? result.alias : '';
         }
         if (result.needsLogin && result.driverType === 'meross') {
-          this.probeMsg.set('Found a Meross device. Sign in to Meross under Integrations, then select Probe again.');
+          this.probeMsg.set('Found a Meross device. Sign in to Meross under Integrations (opened below), then open Devices again and select Probe.');
           this.probeErr.set(true);
           this.toggleSection('integrations', true);
           this.merossOpenRequest.update((n) => n + 1);
