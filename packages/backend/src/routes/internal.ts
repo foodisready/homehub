@@ -20,7 +20,9 @@ import { maybeFireShutoff } from '../sensors/shutoff';
 import { realInvoker, realNotifier } from '../sensors/shutoff-runtime';
 import { notifyStaleRecovery } from '../sensors/stale-check';
 import { runPowerCommand } from '../nlp/commands';
-import { answerVoiceAsk, askForVoice } from '../nlp/nlp.service';
+import { answerVoiceAsk, askForVoice, thermostatProposal } from '../nlp/nlp.service';
+import { askText, setPending } from '../nlp/confirm';
+import { randomUUID } from 'crypto';
 import { recordVoiceCommand } from '../nlp/command-log';
 import { withActivity } from '../activity/activity';
 import { issueTokens, serviceUser } from '../auth/auth.service';
@@ -130,8 +132,21 @@ internalRouter.post('/voice/command', async (req: Request, res: Response) => {
   const said = typeof heard === 'string' && heard.trim() ? heard.trim() : null;
   const reading = { who: 'voice', lang: language, heard: said, timeoutMs: 4_000, windowMs: FOLLOW_UP_MS.voice };
 
-  const handled = await withActivity({ source: 'voice' }, () => runPowerCommand(spoken)) ?? answerStatusQuestion(spoken)
-    ?? await answerAsked(spoken, { ...reading, read: canSay });
+  const ruled = await withActivity({ source: 'voice' }, () => runPowerCommand(spoken));
+  if (ruled?.ask) {
+    // Turning a thermostat off: the speaker asks first and listens for the yes, on the bridge's
+    // quick first hearing too (it sends ask only on its careful second one, but listens for a
+    // question on both). A bridge that can't ask is told to use the card.
+    recordVoiceCommand(said ?? text.trim(), true);
+    if (ask !== true && questions !== true) return res.json({ handled: false, response: 'Turning off a thermostat needs a yes, so use its card on the dashboard.', actions: [] });
+    const proposal = thermostatProposal(ruled.ask, language ?? 'en', spoken);
+    const confirmId = randomUUID();
+    setPending(`voice:${confirmId}`, proposal);
+    const say = askText(proposal);
+    // handled: understood, so the bridge asks now rather than hearing it again more slowly first.
+    return res.json({ handled: true, response: say, say, lang: proposal.lang, actions: [], confirmId });
+  }
+  const handled = ruled ?? answerStatusQuestion(spoken) ?? await answerAsked(spoken, { ...reading, read: canSay });
   if (handled) {
     recordVoiceCommand(said ?? text.trim(), true);
     const own = (handled as Answered).said;

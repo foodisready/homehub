@@ -3,7 +3,7 @@ import { logger } from '../logger';
 import { emitThermostatState } from '../socket';
 import { temperatureUnit, type TemperatureUnit } from '../home/weather';
 import type { ThermostatMode, ThermostatReading } from '../matter/controller';
-import { noteRunning } from './history';
+import { noteRunning, outdoorNow } from './history';
 
 /**
  * Thermostats, each a HomeHub device (driver_config.kind 'thermostat'): Matter ones,
@@ -46,6 +46,8 @@ export interface ThermostatView extends ThermostatReading, Ranges {
   online: boolean;
   /** How the home shows temperatures. Every number here is °C. */
   unit: TemperatureUnit;
+  /** Outside now, if HomeHub knows (the home's location is set): for "it's cold out" before turning off. */
+  outdoor?: number | null;
 }
 
 export class ThermostatError extends Error {
@@ -107,7 +109,7 @@ const last = new Map<number, ThermostatView>();
 export async function getThermostat(id: number): Promise<ThermostatView> {
   const r = row(id);
   const c = configOf(r);
-  const base = { id, alias: r.alias, room: r.room, unit: temperatureUnit(), ...rangesOf(id) };
+  const base = { id, alias: r.alias, room: r.room, unit: temperatureUnit(), outdoor: outdoorNow(), ...rangesOf(id) };
   try {
     const reading: ThermostatReading & { hold?: ThermostatView['hold'] } = r.driver_type === 'honeywell'
       ? (await honeywell()).readThermostat(Number(c.deviceId))

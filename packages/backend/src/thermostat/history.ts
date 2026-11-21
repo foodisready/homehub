@@ -119,6 +119,13 @@ export async function fetchOutdoor(opts: { fetchImpl?: typeof fetch; now?: numbe
   return kept;
 }
 
+/** The outdoor temperature now (°C), from the hourly ones kept: null if none from the last 3 hours. */
+export function outdoorNow(now = Date.now()): number | null {
+  const r = getDb().prepare('SELECT temp_c FROM outdoor_hours WHERE hour >= ? AND hour <= ? ORDER BY hour DESC LIMIT 1')
+    .get(localHour(new Date(now - 3 * 3_600_000)), localHour(new Date(now))) as { temp_c: number } | undefined;
+  return r ? r.temp_c : null;
+}
+
 let timers: ReturnType<typeof setInterval>[] = [];
 
 /** Starts sampling every 5 minutes and fetching outdoor temperatures every hour, once there's a thermostat. */

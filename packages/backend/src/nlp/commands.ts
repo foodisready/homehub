@@ -125,6 +125,25 @@ export function parseDoorCommand(text: string): PowerCommand | null {
   return { name: match[2], state: match[1] === 'open' };
 }
 
+/** A thermostat: Matter or Honeywell, driver_config.kind 'thermostat'. */
+export const isThermostat = (device: { driver_config?: string | null }) => {
+  try { return !!device.driver_config && JSON.parse(device.driver_config)?.kind === 'thermostat'; } catch { return false; }
+};
+
+/**
+ * Turning a thermostat off stops all heating and cooling, so Chat and voice ask first ("Should I turn
+ * off 2nd Floor Thermostat?"), and a name that also covers lights turns those off and leaves the
+ * thermostat on. The caller asks the question and keeps it for the yes (confirm.ts).
+ */
+export interface ThermostatAsk { deviceIds: number[]; aliases: string[] }
+export type CommandResult = { response: string; actions: ActionTaken[]; ask?: ThermostatAsk };
+
+const askOff = (devices: PowerDevice[]): CommandResult => ({
+  response: `Should I turn off ${joinNames(devices.map((d) => d.alias))}?`,
+  actions: [],
+  ask: { deviceIds: devices.map((d) => d.id).sort((a, b) => a - b), aliases: devices.map((d) => d.alias) },
+});
+
 /** A garage door opener: the only Meross devices HomeHub supports. */
 export const isGarageDoor = (device: { driver_type?: string | null }) => device.driver_type === 'meross';
 
@@ -300,7 +319,7 @@ function sceneFromText(text: string): NamedScene | null {
 /** Answer a simple command without the chat model. Returns null if the model should handle it. */
 export async function runPowerCommand(
   text: string,
-): Promise<{ response: string; actions: ActionTaken[] } | null> {
+): Promise<CommandResult | null> {
   const namedScene = sceneFromText(text);
   if (namedScene) return runScene(namedScene);
 
@@ -316,6 +335,13 @@ export async function runPowerCommand(
   if (cameraCommand) group = group.filter(isCamera);
   if (group.length) {
     if (!command.state && group.every(isCamera)) return { response: CAMERA_PAUSE_REFUSED, actions: [] };
+    const thermostats = command.state ? [] : group.filter(isThermostat);
+    if (thermostats.length === group.length && thermostats.length) return askOff(thermostats);
+    if (thermostats.length) {
+      const done = await runGroupCommand(group.filter((d) => !isThermostat(d)), command);
+      const names = joinNames(thermostats.map((d) => d.alias));
+      return { ...done, response: `${done.response} I left ${names} on: say “turn off ${thermostats[0].alias}” to turn ${thermostats.length > 1 ? 'one' : 'it'} off.` };
+    }
     return runGroupCommand(group, command);
   }
 
@@ -333,6 +359,7 @@ export async function runPowerCommand(
   const device = match.device as unknown as PowerDevice;
   if (cameraCommand && !isCamera(device)) return null;
   if (!command.state && isCamera(device)) return { response: CAMERA_PAUSE_REFUSED, actions: [] };
+  if (!command.state && isThermostat(device)) return askOff([device]);
   if (!assistantMaySwitch(device, command.state)) {
     return {
       response: `${device.alias} is protected, so Chat won't switch it. Use its tile on the dashboard.`,

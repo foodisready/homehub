@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, OnDestroy, OnInit, computed, inject, input, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
-import { MODE_NAME, ThermostatService, shown, step, toC, type ThermostatMode, type ThermostatView } from './thermostat.service';
+import { MODE_NAME, ThermostatService, offQuestion, shown, step, toC, type ThermostatMode, type ThermostatView } from './thermostat.service';
 import { describeNext, describeTargets } from './schedule-text';
 
 /**
@@ -34,6 +34,10 @@ import { describeNext, describeTargets } from './schedule-text';
     .history { font-size: 0.85rem; color: var(--accent); align-self: flex-start; padding: 0.2rem 0; }
     .links { display: flex; flex-wrap: wrap; gap: 0.2rem 1.2rem; }
     .scheduled { font-size: 0.85rem; color: var(--text-muted); margin: 0; }
+    .ask { display: flex; flex-direction: column; gap: 0.4rem; }
+    .ask .buttons { display: flex; gap: 0.4rem; }
+    .ask button { font-size: 0.8rem; padding: 0.4rem 0.8rem; border-radius: var(--radius); background: var(--bg); border: 1px solid var(--border); color: var(--text); }
+    .ask button.danger { background: var(--red); border-color: var(--red); color: #fff; font-weight: 600; }
     .own { display: flex; align-items: center; flex-wrap: wrap; gap: 0.3rem 0.8rem; }
     .resume { background: none; border: none; padding: 0.2rem 0; color: var(--accent); font-size: 0.85rem; }
   `],
@@ -52,6 +56,15 @@ import { describeNext, describeTargets } from './schedule-text';
               <button type="button" role="radio" [attr.aria-checked]="t.mode === m" (click)="setMode(m)">{{ modeName(m) }}</button>
             }
           </div>
+          @if (askingOff()) {
+            <div class="ask" role="alertdialog" [attr.aria-label]="'Turn off ' + t.alias">
+              <p class="note">{{ offText() }}</p>
+              <div class="buttons">
+                <button type="button" class="danger" (click)="confirmOff()">Turn off</button>
+                <button type="button" (click)="askingOff.set(false)">Cancel</button>
+              </div>
+            </div>
+          }
           @for (key of targets(); track key) {
             <div class="target">
               <span class="what">{{ key === 'heat' ? 'Heat to' : 'Cool to' }}</span>
@@ -176,9 +189,20 @@ export class ThermostatControlComponent implements OnInit, OnDestroy {
 
   modeName(m: ThermostatMode): string { return MODE_NAME[m]; }
 
-  setMode(mode: ThermostatMode): void {
+  /** Off was chosen: asked first, since it stops all heating and cooling. */
+  readonly askingOff = signal(false);
+  readonly offText = computed(() => offQuestion(this.view(), ''));
+
+  confirmOff(): void {
+    this.askingOff.set(false);
+    this.setMode('off', true);
+  }
+
+  setMode(mode: ThermostatMode, confirmed = false): void {
     const t = this.view();
     if (!t || t.mode === mode) return;
+    if (mode === 'off' && !confirmed) { this.askingOff.set(true); return; }
+    this.askingOff.set(false);
     this.error.set('');
     this.svc.change(t.id, { mode }).subscribe({ error: (e) => this.error.set(e?.error?.error ?? 'The mode couldn’t be changed.') });
   }

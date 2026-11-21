@@ -139,6 +139,36 @@ describe('chat commands', () => {
     assert.equal(commands.formatDuration(150), '2 hours 30 minutes');
   });
 
+  describe('thermostats', () => {
+    before(async () => {
+      const { getDriver } = await import('../drivers/registry');
+      getDriver('honeywell').setPower = async (ip: string, state: boolean) => { calls.push({ ip, state }); };
+      db.prepare("INSERT INTO devices (alias, ip, driver_type, driver_config, room) VALUES ('Hall Thermostat', 'honeywell:9', 'honeywell', '{\"kind\":\"thermostat\",\"deviceId\":9}', 'Hall')").run();
+      db.prepare("INSERT INTO devices (alias, ip, room) VALUES ('Hall lamp', '10.0.0.51', 'Hall')").run();
+    });
+    after(() => { db.prepare("DELETE FROM devices WHERE alias IN ('Hall Thermostat', 'Hall lamp')").run(); });
+
+    it('turning one off is asked first, and nothing is switched yet', async () => {
+      const r = await commands.runPowerCommand('turn off the hall thermostat');
+      assert.equal(r?.response, 'Should I turn off Hall Thermostat?');
+      assert.deepEqual(r?.ask?.aliases, ['Hall Thermostat']);
+      assert.deepEqual(calls, []);
+    });
+
+    it('turning one on needs no question', async () => {
+      const r = await commands.runPowerCommand('turn on the hall thermostat');
+      assert.equal(r?.ask, undefined);
+      assert.deepEqual(calls, [{ ip: 'honeywell:9', state: true }]);
+    });
+
+    it('the room off turns the lamp off and leaves the thermostat on', async () => {
+      const r = await commands.runPowerCommand('turn off the hall');
+      assert.equal(r?.ask, undefined);
+      assert.deepEqual(calls, [{ ip: '10.0.0.51', state: false }]);
+      assert.match(r!.response, /I left Hall Thermostat on: say “turn off Hall Thermostat” to turn it off\./);
+    });
+  });
+
   describe('garage doors', () => {
     before(async () => {
       const { getDriver } = await import('../drivers/registry');

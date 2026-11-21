@@ -42,6 +42,9 @@ function changed(d: Device, state: boolean): Device['lastChange'] {
   return { state, source: 'homehub', detail: null, via: null, userName: null, at: new Date().toISOString() };
 }
 
+/** A thermostat: "All off" leaves it alone. */
+const isThermostat = (d: Device) => d.driverConfig?.['kind'] === 'thermostat';
+
 @Component({
   selector: 'app-dashboard',
   standalone: true,
@@ -196,7 +199,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
         name,
         devices,
         count: `${on} of ${devices.length} on`,
-        canTurnOff: devices.some((d) => d.state && !d.isProtected),
+        // "All off" is for lights and plugs: it leaves thermostats alone, so it never cuts the heat.
+        canTurnOff: devices.some((d) => d.state && !d.isProtected && !isThermostat(d)),
         anyOn: on > 0,
       };
     });
@@ -324,7 +328,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
   }
 
   allOff(devices: Device[]): void {
-    devices.filter((d) => d.state && !d.isProtected).forEach((d) => this.toggle(d));
+    devices.filter((d) => d.state && !d.isProtected && !isThermostat(d)).forEach((d) => this.toggle(d));
   }
 
   toggle(device: Device): void {

@@ -117,7 +117,7 @@ Thread devices work too, as long as you have a Thread border router, such as a G
 
 A thermostat with the Matter logo, such as a Google Nest Thermostat, is added the same way, with **+ Add a Matter device**. It becomes one device. On **Home**, its row shows the room's temperature and what it's doing, such as "70° · Heating to 72°". Select it to see the temperature in large type, choose **Off**, **Heat**, **Cool** or **Auto**, and set the target with **−** and **+**. In **Auto** there are two targets: it heats below the first and cools above the second. Taps in a row are sent together once you stop. Changes made on the thermostat or in another app show up straight away. Temperatures are in °F or °C, depending on your home's time zone.
 
-The switch on the row turns the thermostat off, and on again in the mode it was in. Schedules, scenes and timers can do the same.
+The switch on the row turns the thermostat off, and on again in the mode it was in. Off stops all heating and cooling until it's turned back on, so HomeHub asks first, whether you use the switch or **Off**; when it's below 40 °F (4 °C) outside, the question says so. Turning it on isn't asked. **All off** for a room leaves thermostats alone, and thermostats have no **Turn off after** timer. By Chat or voice, "turn off the 2nd floor thermostat" is asked back ("Should I turn off 2nd Floor Thermostat?") and done on a yes; a name that also covers lights turns the lights off and leaves the thermostat on. Scenes can still turn a thermostat off or on, as set up.
 
 To set its temperature ranges, an administrator opens the thermostat with **Edit** in **Settings → Devices**:
 

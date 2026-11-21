@@ -192,6 +192,32 @@ describe('/internal/voice', () => {
 
   beforeEach(() => { calls.length = 0; });
 
+  it('turning a thermostat off is asked aloud, and done on a yes', async () => {
+    getDriver('honeywell').setPower = async (ip: string, state: boolean) => { calls.push({ ip, state }); };
+    getDb().prepare("INSERT INTO devices (alias, ip, driver_type, driver_config) VALUES ('Upstairs Thermostat', 'honeywell:7', 'honeywell', '{\"kind\":\"thermostat\",\"deviceId\":7}')").run();
+    try {
+      // The bridge's quick first hearing: it sends retry, not ask, but listens for a question.
+      const res = await fetch(`${baseUrl}/internal/voice/command`, {
+        method: 'POST', headers: key, body: JSON.stringify({ text: 'turn off upstairs thermostat', retry: true, questions: true }),
+      });
+      const body = await res.json() as any;
+      assert.equal(body.handled, true, 'understood: asked now, not heard again first');
+      assert.equal(body.say, 'Should I turn off Upstairs Thermostat?');
+      assert.equal(typeof body.confirmId, 'string');
+      assert.deepEqual(calls, []);
+      const yes = await fetch(`${baseUrl}/internal/voice/confirm/${body.confirmId}`, { method: 'POST', headers: key, body: JSON.stringify({ answer: 'yes' }) });
+      const done = await yes.json() as any;
+      assert.equal(done.handled, true);
+      assert.deepEqual(calls, [{ ip: 'honeywell:7', state: false }]);
+      // A bridge that can't ask is told to use the card.
+      const old = await say('turn off upstairs thermostat');
+      assert.match(old.body.response, /needs a yes/);
+      assert.equal(calls.length, 1);
+    } finally {
+      getDb().prepare("DELETE FROM devices WHERE alias = 'Upstairs Thermostat'").run();
+    }
+  });
+
   it('runs a command the rules understand, including trailing punctuation', async () => {
     const { body } = await say('Turn on my office lamp.');
     assert.equal(body.handled, true);

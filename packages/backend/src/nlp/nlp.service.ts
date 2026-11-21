@@ -11,12 +11,12 @@ import { getDriver } from '../drivers/registry';
 import { applyPower, assistantMaySwitch, isProtectedDevice, type PowerDevice } from '../devices/power';
 import { logger } from '../logger';
 import { findDeviceByName, findDeviceGroup, listDeviceNames, NOT_A_LIGHT } from './find-device';
-import { isCamera, isGarageDoor, runGroupCommand, runPowerCommand } from './commands';
+import { isCamera, isGarageDoor, runGroupCommand, runPowerCommand, type ThermostatAsk } from './commands';
 import { hasChinese, MANDARIN, runNativeCommand } from './native-commands';
 import { recordCommand } from './command-log';
 import { looksLikeToolCall, toolArguments, toolCallInText } from './tool-args';
 import { asksForLater, primeRewrite, rewriteMessage } from './rewrite';
-import { answerKind, askText, confirm, declined, propose, refusedText, setPending, takePending, type Lang } from './confirm';
+import { answerKind, askText, confirm, declined, propose, refusedText, setPending, takePending, type Lang, type Proposal } from './confirm';
 import { understandPrompt, understandWithClaude, understandWithOllama, type HomeNames, type UnderstandResult } from './understand';
 import { CLAUDE_LABEL, claudeErrorText, claudeInUse, recordClaudeFailure, recordClaudeUse } from './ai-choice';
 import { chatWithClaude, ClaudeChatError } from './claude-chat';
@@ -603,8 +603,22 @@ type Handled = { response: string; actions: ActionTaken[] };
 
 const CHAT_QUESTION = { timeoutMs: 6_000, windowMs: FOLLOW_UP_MS.chat };
 
-const byRules = async (text: string, who: string): Promise<Handled | null> =>
-  await runPowerCommand(text) ?? await runNativeCommand(text) ?? answerStatusQuestion(text) ?? await answerAsked(text, { who, ...CHAT_QUESTION });
+const byRules = async (text: string, who: string): Promise<Handled | null> => {
+  const ruled = await runPowerCommand(text) ?? await runNativeCommand(text);
+  if (ruled?.ask) {
+    // Turning a thermostat off: asked first, and done on a yes (byAnswer).
+    const lang: Lang = 'lang' in ruled && typeof ruled.lang === 'string' ? ruled.lang as Lang : 'en';
+    const proposal = thermostatProposal(ruled.ask, lang, text);
+    setPending(who, proposal);
+    return { response: askText(proposal), actions: [] };
+  }
+  return ruled ?? answerStatusQuestion(text) ?? await answerAsked(text, { who, ...CHAT_QUESTION });
+};
+
+/** The question for turning thermostats off, as a proposal a yes carries out. */
+export function thermostatProposal(ask: ThermostatAsk, lang: Lang, text: string): Proposal {
+  return { deviceIds: ask.deviceIds, aliases: ask.aliases, names: ask.aliases, state: false, minutes: null, door: false, lang, phrase: null, text };
+}
 
 /** A question the rules missed, read by Claude with the household's key (question-reader.ts). */
 const byQuestion = (text: string, who: string): Promise<Handled | null> => answerMissed(text, { who, ...CHAT_QUESTION });

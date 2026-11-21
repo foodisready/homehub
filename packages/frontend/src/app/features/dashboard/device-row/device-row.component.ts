@@ -5,7 +5,7 @@ import { RouterLink } from '@angular/router';
 import type { Device } from '../../../shared/models/device.model';
 import { type ActivityEvent, actionWord, causeText, clock, when } from '../../../shared/activity/activity-text';
 import { ThermostatControlComponent } from '../../../shared/thermostat/thermostat-control.component';
-import { ThermostatService, summary } from '../../../shared/thermostat/thermostat.service';
+import { ThermostatService, offQuestion, summary } from '../../../shared/thermostat/thermostat.service';
 
 export interface OverrideRequest { device: Device; durationMinutes: number; }
 
@@ -230,6 +230,7 @@ export class DeviceRowComponent implements OnDestroy {
     const d = this.device();
     if (this.isDoor()) return `${d.state ? 'Close' : 'Open'} ${d.alias}?`;
     if (this.isCamera()) return `Pause ${d.alias}? It stops watching until you resume it.`;
+    if (this.isThermostat()) return offQuestion(this.thermostats.views().get(d.id), d.alias);
     return `${d.alias} is protected. Turn it ${d.state ? 'off' : 'on'}?`;
   });
 
@@ -252,6 +253,8 @@ export class DeviceRowComponent implements OnDestroy {
    */
   readonly timerChoices = computed(() => {
     if (this.isDoor()) return this.device().state ? [15, 30, 60] : [];
+    // A thermostat has a schedule and Away mode instead: turning the heat off after an hour isn't a timer people want.
+    if (this.isThermostat()) return [];
     return [60, 120, 240];
   });
 
@@ -287,7 +290,9 @@ export class DeviceRowComponent implements OnDestroy {
   tapSwitch(): void {
     // Resuming a camera is safe; pausing it, or switching another protected device, is confirmed.
     const resumingCamera = this.isCamera() && !this.device().state;
-    if (this.device().isProtected && !resumingCamera) this.confirming.set(true);
+    // Turning a thermostat off stops all heating and cooling, so it's asked; turning it on isn't.
+    const thermostatOff = this.isThermostat() && this.device().state;
+    if ((this.device().isProtected && !resumingCamera) || thermostatOff) this.confirming.set(true);
     else this.toggled.emit(this.device());
   }
 

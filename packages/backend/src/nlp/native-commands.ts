@@ -13,7 +13,7 @@
  * The switching itself is the English rules' (runPowerCommand), so protected devices, garage
  * doors (closed, never opened) and cameras behave exactly as when typed in English.
  */
-import { CAMERA_PAUSE_REFUSED, DOOR_OPEN_REFUSED, isGarageDoor, runPowerCommand } from './commands';
+import { CAMERA_PAUSE_REFUSED, DOOR_OPEN_REFUSED, isGarageDoor, runPowerCommand, type ThermostatAsk } from './commands';
 import { findDeviceByName, findDeviceGroup, listDeviceNames, listSceneNames, normalize } from './find-device';
 import type { ActionTaken } from './nlp.service';
 
@@ -313,7 +313,7 @@ function isGarageDoorName(name: string): boolean {
  * Runs a Vietnamese, Cantonese or Mandarin on or off command, and answers in that language.
  * Null if it isn't one, or names nothing in the home: then the chat model has it, as before.
  */
-export async function runNativeCommand(text: string): Promise<Handled | null> {
+export async function runNativeCommand(text: string): Promise<(Handled & { ask?: ThermostatAsk; lang?: NativeCommand['lang'] }) | null> {
   const command = parseNativeCommand(text);
   if (!command) return null;
   const name = homeName(command.name);
@@ -323,5 +323,6 @@ export async function runNativeCommand(text: string): Promise<Handled | null> {
   const door = isGarageDoorName(name);
   const timer = command.minutes && !door ? ` for ${command.minutes} minutes` : '';
   const result = await runPowerCommand(door ? `${command.state ? 'open' : 'close'} ${name}` : `turn ${command.state ? 'on' : 'off'} ${name}${timer}`);
+  if (result?.ask) return { ...result, lang: command.lang };   // the caller asks, in this language
   return result ? inLanguage(result, command) : null;
 }

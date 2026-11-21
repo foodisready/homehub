@@ -31,6 +31,20 @@ export interface ThermostatView extends Ranges {
    * next scheduled change, or holding until changed. Absent or null for one without (Matter).
    */
   hold?: 'schedule' | 'temporary' | 'permanent' | null;
+  /** Outside now, °C, if HomeHub knows. */
+  outdoor?: number | null;
+}
+
+/** Below this outside (40 °F), turning a thermostat off says it's cold out: pipes can freeze. */
+const COLD_OUTSIDE_C = 4.5;
+
+/** What to ask before turning a thermostat off: Off stops all heating and cooling until it's turned back on. */
+export function offQuestion(t: Pick<ThermostatView, 'alias' | 'unit' | 'outdoor'> | undefined, alias: string): string {
+  const name = t?.alias ?? alias;
+  if (t && typeof t.outdoor === 'number' && t.outdoor < COLD_OUTSIDE_C) {
+    return `It's ${shown(t.outdoor, t.unit)}° outside. Turn off ${name}? It won't heat until it's turned back on.`;
+  }
+  return `Turn off ${name}? It won't heat or cool until it's turned back on.`;
 }
 
 /** °C to the home's unit: whole degrees in °F, halves in °C. */
