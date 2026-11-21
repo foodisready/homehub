@@ -11,6 +11,7 @@ import tempfile
 import threading
 import time
 import uuid
+import wave
 from collections.abc import Callable
 from pathlib import Path
 
@@ -137,16 +138,37 @@ class ReplyCache:
                 f.unlink(missing_ok=True)
 
 
+# Silence before each reply. A phone running Ava starts playing before its sound is ready, and the
+# first words were lost: 開咗啊亮燈 heard as 啊亮燈 (2026-11-21). Half a second covers them.
+LEAD_IN_S = 0.5
+
+
+def lead_in(path: Path, seconds: float = LEAD_IN_S) -> None:
+    """`path`, a WAV file, with `seconds` of silence put in front. Left as it is if it can't be read."""
+    try:
+        with wave.open(str(path), 'rb') as r:
+            params, frames = r.getparams(), r.readframes(r.getnframes())
+        silence = b'\0' * (int(params.framerate * seconds) * params.sampwidth * params.nchannels)
+        with wave.open(str(path), 'wb') as w:
+            w.setparams(params)
+            w.writeframes(silence + frames)
+    except (OSError, EOFError, wave.Error) as e:
+        log.warning('reply played without its lead-in: %s', e)
+
+
 def speak_with(server: ReplyServer, cache: ReplyCache, voices: dict) -> Callable[[str, str, str], str]:
-    """speak(text, host, lang) -> the URL a speaker plays the reply from, reusing a kept reply when there is one."""
+    """speak(text, host, lang) -> the URL a speaker plays the reply from, reusing a kept reply when there is one.
+    Kept replies stay as the voice made them; the copy served gets its lead-in."""
     def speak(text: str, host: str, lang: str = 'en') -> str:
         voice = voices.get(lang, voices['en'])
         kept = cache.find(text, lang, voice)
         copied = server.copy_in(kept) if kept else None
         if copied:
+            lead_in(copied[0])
             return server.url(copied[1], host)
         path, name = server.new_file()
         voice.say(text, path)
         cache.keep_copy(path, text, lang, voice)
+        lead_in(path)
         return server.url(name, host)
     return speak

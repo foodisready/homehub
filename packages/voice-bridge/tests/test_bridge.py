@@ -833,6 +833,20 @@ class ReplyCacheTest(unittest.TestCase):
         self.assertEqual(len(yue.said), 2)
         self.assertEqual(en.said, ['Kitchen lights is on.'])
 
+    def test_each_reply_starts_with_half_a_second_of_silence(self):
+        # From the Pi, 2026-11-21: on Ava 開咗啊亮燈 was heard as 啊亮燈, its first words lost.
+        import wave
+        speak = self.speak_fn({'en': CountingVoice(), 'yue': CountingVoice()})
+        for url in (speak('開咗啊亮燈。', '127.0.0.1', 'yue'), speak('開咗啊亮燈。', '127.0.0.1', 'yue')):
+            with wave.open(str(self.server.dir / url.rsplit('/', 1)[1]), 'rb') as r:
+                frames = r.readframes(r.getnframes())
+            self.assertEqual(frames[:16000], b'\0' * 16000, 'half a second at 16 kHz, 16-bit')
+            self.assertEqual(frames[16000:], '開咗啊亮燈。'.encode() * 100, 'then the reply, whole')
+        # The kept copy is as the voice made it, so it isn't given a second lead-in when reused.
+        kept = next((self.tmp / 'cache').glob('*.wav'))
+        with wave.open(str(kept), 'rb') as r:
+            self.assertEqual(r.readframes(r.getnframes()), '開咗啊亮燈。'.encode() * 100)
+
     def test_kept_across_restarts_but_not_for_a_new_voice(self):
         model = self.tmp / 'voice.onnx'
         model.write_bytes(b'one')

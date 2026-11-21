@@ -106,16 +106,29 @@ export class TuyaDriver implements DeviceDriver {
     const { deviceId, key, version = '3.3' } = (config ?? {}) as unknown as TuyaConfig;
     if (!deviceId || !key) throw new Error('Tuya device requires deviceId and key in driver_config');
 
-    await withTuyaRetry(async (connectS) => {
-      const device = makeTuyaDevice(deviceId, key, ip, version);
-      device._connectTimeout = connectS;   // tuyapi's own wait is 5 s
-      try {
-        await device.connect();
-        await device.set({ dps: '1', set: on });
-      } finally {
-        try { device.disconnect(); } catch {}
-      }
-    });
+    // Slow or retried switches are logged: a voice command once waited 6 s on a Tuya lamp (2026-11-21),
+    // and nothing said why.
+    const t0 = Date.now();
+    const failed: string[] = [];
+    try {
+      await withTuyaRetry(async (connectS) => {
+        const device = makeTuyaDevice(deviceId, key, ip, version);
+        device._connectTimeout = connectS;   // tuyapi's own wait is 5 s
+        const t = Date.now();
+        try {
+          await device.connect();
+          await device.set({ dps: '1', set: on });
+        } catch (err) {
+          failed.push(`${(err as Error).message} after ${Date.now() - t} ms`);
+          throw err;
+        } finally {
+          try { device.disconnect(); } catch {}
+        }
+      });
+    } finally {
+      const ms = Date.now() - t0;
+      if (failed.length || ms > 2000) logger.warn({ ip, ms, failed }, 'Tuya switch was slow');
+    }
   }
 
   async getPower(ip: string, config?: Record<string, unknown>): Promise<boolean> {
