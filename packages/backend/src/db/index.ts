@@ -498,6 +498,8 @@ function migrate(db: Database.Database): void {
   try { db.exec('ALTER TABLE thermostats ADD COLUMN heat_size REAL'); } catch {}
   try { db.exec('ALTER TABLE thermostats ADD COLUMN cool_system TEXT'); } catch {}
   try { db.exec('ALTER TABLE thermostats ADD COLUMN cool_size REAL'); } catch {}
+  // Zones on one heating and cooling unit: the thermostat whose system this one shares, so the unit is counted once.
+  try { db.exec('ALTER TABLE thermostats ADD COLUMN shares_system_with INTEGER'); } catch {}
 
   // ── Family invites: a QR code that lets someone make their own login ──
   // Only a hash of the code is kept, so a copy of the DB can't be used to join.

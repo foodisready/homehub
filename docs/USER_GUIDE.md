@@ -356,7 +356,7 @@ A wall switch can control one bulb or twelve, and some names don't say what a de
 
 **Prices:** an administrator selects **Add your energy prices** and enters the price of electricity per kWh, and of gas per therm if you heat with gas. Dividing a bill's total by the kWh it charges for is close enough.
 
-**Heating and cooling** are usually the biggest part, and are estimated from the thermostat's running hours and the system's size. Set it in **Settings → Devices → Edit** on the thermostat, under **Heating and cooling system**: a gas furnace's size is its input in BTU/h, a heat pump or air conditioner's in tons, both on the unit's label. Left blank, a typical size is used.
+**Heating and cooling** are usually the biggest part, and are estimated from the thermostat's running hours and the system's size. Set it in **Settings → Devices → Edit** on the thermostat, under **Heating and cooling system**: a gas furnace's size is its input in BTU/h, a heat pump or air conditioner's in tons, both on the unit's label. Left blank, a typical size is used. If two or more thermostats are zones on one unit, set the unit on one of them and choose **Same unit as** on the others under **Unit**: the unit's running time is then counted once, not once for each zone calling at the same time.
 
 **It isn't your whole home.** The fridge, water heater and other appliances HomeHub doesn't control aren't included, and the page says so. An energy monitor in your electrical panel would show the real total; HomeHub doesn't support one yet.
 

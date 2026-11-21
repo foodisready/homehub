@@ -1,7 +1,7 @@
 import { getDb } from '../db';
 import { logger } from '../logger';
 import { readName } from '../nlp/nickname-suggest';
-import { runMinutes } from '../thermostat/history';
+import { runMinutesTogether } from '../thermostat/history';
 
 /**
  * Where the electricity goes: an estimate for each device HomeHub switches, from how long it
@@ -294,17 +294,34 @@ export function setWatts(deviceId: number, watts: unknown): void {
 
 export type HeatSystem = 'gas' | 'heat_pump' | 'electric';
 export type CoolSystem = 'ac' | 'heat_pump';
-export interface HvacSystem { heat: HeatSystem | null; heatSize: number | null; cool: CoolSystem | null; coolSize: number | null }
+export interface HvacSystem {
+  heat: HeatSystem | null; heatSize: number | null; cool: CoolSystem | null; coolSize: number | null;
+  /** Zones on one unit: the thermostat whose system this one shares. Its system is that one's. */
+  sharesWith?: { id: number; alias: string } | null;
+}
 
 /** Sizes: a gas furnace in BTU/h of input, a heat pump or air conditioner in tons, electric heat in kW. */
 export const DEFAULT_SIZE = { gas: 60_000, heat_pump: 3, electric: 10, ac: 3 } as const;
 
+const isThermostat = (id: number): { alias: string } | null => {
+  const d = getDb().prepare('SELECT alias, driver_config FROM devices WHERE id = ?').get(id) as { alias: string; driver_config: string | null } | undefined;
+  try { return d && JSON.parse(d.driver_config ?? '{}')?.kind === 'thermostat' ? { alias: d.alias } : null; } catch { return null; }
+};
+
+/** The thermostat holding the system this one's unit is set on: itself, or the one it shares with while that one is still there. */
+export function systemOwner(thermostatId: number): number {
+  const r = getDb().prepare('SELECT shares_system_with AS w FROM thermostats WHERE device_id = ?').get(thermostatId) as { w: number | null } | undefined;
+  return r?.w && r.w !== thermostatId && isThermostat(r.w) ? r.w : thermostatId;
+}
+
 export function hvacSystem(thermostatId: number): HvacSystem {
-  const r = getDb().prepare('SELECT heat_system, heat_size, cool_system, cool_size FROM thermostats WHERE device_id = ?').get(thermostatId) as
+  const owner = systemOwner(thermostatId);
+  const r = getDb().prepare('SELECT heat_system, heat_size, cool_system, cool_size FROM thermostats WHERE device_id = ?').get(owner) as
     { heat_system: string | null; heat_size: number | null; cool_system: string | null; cool_size: number | null } | undefined;
   return {
     heat: (r?.heat_system as HeatSystem) ?? null, heatSize: r?.heat_size ?? null,
     cool: (r?.cool_system as CoolSystem) ?? null, coolSize: r?.cool_size ?? null,
+    sharesWith: owner === thermostatId ? null : { id: owner, alias: isThermostat(owner)!.alias },
   };
 }
 
@@ -319,15 +336,34 @@ export function saveHvacSystem(thermostatId: number, input: unknown): HvacSystem
     return x;
   };
   const s: HvacSystem = { heat: heat as HeatSystem | null, heatSize: size(v.heatSize, 'heatSize'), cool: cool as CoolSystem | null, coolSize: size(v.coolSize, 'coolSize') };
+  // Sharing another thermostat's unit: always the one that holds the system, never a chain or itself.
+  let owner: number | null = null;
+  if (v.sharesWith !== undefined && v.sharesWith !== null) {
+    const other = Number(v.sharesWith);
+    if (!Number.isInteger(other) || !isThermostat(other)) throw new Error('sharesWith must be another thermostat');
+    owner = systemOwner(other);
+    if (owner === thermostatId) throw new Error('A thermostat can’t share its own system');
+  }
   const db = getDb();
-  if (!db.prepare('SELECT 1 FROM thermostats WHERE device_id = ?').get(thermostatId)) {
+  const ensure = (id: number) => {
+    if (db.prepare('SELECT 1 FROM thermostats WHERE device_id = ?').get(id)) return;
     // A thermostat whose ranges were never saved: start from the defaults.
     const f = (x: number) => Math.round(((x - 32) * 5 / 9) * 1000) / 1000;
-    db.prepare('INSERT INTO thermostats (device_id, comfort_low, comfort_high, allowed_low, allowed_high) VALUES (?, ?, ?, ?, ?)').run(thermostatId, f(68), f(76), f(60), f(82));
-  }
-  db.prepare('UPDATE thermostats SET heat_system = ?, heat_size = ?, cool_system = ?, cool_size = ? WHERE device_id = ?')
-    .run(s.heat, s.heatSize, s.cool, s.coolSize, thermostatId);
-  return s;
+    db.prepare('INSERT INTO thermostats (device_id, comfort_low, comfort_high, allowed_low, allowed_high) VALUES (?, ?, ?, ?, ?)').run(id, f(68), f(76), f(60), f(82));
+  };
+  db.transaction(() => {
+    ensure(thermostatId);
+    if (owner !== null) {
+      db.prepare('UPDATE thermostats SET heat_system = NULL, heat_size = NULL, cool_system = NULL, cool_size = NULL, shares_system_with = ? WHERE device_id = ?')
+        .run(owner, thermostatId);
+      // Ones that shared this thermostat's system now share the unit's.
+      db.prepare('UPDATE thermostats SET shares_system_with = ? WHERE shares_system_with = ?').run(owner, thermostatId);
+    } else {
+      db.prepare('UPDATE thermostats SET heat_system = ?, heat_size = ?, cool_system = ?, cool_size = ?, shares_system_with = NULL WHERE device_id = ?')
+        .run(s.heat, s.heatSize, s.cool, s.coolSize, thermostatId);
+    }
+  })();
+  return hvacSystem(thermostatId);
 }
 
 /**
@@ -433,13 +469,24 @@ function usageBetween(from: string, to: string, now: number, only?: Set<number>)
   const out: Pick<MonthUsage, 'devices' | 'hvac' | 'excluded' | 'totals'> = {
     devices: [], hvac: [], excluded: [], totals: { kwh: 0, therms: 0, cost: 0, notCounted: 0, electricityCost: null, gasCost: null },
   };
-  for (const d of devices()) {
-    if (only && !only.has(d.id)) continue;
+  // Thermostats on one unit (zones) are counted together, under the one holding the system.
+  const all = devices();
+  const units = new Map<number, typeof all>();
+  for (const d of all) {
+    if (excludedReason(d) !== 'thermostat') continue;
+    const owner = systemOwner(d.id);
+    units.set(owner, [...(units.get(owner) ?? []), d]);
+  }
+  for (const d of all) {
     const reason = excludedReason(d);
     if (reason === 'thermostat') {
+      const zones = units.get(d.id);
+      if (!zones) continue;   // counted with the thermostat whose system it shares
+      if (only && !zones.some((z) => only.has(z.id))) continue;
       const s = hvacSystem(d.id);
       const end = Math.min(dayStart(to), now);
-      const mins = runMinutes(d.id, dayStart(from), end, now);
+      const mins = runMinutesTogether(zones.map((z) => z.id), dayStart(from), end, now);
+      const alias = zones.map((z) => z.alias).join(' + ');
       for (const kind of ['heating', 'cooling'] as const) {
         const hours = mins[kind] / 60;
         if (hours <= 0 && !perHour(kind, s)) continue;
@@ -447,13 +494,14 @@ function usageBetween(from: string, to: string, now: number, only?: Set<number>)
         const kwh = rate ? r2(hours * rate.kwh) : null;
         const therms = rate ? r2(hours * rate.therms) : null;
         const rowCost = rate ? costOf(kwh, therms, prices) : null;
-        out.hvac.push({ id: d.id, alias: d.alias, kind, hours: r2(hours), kwh, therms, cost: rowCost, system: kind === 'heating' ? s.heat : s.cool });
+        out.hvac.push({ id: d.id, alias, kind, hours: r2(hours), kwh, therms, cost: rowCost, system: kind === 'heating' ? s.heat : s.cool });
         if (kwh !== null) out.totals.kwh += kwh;
         if (therms !== null) out.totals.therms += therms;
         if (!rate && hours > 0) out.totals.notCounted++;
       }
       continue;
     }
+    if (only && !only.has(d.id)) continue;
     if (reason) { out.excluded.push({ id: d.id, alias: d.alias, reason }); continue; }
     const t = deviceTotals(d, from, to, now);
     const w = wattsFor(d, now);

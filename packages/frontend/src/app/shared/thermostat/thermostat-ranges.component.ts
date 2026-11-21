@@ -42,6 +42,18 @@ import { ThermostatService, shown, toC, type Ranges } from './thermostat.service
     </fieldset>
     <fieldset>
       <legend>Heating and cooling system</legend>
+      @if (others().length) {
+        <div class="r">
+          <span class="what">Unit</span>
+          <select [(ngModel)]="sharesWith" aria-label="Which heating and cooling unit">
+            <option [ngValue]="null">Its own</option>
+            @for (o of others(); track o.id) { <option [ngValue]="o.id">Same unit as {{ o.alias }}</option> }
+          </select>
+        </div>
+      }
+      @if (sharesWith !== null) {
+        <p>It's a zone on {{ otherName(sharesWith) }}'s unit: it uses that unit's system, and on the Energy page the unit's running time is counted once, not once for each zone.</p>
+      } @else {
       <div class="r">
         <span class="what">Heating</span>
         <select [(ngModel)]="heat" aria-label="Heating system">
@@ -56,7 +68,8 @@ import { ThermostatService, shown, toC, type Ranges } from './thermostat.service
         </select>
         @if (cool) { <input type="number" min="0" step="0.5" [(ngModel)]="coolSize" [placeholder]="'3'" aria-label="Cooling size in tons" /> tons }
       </div>
-      <p>For the Energy page's estimate of what heating and cooling cost, from its running hours. The size is on the unit's label: a furnace's input in BTU/h (often 40,000–100,000), a heat pump or air conditioner in tons (2–5; 36,000 BTU/h is 3 tons). Blank uses a typical size.</p>
+      <p>For the Energy page's estimate of what heating and cooling cost, from its running hours. The size is on the unit's label: a furnace's input in BTU/h (often 40,000–100,000), a heat pump or air conditioner in tons (2–5; 36,000 BTU/h is 3 tons). Blank uses a typical size. If thermostats are zones on one unit, set the unit on one of them, and choose "Same unit as" on the others.</p>
+      }
     </fieldset>
   `,
 })
@@ -69,6 +82,11 @@ export class ThermostatRangesComponent implements OnInit {
   private readonly loaded = signal(false);
   private readonly http = inject(HttpClient);
   heat = ''; heatSize: number | null = null; cool = ''; coolSize: number | null = null;
+  /** The thermostat whose unit this one is a zone on, or null for its own. */
+  sharesWith: number | null = null;
+  /** The other thermostats, to share a unit with. */
+  readonly others = signal<Array<{ id: number; alias: string }>>([]);
+  otherName(id: number): string { return this.others().find((o) => o.id === id)?.alias ?? 'another thermostat'; }
   private systemStart = '';
   readonly heatUnit = () => (this.heat === 'gas' ? 'BTU/h' : this.heat === 'electric' ? 'kW' : 'tons');
   readonly heatDefault = () => (this.heat === 'gas' ? '60000' : this.heat === 'electric' ? '10' : '3');
@@ -83,9 +101,14 @@ export class ThermostatRangesComponent implements OnInit {
 
   ngOnInit(): void {
     this.svc.watch(this.deviceId());
-    this.http.get<{ heat: string | null; heatSize: number | null; cool: string | null; coolSize: number | null }>(`/api/thermostats/${this.deviceId()}/system`).subscribe({
+    this.http.get<{ thermostats: Array<{ id: number; alias: string }> }>('/api/thermostats').subscribe({
+      next: (r) => { this.others.set(r.thermostats.filter((t) => t.id !== this.deviceId()).map(({ id, alias }) => ({ id, alias }))); this.cd.markForCheck(); },
+      error: () => undefined,
+    });
+    this.http.get<{ heat: string | null; heatSize: number | null; cool: string | null; coolSize: number | null; sharesWith?: { id: number } | null }>(`/api/thermostats/${this.deviceId()}/system`).subscribe({
       next: (s) => {
-        [this.heat, this.heatSize, this.cool, this.coolSize] = [s.heat ?? '', s.heatSize, s.cool ?? '', s.coolSize];
+        this.sharesWith = s.sharesWith?.id ?? null;
+        [this.heat, this.heatSize, this.cool, this.coolSize] = s.sharesWith ? ['', null, '', null] : [s.heat ?? '', s.heatSize, s.cool ?? '', s.coolSize];
         this.systemStart = this.systemKey();
         this.cd.markForCheck();
       },
@@ -93,7 +116,7 @@ export class ThermostatRangesComponent implements OnInit {
     });
   }
 
-  private systemKey(): string { return [this.heat, this.heatSize, this.cool, this.coolSize].join(','); }
+  private systemKey(): string { return [this.sharesWith, this.heat, this.heatSize, this.cool, this.coolSize].join(','); }
 
   /** Copies the saved ranges into the boxes. */
   private fill(): void {
@@ -112,9 +135,9 @@ export class ThermostatRangesComponent implements OnInit {
   /** Saves what changed, ranges and system; the server says what's wrong if it doesn't fit. */
   save(): Observable<unknown> {
     const num = (v: unknown) => (v === null || v === undefined || v === '' ? null : Number(v));
-    const system = this.systemKey() === this.systemStart ? of(null) : this.http.put(`/api/thermostats/${this.deviceId()}/system`, {
-      heat: this.heat || null, heatSize: this.heat ? num(this.heatSize) : null, cool: this.cool || null, coolSize: this.cool ? num(this.coolSize) : null,
-    });
+    const system = this.systemKey() === this.systemStart ? of(null) : this.http.put(`/api/thermostats/${this.deviceId()}/system`, this.sharesWith !== null
+      ? { sharesWith: this.sharesWith, heat: null, heatSize: null, cool: null, coolSize: null }
+      : { heat: this.heat || null, heatSize: this.heat ? num(this.heatSize) : null, cool: this.cool || null, coolSize: this.cool ? num(this.coolSize) : null });
     return forkJoin([this.saveRanges(), system]).pipe(map(() => null));
   }
 

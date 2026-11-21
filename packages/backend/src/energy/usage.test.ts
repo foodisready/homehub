@@ -162,6 +162,44 @@ describe('energy estimates', () => {
     assert.equal(m.devices[0].alias, 'Hall lamp', 'biggest first');
   });
 
+  it('zones on one unit: their running time counts once, at the unit’s size', () => {
+    const cfg = { driver_type: 'honeywell', driver_config: '{"kind":"thermostat"}' };
+    const kitchen = device('Kitchen Thermostat', cfg);
+    const bedroom = device('M. Bedroom Thermostat', cfg);
+    const upstairs = device('2nd Floor Thermostat', cfg);
+    const run = (id: number, kind: string, from: number, to: number) =>
+      db.prepare('INSERT INTO thermostat_runs (device_id, kind, started_at, ended_at) VALUES (?, ?, ?, ?)').run(id, kind, iso(from), iso(to));
+    // Kitchen heats 6:00–8:00 and bedroom 7:00–9:00: the unit ran 6:00–9:00, 3 h, not 4.
+    run(kitchen, 'heating', at(10, 6, 6), at(10, 6, 8));
+    run(bedroom, 'heating', at(10, 6, 7), at(10, 6, 9));
+    // Bedroom alone later: 1 h more.
+    run(bedroom, 'heating', at(10, 6, 12), at(10, 6, 13));
+    run(upstairs, 'heating', at(10, 6, 6), at(10, 6, 8));
+    u.saveHvacSystem(kitchen, { heat: 'gas', heatSize: 100_000 });
+    u.saveHvacSystem(upstairs, { heat: 'gas', heatSize: 60_000 });
+    const shared = u.saveHvacSystem(bedroom, { sharesWith: kitchen, heat: 'electric', heatSize: 5 });
+    assert.deepEqual(shared, { heat: 'gas', heatSize: 100_000, cool: null, coolSize: null, sharesWith: { id: kitchen, alias: 'Kitchen Thermostat' } },
+      'it reads as the unit’s system; what else was sent is ignored');
+
+    const now = at(10, 7, 12);
+    const m = u.monthUsage('2026-11', now);
+    assert.deepEqual(m.hvac.map((h) => [h.alias, h.hours, h.therms]), [
+      ['2nd Floor Thermostat', 2, 1.2],
+      ['Kitchen Thermostat + M. Bedroom Thermostat', 4, 4],
+    ]);
+
+    // Sharing the bedroom's: that's the kitchen's unit, never a chain. And not itself.
+    assert.equal(u.saveHvacSystem(upstairs, { sharesWith: bedroom }).sharesWith?.id, kitchen);
+    assert.throws(() => u.saveHvacSystem(kitchen, { sharesWith: bedroom }), /can’t share its own system/);
+    // Upstairs gets its own unit back.
+    assert.equal(u.saveHvacSystem(upstairs, { heat: 'gas', heatSize: 60_000 }).sharesWith, null);
+
+    // The unit's thermostat deleted: the others are on their own again.
+    db.prepare('DELETE FROM devices WHERE id = ?').run(kitchen);
+    assert.equal(u.hvacSystem(bedroom).sharesWith, null);
+    assert.equal(u.monthUsage('2026-11', now).hvac.find((h) => h.alias === 'M. Bedroom Thermostat')?.hours, 3);
+  });
+
   it('compares a month so far with the same days of the last, only with history for all of them', () => {
     const lamp = device('Hall lamp');
     event(lamp, 'power', 1, at(10, 3, 0));              // history starts 3 November

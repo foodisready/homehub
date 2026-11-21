@@ -166,6 +166,33 @@ export function runMinutes(deviceId: number, from: number, to: number, now = Dat
   return out;
 }
 
+/**
+ * Heating and cooling minutes of one unit shared by several thermostats (zones): time when any
+ * of them was calling, so overlapping calls count once.
+ */
+export function runMinutesTogether(deviceIds: number[], from: number, to: number, now = Date.now()): Record<RunKind, number> {
+  if (deviceIds.length === 1) return runMinutes(deviceIds[0], from, to, now);
+  const rows = getDb().prepare(`
+    SELECT kind, started_at, ended_at FROM thermostat_runs
+    WHERE device_id IN (${deviceIds.map(() => '?').join(', ')}) AND started_at < ? AND (ended_at IS NULL OR ended_at > ?)
+  `).all(...deviceIds, iso(to), iso(from)) as { kind: RunKind; started_at: string; ended_at: string | null }[];
+  const out: Record<RunKind, number> = { heating: 0, cooling: 0 };
+  for (const kind of ['heating', 'cooling'] as const) {
+    const spans = rows.filter((r) => r.kind === kind)
+      .map((r) => [Math.max(from, Date.parse(r.started_at)), Math.min(to, r.ended_at ? Date.parse(r.ended_at) : now)] as const)
+      .filter(([a, b]) => b > a)
+      .sort((x, y) => x[0] - y[0]);
+    let total = 0, start = -Infinity, end = -Infinity;
+    for (const [a, b] of spans) {
+      if (a > end) { if (end > start) total += end - start; start = a; end = b; }
+      else end = Math.max(end, b);
+    }
+    if (end > start) total += end - start;
+    out[kind] = total / 60_000;
+  }
+  return out;
+}
+
 const dayKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
 /**
