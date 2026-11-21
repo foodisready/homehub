@@ -5,7 +5,7 @@ import { SecretInputDirective } from '../../shared/secret-input/secret-input.dir
 
 interface HoneywellStatus { email: string | null; signedIn: boolean; rejected: boolean; message: string | null }
 interface AccountThermostat { deviceId: number; name: string; location: string; deviceIdInHomeHub: number | null; alias: string | null }
-interface SignInResult extends HoneywellStatus { added: { id: number; alias: string }[]; thermostats: AccountThermostat[] }
+interface SignInResult extends HoneywellStatus { added: { id: number; alias: string }[]; thermostats: AccountThermostat[]; listError?: string }
 
 /**
  * Settings → Integrations → Honeywell. Signs in to Total Connect Comfort, the service a
@@ -60,7 +60,7 @@ interface SignInResult extends HoneywellStatus { added: { id: number; alias: str
                [(ngModel)]="password" placeholder="Password" aria-label="Total Connect Comfort password" (keydown.enter)="save()" />
         <div class="bar wide">
           <button class="btn-sm btn-primary" (click)="save()" [disabled]="saving() || !email.trim() || !password">
-            {{ saving() ? 'Signing in…' : 'Sign in' }}
+            {{ saving() ? 'Signing in… Honeywell can take a minute' : 'Sign in' }}
           </button>
           @if (status()?.signedIn) {
             <button class="btn-sm btn-ghost" (click)="signOut()" [disabled]="saving()">Forget</button>
@@ -135,7 +135,9 @@ export class HoneywellLoginComponent implements OnInit {
         this.status.set(r);
         this.thermostats.set(r.thermostats);
         const n = r.added.length;
-        this.show(!r.thermostats.length
+        this.show(r.listError
+          ? 'Signed in. Honeywell is slow to list the thermostats right now, so HomeHub will add them within a few minutes.'
+          : !r.thermostats.length
           ? 'Signed in, but the account has no thermostats yet. Pair them with the gateway, then sign in again.'
           : n ? `Signed in. Added ${r.added.map((d) => d.alias).join(', ')}; their readings appear within a minute.` : 'Signed in.');
         if (n) this.devicesChanged.emit();

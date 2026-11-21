@@ -41,10 +41,10 @@ honeywellRouter.put('/login', async (req: Request, res: Response) => {
     return res.status(400).json({ error: 'Email and password are required', code: 'VALIDATION_ERROR' });
   }
   try {
-    const locations = await honeywell.signIn(email.trim(), password);
-    const added = honeywell.addThermostats(locations);
+    const { locations, listError } = await honeywell.signIn(email.trim(), password);
+    const added = locations ? honeywell.addThermostats(locations) : [];
     void honeywell.pollAll();
-    res.json({ ...honeywell.accountStatus(), added, thermostats: listOf(locations) });
+    res.json({ ...honeywell.accountStatus(), added, thermostats: locations ? listOf(locations) : [], ...(listError ? { listError } : {}) });
   } catch (err) {
     if (err instanceof TccError) logger.warn({ kind: err.kind, reason: err.message }, 'Total Connect Comfort sign-in failed');
     failure(res, err);

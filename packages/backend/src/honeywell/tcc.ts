@@ -21,7 +21,8 @@
 
 export const TCC_BASE = 'https://mytotalconnectcomfort.com';
 const AUTH_COOKIE = '.ASPXAUTH_TRUEHOME';
-const TIMEOUT_MS = 20_000;
+// Honeywell's servers can take 40 seconds or more to answer (seen from the Pi, 2026-11-21).
+const TIMEOUT_MS = 60_000;
 
 export type TccFailure =
   /** The email or password was refused, or the account can't sign in (locked, say). */

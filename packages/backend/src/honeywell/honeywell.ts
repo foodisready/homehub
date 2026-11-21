@@ -135,13 +135,13 @@ async function withSession<T>(fn: (s: TccSession) => Promise<T>): Promise<T> {
 }
 
 /**
- * Signs in with a new email and password. Saved only if Honeywell accepts them.
- * Returns the account's locations and thermostats.
+ * Signs in with a new email and password, saved as soon as Honeywell accepts them. Returns the
+ * account's locations and thermostats, or null if Honeywell accepted the sign-in but didn't list
+ * them in time: the next poll lists them and adds the thermostats then.
  */
-export async function signIn(email: string, password: string): Promise<TccLocation[]> {
+export async function signIn(email: string, password: string): Promise<{ locations: TccLocation[] | null; listError?: string }> {
   const s = new TccSession(fetchImpl);
   await s.signIn(email, password);
-  const locations = await s.locations();
   getDb().transaction(() => {
     put(EMAIL, email);
     put(PASSWORD, password);
@@ -151,8 +151,33 @@ export async function signIn(email: string, password: string): Promise<TccLocati
   session = s;
   lastSignIn = Date.now();
   turnedAway = 0;
-  account = { at: Date.now(), locations };
-  return locations;
+  account = null;
+  lastListTry = 0;
+  try {
+    const locations = await s.locations();
+    account = { at: Date.now(), locations };
+    return { locations };
+  } catch (err) {
+    logger.warn({ err: String((err as Error)?.message ?? err) }, 'Signed in to Total Connect Comfort, but it didn’t list the thermostats yet');
+    return { locations: null, listError: (err as Error)?.message ?? String(err) };
+  }
+}
+
+let lastListTry = 0;
+
+/**
+ * Signed in but no Honeywell thermostats in HomeHub yet (the list was slow at sign-in):
+ * lists the account and adds them, at most every 5 minutes. Thermostats someone deleted
+ * aren't added back while any other Honeywell thermostat is still in HomeHub.
+ */
+async function addIfNone(): Promise<void> {
+  if (honeywellRows().length || Date.now() - lastListTry < 5 * 60_000) return;
+  lastListTry = Date.now();
+  try {
+    addThermostats(await accountThermostats());
+  } catch (err) {
+    logger.debug({ err: String((err as Error)?.message ?? err) }, 'Total Connect Comfort thermostats not listed yet');
+  }
 }
 
 /** Forgets the account. Its thermostats stay in HomeHub, offline, until signed in again. */
@@ -405,12 +430,12 @@ let polling = false;
 /** Reads every Honeywell thermostat once, one after another. */
 export async function pollAll(): Promise<void> {
   if (polling) return;
-  const rows = honeywellRows();
   const st = accountStatus();
-  if (!rows.length || !st.signedIn || st.rejected || !isActiveServer()) return;
+  if (!st.signedIn || st.rejected || !isActiveServer()) return;
   polling = true;
   try {
-    for (const r of rows) {
+    await addIfNone();
+    for (const r of honeywellRows()) {
       try {
         if (await readNow(r.deviceId)) await tellPages(r.deviceId);
       } catch (err) {
@@ -447,5 +472,6 @@ export function resetForTests(): void {
   session = null;
   account = null;
   lastSignIn = 0;
+  lastListTry = 0;
   turnedAway = 0;
 }

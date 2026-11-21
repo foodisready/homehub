@@ -87,7 +87,7 @@ function portal() {
 
 let p = portal();
 
-const signIn = () => h.signIn(EMAIL, GOOD).then((locs) => h.addThermostats(locs));
+const signIn = () => h.signIn(EMAIL, GOOD).then((r) => h.addThermostats(r.locations!));
 const idOf = (deviceId: number) => t.thermostatIdForHoneywell(deviceId)!;
 
 describe('Honeywell Total Connect Comfort', () => {
@@ -272,6 +272,23 @@ describe('Honeywell Total Connect Comfort', () => {
     await h.pollAll();
     await h.pollAll();
     assert.equal(p.state.signIns, before + 2, 'then it waits, rather than signing in each round');
+  });
+
+  it('signed in but the list was slow: the sign-in is kept, and the next poll adds the thermostats', async () => {
+    const orig = p.fetch;
+    let slow = true;
+    h.setFetch(async (url, init) => {
+      if (slow && String(url).includes('GetLocationListData')) return new Response('', { status: 503 });
+      return orig(url, init);
+    });
+    const r = await h.signIn(EMAIL, GOOD);
+    assert.equal(r.locations, null);
+    assert.ok(r.listError);
+    assert.equal(h.accountStatus().signedIn, true);
+    slow = false;
+    await h.pollAll();
+    assert.equal((db.prepare("SELECT COUNT(*) AS n FROM devices WHERE driver_type = 'honeywell'").get() as { n: number }).n, 2);
+    assert.equal((await t.getThermostat(idOf(101))).online, true);
   });
 
   it('a thermostat that lost touch with its gateway, or not read lately, shows offline', async () => {
