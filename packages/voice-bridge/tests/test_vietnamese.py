@@ -243,7 +243,9 @@ class PipelineTest(unittest.TestCase):
         a = answer(b'\0' * 32000, True, whisper, hub, yue, vi_ears=FakeVietnamese('TẮT ĐÈN PHÒNG NGỦ'))
         self.assertEqual(hub.sent, ['turn off đèn phòng ngủ'])
         self.assertEqual((a.lang, a.reply, a.handled), ('vi', 'Đã tắt đèn phòng ngủ.', True))
-        self.assertEqual((whisper.calls, yue.calls), (0, 0))
+        # Whisper isn't needed. SenseVoice starts alongside the Vietnamese model to save time (pipeline's
+        # _beside), so it may have been called, but what it heard isn't used.
+        self.assertEqual(whisper.calls, 0)
 
     def test_english_still_goes_to_whisper(self):
         hub, whisper = FakeHomeHub(), FakeWhisper('Turn on the kitchen lights.')

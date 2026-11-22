@@ -753,6 +753,48 @@ class SpeakerLinkTest(unittest.IsolatedAsyncioTestCase):
         group.found('Android Voice Assistant', cfg.Speaker('192.168.86.21', 6053))
         self.assertEqual(sorted(l.speaker.host for l in group.links.values()), ['192.168.86.20', '192.168.86.21', '192.168.86.30'])
 
+    async def test_the_minute_check_puts_back_a_speaker_dropped_while_two_traded_names(self):
+        # 2026-11-22: Ava on a Pixel and on a tablet, "Android Voice Assistant" and "(2)". When one restarted
+        # Ava they traded names, and one name's address flipped .246 → .20 → .246 meanwhile: the link to
+        # .20 was dropped, and no announcement came to put it back, so that device stayed unconnected.
+        from homehub_voice import speakers
+
+        made = []
+
+        def make(s, listed):
+            link = speakers.SpeakerLink(s, lambda a, sp: None, lambda t, h: '', listed)
+            link.start = lambda: None
+            made.append(link)
+            return link
+
+        A, B = 'Android Voice Assistant', 'Android Voice Assistant (2)'
+        pixel, tablet = cfg.Speaker('192.168.86.246', 6053), cfg.Speaker('192.168.86.20', 6053)
+        group = speakers.Speakers([], make, discover=False)
+        hosts = lambda: sorted(l.speaker.host for l in group.links.values())
+        # The plain name was the tablet's, then the Pixel's: A follows to .246 and .20's link goes,
+        # while B (the tablet's new name) is announced but hasn't answered where it is yet.
+        group.found(A, tablet)
+        group.found(A, pixel)
+        self.assertEqual(hosts(), ['192.168.86.246'], 'the failure, reproduced: the tablet has no link')
+        # A minute later every announced name is asked where it is: B is the tablet, and it's back.
+        group.check({A: pixel, B: tablet}, {A, B})
+        self.assertEqual(hosts(), ['192.168.86.20', '192.168.86.246'])
+        # Traded names, both answering: still both, each once.
+        group.check({A: tablet, B: pixel}, {A, B})
+        self.assertEqual(hosts(), ['192.168.86.20', '192.168.86.246'])
+        self.assertEqual(len(group.links), 2)
+        # A name that didn't answer this time keeps its link: a blip isn't a goodbye.
+        group.check({A: tablet}, {A, B})
+        self.assertEqual(hosts(), ['192.168.86.20', '192.168.86.246'])
+        # A speaker no longer announced at all (the phone left) is let go.
+        group.check({A: tablet}, {A})
+        self.assertEqual(hosts(), ['192.168.86.20'])
+        # A listed speaker (SPEAKERS) is never dropped by the check.
+        listed = speakers.Speakers([cfg.Speaker('10.0.0.9', 6053)], make, discover=False)
+        listed.add(cfg.Speaker('10.0.0.9', 6053), True)
+        listed.check({}, set())
+        self.assertEqual([l.speaker.host for l in listed.links.values()], ['10.0.0.9'])
+
     async def test_asking_for_an_address_keeps_trying_until_it_answers(self):
         from homehub_voice import speakers
         answers = [None, None, RuntimeError('network'), cfg.Speaker('192.168.86.20', 6053)]

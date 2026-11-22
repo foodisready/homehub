@@ -390,6 +390,8 @@ class SpeakerLink:
 
 # Asking an announced speaker for its address: soon at first, then less often, never giving up
 # while it's still announced (the caller cancels when it goes).
+# How often every announced speaker is asked where it is, to put the links right (Speakers.check).
+CHECK_S = 60.0
 ASK_FIRST_S = 2.0
 ASK_MOST_S = 30.0
 
@@ -473,6 +475,32 @@ class Speakers:
         self.named[name] = key
         self.add(speaker, False)
 
+    def gone(self, name: str) -> None:
+        """A speaker stopped announcing itself: forget its name. Its link goes at the next check,
+        unless another name still has that address."""
+        self.named.pop(name, None)
+
+    def check(self, answered: dict[str, Speaker], announced: set[str]) -> None:
+        """Once a minute: where each announced speaker says it is now (`answered`, the ones that
+        replied), and every name still announced. Each is followed to its address, as when found,
+        and a link no announced name points to any more is dropped.
+
+        2026-11-22: two phones running Ava ("Android Voice Assistant" and "(2)") traded names, and
+        one name's address flipped .246 → .20 → .246 while they did; the link to .20 was dropped
+        and nothing ever pointed back to it, so that phone stayed unconnected until a restart. This
+        puts every announced speaker back within a minute, whatever the order of announcements."""
+        for name in [n for n in self.named if n not in announced]:
+            self.gone(name)
+        for name, speaker in answered.items():
+            self.found(name, speaker)
+        claimed = set(self.named.values())
+        for key in [k for k, l in self.links.items() if not l.listed and k not in claimed]:
+            link = self.links.pop(key)
+            log.info('%s is no longer announced at %s', link.name, link.speaker.label)
+            if link.task:
+                link.task.cancel()
+            self.changed.set()
+
     async def run(self) -> None:
         for s in self.listed:
             self.add(s, True)
@@ -505,17 +533,34 @@ class Speakers:
             looking[name] = t
             t.add_done_callback(lambda done, n=name: looking.pop(n, None) if looking.get(n) is done else None)
 
+        announced: set[str] = set()
+
         def changed(zeroconf, service_type, name, state_change) -> None:
             # Updated: it may have a new address (a phone that changed its network ID, say).
             if state_change in (ServiceStateChange.Added, ServiceStateChange.Updated):
+                announced.add(name)
                 look(name)
-            elif state_change is ServiceStateChange.Removed and (t := looking.pop(name, None)):
-                t.cancel()
+            elif state_change is ServiceStateChange.Removed:
+                announced.discard(name)
+                if (t := looking.pop(name, None)):
+                    t.cancel()
+
+        async def check_often() -> None:
+            # Announcements can arrive out of order, or not at all, while speakers trade names: ask
+            # each announced one where it is now, once a minute, and put the links right.
+            while True:
+                await asyncio.sleep(CHECK_S)
+                names = sorted(announced)
+                found = await asyncio.gather(*(address(n) for n in names), return_exceptions=True)
+                answered = {n: a for n, a in zip(names, found) if isinstance(a, Speaker)}
+                self.check(answered, set(announced))
 
         browser = AsyncServiceBrowser(zc.zeroconf, ESPHOME_SERVICE, handlers=[changed])
         log.info('looking for speakers on the network')
+        checking = asyncio.ensure_future(check_often())
         try:
             await asyncio.Event().wait()
         finally:
+            checking.cancel()
             await browser.async_cancel()
             await zc.async_close()
