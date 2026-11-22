@@ -89,7 +89,7 @@ nlpRouter.post('/', async (req: Request, res: Response) => {
   }
 
   try {
-    const result = await processMessage(message.trim(), history, who(req));
+    const result = await processMessage(message.trim(), history, who(req), req.user?.role);
     res.json(result);
   } catch (err: any) {
     logger.error(err, 'NLP processing failed');
@@ -117,7 +117,7 @@ nlpRouter.post('/stream', async (req: Request, res: Response) => {
   const heartbeat = setInterval(() => res.write(': waiting\n\n'), 15_000);
 
   try {
-    for await (const event of processMessageStream(message.trim(), history, who(req))) {
+    for await (const event of processMessageStream(message.trim(), history, who(req), req.user?.role)) {
       send(event);
       if (event.type === 'done' || event.type === 'error') break;
     }

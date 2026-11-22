@@ -435,4 +435,157 @@ describe('Claude Haiku option', () => {
     assert.equal(r.body.confirmId, undefined);
     assert.equal(anthropic.requests.length, 0);
   });
+
+  // ── Setting things up from Chat (setup-tools.ts) ──────────────
+
+  const tool = (name: string, input: Record<string, unknown>, id = 'tu_s') =>
+    message([{ type: 'tool_use', id, name, input }], 'tool_use');
+  const lastToolResult = () => {
+    const req = anthropic.requests.at(-1);
+    const turn = req.messages.at(-1);
+    return JSON.parse(turn.content.find((c: any) => c.type === 'tool_result').content);
+  };
+
+  it('with Claude: Chat never schedules a garage door to open, but can schedule it to close', async () => {
+    choice.setClaudeKey(KEY); choice.setAiMode('claude');
+    db.prepare("INSERT INTO devices (alias, ip, room, driver_type) VALUES ('Garage', '192.0.2.12', 'Garage', 'meross')").run();
+    try {
+      anthropic.chat = [
+        tool('create_schedule', { alias: 'Garage', label: 'Garage open', trigger_type: 'cron', state: 'on', cron_expression: '0 7 * * *' }),
+        message([{ type: 'text', text: 'I can’t do that.' }]),
+      ];
+      await nlp.processMessage('open the garage every morning at 7', [], 's1', 'admin');
+      assert.match(lastToolResult().error, /can't schedule Garage to open/);
+      assert.equal((db.prepare('SELECT COUNT(*) n FROM schedules').get() as { n: number }).n, 0);
+
+      anthropic.chat = [
+        tool('create_schedule', { alias: 'Garage', label: 'Garage close', trigger_type: 'cron', state: 'off', cron_expression: '0 23 * * *' }),
+        message([{ type: 'text', text: 'Done.' }]),
+      ];
+      await nlp.processMessage('close the garage every night at 11', [], 's1', 'admin');
+      assert.equal(lastToolResult().success, true);
+      assert.equal((db.prepare("SELECT COUNT(*) n FROM schedules WHERE state = 0").get() as { n: number }).n, 1);
+    } finally {
+      db.prepare('DELETE FROM schedules').run();
+      db.prepare("DELETE FROM devices WHERE alias = 'Garage'").run();
+    }
+  });
+
+  it('with Claude: only an admin adds or deletes schedules from Chat, as on the Schedules page', async () => {
+    choice.setClaudeKey(KEY); choice.setAiMode('claude');
+    try {
+      anthropic.chat = [
+        tool('create_schedule', { alias: 'Porch light', label: 'Porch on', trigger_type: 'solar', state: 'on', solar_event: 'sunset' }),
+        message([{ type: 'text', text: 'Only an admin can.' }]),
+      ];
+      await nlp.processMessage('turn the porch light on at sunset every day', [], 's2', 'user');
+      assert.match(lastToolResult().error, /Only an admin/);
+      anthropic.chat = [
+        tool('create_schedule', { alias: 'Porch light', label: 'Porch on', trigger_type: 'solar', state: 'on', solar_event: 'sunset' }),
+        message([{ type: 'text', text: 'Done.' }]),
+      ];
+      await nlp.processMessage('turn the porch light on at sunset every day', [], 's2');
+      assert.match(lastToolResult().error, /Only an admin/, 'no role is not an admin');
+      const id = (db.prepare("INSERT INTO schedules (device_id, label, trigger_type, solar_event, state) VALUES (1, 'x', 'solar', 'sunset', 1)").run()).lastInsertRowid;
+      anthropic.form = { action: 'unclear', target: null, scene: null, minutes: null, lang: 'en' };
+      anthropic.chat = [tool('delete_schedule', { schedule_id: String(id) }), message([{ type: 'text', text: 'No.' }])];
+      await nlp.processMessage('delete that schedule', [], 's2', 'user');
+      assert.match(lastToolResult().error, /Only an admin/);
+      assert.equal((db.prepare('SELECT COUNT(*) n FROM schedules').get() as { n: number }).n, 1);
+    } finally {
+      db.prepare('DELETE FROM schedules').run();
+    }
+  });
+
+  it('with Claude: a time the scheduler can’t read isn’t saved', async () => {
+    choice.setClaudeKey(KEY); choice.setAiMode('claude');
+    anthropic.chat = [
+      tool('create_schedule', { alias: 'Porch light', label: 'Porch off', trigger_type: 'cron', state: 'off', cron_expression: '0 30 * * *' }),
+      message([{ type: 'text', text: 'Hmm.' }]),
+    ];
+    await nlp.processMessage('turn the porch light off at 12:30 every night', [], 's3', 'admin');
+    assert.match(lastToolResult().error, /minute comes first/);
+    assert.equal((db.prepare('SELECT COUNT(*) n FROM schedules').get() as { n: number }).n, 0);
+  });
+
+  it('with Claude: a reminder is read back, and saved only on a yes', async () => {
+    choice.setClaudeKey(KEY); choice.setAiMode('claude');
+    try {
+      anthropic.chat = [tool('create_reminder', { text: 'Time to take your medicine', times: ['9:00'], ask: true, lang: 'en' })];
+      let r = await nlp.processMessage('remind mum to take her medicine at 9 every morning and check she did', [], 's4', 'user');
+      assert.equal(r.response, 'Should I add this reminder? At 9 AM every day the speakers will say “Time to take your medicine”, then ask if it’s done. If nobody says yes, the family is told.');
+      assert.equal(anthropic.requests.length, 1, 'Claude isn’t asked again once HomeHub is asking');
+      assert.equal((db.prepare('SELECT COUNT(*) n FROM reminders').get() as { n: number }).n, 0, 'nothing saved before the yes');
+      r = await nlp.processMessage('yes', [], 's4', 'user');
+      assert.match(r.response, /^Done\. The reminder is on the Family page/);
+      const row = db.prepare('SELECT * FROM reminders').get() as { at_time: string; days: string; ask: number; text: string };
+      assert.deepEqual([row.at_time, row.days, row.ask, row.text], ['09:00', '0123456', 1, 'Time to take your medicine']);
+
+      // Several times a day, on weekdays; then "no" saves nothing.
+      anthropic.chat = [tool('create_reminder', { text: 'Time to drink some water', times: ['09:00', '11:00', '13:00'], days: [1, 2, 3, 4, 5], lang: 'en' })];
+      r = await nlp.processMessage('remind me to drink water every 2 hours from 9 to 1 on weekdays', [], 's4', 'user');
+      assert.match(r.response, /At 9 AM, 11 AM and 1 PM on weekdays the speakers will say “Time to drink some water”\.$/);
+      r = await nlp.processMessage('no', [], 's4', 'user');
+      assert.equal(r.response, 'OK, I didn’t set anything up.');
+      assert.equal((db.prepare('SELECT COUNT(*) n FROM reminders').get() as { n: number }).n, 1);
+
+      // A bad time goes back to Claude as an error; nothing is asked.
+      anthropic.chat = [tool('create_reminder', { text: 'Stretch', times: ['25:00'], lang: 'en' }), message([{ type: 'text', text: 'What time?' }])];
+      r = await nlp.processMessage('remind me to stretch at 25', [], 's4', 'user');
+      assert.equal(r.response, 'What time?');
+      assert.match(lastToolResult().error, /HH:MM/);
+    } finally {
+      db.prepare('DELETE FROM reminders').run();
+    }
+  });
+
+  it('with Claude: deleting a reminder asks first, in the language asked in', async () => {
+    choice.setClaudeKey(KEY); choice.setAiMode('claude');
+    const id = Number(db.prepare("INSERT INTO reminders (text, language, at_time, days, enabled, ask) VALUES ('食藥喇', 'auto', '21:00', '0123456', 1, 0)").run().lastInsertRowid);
+    try {
+      anthropic.form = { action: 'unclear', target: null, scene: null, minutes: null, lang: 'yue' };
+      anthropic.chat = [tool('delete_reminder', { ids: [id], lang: 'yue' })];
+      let r = await nlp.processMessage('唔使再提我食藥', [], 's5', 'user');
+      assert.equal(r.response, '要唔要刪除呢個提醒？每日晚上9點：“食藥喇”');
+      r = await nlp.processMessage('係', [], 's5', 'user');
+      assert.equal(r.response, '已經刪咗。');
+      assert.equal((db.prepare('SELECT COUNT(*) n FROM reminders').get() as { n: number }).n, 0);
+    } finally {
+      db.prepare('DELETE FROM reminders').run();
+    }
+  });
+
+  it('with Claude: a check-in is an admin’s, read back with who would be told', async () => {
+    choice.setClaudeKey(KEY); choice.setAiMode('claude');
+    try {
+      anthropic.chat = [tool('create_checkin', { name: 'Mum', by: '10:00', lang: 'en' }), message([{ type: 'text', text: 'Ask an admin.' }])];
+      let r = await nlp.processMessage('tell us if mum isn’t up by 10', [], 's6', 'user');
+      assert.match(lastToolResult().error, /Only an admin/);
+
+      anthropic.chat = [tool('create_checkin', { name: 'Mum', by: '10:00', ask_first: false, lang: 'en' })];
+      r = await nlp.processMessage('tell us if mum isn’t up by 10', [], 's6', 'admin');
+      assert.match(r.response, /^Should I set up a check-in for Mum\? If there’s no sign of activity at home between 5 AM and 10 AM every day/);
+      assert.match(r.response, /Nobody would be told yet/, 'no phone or email is set up in this test');
+      assert.equal((db.prepare('SELECT COUNT(*) n FROM checkins').get() as { n: number }).n, 0, 'the check is rolled back');
+      r = await nlp.processMessage('yes', [], 's6', 'admin');
+      assert.match(r.response, /^Done\./);
+      const c = db.prepare('SELECT * FROM checkins').get() as { name: string; by_time: string; from_time: string };
+      assert.deepEqual([c.name, c.from_time, c.by_time], ['Mum', '05:00', '10:00']);
+
+      anthropic.chat = [tool('who_gets_alerts', {}), message([{ type: 'text', text: 'Nobody yet.' }])];
+      r = await nlp.processMessage('who gets told in an emergency?', [], 's6', 'user');
+      assert.equal(lastToolResult().phones, 0);
+      assert.equal(r.response, 'Nobody yet.');
+    } finally {
+      db.prepare('DELETE FROM checkins').run();
+    }
+  });
+
+  it('the local model has no setup tools, and isn’t told it can set them up', async () => {
+    await nlp.processMessage('remind me to drink water at 3pm', [], 's7', 'admin');
+    const chatReq = ollama.requests.find((q) => Array.isArray(q.tools));
+    assert.ok(chatReq, 'the local chat model answered');
+    assert.ok(!chatReq.tools.some((t: any) => t.function.name === 'create_reminder'));
+    assert.match(chatReq.messages[0].content, /cannot set up spoken reminders/);
+  });
 });

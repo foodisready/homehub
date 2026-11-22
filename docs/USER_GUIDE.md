@@ -672,6 +672,17 @@ Either way, HomeHub answers what it can itself first, asks before switching anyt
 
 **Voice:** with Claude Haiku, a voice command HomeHub's rules don't understand goes to Claude too. If Claude can tell which device was meant, the speaker asks, such as "Should I turn on Porch light?", 係咪要開廚房燈？ or "Có phải bạn muốn bật Đèn bàn không?", in the language you spoke. It asks in words, so a question is never mistaken for HomeHub saying it did it. Answer within 15 seconds: "yes", 係, 是 or "có" switches it, and "no", 唔係, 不 or "không" leaves everything as it was. A speaker that listens again by itself after a question needs no wake word for the answer. Anything else is taken as a new command. Claude is told which wake word woke the speaker, since its end is sometimes heard at the start of the command (老友 heard as 冇有), and whether each device is on or off now: when the word for on or off was lost, as in 欧亮燈 for 熄啊亮燈, it asks about the change, 係咪要熄啊亮燈？ for a lamp that's on. If Claude can't tell, the speaker says it didn't understand, as before, or stays quiet if it sounded like talk in the room. With the model on this HomeHub, voice uses HomeHub's rules only: on heard speech, the small model asked about the wrong device too often.
 
+### Set things up from Chat
+
+With Claude Haiku, you can set up reminders and check-ins by typing in Chat, in any of HomeHub's languages. HomeHub reads back exactly what it will save, in the language you wrote in, and saves only when you answer yes. Anything else you type leaves it unsaved.
+
+- **Spoken reminders:** "Remind Mum to take her medicine at 9 every morning and check she did." → *Should I add this reminder? At 9 AM every day the speakers will say "Time to take your medicine", then ask if it's done. If nobody says yes, the family is told.* Several times a day work too: "remind me to get up and move around every hour from 10 to 4 on weekdays" becomes one reminder for each time, up to 12 a day. They appear on the **Family** page, where you can change or pause them. "What reminders do we have?" lists them, and "stop the water reminder" deletes it, after asking. Anyone can add reminders, as on the Family page. The speakers need the reminder's language turned on in **Settings → Voice control**; Chat says so if it isn't.
+- **Daily check-ins** (admins): "Tell us if there's no activity at Mum's by 10 AM." → HomeHub reads back the hours, the days and who would be told, and warns if nobody would be told yet. Add "ask her first" to have the speakers ask at home before telling the family. Choose which devices count on the Family page afterwards.
+- **Who gets told:** "Who gets told in an emergency?" names the phones with HomeHub notifications on, and how many email addresses get alerts. To change who, each person turns on notifications in the HomeHub app on their own phone (**Settings → Notifications**), and an admin sets email addresses in **Settings → Integrations → Email alerts**. Chat doesn't change who is told.
+- **Schedules:** "Turn the porch light on at sunset every day." Only admins can add or delete schedules from Chat, as on the Schedules page. Chat never schedules a garage door to open, though it can schedule one to close, and it doesn't save a time the scheduler couldn't run.
+
+With the model on this HomeHub, Chat can't set up reminders or check-ins, and says to use the Family page instead.
+
 To use Claude Haiku:
 
 1. Make an API key at [console.anthropic.com](https://console.anthropic.com/settings/keys), and set a monthly spending limit there, such as $5.

@@ -21,6 +21,8 @@ import { understandPrompt, understandWithClaude, understandWithOllama, type Home
 import { CLAUDE_LABEL, claudeErrorText, claudeInUse, recordClaudeFailure, recordClaudeUse } from './ai-choice';
 import { chatWithClaude, ClaudeChatError } from './claude-chat';
 import { warmupDone, warmupStarted, warmupStep } from './warmup';
+import { cronProblem } from '../routes/cron-check';
+import { PLAN_DECLINED, runSetupTool, setPlan, SETUP_TOOL_NAMES, SETUP_TOOLS, takePlan } from './setup-tools';
 
 export interface ChatMessage {
   role: 'user' | 'assistant';
@@ -182,7 +184,13 @@ export function timerMinutes(value: unknown): number | undefined {
   return minutes === 0 ? undefined : minutes;
 }
 
-async function executeTool(name: string, args: Record<string, unknown>, userMessage = ''): Promise<unknown> {
+/** Who is asking: schedules, like the Schedules page, are an admin's to add and delete. */
+export interface ToolContext { who: string; admin: boolean }
+const NOBODY_IN_PARTICULAR: ToolContext = { who: 'chat', admin: false };
+const SCHEDULES_ADMIN_ONLY = 'Only an admin can add or delete schedules, as on the Schedules page. Tell the user to ask an admin. Nothing was changed.';
+const SOLAR = new Set(['sunrise', 'sunset', 'dawn', 'dusk', 'goldenHour', 'solarNoon']);
+
+async function executeTool(name: string, args: Record<string, unknown>, userMessage = '', ctx: ToolContext = NOBODY_IN_PARTICULAR): Promise<unknown> {
   const db = getDb();
 
   switch (name) {
@@ -251,11 +259,24 @@ async function executeTool(name: string, args: Record<string, unknown>, userMess
       const solarEvent          = args.solar_event ? String(args.solar_event) : null;
       const solarOffsetMinutes  = args.solar_offset_minutes ? parseInt(String(args.solar_offset_minutes), 10) : 0;
 
+      if (!ctx.admin) return { error: SCHEDULES_ADMIN_ONLY };
+      if (triggerType !== 'cron' && triggerType !== 'solar') return { error: 'trigger_type must be "cron" or "solar"' };
       const match = findDeviceByName(alias);
       if ('error' in match) return { error: match.error };
       const device = match.device as any;
+      // The same rule as switching now: Chat never opens a garage door or pauses a camera, later included.
+      if (!assistantMaySwitch(device, state)) {
+        return { error: isGarageDoor(device)
+          ? `For safety, Chat can't schedule ${device.alias} to open. It can schedule it to close; to open it at a time, an admin can add that on the Schedules page.`
+          : `${device.alias} is protected, so Chat can't schedule it ${state ? 'on' : 'off'}. An admin can add that on the Schedules page.` };
+      }
       if (triggerType === 'cron' && !cronExpression) return { error: 'cron_expression is required for cron schedules' };
       if (triggerType === 'solar' && !solarEvent)    return { error: 'solar_event is required for solar schedules' };
+      if (triggerType === 'solar' && !SOLAR.has(solarEvent!)) return { error: `solar_event must be one of ${[...SOLAR].join(', ')}` };
+      // One the scheduler can't read would be saved and never run.
+      const problem = triggerType === 'cron' ? cronProblem(cronExpression!) : null;
+      if (problem) return { error: `${problem} Nothing was saved.` };
+      if (!Number.isFinite(solarOffsetMinutes) || Math.abs(solarOffsetMinutes) > 720) return { error: 'solar_offset_minutes must be a number of minutes, up to 720 either way' };
 
       const row = db.prepare(`
         INSERT INTO schedules (device_id, label, trigger_type, cron_expression, solar_event, solar_offset_minutes, state, enabled)
@@ -295,6 +316,7 @@ async function executeTool(name: string, args: Record<string, unknown>, userMess
     }
 
     case 'delete_schedule': {
+      if (!ctx.admin) return { error: SCHEDULES_ADMIN_ONLY };
       const id = parseInt(String(args.schedule_id ?? ''), 10);
       const result = db.prepare('DELETE FROM schedules WHERE id = ?').run(id);
       if (result.changes === 0) return { error: `Schedule #${id} not found. Use list_schedules to find IDs.` };
@@ -514,6 +536,12 @@ async function warmSteps(
  * first message after a change pays to read them. The date comes last, so a
  * new day only re-reads that line.
  */
+/**
+ * The local model doesn't have the setup tools (setup-tools.ts), so it says where to go instead of
+ * claiming to have set something up.
+ */
+const LOCAL_SETUP_NOTE = '\nYou cannot set up spoken reminders or daily check-ins here. If asked, say they can be added on the Family page, or from Chat with Claude turned on in Settings → AI.';
+
 export function buildSystemPrompt(names: string[] = listDeviceNames()): string {
   const list = names.length ? names.map((n) => `- ${n}`).join('\n') : '(none yet)';
   return `You are HomeHub, a helpful smart home assistant. You control smart plugs and switches (TP-Link Kasa, Shelly, and others) and manage automation schedules.
@@ -537,12 +565,13 @@ Today's date: ${new Date().toLocaleDateString('en-US', { weekday: 'long', year: 
 export async function resolveTools(
   userMessage: string,
   history: ChatMessage[],
+  ctx: ToolContext = NOBODY_IN_PARTICULAR,
 ): Promise<{ messages: OllamaMessage[]; actions: ActionTaken[] }> {
   const ollamaUrl = process.env.OLLAMA_URL ?? 'http://localhost:11434';
   const model     = process.env.OLLAMA_MODEL ?? 'llama3.2:3b';
 
   const messages: OllamaMessage[] = [
-    { role: 'system', content: buildSystemPrompt() },
+    { role: 'system', content: buildSystemPrompt() + LOCAL_SETUP_NOTE },
     ...history.slice(-10).map((m) => ({ role: m.role as OllamaMessage['role'], content: m.content })),
     { role: 'user', content: userMessage },
   ];
@@ -586,7 +615,7 @@ export async function resolveTools(
       logger.info({ tool: toolName, args: toolArgs }, 'NLP tool call');
 
       let result: unknown;
-      try { result = await executeTool(toolName, toolArgs, userMessage); }
+      try { result = await executeTool(toolName, toolArgs, userMessage, ctx); }
       catch (err: any) { result = { error: err.message }; }
 
       actions.push({ tool: toolName, args: toolArgs, result });
@@ -664,6 +693,20 @@ export function homeNames(): HomeNames {
 
 /** A yes or no to the question this person was just asked. Anything else drops the question. */
 async function byAnswer(text: string, who: string): Promise<Handled | null> {
+  // Setting something up from Chat (setup-tools.ts): saved only on a yes.
+  const plan = takePlan(who);
+  if (plan) {
+    const kind = answerKind(text);
+    if (kind === 'yes') {
+      try { return { response: plan.run(), actions: [] }; }
+      catch (err) {
+        logger.warn({ err }, 'Chat setup not saved');
+        return { response: (err as Error).message || 'It couldn’t be saved.', actions: [] };
+      }
+    }
+    if (kind === 'no') return { response: PLAN_DECLINED[plan.lang], actions: [] };
+    // Anything else is a new message: the question lapses, as a switch's does.
+  }
   const proposal = takePending(who);
   if (!proposal) return null;
   const kind = answerKind(text);
@@ -789,13 +832,24 @@ HomeHub learns names: when someone says yes to its question, it remembers the wo
  * With the household's Anthropic key: Claude Haiku answers, with the same tools as the local chat.
  * Null when there's no key or Claude couldn't answer; then this HomeHub's model does, as before.
  */
-async function byClaudeChat(text: string, history: ChatMessage[], who: string, lang: Lang | undefined): Promise<Handled | null> {
+async function byClaudeChat(text: string, history: ChatMessage[], who: string, lang: Lang | undefined, admin = false): Promise<Handled | null> {
   const key = claudeInUse();
   if (!key) return null;
   // Claude never switches anything itself either: a switch becomes "Did you mean…?", as with the form.
   let asked: Handled | null = null;
+  const ctx: ToolContext = { who, admin };
   const execute = async (name: string, args: Record<string, unknown>): Promise<unknown> => {
-    if (name !== 'set_power_state' || asksForLater(text)) return executeTool(name, args, text);
+    if (SETUP_TOOL_NAMES.has(name)) {
+      if (asked) return { error: 'HomeHub is already asking the user about one change. Wait for their answer.' };
+      const r = runSetupTool(name, args, ctx);
+      if (r.ask) {
+        takePending(who);   // one question at a time
+        setPlan(who, r.ask);
+        asked = { response: r.ask.question, actions: [] };
+      }
+      return r.result;
+    }
+    if (name !== 'set_power_state' || asksForLater(text)) return executeTool(name, args, text, ctx);
     if (asked) return { error: 'HomeHub is already asking the user about one change. Wait for their answer.' };
     const alias = String(args.alias ?? '');
     const group = findDeviceGroup(alias);
@@ -815,7 +869,7 @@ async function byClaudeChat(text: string, history: ChatMessage[], who: string, l
   };
   try {
     const r = await chatWithClaude(text, history, {
-      apiKey: key, system: buildSystemPrompt() + claudeStyle(), tools: TOOLS, execute, stop: () => asked !== null,
+      apiKey: key, system: buildSystemPrompt() + claudeStyle(), tools: [...TOOLS, ...SETUP_TOOLS], execute, stop: () => asked !== null,
     });
     recordClaudeUse(r.inputTokens, r.outputTokens);
     if (asked) return asked;
@@ -843,7 +897,9 @@ export async function processMessage(
   userMessage: string,
   history: ChatMessage[],
   who = 'chat',
+  role?: string,
 ): Promise<{ response: string; actions: ActionTaken[] }> {
+  const ctx: ToolContext = { who, admin: role === 'admin' };
   const answered = await byAnswer(userMessage, who);
   if (answered) return answered;
 
@@ -856,13 +912,13 @@ export async function processMessage(
   const { asked, answer } = await byModelReading(userMessage, who);
   if (answer) return answer;
 
-  const claude = await byClaudeChat(userMessage, history, who, asked?.lang);
+  const claude = await byClaudeChat(userMessage, history, who, asked?.lang, ctx.admin);
   if (claude) return claude;
 
   const rewritten = await byRewrite(userMessage);
   if (rewritten) return rewritten;
 
-  const { messages, actions } = await resolveTools(userMessage, history);
+  const { messages, actions } = await resolveTools(userMessage, history, ctx);
 
   // The last message is already a text response (no tool calls) — return it directly
   const last = messages[messages.length - 1];
@@ -888,7 +944,9 @@ export async function* processMessageStream(
   userMessage: string,
   history: ChatMessage[],
   who = 'chat',
+  role?: string,
 ): AsyncGenerator<StreamEvent> {
+  const ctx: ToolContext = { who, admin: role === 'admin' };
   const answered = await byAnswer(userMessage, who);
   if (answered) {
     yield { type: 'meta', by: 'rules' };
@@ -920,7 +978,7 @@ export async function* processMessageStream(
     return;
   }
 
-  const claude = await byClaudeChat(userMessage, history, who, asked?.lang);
+  const claude = await byClaudeChat(userMessage, history, who, asked?.lang, ctx.admin);
   if (claude) {
     for (const action of claude.actions) yield { type: 'action', action };
     yield { type: 'token', content: claude.response };
@@ -940,7 +998,7 @@ export async function* processMessageStream(
   let actions: ActionTaken[];
 
   try {
-    ({ messages, actions } = await resolveTools(userMessage, history));
+    ({ messages, actions } = await resolveTools(userMessage, history, ctx));
   } catch (err: any) {
     logger.warn({ reason: err?.message }, 'Chat model not answering');
     yield { type: 'error', message: chatModelDown(userMessage) };

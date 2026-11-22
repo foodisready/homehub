@@ -95,11 +95,10 @@ export function voiceFor(text: string, language: ReminderLanguage, on: VoiceLang
 
 const LANGUAGE_NAME: Record<VoiceLanguage, string> = { en: 'English', yue: 'Cantonese', zh: 'Mandarin', vi: 'Vietnamese' };
 
-export function saveReminder(input: unknown, id?: number): Reminder {
+/** A reminder as it would be saved, checked; throws ReminderError for what's wrong. Saves nothing. */
+export function readReminder(input: unknown, existing: Reminder | null = null): Pick<Reminder, 'text' | 'language' | 'at' | 'days' | 'enabled' | 'ask'> {
   if (!input || typeof input !== 'object') throw new ReminderError('Expected an object');
   const b = input as Record<string, unknown>;
-  const existing = id ? getReminder(id) : null;
-  if (id && !existing) throw new ReminderError('No such reminder');
   const text = typeof b['text'] === 'string' ? b['text'].trim() : existing?.text ?? '';
   if (!text || text.length > 200) throw new ReminderError('What to say is required, up to 200 characters');
   const language = (b['language'] ?? existing?.language ?? 'auto') as ReminderLanguage;
@@ -116,7 +115,14 @@ export function saveReminder(input: unknown, id?: number): Reminder {
   }
   const enabled = 'enabled' in b ? b['enabled'] === true : existing?.enabled ?? true;
   const ask = 'ask' in b ? b['ask'] === true : existing?.ask ?? false;
-  const values = [text, language, at, [...new Set(days as number[])].sort().join(''), enabled ? 1 : 0, ask ? 1 : 0];
+  return { text, language, at, days: [...new Set(days as number[])].sort(), enabled, ask };
+}
+
+export function saveReminder(input: unknown, id?: number): Reminder {
+  const existing = id ? getReminder(id) : null;
+  if (id && !existing) throw new ReminderError('No such reminder');
+  const { text, language, at, days, enabled, ask } = readReminder(input, existing);
+  const values = [text, language, at, days.join(''), enabled ? 1 : 0, ask ? 1 : 0];
   const db = getDb();
   // A time already passed today waits for tomorrow, so saving at 9:05 doesn't say a 9:00 reminder now.
   const today = dayKey(new Date());
