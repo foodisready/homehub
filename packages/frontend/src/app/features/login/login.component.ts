@@ -1,7 +1,7 @@
 import { Component, OnInit, signal } from '@angular/core';
 import { HttpErrorResponse } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
-import { Router } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
 import { AuthService } from '../../core/auth/auth.service';
 import { SocketService } from '../../core/socket/socket.service';
 
@@ -136,7 +136,17 @@ export class LoginComponent implements OnInit {
     private auth:   AuthService,
     private socket: SocketService,
     private router: Router,
+    private route:  ActivatedRoute,
   ) {}
+
+  /**
+   * Where to go once signed in: the page that asked for it (?next=/wall from the sign-in guard), so a
+   * wall tablet's shortcut comes back to the wall display. Only HomeHub's own pages; Home otherwise.
+   */
+  private next(): string {
+    const n = this.route.snapshot.queryParamMap.get('next') ?? '';
+    return /^\/(?![\/\\])/.test(n) && !n.startsWith('/login') ? n : '/dashboard';
+  }
 
   ngOnInit(): void {
     this.auth.setupNeeded().subscribe({
@@ -157,7 +167,7 @@ export class LoginComponent implements OnInit {
     this.auth.login(this.username, this.password).subscribe({
       next: () => {
         this.socket.connect();
-        this.router.navigate(['/dashboard']);
+        void this.router.navigateByUrl(this.next());
       },
       error: (err: HttpErrorResponse) => {
         this.error.set(err.status === 429 ? err.error.error : 'Invalid username or password.');

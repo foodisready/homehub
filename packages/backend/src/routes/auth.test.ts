@@ -74,6 +74,38 @@ describe('POST /api/auth/login rate limiting', () => {
   beforeEach(() => resetLoginLimiter());
   afterEach(() => mock.timers.reset());
 
+  it('keeps the sign-in on a plain http home address: Secure only over https, in production', async () => {
+    const before = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+    try {
+      const signIn = (origin: string) => fetch(`${baseUrl}/api/auth/login`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', Origin: origin },
+        body: JSON.stringify({ username: 'bob', password: PASSWORD }),
+      });
+      // A wall tablet at http://192.168.86.88:4200: a Secure cookie would be thrown away by the browser.
+      const lan = (await signIn('http://192.168.86.88:4200')).headers.get('set-cookie') ?? '';
+      assert.match(lan, /refreshToken=/);
+      assert.doesNotMatch(lan, /;\s*Secure/i);
+      assert.match(lan, /HttpOnly/i);
+      assert.match(lan, /SameSite=Strict/i);
+      // The Tailscale address is https: Secure.
+      const tailnet = (await signIn('https://homehubrpi.example.ts.net')).headers.get('set-cookie') ?? '';
+      assert.match(tailnet, /;\s*Secure/i);
+    } finally {
+      process.env.NODE_ENV = before;
+    }
+  });
+
+  it('tells https from http by Origin, Referer or X-Forwarded-Proto', async () => {
+    const { overHttps } = await import('./auth');
+    const req = (headers: Record<string, string>) => ({ headers, secure: false }) as never;
+    assert.equal(overHttps(req({ origin: 'https://homehub.local' })), true);
+    assert.equal(overHttps(req({ referer: 'https://homehub.local/wall' })), true);
+    assert.equal(overHttps(req({ 'x-forwarded-proto': 'https, http' })), true);
+    assert.equal(overHttps(req({ origin: 'http://192.168.86.88:4200' })), false);
+    assert.equal(overHttps(req({})), false);
+  });
+
   it('blocks after five failures, even with the right password', async () => {
     await failLogins('alice', 5);
 

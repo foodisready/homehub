@@ -16,13 +16,31 @@ export const authRouter = Router();
 
 const REFRESH_COOKIE = 'refreshToken';
 
-const COOKIE_OPTS = {
-  httpOnly: true,
-  secure:   process.env.NODE_ENV === 'production',
-  sameSite: 'strict' as const,
-  path:     '/api/auth/refresh',
-  maxAge:   7 * 24 * 60 * 60 * 1000, // 7 days in ms
-};
+/**
+ * Whether this request came over https: the page's own address, which the browser sends as Origin
+ * (or Referer) with these POSTs, or a proxy's X-Forwarded-Proto.
+ */
+export function overHttps(req: Pick<Request, 'headers' | 'secure'>): boolean {
+  const h = req.headers;
+  const first = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? '';
+  return req.secure || first(h['x-forwarded-proto']).split(',')[0].trim() === 'https'
+    || first(h.origin).startsWith('https://') || first(h.referer).startsWith('https://');
+}
+
+/**
+ * The sign-in cookie. Secure over https, as on the Tailscale address. On the home network's plain
+ * http address (http://192.168.86.88:4200, a wall tablet's) a Secure cookie is thrown away by the
+ * browser, which then signed in again on every reload and landed on Home, not the wall display.
+ */
+function cookieOpts(req: Request) {
+  return {
+    httpOnly: true,
+    secure:   process.env.NODE_ENV === 'production' && overHttps(req),
+    sameSite: 'strict' as const,
+    path:     '/api/auth/refresh',
+    maxAge:   7 * 24 * 60 * 60 * 1000, // 7 days in ms
+  };
+}
 
 // POST /api/auth/login
 authRouter.post('/login', async (req: Request, res: Response) => {
@@ -51,7 +69,7 @@ authRouter.post('/login', async (req: Request, res: Response) => {
 
   attempt.succeeded();
   const { accessToken, refreshToken } = issueTokens(user);
-  res.cookie(REFRESH_COOKIE, refreshToken, COOKIE_OPTS);
+  res.cookie(REFRESH_COOKIE, refreshToken, cookieOpts(req));
 
   logger.info({ userId: user.id, name: user.name }, 'User logged in');
   res.json({
@@ -74,7 +92,7 @@ authRouter.post('/setup', async (req: Request, res: Response) => {
   try {
     const user = await createFirstAdmin(username, password);
     const { accessToken, refreshToken } = issueTokens(user);
-    res.cookie(REFRESH_COOKIE, refreshToken, COOKIE_OPTS);
+    res.cookie(REFRESH_COOKIE, refreshToken, cookieOpts(req));
     logger.info({ userId: user.id, name: user.name, address: req.socket.remoteAddress }, 'First admin created');
     res.status(201).json({ accessToken, user: { id: user.id, name: user.name, role: user.role } });
   } catch (err) {
@@ -122,7 +140,7 @@ authRouter.post('/join', async (req: Request, res: Response) => {
     const user = await redeemInvite(code, username, password);
     attempt.succeeded();
     const { accessToken, refreshToken } = issueTokens(user);
-    res.cookie(REFRESH_COOKIE, refreshToken, COOKIE_OPTS);
+    res.cookie(REFRESH_COOKIE, refreshToken, cookieOpts(req));
     logger.info({ userId: user.id, name: user.name }, 'Family member joined with an invite');
     res.status(201).json({ accessToken, user: { id: user.id, name: user.name, role: user.role } });
   } catch (err) {
@@ -149,7 +167,7 @@ authRouter.post('/refresh', (req: Request, res: Response) => {
 
     const { accessToken, refreshToken: newRefresh } = issueTokens(user);
     // Rotate the refresh token
-    res.cookie(REFRESH_COOKIE, newRefresh, COOKIE_OPTS);
+    res.cookie(REFRESH_COOKIE, newRefresh, cookieOpts(req));
     res.json({ accessToken, user: { id: user.id, name: user.name, role: user.role } });
   } catch {
     res.clearCookie(REFRESH_COOKIE, { path: '/api/auth/refresh' });

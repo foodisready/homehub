@@ -730,7 +730,7 @@ A tablet that's always on, on a wall or the kitchen counter, can be HomeHub's sc
 
 **Keeping the screen on:** on a secure address (`https://`, such as the Tailscale one), HomeHub keeps the screen on while the wall display is open. On the home address (`http://`), the browser doesn't allow that, and **⋯** says so: on the tablet, set **Settings → Display → Screen timeout** to the longest, or turn on **Developer options → Stay awake** to keep it on while charging.
 
-**On the home screen:** with the wall display open in Chrome, tap **⋮ → Add to Home screen**, and the icon opens straight into it. On the home address (`http://`) that's a shortcut that opens in Chrome; on a secure address Chrome offers **Install app** too, which opens full screen with no address bar. On the home address, **⋯ → Full screen** hides the address bar until the tablet is restarted or the app is closed.
+**On the home screen:** with the wall display open in Chrome, tap **⋮ → Add to Home screen**, and the icon opens straight into it. If the menu doesn't have it, tap **⋮ → Share** and choose **Add to Home screen** there. The tablet stays signed in, on the home address too, and if it ever has to sign in again, it goes back to the wall display afterwards. On the home address (`http://`) that's a shortcut that opens in Chrome; on a secure address Chrome offers **Install app** too, which opens full screen with no address bar. On the home address, **⋯ → Full screen** hides the address bar until the tablet is restarted or the app is closed.
 
 **Lock with a PIN:** so only people who know it can use the screen. In **⋯ → Lock with a PIN**, enter a PIN of 4 to 8 digits twice and select **Save**. Then:
 
