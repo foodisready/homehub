@@ -1,6 +1,5 @@
 import { Component, OnInit, OnDestroy, signal, computed, inject } from '@angular/core';
-import { RouterLink } from '@angular/router';
-import { DatePipe, DecimalPipe } from '@angular/common';
+import { Router } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { AuthService } from '../../core/auth/auth.service';
 import { SensorService } from '../../core/services/sensor.service';
@@ -8,11 +7,12 @@ import { FirmwareService } from '../../core/services/firmware.service';
 import { SocketService } from '../../core/socket/socket.service';
 import type { Sensor, FirmwareRelease } from '../../shared/models/sensor.model';
 import { MotionRulesComponent } from './motion-rules.component';
+import { SettingsTilesComponent, type SettingsTile } from '../settings/settings-tiles.component';
 
 @Component({
   selector: 'app-sensors',
   standalone: true,
-  imports: [RouterLink, DatePipe, DecimalPipe, FormsModule, MotionRulesComponent],
+  imports: [FormsModule, MotionRulesComponent, SettingsTilesComponent],
   styles: [`
     .topbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.5rem; }
     .topbar h1 { font-size: 1.4rem; font-weight: 700; }
@@ -62,6 +62,7 @@ import { MotionRulesComponent } from './motion-rules.component';
   `],
   template: `
     <div class="page">
+      @if (!paging()) {
       <div class="topbar">
         <div style="display:flex;align-items:center;gap:1rem">
           <h1>Sensors</h1>
@@ -95,50 +96,12 @@ import { MotionRulesComponent } from './motion-rules.component';
           <p>Click <strong>+ Add sensor</strong> above to register your first AuraFlow device.</p>
         </div>
       } @else {
-        <div class="sensor-list">
-          @for (s of sensors(); track s.id) {
-            <a class="sensor-row" [routerLink]="['/sensors', s.id]">
-              <div class="sensor-info">
-                <div class="sensor-alias">{{ s.alias }}</div>
-                <div class="sensor-key">{{ s.sensorId }} · {{ s.type }}</div>
-                <div class="sensor-meta">
-                  @if (s.lastSeenAt) {
-                    last seen {{ s.lastSeenAt | date:'short' }}
-                  } @else {
-                    never reported
-                  }
-                  @if (s.lastSignalQuality !== null) {
-                    · signal {{ s.lastSignalQuality | number:'1.0-0' }}
-                  }
-                  @if (s.firmwareVersion) {
-                    · fw {{ s.firmwareVersion }}
-                  }
-                </div>
-              </div>
-              <div class="badges">
-                @if (s.snoozedUntil && isFuture(s.snoozedUntil)) {
-                  <span class="badge snoozed">snoozed</span>
-                }
-                @if (s.pendingState === 'flowing') {
-                  <span class="badge flowing">flowing</span>
-                }
-                @if (isStale(s)) {
-                  <span class="badge stale">stale</span>
-                }
-                @if (s.lastMeterReachable === false) {
-                  <span class="badge no-meter" title="Device is online but the flow meter isn't responding (Modbus read failed). Wire up the TUF-2000M to start collecting readings.">no meter</span>
-                }
-                @if (updateAvailableFor(s); as latest) {
-                  <span class="badge update" [title]="'Update available: v' + latest">Update v{{ latest }}</span>
-                }
-              </div>
-            </a>
-          }
-        </div>
+        <app-settings-tiles [tiles]="tiles()" [searchable]="false" (open)="openSensor($event)" />
+      }
       }
 
       @if (auth.user()?.role === 'admin') {
-        <app-motion-rules />
+        <app-motion-rules (paging)="paging.set($event)" />
       }
     </div>
   `,
@@ -148,6 +111,42 @@ export class SensorsComponent implements OnInit, OnDestroy {
   private firmware = inject(FirmwareService);
   private socket   = inject(SocketService);
   readonly auth    = inject(AuthService);
+
+  private router = inject(Router);
+  /** A motion light is open as its own page: the rest of the page steps aside. */
+  readonly paging = signal(false);
+
+  /** Each sensor as a tile, with what it's doing and a Look badge when it needs attention. */
+  readonly tiles = computed<SettingsTile[]>(() => this.sensors().map((s) => {
+    const stale = this.isStale(s);
+    const update = this.updateAvailableFor(s);
+    const status = stale ? `Not reporting · last seen ${this.ago(s.lastSeenAt)}`
+      : !s.lastSeenAt ? 'Never reported'
+      : s.lastMeterReachable === false ? 'Online, but the flow meter isn\'t answering'
+      : s.pendingState === 'flowing' ? 'Water flowing now'
+      : s.snoozedUntil && this.isFuture(s.snoozedUntil) ? 'Alerts snoozed'
+      : `No flow · seen ${this.ago(s.lastSeenAt)}`;
+    return {
+      key: String(s.id), name: s.alias, group: 'Water flow', icon: 'drop', hue: '#5aa9ff',
+      status: update && !stale ? `${status} · update v${update}` : status,
+      look: stale || s.lastMeterReachable === false || !s.lastSeenAt,
+      words: `${s.sensorId} ${s.type}`,
+    } satisfies SettingsTile;
+  }));
+
+  openSensor(key: string): void { void this.router.navigate(['/sensors', Number(key)]); }
+
+  /** "5 min ago", from the server's UTC time. */
+  private ago(at: string | null): string {
+    if (!at) return 'never';
+    const t = Date.parse(at.includes('T') ? at : at.replace(' ', 'T') + 'Z');
+    const mins = Math.round((Date.now() - t) / 60_000);
+    if (!Number.isFinite(mins)) return 'a while ago';
+    if (mins < 1) return 'just now';
+    if (mins < 60) return `${mins} min ago`;
+    const h = Math.round(mins / 60);
+    return h < 48 ? `${h} h ago` : new Date(t).toLocaleDateString([], { month: 'short', day: 'numeric' });
+  }
 
   loading  = signal(true);
   sensors  = signal<Sensor[]>([]);

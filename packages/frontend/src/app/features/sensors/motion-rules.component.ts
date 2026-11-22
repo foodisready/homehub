@@ -1,4 +1,6 @@
-import { Component, OnDestroy, OnInit, computed, inject, signal } from '@angular/core';
+import { Component, DestroyRef, OnDestroy, OnInit, computed, inject, output, signal } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { ActivatedRoute, Router } from '@angular/router';
 import { DatePipe } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
@@ -93,18 +95,43 @@ interface FoundSensor { ip: string; name: string; model: string; needsLogin: boo
     .light .alias { flex: 1 1 8rem; min-width: 0; font-weight: 600; overflow-wrap: anywhere; }
     .lights select { width: 100%; }
     .btn-x { background: transparent; border: 1px solid var(--border); color: var(--text-muted); padding: 0.3rem 0.6rem; font-size: 0.8rem; line-height: 1; }
+    .card-rule { display: grid; gap: 0.2rem; width: 100%; text-align: left; padding: 0.85rem 1rem; margin-bottom: 0.6rem; border: 1px solid var(--border); border-radius: 16px; background: var(--surface); color: var(--text); font: inherit; cursor: pointer; }
+    .card-rule:hover { border-color: var(--accent); }
+    .card-rule .what { display: flex; flex-wrap: wrap; gap: 0.35rem; align-items: baseline; font-size: 0.93rem; }
+    .card-rule .arrow { color: var(--text-muted); }
+    .card-rule .how { font-size: 0.8rem; color: var(--text-muted); }
+    .card-rule .now { font-size: 0.8rem; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+    .card-rule .now.live { color: #4ade80; font-weight: 600; }
+    .card-rule .now.warn { color: #fbbf24; }
+    .add { width: 100%; border: 1px dashed var(--border); border-radius: 16px; padding: 0.8rem; background: none; color: var(--accent); font-weight: 600; }
+    .page-in { animation: hh-slide .28s cubic-bezier(.2, .8, .2, 1); }
     .btn-remove { background: transparent; border: 1px solid var(--border); color: var(--text-muted); padding: 0.3rem 0.7rem; font-size: 0.8rem; }
   `],
   template: `
-    <h2 class="title">Motion lights</h2>
-    <p class="sub">Turns a light off when a room has had no motion for a while, and can turn it on when motion starts.</p>
+    @if (openId() === null) {
+      <h2 class="title">Motion lights</h2>
+      <p class="sub">Turns a light off when a room has had no motion for a while, and can turn it on when motion starts. Tap one to change it.</p>
+      @for (rule of rules(); track rule.id) {
+        <button type="button" class="card-rule" (click)="openRule(rule.id)">
+          <span class="what"><b>{{ sensorName(rule) }}</b><span class="arrow" aria-hidden="true">→</span><b>{{ lightNames(rule) }}</b></span>
+          <span class="how">{{ summary(rule) }}</span>
+          <span class="now" [class.live]="rule.status.kind === 'occupied' || rule.status.kind === 'counting'" [class.warn]="!hasSensor(rule) || rule.status.kind === 'offline'">{{ nowText(rule) }}</span>
+        </button>
+      }
+      <button type="button" class="add" (click)="openRule('new')">+ Add motion light</button>
+    } @else {
+      <div class="hh-pagebar">
+        <button type="button" class="hh-back" (click)="closeRule()" aria-label="Back to Sensors"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg></button>
+        <h2>{{ openRuleName() }}</h2>
+      </div>
+    }
 
-    @for (rule of rules(); track rule.id) {
-      <div class="rule">
+    @for (rule of openRules(); track rule.id) {
+      <div class="rule page-in">
         <div class="head">
           <input class="name" [ngModel]="rule.name" aria-label="Rule name" autocomplete="off"
                  (change)="save(rule, { name: value($event) })" />
-          <button class="btn-remove" (click)="remove(rule)">Remove</button>
+          <button class="btn-remove" (click)="removing.set(rule)">Remove</button>
         </div>
         <div class="meta">
           @switch (rule.status.kind) {
@@ -277,7 +304,9 @@ interface FoundSensor { ip: string; name: string; model: string; needsLogin: boo
       </div>
     }
 
-    <div class="form">
+    @if (openId() === 'new') {
+    <div class="form page-in">
+      <p class="meta">Name it, pick the first light and how long to wait. Next, you choose its sensor: a Shelly Motion or a Ring camera.</p>
       <div class="fields">
         <input [(ngModel)]="newName" placeholder="Name, such as Kitchen" autocomplete="off" />
         <select [(ngModel)]="newDeviceId">
@@ -295,6 +324,18 @@ interface FoundSensor { ip: string; name: string; model: string; needsLogin: boo
       </label>
       @if (createError()) { <span class="err">{{ createError() }}</span> }
     </div>
+    }
+
+    @if (removing(); as r) {
+      <div class="hh-scrim" (click)="removing.set(null)">
+        <div class="hh-sheet" role="dialog" aria-modal="true" aria-labelledby="rm-title" (click)="$event.stopPropagation()">
+          <div class="hh-grab"></div>
+          <h3 id="rm-title">Remove {{ r.name }}?</h3>
+          <p class="meta" style="margin:0 0 1rem;line-height:1.45">Motion stops switching {{ r.lights.length > 1 ? 'these lights' : 'this light' }}. The lights and the sensor themselves aren't changed.</p>
+          <div class="hh-acts"><button type="button" (click)="removing.set(null)">Cancel</button><button type="button" class="danger" (click)="remove(r)">Remove</button></div>
+        </div>
+      </div>
+    }
   `,
 })
 export class MotionRulesComponent implements OnInit, OnDestroy {
@@ -330,7 +371,74 @@ export class MotionRulesComponent implements OnInit, OnDestroy {
   readonly searched   = signal(false);
   readonly found      = signal<FoundSensor[]>([]);
 
+  // ── Each rule as a card; one open at a time as its own page (?rule= in the address) ──
+  private readonly router = inject(Router);
+  private readonly route = inject(ActivatedRoute);
+  private readonly destroyRef = inject(DestroyRef);
+  /** The open rule, 'new' for adding one, or null for every card. */
+  readonly openId = signal<number | 'new' | null>(null);
+  /** Tells the page a rule is open, so it can hide the rest. */
+  readonly paging = output<boolean>();
+  readonly removing = signal<MotionRule | null>(null);
+  private openedHere = false;
+  readonly openRules = computed(() => this.rules().filter((r) => r.id === this.openId()));
+  readonly openRuleName = computed(() => this.openId() === 'new' ? 'New motion light' : this.openRules()[0]?.name ?? 'Motion light');
+
+  openRule(id: number | 'new'): void {
+    this.openedHere = true;
+    void this.router.navigate([], { relativeTo: this.route, queryParams: { rule: id }, queryParamsHandling: 'merge' });
+  }
+
+  closeRule(): void {
+    if (this.openedHere) { this.openedHere = false; history.back(); return; }
+    void this.router.navigate([], { relativeTo: this.route, queryParams: { rule: null }, queryParamsHandling: 'merge', replaceUrl: true });
+  }
+
+  hasSensor(rule: MotionRule): boolean { return rule.ringCameraId !== null || !!rule.sensorIp; }
+
+  sensorName(rule: MotionRule): string {
+    if (rule.ringCameraId !== null) return rule.ringCameraName ?? 'Ring camera';
+    return rule.sensorIp ? rule.name : `${rule.name} (no sensor yet)`;
+  }
+
+  lightNames(rule: MotionRule): string { return rule.lights.map((l) => l.alias).join(' + '); }
+
+  /** The rule in a line: "On with motion, off after 10 min without motion · after sunset". */
+  summary(rule: MotionRule): string {
+    const when = { always: '', dark: 'when the room is dark', sun: 'between sunset and sunrise', hours: `${rule.hoursFrom}–${rule.hoursTo}` }[rule.turnOnWhen];
+    return `${rule.turnOnWithMotion ? 'On with motion, off' : 'Off'} after ${rule.offAfterMinutes} min without motion${rule.turnOnWithMotion && when ? ' · ' + when : ''}`;
+  }
+
+  /** What it's doing now, in a few words. */
+  nowText(rule: MotionRule): string {
+    if (!this.hasSensor(rule)) return 'Choose its sensor';
+    switch (rule.status.kind) {
+      case 'waiting': return "Waiting for the sensor's first report";
+      case 'occupied': return 'Motion now';
+      case 'counting': return `Off in ${this.countdown(rule.status)}`;
+      case 'held': return 'On a keep-on timer';
+      case 'offline': return rule.lights.length > 1 ? 'Lights offline' : 'Light offline';
+      default: return rule.lastMotionAt ? `Off · last motion ${this.ago(rule.lastMotionAt)}` : 'Off';
+    }
+  }
+
+  private ago(iso: string): string {
+    const mins = Math.round((this.now() - Date.parse(iso)) / 60_000);
+    if (mins < 1) return 'just now';
+    if (mins < 60) return `${mins} min ago`;
+    const h = Math.round(mins / 60);
+    return h < 24 ? `${h} h ago` : new Date(iso).toLocaleDateString([], { month: 'short', day: 'numeric' });
+  }
+
   ngOnInit(): void {
+    this.route.queryParamMap.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((q) => {
+      const raw = q.get('rule');
+      const id = raw === 'new' ? 'new' : raw && /^\d+$/.test(raw) ? Number(raw) : null;
+      if (id === null) this.openedHere = false;
+      if (id !== this.openId()) window.scrollTo({ top: 0 });
+      this.openId.set(id);
+      this.paging.emit(id !== null);
+    });
     this.load();
     this.loadDevices();
     this.http.get<{ cameras: RingCameraChoice[] }>('/api/ring').subscribe({ next: (r) => this.ringCameras.set(r.cameras), error: () => undefined });
@@ -473,6 +581,7 @@ export class MotionRulesComponent implements OnInit, OnDestroy {
         this.newDeviceId = null;
         this.newMinutes = 10;
         this.load();
+        if (created?.id) void this.router.navigate([], { relativeTo: this.route, queryParams: { rule: created.id }, queryParamsHandling: 'merge', replaceUrl: true });
         // Next step for a new rule: its sensor. With Ring cameras to choose from, let the card ask.
         if (created?.id && !this.ringCameras().length) this.startConnect(created);
         else if (created?.id) this.show(created, 'Added. Now choose its sensor: a Shelly Motion or a Ring camera.', false);
@@ -504,7 +613,8 @@ export class MotionRulesComponent implements OnInit, OnDestroy {
   }
 
   remove(rule: MotionRule): void {
-    this.http.delete(`/api/motion/${rule.id}`).subscribe(() => this.load());
+    this.removing.set(null);
+    this.http.delete(`/api/motion/${rule.id}`).subscribe(() => { this.load(); if (this.openId() === rule.id) this.closeRule(); });
   }
 
   startConnect(rule: MotionRule): void {

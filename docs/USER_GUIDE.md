@@ -497,8 +497,8 @@ To resume them, say "resume the cameras" or "turn the cameras back on". Anyone c
 Motion lights turn a light on when someone arrives, and off once the room has been empty for a set time. They need a first-generation Shelly Motion.
 
 1. Set up the sensor on your Wi-Fi with the Shelly app or its setup page, and reserve its address on your router.
-2. Open **Sensors** and go to **Motion lights**.
-3. Enter a name, choose a light and set the minutes, then select **Add**.
+2. Open **Sensors**, and under **Motion lights** select **+ Add motion light**.
+3. Enter a name, choose a light and set the minutes, then select **Add**. The new motion light opens on its own page.
 4. Press the sensor's button to wake it. A new rule searches for sensors straight away; for an existing one, select **Connect sensor**, then **Find sensors**.
 5. Pick your sensor from the list. HomeHub fills in its address, and the username `admin` if it has a login. Enter its password if it has one, then select **Connect**. If the sensor isn't listed, press its button and search again, or type its address.
 
@@ -509,7 +509,9 @@ A sensor already used by another rule is marked. Picking it moves it to this rul
 
 A Ring doorbell or camera can be a rule's sensor instead of a Shelly Motion (a rule has one sensor, so choosing Ring replaces the Shelly): choose it under **Ring camera** on the rule's card, after adding it on the Cameras page. Its motion counts, and so does the doorbell ringing, so a porch light can come on for whoever's at the door. Ring sends no "motion over", so the rule hears it a minute after the last motion. Ring has no light reading, so **When the room is dark** needs a Shelly Motion; use **Between sunset and sunrise** instead.
 
-A rule does nothing until its sensor first reports. Its card shows what it's doing, including a countdown to when the light turns off. The countdown clears when the light goes off, within about a minute if you use a wall switch. Turning a light off at the wall also ends any timer it had, so motion can turn it back on. Motion leaves a light alone while you've chosen **Keep off for**, and while it's on with a timer, so the timer still turns it off. Clear **Turn on when motion starts** to only turn lights off. You can edit a rule's name, lights and minutes on its card, and test each light with the button next to it.
+Each motion light shows on the Sensors page as a card that reads as one line, such as "Hallway sensor → Hallway ceiling + Stair lamp", with how it works ("On with motion, off after 10 min without motion · between sunset and sunrise") and what it's doing now. Tap a card to change it on its own page; the arrow at the top, or your phone's Back button, goes back. **Remove** there asks first.
+
+A rule does nothing until its sensor first reports. Its page shows what it's doing, including a countdown to when the light turns off. The countdown clears when the light goes off, within about a minute if you use a wall switch. Turning a light off at the wall also ends any timer it had, so motion can turn it back on. Motion leaves a light alone while you've chosen **Keep off for**, and while it's on with a timer, so the timer still turns it off. Clear **Turn on when motion starts** to only turn lights off. You can edit a rule's name, lights and minutes on its page, and test each light with the button next to it.
 
 ### Several lights from one sensor
 
