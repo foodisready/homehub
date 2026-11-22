@@ -143,3 +143,24 @@ input.own-clear::-webkit-search-cancel-button { -webkit-appearance: none; appear
   html, body { background: #fff !important; color: #000 !important; }
   .page { padding: 0 !important; max-width: none !important; }
 }
+
+/* ── Bottom sheets: a panel that slides up over a dimmed page (Rooms view, Settings) ── */
+.hh-scrim { position: fixed; inset: 0; background: rgba(2, 6, 23, .6); z-index: 200; display: flex; align-items: flex-end; justify-content: center; animation: hh-fade .2s ease; }
+.hh-sheet { width: min(560px, 100%); max-height: 85vh; overflow-y: auto; background: var(--surface); border-radius: 22px 22px 0 0; border-top: 1px solid var(--border);
+  padding: 0.6rem max(1.1rem, env(safe-area-inset-left, 0px)) calc(1.2rem + env(safe-area-inset-bottom, 0px)); animation: hh-up .26s cubic-bezier(.2,.8,.2,1); }
+.hh-grab { width: 2.5rem; height: 4px; border-radius: 4px; background: var(--border); margin: 0 auto 0.9rem; }
+.hh-sheet h3 { margin: 0 0 0.35rem; font-size: 1.05rem; }
+.hh-sheet p { margin: 0 0 1rem; color: var(--text-muted); line-height: 1.45; }
+.hh-acts { display: flex; gap: 0.6rem; }
+.hh-acts button { flex: 1; padding: 0.75rem; border-radius: 12px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font-weight: 600; }
+.hh-acts .danger { background: var(--red); border-color: var(--red); color: #fff; }
+@keyframes hh-up { from { transform: translateY(100%); } }
+@keyframes hh-fade { from { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .hh-scrim, .hh-sheet { animation: none; } }
+
+/* ── Status chips: small rounded labels for what's on, a temperature, or a problem ── */
+.hh-chip { font-size: 0.72rem; padding: 0.15rem 0.5rem; border-radius: 999px; background: #26354d; color: var(--text-muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.hh-chip.on { color: #4ade80; background: color-mix(in srgb, var(--green) 16%, #26354d); }
+.hh-chip.heat { color: #fb923c; background: color-mix(in srgb, #fb923c 15%, #26354d); }
+.hh-chip.cool { color: #60a5fa; background: color-mix(in srgb, #60a5fa 15%, #26354d); }
+.hh-chip.warn { color: #fca5a5; background: color-mix(in srgb, var(--red) 15%, #26354d); }

@@ -10,9 +10,15 @@ import { SystemStatusComponent } from './system-status.component';
 import { HomeSetupNoticeComponent } from './home-setup-notice.component';
 import { CamerasCardComponent } from './cameras-card.component';
 import { AwayComponent } from './away.component';
+import { RoomsViewComponent } from './rooms-view.component';
 import { Device } from '../../shared/models/device.model';
 
 const COLLAPSED_KEY = 'homehub.dashboard.collapsed';
+const VIEW_KEY = 'homehub.dashboard.view';
+
+function loadView(): 'rooms' | 'list' {
+  try { return localStorage.getItem(VIEW_KEY) === 'list' ? 'list' : 'rooms'; } catch { return 'rooms'; }
+}
 const OFFLINE = 'Offline';
 const UNASSIGNED = 'Unassigned';
 
@@ -48,7 +54,7 @@ const isThermostat = (d: Device) => d.driverConfig?.['kind'] === 'thermostat';
 @Component({
   selector: 'app-dashboard',
   standalone: true,
-  imports: [DeviceRowComponent, DeviceFilterComponent, SystemStatusComponent, HomeSetupNoticeComponent, CamerasCardComponent, AwayComponent, DecimalPipe],
+  imports: [DeviceRowComponent, RoomsViewComponent, DeviceFilterComponent, SystemStatusComponent, HomeSetupNoticeComponent, CamerasCardComponent, AwayComponent, DecimalPipe],
   styles: [`
     .topbar {
       display: flex;
@@ -63,6 +69,11 @@ const isThermostat = (d: Device) => d.driverConfig?.['kind'] === 'thermostat';
     .topbar-right { display: flex; align-items: center; flex-wrap: wrap; gap: 0.6rem 1rem; }
 
     app-device-filter { margin-bottom: 1rem; }
+    .view-bar { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.75rem; flex-wrap: wrap; }
+    .view-bar .total { margin: 0; }
+    .seg { display: inline-flex; background: var(--surface); border: 1px solid var(--border); border-radius: 999px; padding: 3px; margin-left: auto; }
+    .seg button { border: 0; background: none; color: var(--text-muted); padding: 0.3rem 0.9rem; border-radius: 999px; font-size: 0.82rem; }
+    .seg button[aria-pressed="true"] { background: var(--accent); color: #fff; font-weight: 600; }
     .total { color: var(--text-muted); font-size: 0.8rem; margin-bottom: 0.75rem; }
 
     .rooms {
@@ -127,10 +138,19 @@ const isThermostat = (d: Device) => d.driverConfig?.['kind'] === 'thermostat';
         </div>
       } @else {
         <app-device-filter [devices]="devices()" [(search)]="search" [(filter)]="filter" />
-        @if (totalWattage() > 0) {
-          <div class="total">{{ totalWattage() | number:'1.1-1' }} W in use</div>
-        }
+        <div class="view-bar">
+          @if (totalWattage() > 0) { <div class="total">{{ totalWattage() | number:'1.1-1' }} W in use</div> }
+          <div class="seg" role="group" aria-label="Show devices as">
+            <button type="button" [attr.aria-pressed]="view() === 'rooms'" (click)="setView('rooms')">Rooms</button>
+            <button type="button" [attr.aria-pressed]="view() === 'list'" (click)="setView('list')">List</button>
+          </div>
+        </div>
 
+        @if (view() === 'rooms') {
+          <app-rooms-view [devices]="roomDevices()" [busyIds]="busyIds()"
+                          (toggled)="toggle($event)" (overrideSet)="setOverride($event)"
+                          (overrideCancelled)="cancelOverride($event)" (allOff)="allOff($event)" />
+        } @else {
         <div class="rooms">
           @for (section of sections(); track section.name) {
             <section class="card room" [class.lit]="section.anyOn">
@@ -160,6 +180,7 @@ const isThermostat = (d: Device) => d.driverConfig?.['kind'] === 'thermostat';
             <div class="empty">No devices match.</div>
           }
         </div>
+        }
       }
 
     </div>
@@ -177,6 +198,16 @@ export class DashboardComponent implements OnInit, OnDestroy {
   readonly search = signal('');
   readonly filter = signal<DeviceFilter>('all');
   private readonly collapsed = signal(loadCollapsed());
+  /** Rooms (tiles, and a room's devices as bubbles) or the list. */
+  readonly view = signal(loadView());
+
+  setView(v: 'rooms' | 'list'): void {
+    this.view.set(v);
+    try { localStorage.setItem(VIEW_KEY, v); } catch { /* the choice lasts this visit */ }
+  }
+
+  /** What the Rooms view shows: the search and filter's matches, offline ones in their own rooms. */
+  readonly roomDevices = computed(() => this._devices().filter((d) => matchesDevice(d, this.search(), this.filter())));
 
   /** Rooms in name order, then devices with no room, then offline devices. */
   readonly sections = computed<DeviceSection[]>(() => {

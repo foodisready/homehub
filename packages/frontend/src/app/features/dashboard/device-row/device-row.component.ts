@@ -136,6 +136,8 @@ export interface OverrideRequest { device: Device; durationMinutes: number; }
 export class DeviceRowComponent implements OnDestroy {
   device = input.required<Device>();
   busy   = input(false);
+  /** Opens with its panel showing: the Rooms view's controls for one device. */
+  startOpen = input(false);
 
   toggled           = output<Device>();
   overrideSet       = output<OverrideRequest>();
@@ -158,6 +160,7 @@ export class DeviceRowComponent implements OnDestroy {
   private ticker?: ReturnType<typeof setInterval>;
 
   constructor() {
+    effect(() => { if (this.startOpen()) untracked(() => { this.open.set(true); this.loadRecent(); }); });
     effect(() => {
       const timed = !!this.device().autoOff?.at;
       if (timed && !this.ticker) this.ticker = setInterval(() => this.now.set(Date.now()), 1000);

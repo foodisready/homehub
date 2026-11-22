@@ -366,7 +366,13 @@ HomeHub keeps each device's daily hours and measured energy for as long as it ru
 
 Rooms keep the dashboard short. Open **Settings → Devices**, select **Edit** on a device, and enter a room. Devices with no room appear under **Unassigned**.
 
-On the dashboard, you can collapse a room, and **All off** turns off everything in it except protected devices. Offline devices move to their own group at the bottom.
+Home shows your devices as **Rooms** at first, or as a **List**: switch at the top, and HomeHub remembers your choice on each browser.
+
+- **Rooms:** a tile for each room, glowing warmer the more of its lights are on. Its chips show how many lights and plugs are on, the room's temperature if it has a thermostat (orange while heating, blue while cooling), a garage door left open, and anything offline, which also puts a red dot on the tile. **Camera** means a camera there is watching. Lights are recognized by their names, such as "lamp", "light" or "đèn".
+- **A room:** tap a tile and it grows into the room. Its devices hang off the room as round bubbles; a line lights up when a device is on. Tap a bubble to switch it, and press and hold it for its controls: timers, a thermostat's temperature and mode, and recent activity. Thermostats turned off, garage doors, pausing a camera and protected devices ask first, as on the list. A room with more than 8 devices shows them as a grid instead. **‹** and **›** at the bottom move to the next room, and the arrow at the top goes back to the tiles. Searching and filtering work here too.
+- **List:** each room folds open and shut. Offline devices move to their own group at the bottom.
+
+**All off** turns off a room's lights and plugs, leaving protected devices and thermostats alone.
 
 Search by device name, nickname or room, or use the **On** and **Offline** filters. The same search is in **Settings → Devices**. On a computer, press `/` to jump to search.
 
