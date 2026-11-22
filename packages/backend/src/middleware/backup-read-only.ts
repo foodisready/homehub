@@ -24,6 +24,7 @@ const ALLOWED: [string, RegExp][] = [
   ['POST', /^\/devices\/[^/]+\/(on|off)$/],
   ['POST', /^\/scenes\/[^/]+\/run$/],
   ['POST', /^\/lock\/check$/],                           // unlocking a wall tablet
+  ['POST', /^\/devices\/check$/],                        // reading devices now: changes nothing
   ['POST', /^\/nlp(\/stream)?$/],                       // chat: "turn on the kitchen lights"
   ['*', /^\/system(\/|$)/],
   ['*', /^\/backups(\/|$)/],

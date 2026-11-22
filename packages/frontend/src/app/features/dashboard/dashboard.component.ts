@@ -283,7 +283,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
   }
 
   ngOnInit(): void {
-    this.loadDevices();
+    this.catchUp();
     this.subscribeSocket();
     // Schedules and motion rules can start a countdown on their own.
     this.autoOffInterval = setInterval(() => { if (!document.hidden) this.refreshAutoOff(0); }, 60_000);
@@ -295,8 +295,13 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
   private readonly onVisible = () => { if (!document.hidden) this.catchUp(); };
 
+  /**
+   * Back on screen: show what HomeHub last saw at once, then ask it to read every device now and
+   * show that, so a door opened while the phone was in a pocket doesn't wait for the next check.
+   */
   private catchUp(): void {
     this.loadDevices(() => this.refreshAutoOff(0));
+    this.http.post('/api/devices/check', {}).subscribe({ next: () => this.loadDevices(), error: () => undefined });
   }
 
   ngOnDestroy(): void {

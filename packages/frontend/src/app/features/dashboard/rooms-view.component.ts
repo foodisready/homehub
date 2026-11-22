@@ -1,6 +1,7 @@
 import {
   AfterViewChecked, ChangeDetectorRef, Component, ElementRef, OnDestroy, computed, effect, inject, input, output, signal, untracked, viewChild,
 } from '@angular/core';
+import { HttpClient } from '@angular/common/http';
 import type { Device } from '../../shared/models/device.model';
 import { ThermostatService, offQuestion, shown } from '../../shared/thermostat/thermostat.service';
 import { DeviceRowComponent, OverrideRequest } from './device-row/device-row.component';
@@ -97,9 +98,12 @@ const MAX_WIRED = 8;
     .ico svg { width: 1.35rem; height: 1.35rem; }
     .name { position: relative; font-weight: 650; font-size: 0.98rem; line-height: 1.2; text-wrap: balance; }
     .meta { position: relative; display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: auto; }
-    .live { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.7rem; color: var(--text-muted); }
-    .live::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--red); box-shadow: 0 0 6px var(--red); }
-    .alert { position: absolute; top: 0.6rem; right: 0.6rem; width: 9px; height: 9px; border-radius: 50%; background: var(--red); box-shadow: 0 0 0 3px var(--surface); }
+    /* A camera watching: the red REC light, the one use of a red dot here. Problems are said in words (the "offline" chip). */
+    .live { display: inline-flex; align-items: center; gap: .3rem; font-size: .7rem; color: var(--text-muted); padding: .15rem .45rem; border-radius: 99px; background: var(--surface-2); }
+    .live svg { width: .85rem; height: .85rem; }
+    .live i { width: 6px; height: 6px; border-radius: 50%; background: var(--red); }
+    /* Lights and plugs on: warm, like the tile's glow, not green. */
+    .tile .hh-chip.on { color: var(--warm); background: #fbbf2429; }
 
     .head { border-radius: 20px; padding: 0.85rem; background: var(--surface); border: 1px solid var(--line); position: relative; overflow: hidden; }
     .head .glow { background: radial-gradient(120% 120% at 50% 0%, color-mix(in srgb, var(--warm) calc(var(--lit) * 28%), transparent), transparent 70%); }
@@ -208,7 +212,7 @@ const MAX_WIRED = 8;
             <span class="glow"></span>
             <span class="top">
               <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path [attr.d]="path(r.icon)" /></svg></span>
-              @if (r.camera) { <span class="live">Camera</span> }
+              @if (r.camera) { <span class="live" title="A camera here is watching"><i></i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path [attr.d]="path('camera')" /></svg>Watching</span> }
             </span>
             <span class="name">{{ r.name }}</span>
             <span class="meta">
@@ -223,7 +227,6 @@ const MAX_WIRED = 8;
               @if (r.door) { <span class="hh-chip" [class.warn]="r.openDoor">{{ r.openDoor ? 'Door open' : 'Door closed' }}</span> }
               @if (r.offline) { <span class="hh-chip warn">{{ r.offline }} offline</span> }
             </span>
-            @if (r.offline) { <span class="alert" aria-hidden="true"></span> }
           </button>
         } @empty {
           <p class="hint">No devices match.</p>
@@ -267,6 +270,18 @@ export class RoomsViewComponent implements AfterViewChecked, OnDestroy {
 
   private readonly thermostats = inject(ThermostatService);
   private readonly cd = inject(ChangeDetectorRef);
+  private readonly http = inject(HttpClient);
+
+  /**
+   * A room just opened: read its devices now rather than show what the last regular check saw, so
+   * a garage door opened with its remote shows open. Changes arrive as live updates.
+   */
+  private readonly checkOpenRoom = effect(() => {
+    const name = this.openName();
+    if (name === null) return;
+    const ids = untracked(() => this.tiles().find((t) => t.name === name)?.devices.map((d) => d.id) ?? []);
+    if (ids.length) this.http.post('/api/devices/check', { ids }).subscribe({ error: () => undefined });
+  });
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   private readonly map = viewChild<ElementRef<HTMLElement>>('map');
   private readonly hub = viewChild<ElementRef<HTMLElement>>('hub');
@@ -399,7 +414,7 @@ export class RoomsViewComponent implements AfterViewChecked, OnDestroy {
   }
 
   tileSummary(r: RoomTile): string {
-    return [r.of ? `${r.on} of ${r.of} on` : '', r.openDoor ? 'door open' : '', r.offline ? `${r.offline} offline` : ''].filter(Boolean).join(', ');
+    return [r.of ? `${r.on} of ${r.of} on` : '', r.camera ? 'camera watching' : '', r.openDoor ? 'door open' : '', r.offline ? `${r.offline} offline` : ''].filter(Boolean).join(', ');
   }
   subtitle(r: RoomTile): string {
     const parts = [r.of ? `${r.on} of ${r.of} lights and plugs on` : 'No lights or plugs'];

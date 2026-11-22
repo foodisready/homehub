@@ -106,7 +106,20 @@ export function resetNoPower(): void { lowSince.clear(); usualDraw.clear(); }
 const TUYA_POLL_INTERVAL_MS = 5 * 60 * 1000;
 const tuyaLastPolled = new Map<number, number>();
 
-async function pollDevice(
+/** Reads in progress, so two callers asking about one device share a single read. */
+const reading = new Map<number, Promise<void>>();
+
+function pollDevice(
+  id: number, ip: string, alias: string, hasEmeter: boolean, driverType: string, driverConfig: Record<string, unknown> | undefined,
+): Promise<void> {
+  const busy = reading.get(id);
+  if (busy) return busy;
+  const read = readDevice(id, ip, alias, hasEmeter, driverType, driverConfig).finally(() => reading.delete(id));
+  reading.set(id, read);
+  return read;
+}
+
+async function readDevice(
   id: number,
   ip: string,
   alias: string,
@@ -204,6 +217,32 @@ export async function pollDeviceNow(id: number): Promise<void> {
   if (!d) return;
   const config = d.driver_config ? JSON.parse(d.driver_config) : undefined;
   await pollDevice(d.id, d.ip, d.alias, d.has_emeter === 1, d.driver_type ?? 'kasa', config);
+}
+
+type Row = { id: number; ip: string; alias: string; has_emeter: number; driver_type: string; driver_config: string | null };
+const pollRow = (d: Row) => pollDevice(d.id, d.ip, d.alias, d.has_emeter === 1, d.driver_type ?? 'kasa', d.driver_config ? JSON.parse(d.driver_config) : undefined);
+
+/** A device read this recently is fresh enough for "check now". */
+export const FRESH_MS = 3_000;
+/** "Check now" answers by then even if a device is slow; its state still arrives over the socket. */
+export const CHECK_WAIT_MS = 4_000;
+
+/**
+ * Reads these devices now (all, if none are named) instead of waiting up to a poll interval, for a
+ * screen that just opened: a garage door opened with its remote shows open straight away. Devices
+ * read in the last few seconds are skipped, and Tuya keeps its own limit (see pollDevice).
+ */
+export async function checkNow(ids?: number[], now = Date.now()): Promise<void> {
+  const rows = getDb().prepare('SELECT id, ip, alias, has_emeter, driver_type, driver_config FROM devices').all() as Row[];
+  const want = ids?.length ? new Set(ids) : null;
+  const stale = rows.filter((d) => (!want || want.has(d.id)) && now - (cache.get(d.id)?.lastPolled.getTime() ?? 0) >= FRESH_MS);
+  if (!stale.length) return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([
+    Promise.allSettled(stale.map(pollRow)),
+    new Promise<void>((resolve) => { timer = setTimeout(resolve, CHECK_WAIT_MS); }),
+  ]);
+  clearTimeout(timer);
 }
 
 /** Forget cached states and poll again, after the device list was replaced (e.g. a restore). */

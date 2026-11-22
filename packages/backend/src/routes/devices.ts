@@ -3,7 +3,7 @@ import { WyzeCloudError } from '../cameras/wyze-cloud';
 import { reconcileDiscovered } from '../drivers/reconcile';
 import type { DiscoveredDevice } from '../drivers/DeviceDriver';
 import { getDb } from '../db';
-import { getCachedState, getAllCachedStates, noteState, pollDeviceNow } from '../kasa/device.cache';
+import { checkNow, getCachedState, getAllCachedStates, noteState, pollDeviceNow } from '../kasa/device.cache';
 import { forgetIfUnused } from '../matter/service';
 import { getDriver, getAllDrivers } from '../drivers/registry';
 import { isSensorOnlyShelly } from '../drivers/ShellyDriver';
@@ -133,6 +133,18 @@ devicesRouter.get('/', (_req: Request, res: Response) => {
   const changes = lastChanges();
   const autoOff = pendingAutoOff();
   res.json(devices.map((d) => mergeWithCache(d, changes, autoOff)));
+});
+
+// POST /api/devices/check { ids?: number[] } — read these devices now (all if none), for a screen that just
+// opened. Answers once they're read, or after a few seconds; changes also arrive over the socket.
+devicesRouter.post('/check', async (req: Request, res: Response) => {
+  const raw = (req.body ?? {}).ids;
+  if (raw !== undefined && (!Array.isArray(raw) || raw.length > 200 || !raw.every((n) => Number.isInteger(n) && n > 0))) {
+    res.status(400).json({ error: 'ids must be a list of device ids', code: 'VALIDATION_ERROR' });
+    return;
+  }
+  await checkNow(raw as number[] | undefined);
+  res.status(204).end();
 });
 
 // GET /api/devices/auto-off — { [deviceId]: AutoOff } for devices that will turn themselves off

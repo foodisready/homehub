@@ -50,4 +50,31 @@ describe('checking devices on a backup HomeHub', () => {
     await cache.pollDeviceNow(id('Bedside'));
     assert.deepEqual(reads, ['tuya 10.0.0.38']);
   });
+
+  it('"check now" reads only the devices named, and skips one read seconds ago', async () => {
+    role('active');
+    db.prepare("INSERT INTO devices (alias, ip, driver_type) VALUES ('Desk', '10.0.0.77', 'kasa')").run();
+    reads = [];
+    await cache.checkNow([id('Desk')]);
+    assert.deepEqual(reads, ['kasa 10.0.0.77']);
+    reads = [];
+    await cache.checkNow([id('Desk')]);
+    assert.deepEqual(reads, [], 'just read: fresh enough');
+    reads = [];
+    await cache.checkNow([id('Desk')], Date.now() + cache.FRESH_MS);
+    assert.deepEqual(reads, ['kasa 10.0.0.77'], 'a few seconds later it reads again');
+  });
+
+  it('two callers asking about one device at once share a single read', async () => {
+    const { getDriver } = await import('../drivers/registry');
+    const kasa = getDriver('kasa') as any;
+    const was = kasa.getPower;
+    let calls = 0;
+    kasa.getPower = async () => { calls++; await new Promise((r) => setTimeout(r, 30)); return false; };
+    try {
+      await Promise.all([cache.pollDeviceNow(id('Desk')), cache.pollDeviceNow(id('Desk'))]);
+      assert.equal(calls, 1);
+      assert.equal(cache.getCachedState(id('Desk'))?.state, false);
+    } finally { kasa.getPower = was; }
+  });
 });
