@@ -126,7 +126,7 @@ export interface OverrideRequest { device: Device; durationMinutes: number; }
         <div class="links">
           <a routerLink="/activity" [queryParams]="{ deviceId: device().id }">All activity</a>
           <a routerLink="/schedules">Schedules</a>
-          @if (device().hasEmeter) { <a routerLink="/energy">Energy</a> }
+          @if (device().hasEmeter) { <a routerLink="/energy" [queryParams]="{ area: 'live' }">Energy</a> }
           @if (isCamera()) { <a routerLink="/cameras">Live view and snapshots</a> }
         </div>
       </div>

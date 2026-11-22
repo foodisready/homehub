@@ -16,9 +16,11 @@ const CURRENCIES = ['USD', 'CAD', 'GBP', 'EUR', 'AUD', 'HKD', 'CNY', 'VND', 'SGD
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [`
     :host { display: block; }
-    .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 0.6rem; }
-    .tile { background: var(--bg); border-radius: var(--radius); padding: 0.7rem 0.85rem; }
+    .tiles { display: flex; flex-wrap: wrap; gap: 0.6rem; }
+    .tile { flex: 1 1 160px; background: var(--bg); border-radius: var(--radius); padding: 0.7rem 0.85rem; }
     .v { font-size: 1.55rem; font-weight: 600; line-height: 1.2; }
+    .tile.hero { flex-basis: 100%; padding: 0.9rem 1rem; }
+    .tile.hero .v { font-size: 2.2rem; font-weight: 700; letter-spacing: -0.01em; }
     .l { font-size: 0.78rem; color: var(--text-muted); margin-top: 0.15rem; }
     .about { font-size: 0.8rem; color: var(--text-muted); margin: 0.8rem 0 0; line-height: 1.5; }
     .link { background: none; border: none; color: var(--accent); padding: 0; font-size: inherit; text-align: left; }
@@ -28,16 +30,20 @@ const CURRENCIES = ['USD', 'CAD', 'GBP', 'EUR', 'AUD', 'HKD', 'CNY', 'VND', 'SGD
     select { width: 5.5rem; }
     .err { color: var(--red); font-size: 0.8rem; width: 100%; margin: 0; }
     @media (max-width: 520px) {
-      .tiles { grid-template-columns: 1fr; gap: 0.4rem; }
+      .tiles { flex-direction: column; gap: 0.4rem; }
+      .tile { flex: none; }
       .tile { display: flex; align-items: baseline; gap: 0.7rem; padding: 0.55rem 0.75rem; }
       .v { font-size: 1.2rem; min-width: 5.4rem; }
       .l { margin: 0; }
+      .tile.hero { display: block; padding: 0.8rem 0.9rem; }
+      .tile.hero .v { font-size: 1.9rem; }
+      .tile.hero .l { margin-top: 0.15rem; }
     }
   `],
   template: `
     <div class="card">
       <div class="tiles">
-        <div class="tile">
+        <div class="tile hero">
           <div class="v">{{ kwh(u().totals.kwh) }}</div>
           <div class="l">{{ u().panel?.wholeKwh != null ? 'HomeHub’s devices, estimated,' : 'electricity' }} {{ u().partial ? 'this month so far' : 'in ' + monthLong() }}</div>
         </div>
@@ -68,7 +74,7 @@ const CURRENCIES = ['USD', 'CAD', 'GBP', 'EUR', 'AUD', 'HKD', 'CNY', 'VND', 'SGD
         Estimated for {{ counted() }} {{ counted() === 1 ? 'device' : 'devices' }} HomeHub switches{{ hvacCounted() ? ', and your heating and cooling,' : '' }}
         from how long each was on and what it draws. It isn’t your whole home: the fridge, water heater and other appliances HomeHub doesn’t control aren’t included.
         @if (u().recordedFrom; as since) { Counted from {{ day(since) }}, when HomeHub started keeping this history. }
-        @if (u().totals.notCounted) { {{ u().totals.notCounted }} {{ u().totals.notCounted === 1 ? 'isn’t' : 'aren’t' }} counted yet: see below. }
+        @if (u().totals.notCounted) { {{ u().totals.notCounted }} {{ u().totals.notCounted === 1 ? 'isn’t' : 'aren’t' }} counted yet: see Where it goes. }
         @if (admin() && u().totals.cost !== null && !editing()) { <button type="button" class="link" (click)="editing.set(true)">Change prices</button> }
       </p>
 
