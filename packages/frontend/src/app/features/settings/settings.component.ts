@@ -1,5 +1,6 @@
-import { Component, OnInit, signal, computed, OnDestroy, viewChild, inject, effect, ElementRef } from '@angular/core';
-import { ActivatedRoute, RouterLink } from '@angular/router';
+import { Component, OnInit, signal, computed, OnDestroy, viewChild, inject, effect, ElementRef, DestroyRef } from '@angular/core';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
 import { AuthService } from '../../core/auth/auth.service';
@@ -25,6 +26,7 @@ import { CamerasToggleComponent } from './cameras-toggle.component';
 import { TeachCommandsComponent } from './teach-commands.component';
 import { VoiceRepliesComponent } from './voice-replies.component';
 import { VoiceControlComponent } from './voice-control.component';
+import { SettingsTilesComponent, type SettingsTile } from './settings-tiles.component';
 import { AutomationsService } from '../../core/services/automations.service';
 import { SecretInputDirective } from '../../shared/secret-input/secret-input.directive';
 import { NicknameChipsComponent, type NicknameSuggestion } from '../../shared/nickname-chips/nickname-chips.component';
@@ -42,6 +44,22 @@ interface ChatStats {
     recentMissed: { text: string; createdAt: string }[];
   };
 }
+
+interface HealthItemLite { id: string; label: string; level: 'ok' | 'info' | 'warn' | 'error'; detail?: string }
+
+/** What the Settings tiles show, from requests that each may fail on their own. */
+interface SettingsSummary {
+  health?:    { items: HealthItemLite[] };
+  home?:      { timezone: string | null; located: boolean; temperatureUnit?: 'F' | 'C' };
+  ai?:        { mode: 'local' | 'claude'; usage?: { costUsd?: number }; overLimit?: boolean };
+  voice?:     { enabled: boolean; languages: string[] };
+  misses?:    unknown[];
+  honeywell?: { signedIn: boolean; rejected: boolean };
+  meross?:    { signedIn: boolean };
+  ring?:      { state: string };
+}
+
+const LANGUAGE_NAME: Record<string, string> = { en: 'English', yue: 'Cantonese', vi: 'Vietnamese', zh: 'Mandarin' };
 
 interface UserRow {
   id:   number;
@@ -82,7 +100,7 @@ const DRIVER_LABEL: Record<string, string> = {
 @Component({
   selector: 'app-settings',
   standalone: true,
-  imports: [SecretInputDirective, NicknameChipsComponent, ThermostatRangesComponent, FormsModule, RouterLink, InviteQrComponent, MatterPairComponent, DeviceFilterComponent, BackupsComponent, BackupSyncComponent, ServerRoleComponent, MerossLoginComponent, HoneywellLoginComponent, OtherNetworksComponent, HomeSettingsComponent, AiConnectionComponent, AiChoiceComponent, CamerasToggleComponent, TeachCommandsComponent, VoiceRepliesComponent, VoiceControlComponent],
+  imports: [SecretInputDirective, NicknameChipsComponent, ThermostatRangesComponent, FormsModule, RouterLink, InviteQrComponent, MatterPairComponent, DeviceFilterComponent, BackupsComponent, BackupSyncComponent, ServerRoleComponent, MerossLoginComponent, HoneywellLoginComponent, OtherNetworksComponent, HomeSettingsComponent, AiConnectionComponent, AiChoiceComponent, CamerasToggleComponent, TeachCommandsComponent, VoiceRepliesComponent, VoiceControlComponent, SettingsTilesComponent],
   styles: [`
     .topbar { display:flex; align-items:center; justify-content:space-between; margin-bottom:1.5rem; }
     .topbar h1 { font-size:1.4rem; font-weight:700; }
@@ -252,13 +270,30 @@ const DRIVER_LABEL: Record<string, string> = {
     .key-warning { font-size:0.75rem; color:#fbbf24; margin-top:0.25rem; }
   `],
   template: `
-    <div class="page">
+    <div class="page" [class.hh-tiles]="view() === 'tiles'">
 
       <div class="topbar">
         <div style="display:flex;align-items:center;gap:1rem">
           <h1>Settings</h1>
         </div>
+        <div class="hh-seg" role="group" aria-label="Show settings as">
+          <button type="button" [attr.aria-pressed]="view() === 'tiles'" (click)="setView('tiles')">Tiles</button>
+          <button type="button" [attr.aria-pressed]="view() === 'list'" (click)="setView('list')">List</button>
+        </div>
       </div>
+
+      @if (view() === 'tiles') {
+        @if (pageTile(); as t) {
+          <div class="hh-pagebar">
+            <button type="button" class="hh-back" (click)="closePage()" aria-label="Back to all settings">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>
+            </button>
+            <h2>{{ t.name }}</h2>
+          </div>
+        } @else {
+          <app-settings-tiles [tiles]="tiles()" (open)="toggleSection($event, true)" />
+        }
+      }
 
       <!-- ── Devices ───────────────────────────────────────────── -->
       <div class="section">
@@ -1034,6 +1069,7 @@ const DRIVER_LABEL: Record<string, string> = {
         }
       </div>
 
+      @if (view() === 'list' || !pageTile()) {
       <div class="card support">
         <div class="support-text">
           <strong>Support HomeHub</strong>
@@ -1044,6 +1080,7 @@ const DRIVER_LABEL: Record<string, string> = {
           <a class="btn-sm btn-ghost" href="https://github.com/foodisready/homehub" target="_blank" rel="noopener">Source code</a>
         </div>
       </div>
+      }
 
     </div>
   `,
@@ -1072,7 +1109,41 @@ export class SettingsComponent implements OnInit, OnDestroy {
   // One open at a time, so the page stays short enough to find things in, on a phone above all. Devices
   // starts open; the one open last is remembered on this browser.
   private static readonly SECTION_KEY = 'homehub.settings.open';
-  private readonly openSection = signal<string | null>(SettingsComponent.loadSection());
+  // As tiles (the default) or the list of sections, as this browser last chose. As tiles, an open
+  // section is a page of its own, in the address (?section=), so the phone's Back button goes back.
+  private static readonly VIEW_KEY = 'homehub.settings.view';
+  readonly view = signal<'tiles' | 'list'>(SettingsComponent.loadView());
+  private readonly openSection = signal<string | null>(this.view() === 'tiles' ? null : SettingsComponent.loadSection());
+  private readonly router = inject(Router);
+  /** Opened a page from the tiles here, so Back in the page bar can go back in the browser's history. */
+  private pagedHere = false;
+
+  private static loadView(): 'tiles' | 'list' {
+    try { return localStorage.getItem(SettingsComponent.VIEW_KEY) === 'list' ? 'list' : 'tiles'; } catch { return 'tiles'; }
+  }
+
+  setView(v: 'tiles' | 'list'): void {
+    if (v === this.view()) return;
+    this.view.set(v);
+    try { localStorage.setItem(SettingsComponent.VIEW_KEY, v); } catch { /* the choice lasts this visit */ }
+    this.pagedHere = false;
+    // The open page stays open as the list's open section; going to tiles starts at all of them.
+    if (v === 'tiles') {
+      this.openSection.set(null);
+      void this.router.navigate([], { relativeTo: this.route, queryParams: { section: null }, queryParamsHandling: 'merge', replaceUrl: true });
+    }
+  }
+
+  /** The tile whose page is open, as tiles; null shows all the tiles. */
+  readonly pageTile = computed(() => {
+    const key = this.openSection();
+    return this.view() === 'tiles' && key ? this.tiles().find((t) => t.key === key) ?? null : null;
+  });
+
+  closePage(): void {
+    if (this.pagedHere) { this.pagedHere = false; history.back(); return; }
+    void this.router.navigate([], { relativeTo: this.route, queryParams: { section: null }, queryParamsHandling: 'merge', replaceUrl: true });
+  }
 
   private static loadSection(): string | null {
     try {
@@ -1129,6 +1200,13 @@ export class SettingsComponent implements OnInit, OnDestroy {
    * back into view, just below the top bar. A title still in view isn't moved.
    */
   toggleSection(key: string, open = !this.isSectionOpen(key)): void {
+    if (this.view() === 'tiles') {
+      // The address says which page is open: the route change below opens or closes it.
+      if (open === this.isSectionOpen(key)) return;
+      if (open) this.pagedHere = true;
+      void this.router.navigate([], { relativeTo: this.route, queryParams: { section: open ? key : null }, queryParamsHandling: 'merge', replaceUrl: !open });
+      return;
+    }
     if (!open && !this.isSectionOpen(key)) return;
     this.openSection.set(open ? key : null);
     try { localStorage.setItem(SettingsComponent.SECTION_KEY, open ? key : ''); } catch { /* private window */ }
@@ -1149,6 +1227,147 @@ export class SettingsComponent implements OnInit, OnDestroy {
   readonly currentUser = computed(() => this.auth.user()?.name ?? '');
 
   chatStats = signal<ChatStats | null>(null);
+
+  // ── Settings as tiles ──────────────────────────────────────
+  private readonly destroyRef = inject(DestroyRef);
+  /** How things are, for the tiles' status lines. Each part is filled in as it arrives, or stays unknown. */
+  private readonly summary = signal<SettingsSummary>({});
+
+  /** Fetches what the tiles show. Each request is on its own: one that fails leaves its tile plain. */
+  private loadSummary(): void {
+    const get = <K extends keyof SettingsSummary>(url: string, key: K) =>
+      this.http.get<SettingsSummary[K]>(url).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+        next: (value) => this.summary.update((s) => ({ ...s, [key]: value })),
+        error: () => undefined,
+      });
+    get('/api/system/health', 'health');
+    get('/api/home-settings', 'home');
+    if (!this.isAdmin()) return;
+    get('/api/ai', 'ai');
+    get('/api/nlp/voice', 'voice');
+    get('/api/nlp/misses', 'misses');
+    get('/api/honeywell/login', 'honeywell');
+    get('/api/meross/login', 'meross');
+    get('/api/ring', 'ring');
+  }
+
+  private healthItem(id: string): HealthItemLite | undefined {
+    return this.summary().health?.items.find((i) => i.id === id);
+  }
+
+  /** The sections this person can open, as tiles, with how each is doing. */
+  readonly tiles = computed<SettingsTile[]>(() => {
+    const admin = this.isAdmin();
+    const full = admin && !this.automations.readOnly();
+    const sum = this.summary();
+    const bad = (i?: HealthItemLite) => i?.level === 'warn' || i?.level === 'error';
+    const out: SettingsTile[] = [];
+
+    // Your home
+    const devices = this.devices();
+    const offline = devices.filter((d) => !d.online).length;
+    out.push({
+      key: 'devices', name: 'Devices', group: 'Your home', icon: 'devices', hue: '#4f8cff',
+      status: !devices.length ? 'None yet: add your first' : offline ? `${devices.length} devices · ${offline} offline` : `${devices.length} devices · all online`,
+      look: offline > 0, words: 'add discover find scan probe rename room nickname matter kasa tuya shelly meross wyze honeywell thermostat plug light',
+    });
+    if (full) {
+      const h = sum.home;
+      const city = h?.timezone ? (h.timezone.split('/').pop() ?? '').replace(/_/g, ' ') : '';
+      out.push({
+        key: 'home', name: 'Home', group: 'Your home', icon: 'house', hue: '#3ddc97',
+        status: !h ? 'Location and time zone' : [city || 'Time zone not set', h.located ? '' : 'location not set', `°${h.temperatureUnit ?? 'F'}`].filter(Boolean).join(' · '),
+        look: !!h && !h.located && bad(this.healthItem('location')), words: 'location address time zone timezone sunrise sunset temperature unit fahrenheit celsius',
+      });
+    }
+    if (admin) {
+      const n = this.users().length;
+      out.push({
+        key: 'users', name: 'People', group: 'Your home', icon: 'users', hue: '#c38bff',
+        status: n ? `${n} ${n === 1 ? 'person' : 'people'}` : 'Who can sign in', words: 'users invite qr password admin member account sign in',
+      });
+      const backup = this.healthItem('backups');
+      const made = backup?.detail?.match(/^Last made ([^.]+)\./)?.[1];
+      out.push({
+        key: 'backups', name: 'Backups', group: 'Your home', icon: 'backup', hue: '#5ad1e6',
+        status: made ? `Last backup ${made}` : bad(backup) ? 'No recent backup' : 'Save and restore',
+        look: bad(backup), words: 'backup restore download upload export email copy sync second homehub',
+      });
+    }
+
+    // Talking to HomeHub
+    if (full) {
+      const v = sum.voice;
+      const bridge = this.healthItem('voice-bridge');
+      const speakers = this.healthItem('speakers');
+      const trouble = bad(bridge) ? bridge : bad(speakers) ? speakers : undefined;
+      const langs = v?.languages.map((l) => LANGUAGE_NAME[l] ?? l).join(', ');
+      out.push({
+        key: 'voice', name: 'Voice control', group: 'Talking to HomeHub', icon: 'mic', hue: '#ff8a3d',
+        status: !v ? 'Speakers and languages' : !v.enabled ? 'Off' : trouble ? `${trouble.label}: needs a look` : langs || 'On',
+        look: !!v?.enabled && !!trouble, words: 'voice wake word speaker ava voice pe language cantonese vietnamese mandarin english bridge',
+      });
+      out.push({
+        key: 'replies', name: 'Voice replies', group: 'Talking to HomeHub', icon: 'speaker', hue: '#ffb44d',
+        status: 'What HomeHub says back', words: 'reply replies answer friendly funny plain custom',
+      });
+      const ai = sum.ai;
+      out.push({
+        key: 'ai', name: 'AI for Chat and voice', group: 'Talking to HomeHub', icon: 'brain', hue: '#9b8cff',
+        status: !ai ? 'Which AI understands you' : ai.mode === 'claude' ? `Claude · $${(ai.usage?.costUsd ?? 0).toFixed(2)} this month` : 'On this HomeHub',
+        look: !!ai?.overLimit, words: 'ai claude model ollama api key limit cost chat',
+      });
+      const misses = sum.misses?.length ?? 0;
+      out.push({
+        key: 'teach', name: 'Teach HomeHub', group: 'Talking to HomeHub', icon: 'teach', hue: '#ff6fa8',
+        status: misses ? `${misses} ${misses === 1 ? 'thing' : 'things'} it didn't understand` : 'Words it should know',
+        words: 'teach missed misunderstood nickname words phrases commands',
+      });
+    }
+    out.push({
+      key: 'chat-commands', name: 'Chat commands', group: 'Talking to HomeHub', icon: 'list', hue: '#7aa2c9',
+      status: 'What you can say', words: 'chat commands help examples say',
+    });
+    const voice = this.chatStats()?.voice;
+    if (voice && voice.total > 0) {
+      out.push({
+        key: 'voice-commands', name: 'Voice commands', group: 'Talking to HomeHub', icon: 'wave', hue: '#e98a5b',
+        status: `${voice.understood} of ${voice.total} understood`, words: 'voice commands heard understood missed',
+      });
+    }
+
+    // Connections
+    if (full) {
+      const linked: string[] = [];
+      if (sum.honeywell?.signedIn) linked.push('Honeywell');
+      if (sum.meross?.signedIn) linked.push('Meross');
+      if (sum.ring && sum.ring.state !== 'signed-out') linked.push('Ring');
+      if (this.tuyaCloudReady()) linked.push('Tuya');
+      if (this.emailReady()) linked.push('Email');
+      if (this.smsReady()) linked.push('Text messages');
+      const ringBad = sum.ring?.state === 'expired';
+      out.push({
+        key: 'integrations', name: 'Integrations', group: 'Connections', icon: 'link', hue: '#4f8cff',
+        status: sum.honeywell?.rejected ? 'Honeywell: sign in again' : ringBad ? 'Ring: sign in again' : linked.length ? linked.join(' · ') : 'Accounts and services',
+        look: !!sum.honeywell?.rejected || ringBad,
+        words: 'integrations account sign in honeywell total connect comfort meross ring tuya cloud email smtp sms text twilio cameras ai assistant mcp',
+      });
+    }
+    const push = this.push.state();
+    out.push({
+      key: 'notifications', name: 'Notifications', group: 'Connections', icon: 'bell', hue: '#f25f5c',
+      status: push === 'on' ? 'On for this device' : push === 'blocked' ? 'Blocked on this device' : push === 'off' || push === 'home-screen' ? 'Off on this device' : 'Alerts on this device',
+      words: 'notifications push alerts phone',
+    });
+
+    // More
+    out.push({
+      key: 'preferences', name: 'Preferences', group: 'More', icon: 'sliders', hue: '#8e9ab4',
+      status: [this.kwhRateDraft ? `$${this.kwhRateDraft}/kWh` : '', this.appVersion()].filter(Boolean).join(' · ') || 'Energy rate and version',
+      words: 'preferences energy rate price kwh version server role backup active pause automations',
+    });
+    return out;
+  });
 
   // Device editing
   editingDeviceId = signal<number | null>(null);
@@ -1370,9 +1589,21 @@ export class SettingsComponent implements OnInit, OnDestroy {
       this.welcome.set(true);
       this.toggleSection('home', true);
     }
-    // The dashboard's "time zone not set" notice links to /settings?section=home.
-    const section = this.route.snapshot.queryParamMap.get('section');
-    if (section) this.toggleSection(section, true);
+    // The dashboard's "time zone not set" notice links to /settings?section=home. As tiles, the
+    // address also says which page is open, and follows the browser's Back and Forward.
+    this.route.queryParamMap.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((q) => {
+      const section = q.get('section');
+      if (this.view() === 'tiles') {
+        if (section === this.openSection()) return;
+        if (!section) this.pagedHere = false;
+        this.openSection.set(section);
+        window.scrollTo({ top: 0 });
+        if (!section) this.loadSummary();
+      } else if (section) {
+        this.toggleSection(section, true);
+      }
+    });
+    if (this.view() === 'tiles' && !this.route.snapshot.queryParamMap.get('section')) this.loadSummary();
     this.http.get<{ enabled: boolean; ring: number; ip: number }>('/api/cameras/summary').subscribe({
       next: (c) => this.cameraSummary.set(c.enabled ? c : null),
       error: () => undefined,

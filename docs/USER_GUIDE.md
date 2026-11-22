@@ -2,6 +2,10 @@
 
 This guide covers everyday use, from adding devices to automating your lights. To install HomeHub first, see the [install guide](./INSTALL.md).
 
+## Find a setting
+
+**Settings** (**More** on a phone) shows its sections as tiles, grouped into Your home, Talking to HomeHub, Connections and More. Each tile says how that part is doing, such as "24 devices · 7 offline" or "Last backup 5 hours ago", and a yellow **Look** badge means something there needs you: a device offline, an account to sign in to again, a backup that's late or a voice speaker that isn't answering. Tap a tile to open it; the arrow at the top, or your phone's Back button, goes back to the tiles. Search finds a setting by its name or what's in it, such as "password", "wake word" or "Honeywell"; press Enter when it finds just one to open it. **List** at the top shows the sections as one list instead, and HomeHub remembers your choice on each browser.
+
 ## Devices HomeHub supports
 
 HomeHub controls devices directly over your home network. All of them are switched on and off, and it doesn't support dimming or color.

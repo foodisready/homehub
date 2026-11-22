@@ -164,3 +164,20 @@ input.own-clear::-webkit-search-cancel-button { -webkit-appearance: none; appear
 .hh-chip.heat { color: #fb923c; background: color-mix(in srgb, #fb923c 15%, #26354d); }
 .hh-chip.cool { color: #60a5fa; background: color-mix(in srgb, #60a5fa 15%, #26354d); }
 .hh-chip.warn { color: #fca5a5; background: color-mix(in srgb, var(--red) 15%, #26354d); }
+
+/* Text for screen readers only. */
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+/* Settings as tiles: each section opens as its own page, sliding in, with a bar to go back. */
+@keyframes hh-slide { from { transform: translateX(32px); opacity: 0; } }
+.page.hh-tiles .section > .section-toggle { display: none; }
+.page.hh-tiles > .section { margin-bottom: 0; }
+.hh-tiles .section > :not(.section-toggle) { animation: hh-slide .28s cubic-bezier(.2, .8, .2, 1); }
+.hh-pagebar { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 1rem; animation: hh-slide .28s cubic-bezier(.2, .8, .2, 1); }
+.hh-pagebar h2 { margin: 0; font-size: 1.2rem; font-weight: 700; }
+.hh-back { width: 2.4rem; height: 2.4rem; border-radius: 50%; display: grid; place-items: center; padding: 0; background: var(--surface); border: 1px solid var(--border); color: var(--text); flex: none; }
+.hh-back svg { width: 1.1rem; height: 1.1rem; }
+@media (prefers-reduced-motion: reduce) { .hh-tiles .section > *, .hh-pagebar { animation: none; } }
+.hh-seg { display: inline-flex; background: var(--surface); border: 1px solid var(--border); border-radius: 999px; padding: 3px; }
+.hh-seg button { border: 0; background: none; color: var(--text-muted); padding: 0.3rem 0.9rem; border-radius: 999px; font-size: 0.82rem; }
+.hh-seg button[aria-pressed="true"] { background: var(--accent); color: #fff; font-weight: 600; }
