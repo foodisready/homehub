@@ -1,16 +1,19 @@
 import { Component, computed, inject, signal } from '@angular/core';
-import { RouterLink, RouterOutlet } from '@angular/router';
+import { toSignal } from '@angular/core/rxjs-interop';
+import { filter, map } from 'rxjs';
+import { NavigationEnd, Router, RouterLink, RouterOutlet } from '@angular/router';
 import { AppNavComponent } from './core/nav/app-nav.component';
 import { AuthService } from './core/auth/auth.service';
 import { AutomationsService } from './core/services/automations.service';
 import { AppUpdateService } from './core/services/app-update.service';
 import { ReadOnlyNotice } from './core/services/read-only-notice.service';
 import { AiWarmupService } from './core/services/ai-warmup.service';
+import { LockScreenComponent } from './core/lock/lock-screen.component';
 
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [RouterOutlet, RouterLink, AppNavComponent],
+  imports: [RouterOutlet, RouterLink, AppNavComponent, LockScreenComponent],
   styles: [`
     /* Room for the phone tab bar, so it never covers the end of a page. */
     @media (max-width: 899px) {
@@ -34,6 +37,7 @@ import { AiWarmupService } from './core/services/ai-warmup.service';
     .ready { background: #14532d; color: #dcfce7; border-bottom-color: #16a34a; }
   `],
   template: `
+    @if (!wall()) {
     <app-nav />
     @if (auth.isLoggedIn() && automations.role(); as r) {
       @if (r.role !== 'active') {
@@ -113,9 +117,13 @@ import { AiWarmupService } from './core/services/ai-warmup.service';
         <button type="button" (click)="notice.message.set('')">OK</button>
       </div>
     }
-    <div [class.tab-space]="auth.isLoggedIn()">
+    }
+    <!-- The wall display has the screen to itself: no menus or banners. -->
+    <div [class.tab-space]="auth.isLoggedIn() && !wall()">
       <router-outlet />
     </div>
+    <!-- Over everything while a shared screen is locked (Wall display → ⋯ → Lock with a PIN). -->
+    <app-lock-screen />
   `,
 })
 export class AppComponent {
@@ -125,6 +133,11 @@ export class AppComponent {
   readonly warmup = inject(AiWarmupService);
   readonly isAdmin = computed(() => this.auth.user()?.role === 'admin');
   readonly resuming = signal(false);
+  private readonly router = inject(Router);
+  readonly wall = toSignal(this.router.events.pipe(
+    filter((e): e is NavigationEnd => e instanceof NavigationEnd),
+    map((e) => e.urlAfterRedirects.split('?')[0] === '/wall'),
+  ), { initialValue: location.pathname === '/wall' });
 
   constructor() {
     inject(AppUpdateService).start();

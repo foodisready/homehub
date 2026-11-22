@@ -22,6 +22,12 @@ export const routes: Routes = [
     canActivate: [authGuard],
   },
   {
+    path: 'wall',
+    loadComponent: () => import('./features/dashboard/dashboard.component').then((m) => m.DashboardComponent),
+    canActivate: [authGuard],
+    data: { wall: true },
+  },
+  {
     path: 'schedules',
     loadComponent: () => import('./features/schedules/schedules.component').then((m) => m.SchedulesComponent),
     canActivate: [authGuard],

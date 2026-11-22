@@ -19,6 +19,7 @@ import { createServer } from 'http';
 import { logger } from './logger';
 import { healthRouter } from './routes/health';
 import { authRouter } from './routes/auth';
+import { lockRouter } from './routes/lock';
 import { devicesRouter } from './routes/devices';
 import { notifyScheduler, schedulesRouter } from './routes/schedules';
 import { usersRouter } from './routes/users';
@@ -130,6 +131,7 @@ app.use('/api', activityMiddleware((req) => (req.headers['x-homehub-client'] ===
 app.use('/api/devices',   devicesRouter);
 app.use('/api/schedules', schedulesRouter);
 app.use('/api/users',     usersRouter);
+app.use('/api/lock',      lockRouter);
 app.use('/api/nlp',       nlpRouter);
 app.use('/api/push',      pushRouter);
 app.use('/api/scenes',    scenesRouter);

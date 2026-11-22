@@ -621,6 +621,8 @@ function migrate(db: Database.Database): void {
   try { db.exec('ALTER TABLE reminders ADD COLUMN ask INTEGER NOT NULL DEFAULT 0'); } catch {}
   // A one-time reminder's day ("remind me at 3 to call the doctor"); null repeats on its days.
   try { db.exec('ALTER TABLE reminders ADD COLUMN on_day TEXT'); } catch {}
+  // A PIN that unlocks a shared screen (the wall display) signed in as this person; hashed like passwords.
+  try { db.exec('ALTER TABLE users ADD COLUMN lock_pin TEXT'); } catch {}
 
   // A check-in can ask at home before telling the family: "亞娘，你冇事吖嘛？"
   try { db.exec('ALTER TABLE checkins ADD COLUMN ask_first INTEGER NOT NULL DEFAULT 0'); } catch {}

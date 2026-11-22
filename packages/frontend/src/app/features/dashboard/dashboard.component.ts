@@ -1,6 +1,6 @@
 import { Component, OnInit, OnDestroy, signal, computed } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Router } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
 import { DecimalPipe } from '@angular/common';
 import { AuthService } from '../../core/auth/auth.service';
 import { SocketService, DeviceStateEvent, DeviceOnlineEvent, DeviceOverrideEvent } from '../../core/socket/socket.service';
@@ -11,6 +11,7 @@ import { HomeSetupNoticeComponent } from './home-setup-notice.component';
 import { CamerasCardComponent } from './cameras-card.component';
 import { AwayComponent } from './away.component';
 import { RoomsViewComponent } from './rooms-view.component';
+import { WallFrameComponent } from './wall-frame.component';
 import { Device } from '../../shared/models/device.model';
 
 const COLLAPSED_KEY = 'homehub.dashboard.collapsed';
@@ -54,7 +55,7 @@ const isThermostat = (d: Device) => d.driverConfig?.['kind'] === 'thermostat';
 @Component({
   selector: 'app-dashboard',
   standalone: true,
-  imports: [DeviceRowComponent, RoomsViewComponent, DeviceFilterComponent, SystemStatusComponent, HomeSetupNoticeComponent, CamerasCardComponent, AwayComponent, DecimalPipe],
+  imports: [DeviceRowComponent, RoomsViewComponent, DeviceFilterComponent, SystemStatusComponent, HomeSetupNoticeComponent, CamerasCardComponent, AwayComponent, DecimalPipe, WallFrameComponent],
   styles: [`
     .topbar {
       display: flex;
@@ -114,6 +115,17 @@ const isThermostat = (d: Device) => d.driverConfig?.['kind'] === 'thermostat';
     .loading { color: var(--text-muted); padding: 2rem 0; text-align: center; }
   `],
   template: `
+    @if (wall) {
+      <!-- The wall display (/wall): the rooms, with a clock, weather, Coming up and scenes above. -->
+      <app-wall-frame>
+        @if (loading()) { <div class="loading">Loading devices…</div> }
+        @else {
+          <app-rooms-view [devices]="devices()" [busyIds]="busyIds()"
+                          (toggled)="toggle($event)" (overrideSet)="setOverride($event)"
+                          (overrideCancelled)="cancelOverride($event)" (allOff)="allOff($event)" />
+        }
+      </app-wall-frame>
+    } @else {
     <div class="page">
 
       <!-- On wider screens the app's top bar shows the name instead -->
@@ -184,6 +196,7 @@ const isThermostat = (d: Device) => d.driverConfig?.['kind'] === 'thermostat';
       }
 
     </div>
+    }
   `,
 })
 export class DashboardComponent implements OnInit, OnDestroy {
@@ -256,12 +269,18 @@ export class DashboardComponent implements OnInit, OnDestroy {
   private autoOffTimer?: ReturnType<typeof setTimeout>;
   private autoOffInterval?: ReturnType<typeof setInterval>;
 
+  /** On /wall: the wall display, the same rooms with a clock and more above. */
+  readonly wall: boolean;
+
   constructor(
     readonly auth:   AuthService,
     private http:    HttpClient,
     private socket:  SocketService,
     private router:  Router,
-  ) {}
+    route:           ActivatedRoute,
+  ) {
+    this.wall = route.snapshot.data['wall'] === true;
+  }
 
   ngOnInit(): void {
     this.loadDevices();

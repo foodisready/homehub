@@ -718,6 +718,32 @@ Everyone can switch devices and set timers. Only administrators can add, edit or
 
 Settings shows one section at a time. Select a section's name to open it, and the one that was open closes. Select it again to close it. Devices starts open, and each browser remembers the section open last.
 
+## Wall display
+
+A tablet that's always on, on a wall or the kitchen counter, can be HomeHub's screen. On the tablet, open **More → Wall display**, or go straight to `/wall` (for example `http://192.168.86.88:4200/wall`) and add that to the home screen.
+
+- **At the top:** a large clock and the date, the weather now with today's high, low and chance of rain, and **Coming up**: what the schedules do in the next 12 hours, such as "6:32 PM · hallway lamp and Living room lamps on".
+- **Scenes,** as large buttons. A tick shows it ran.
+- **Your rooms,** as on the Home page. Tap one to switch its devices.
+- **At night** (10 PM to 6:30 AM at first), the screen turns black with a dim clock and the next thing coming up. The clock moves a little each minute so nothing burns into the screen. Tap it to see everything for 2 minutes.
+- **⋯** in the corner sets the night hours or turns night dimming off, goes **Full screen**, and leaves the wall display. These choices are kept on that tablet only.
+
+**Keeping the screen on:** on a secure address (`https://`, such as the Tailscale one), HomeHub keeps the screen on while the wall display is open. On the home address (`http://`), the browser doesn't allow that, and **⋯** says so: on the tablet, set **Settings → Display → Screen timeout** to the longest, or turn on **Developer options → Stay awake** to keep it on while charging.
+
+**On the home screen:** with the wall display open in Chrome, tap **⋮ → Add to Home screen**, and the icon opens straight into it. On the home address (`http://`) that's a shortcut that opens in Chrome; on a secure address Chrome offers **Install app** too, which opens full screen with no address bar. On the home address, **⋯ → Full screen** hides the address bar until the tablet is restarted or the app is closed.
+
+**Lock with a PIN:** so only people who know it can use the screen. In **⋯ → Lock with a PIN**, enter a PIN of 4 to 8 digits twice and select **Save**. Then:
+
+- The **lock** button next to **⋯**, or **Lock now** in the menu, locks it straight away.
+- It locks by itself after 5 minutes without a touch. Change that to 1, 2, 10, 15 or 30 minutes, or turn it off, in the same menu.
+- Locked, the screen shows a dim clock that moves a little each minute. Tap anywhere for the number pad and enter the PIN. After 5 wrong tries it waits a minute before the next, and longer after each further miss, up to 15 minutes.
+- It stays locked if the page is reloaded, and covers every page, not only the wall display.
+- **Forgot the PIN?** on the lock screen signs out. Sign in again with the account's password, then **Change PIN** or **Remove PIN**: either asks for the current PIN.
+
+The PIN belongs to the login, and HomeHub keeps it hashed, like a password, so the same PIN opens any screen signed in as that login. Whether a screen locks by itself, and when, is set on each screen. The lock keeps people from using the screen. Someone who clears the tablet's browser data gets the sign-in page, which still needs the password.
+
+The menus and banners are hidden on the wall display. Use a family login for a shared tablet: it can switch devices and run scenes, but not change settings.
+
 ## Remote access
 
 To reach HomeHub away from home, set up [Remote Access](./REMOTE_ACCESS.md). Don't forward ports on your router.

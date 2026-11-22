@@ -23,6 +23,7 @@ const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 const ALLOWED: [string, RegExp][] = [
   ['POST', /^\/devices\/[^/]+\/(on|off)$/],
   ['POST', /^\/scenes\/[^/]+\/run$/],
+  ['POST', /^\/lock\/check$/],                           // unlocking a wall tablet
   ['POST', /^\/nlp(\/stream)?$/],                       // chat: "turn on the kitchen lights"
   ['*', /^\/system(\/|$)/],
   ['*', /^\/backups(\/|$)/],
