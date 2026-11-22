@@ -1,4 +1,4 @@
-import { Component, HostListener, OnDestroy, OnInit, computed, inject, signal } from '@angular/core';
+import { Component, HostListener, OnDestroy, OnInit, computed, inject, signal, viewChild } from '@angular/core';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
@@ -8,7 +8,8 @@ import { CamerasStateService } from '../../core/services/cameras-state.service';
 import { AuthImgComponent } from './auth-img.component';
 import { LiveViewComponent } from './live-view.component';
 import { RingCamerasComponent, ringWords, type RingCamera } from './ring-cameras.component';
-import { IpCamerasComponent, ipWords, type IpCamera } from './ip-cameras.component';
+import { IpCamerasComponent, ipMotionLabel, ipWords, type IpCamera } from './ip-cameras.component';
+import { CameraWallComponent, type WallAction, type WallItem } from './camera-wall.component';
 import { BRANDS, BRAND_LABEL, brandShown, cameraMatches, type BrandChoice, type CameraBrand, type CameraFilter } from './camera-filter';
 import { SnapshotSwiperComponent } from './snapshot-swiper.component';
 import { MAX_SHARE, canShareFiles, shareOrSave, snapshotFileName } from './snapshot-share';
@@ -53,7 +54,7 @@ const SEEN_KEY = 'homehub.cameras.seenSnapshot';
 @Component({
   selector: 'app-cameras',
   standalone: true,
-  imports: [SecretInputDirective, FormsModule, AuthImgComponent, LiveViewComponent, RingCamerasComponent, IpCamerasComponent, SnapshotSwiperComponent],
+  imports: [SecretInputDirective, FormsModule, AuthImgComponent, LiveViewComponent, RingCamerasComponent, IpCamerasComponent, SnapshotSwiperComponent, CameraWallComponent],
   styleUrls: ['./camera-layout.css', './snapshot-viewer.css'],
   styles: [`
     h1 { font-size: 1.4rem; font-weight: 700; margin-bottom: 1rem; }
@@ -83,7 +84,7 @@ const SEEN_KEY = 'homehub.cameras.seenSnapshot';
     .add-row .name { flex: 1; min-width: 10rem; }
     .add-row .sub { display: block; font-size: 0.75rem; color: var(--text-muted); }
 
-    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 0.85rem; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(46%, 13rem), 1fr)); gap: 0.7rem; }
     .cam { overflow: hidden; padding: 0; }
     .cam app-auth-img { aspect-ratio: 16 / 9; cursor: pointer; }
     .cam-body { padding: 0.7rem 0.85rem 0.85rem; }
@@ -243,49 +244,8 @@ const SEEN_KEY = 'homehub.cameras.seenSnapshot';
               }
              }
 
-              @for (c of shownCameras(); track c.deviceId) {
-                <div class="card cam">
-                  <app-auth-img [src]="'/api/cameras/' + c.deviceId + '/live.jpg?cached=1'" (result)="thumbResult(c, $event)" [refreshSeconds]="c.watching === false ? 0 : 20"
-                                [alt]="c.name" [failedText]="c.watching === false ? 'Paused' : c.otherNetwork ? 'On another network' : c.streaming ? 'No picture right now' : 'Not connected to this camera yet'"
-                                (click)="openLive(c)" role="button" [attr.aria-label]="'Watch ' + c.name + ' live'" />
-                  <div class="cam-body">
-                    <div class="cam-title">
-                      <strong>{{ c.name }}</strong>
-                      <span class="pill" [class]="'pill ' + statusOf(c)">{{ statusLabel(c) }}</span>
-                    </div>
-                    <div class="cam-sub">
-                      {{ c.room ?? 'No room' }}{{ c.model ? ' · ' + c.model : '' }}
-                      @if (c.lastMotionAt) { · motion {{ ago(c.lastMotionAt) }} }
-                    </div>
-                    @if (statusOf(c) === 'othernet') {
-                      <p class="hint">{{ c.noPictureHint }}</p>
-                    } @else if (statusOf(c) === 'nopicture') {
-                      <p class="hint">
-                        {{ c.lastPictureAt ? 'Last picture ' + ago(c.lastPictureAt) + '.' : 'No picture yet.' }}
-                        {{ c.noPictureHint }}
-                      </p>
-                    }
-                    <div class="cam-actions">
-                      <button class="btn-sm btn-primary" type="button" (click)="openLive(c)" [disabled]="c.watching === false">Live</button>
-                      <button class="btn-sm ghost" type="button" (click)="takeSnapshot(c)" [disabled]="c.watching === false || busyId() === c.deviceId">
-                        {{ busyId() === c.deviceId ? 'Saving…' : 'Snapshot' }}
-                      </button>
-                      @if (c.watching === false) {
-                        <button class="btn-sm ghost" type="button" (click)="setWatching(c, true)" [disabled]="busyId() === c.deviceId">Resume</button>
-                      } @else {
-                        <button class="btn-sm ghost" type="button" (click)="confirmPause.set(c.deviceId)" [disabled]="busyId() === c.deviceId">Pause</button>
-                      }
-                    </div>
-                    @if (confirmPause() === c.deviceId) {
-                      <div class="confirm">
-                        <span>Pause {{ c.name }}? It stops watching, recording and detecting motion until you resume it.</span>
-                        <button class="btn-sm danger" type="button" (click)="setWatching(c, false)">Pause</button>
-                        <button class="btn-sm ghost" type="button" (click)="confirmPause.set(null)">Cancel</button>
-                      </div>
-                    }
-                  </div>
-                </div>
-              }
+              <app-camera-wall [items]="wallItems()" [busy]="wallBusy()" [message]="wallMessage()"
+                               (act)="onWall($event)" (pauseAll)="onPauseAll($event)" (thumb)="onThumb($event)" />
               @if (cameraMsg()) { <p class="msg err span">{{ cameraMsg() }}</p> }
               @if (loaded() && total() && !matching()) {
                 <div class="empty span">
@@ -398,9 +358,9 @@ const SEEN_KEY = 'homehub.cameras.seenSnapshot';
               </section>
             }
 
-            <app-ring-cameras [view]="childView()" [filter]="filter()" (openSetup)="setTab('setup')"
+            <app-ring-cameras [view]="childView()" [filter]="filter()" [tiles]="true" (openSetup)="setTab('setup')"
                               (openSnapshot)="openShot($any($event))" (camerasChange)="ringCams.set($event); ringLoaded.set(true)" />
-            <app-ip-cameras [view]="childView()" [filter]="filter()" (camerasChange)="ipCams.set($event); ipLoaded.set(true)" />
+            <app-ip-cameras [view]="childView()" [filter]="filter()" [tiles]="true" (camerasChange)="ipCams.set($event); ipLoaded.set(true)" />
 
             @if (tab() === 'setup' && settings(); as st) {
               <section class="card source">
@@ -636,6 +596,95 @@ export class CamerasComponent implements OnInit, OnDestroy {
   readonly confirmSignOut = signal(false);
   readonly confirmPause = signal<number | null>(null);
   readonly live = signal<Camera | null>(null);
+
+  // ── The camera wall ────────────────────────────────────────
+  private readonly ringPart = viewChild(RingCamerasComponent);
+  private readonly ipPart = viewChild(IpCamerasComponent);
+
+  /** Every camera shown, Wyze, Ring and IP, as the wall's tiles. */
+  readonly wallItems = computed<WallItem[]>(() => {
+    const admin = this.isAdmin();
+    const wyze = this.shownCameras().map((c): WallItem => {
+      const s = this.statusOf(c);
+      const status: WallItem['status'] = s === 'watching' || s === 'paused' || s === 'offline' ? s : s ? 'warn' : 'checking';
+      return {
+        key: `wyze:${c.deviceId}`, kind: 'wyze', id: c.deviceId, name: c.name, room: c.room ?? 'No room',
+        sub: [c.room ?? 'No room', c.lastMotionAt ? `motion ${this.ago(c.lastMotionAt)}` : ''].filter(Boolean).join(' · '),
+        img: `/api/cameras/${c.deviceId}/live.jpg?cached=1`, refreshSeconds: 20,
+        failedText: c.watching === false ? 'Paused' : c.otherNetwork ? 'On another network' : c.streaming ? 'No picture right now' : 'Not connected to this camera yet',
+        status, statusLabel: this.statusLabel(c), stamp: null, doorbell: false,
+        hint: s === 'othernet' ? c.noPictureHint : s === 'nopicture' ? `${c.lastPictureAt ? 'Last picture ' + this.ago(c.lastPictureAt) + '.' : 'No picture yet.'} ${c.noPictureHint ?? ''}`.trim() : null,
+        canLive: c.watching !== false && s !== 'offline', canSnapshot: c.watching !== false && s !== 'offline', paused: s === 'offline' ? null : c.watching === false,
+        canEdit: false, canRemove: false,
+      };
+    });
+    const ringReady = this.ringPart()?.info()?.state === 'ready';
+    const ring = this.ringCams().filter((c) => cameraMatches(this.filter(), 'ring', ringWords(c))).map((c): WallItem => ({
+      key: `ring:${c.id}`, kind: 'ring', id: c.id, name: c.label, room: 'Ring',
+      sub: [c.home, c.lastDingAt ? `rang ${this.ago(c.lastDingAt)}` : c.lastMotionAt ? `motion ${this.ago(c.lastMotionAt)}` : '', c.model ?? ''].filter(Boolean).join(' · ') || 'Ring',
+      img: c.latestSnapshot ? `/api/cameras/snapshots/${c.latestSnapshot.id}/image` : null, refreshSeconds: 0,
+      failedText: c.encrypted ? 'End-to-end encryption is on, so Ring shares no pictures' : 'No picture yet',
+      status: c.offline ? 'offline' : 'plain', statusLabel: c.offline ? 'Offline' : c.isDoorbell ? 'Doorbell' : 'Ring camera',
+      stamp: c.latestSnapshot ? this.ago(c.latestSnapshot.takenAt) : null, doorbell: c.isDoorbell,
+      hint: c.encrypted ? 'End-to-end encryption is on for this camera in the Ring app, so HomeHub gets no pictures. Doorbell notifications still work.' : null,
+      canLive: ringReady && !c.offline && !c.encrypted, canSnapshot: ringReady && !c.encrypted, paused: null,
+      canEdit: false, canRemove: admin,
+    }));
+    const ip = this.ipCams().filter((c) => cameraMatches(this.filter(), 'ip', ipWords(c))).map((c): WallItem => ({
+      key: `ip:${c.id}`, kind: 'ip', id: c.id, name: c.name, room: 'IP cameras',
+      sub: [c.maker ? `${c.maker} ${c.model ?? ''}`.trim() : c.model ?? (c.onvif ? 'ONVIF camera' : 'RTSP camera'), c.lastMotionAt ? `motion ${this.ago(c.lastMotionAt)}` : ''].filter(Boolean).join(' · '),
+      img: `/api/ip-cameras/${c.id}/live.jpg`, refreshSeconds: 20, failedText: 'No picture right now',
+      status: c.motionState === 'watching' ? 'watching' : c.motionState === 'error' ? 'warn' : c.motionState === 'connecting' ? 'checking' : 'plain',
+      statusLabel: ipMotionLabel(c), stamp: null, doorbell: false,
+      hint: c.motionState === 'error' ? `HomeHub can't get motion from this camera and keeps trying: ${c.motionDetail}. If it has no motion detection, turn motion off under Edit.` : null,
+      canLive: true, canSnapshot: true, paused: null, canEdit: admin, canRemove: admin,
+    }));
+    return [...wyze, ...ring, ...ip];
+  });
+
+  /** The camera whose button is busy, whichever kind it is. */
+  readonly wallBusy = computed(() => {
+    const w = this.busyId(), r = this.ringPart()?.busyId(), i = this.ipPart()?.busyId();
+    return w !== null ? `wyze:${w}` : r != null ? `ring:${r}` : i != null ? `ip:${i}` : null;
+  });
+  readonly wallMessage = computed(() => this.cameraMsg() || this.ringPart()?.cameraMsg() || this.ipPart()?.cameraMsg() || '');
+
+  onWall(e: { action: WallAction; item: WallItem }): void {
+    const { action, item } = e;
+    if (item.kind === 'wyze') {
+      const c = this.cameras().find((x) => x.deviceId === item.id);
+      if (!c) return;
+      if (action === 'live') this.openLive(c);
+      else if (action === 'snapshot') this.takeSnapshot(c);
+      else if (action === 'pause' || action === 'resume') this.setWatching(c, action === 'resume');
+    } else if (item.kind === 'ring') {
+      const part = this.ringPart(), c = this.ringCams().find((x) => x.id === item.id);
+      if (!part || !c) return;
+      if (action === 'live') part.live.set(c);
+      else if (action === 'snapshot') part.snapshot(c);
+      else if (action === 'remove') part.remove(c);
+      else if (action === 'picture' && c.latestSnapshot) this.openShot(c.latestSnapshot);
+    } else {
+      const part = this.ipPart(), c = this.ipCams().find((x) => x.id === item.id);
+      if (!part || !c) return;
+      if (action === 'live') part.live.set(c);
+      else if (action === 'snapshot') part.snapshot(c);
+      else if (action === 'edit') part.startEdit(c);
+      else if (action === 'remove') part.remove(c);
+    }
+  }
+
+  /** Pauses or resumes several Wyze cameras, one after another. */
+  onPauseAll(e: { items: WallItem[]; pause: boolean }): void {
+    const list = e.items.map((i) => this.cameras().find((c) => c.deviceId === i.id)).filter((c): c is Camera => !!c);
+    for (const c of list) this.setWatching(c, !e.pause);
+  }
+
+  onThumb(e: { key: string; ok: boolean }): void {
+    if (!e.key.startsWith('wyze:')) return;
+    const c = this.cameras().find((x) => `wyze:${x.deviceId}` === e.key);
+    if (c) this.thumbResult(c, e.ok);
+  }
   readonly shot = signal<Snapshot | null>(null);
   readonly message = signal('');
   readonly isError = signal(false);

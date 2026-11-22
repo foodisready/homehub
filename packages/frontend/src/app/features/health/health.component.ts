@@ -1,8 +1,10 @@
-import { Component, OnDestroy, OnInit, computed, inject, signal } from '@angular/core';
+import { Component, DestroyRef, OnDestroy, OnInit, computed, inject, signal } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { NgTemplateOutlet } from '@angular/common';
-import { RouterLink } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { AuthService } from '../../core/auth/auth.service';
 import { HealthItem, HealthReport, SystemService, SystemVersion } from '../../core/services/system.service';
+import { SettingsTilesComponent, type SettingsTile } from '../settings/settings-tiles.component';
 
 const REFRESH_MS = 30_000;
 const SWITCH_POLL_MS = 3_000;
@@ -10,30 +12,44 @@ const SWITCH_DEADLINE_MS = 6 * 60_000;
 
 const GROUPS: HealthItem['group'][] = ['HomeHub', 'Devices', 'Voice', 'Data', 'Computer', 'Settings'];
 
-const SUMMARY: Record<HealthReport['status'], string> = {
-  ok: 'Everything is working',
-  attention: 'Something needs a look',
-  problem: 'Something is wrong',
+/** Each area as a tile: its icon and colour. */
+const AREA: Record<HealthItem['group'], Pick<SettingsTile, 'icon' | 'hue'>> = {
+  HomeHub:  { icon: 'hub', hue: '#4f8cff' },
+  Devices:  { icon: 'devices', hue: '#3ddc97' },
+  Voice:    { icon: 'mic', hue: '#ff8a3d' },
+  Data:     { icon: 'backup', hue: '#5ad1e6' },
+  Computer: { icon: 'chip', hue: '#9b8cff' },
+  Settings: { icon: 'sliders', hue: '#8e9ab4' },
 };
+const RANK: Record<HealthItem['level'], number> = { error: 0, warn: 1, info: 2, ok: 3 };
+const RING = 2 * Math.PI * 40;
 
 /**
- * Health: whether HomeHub is working, in words anyone can act on. Problems
- * come first; everything that's fine is listed below them.
+ * Health: whether HomeHub is working, in words anyone can act on. A ring sums it up, a tile for each
+ * area says how it's doing, and opening one lists its checks, problems first, each with what to do.
+ * The open area is in the address (?area=), so the phone's Back button goes back to the tiles.
  */
 @Component({
   selector: 'app-health',
   standalone: true,
-  imports: [RouterLink, NgTemplateOutlet],
+  imports: [RouterLink, NgTemplateOutlet, SettingsTilesComponent],
   styles: [`
     h1 { font-size: 1.4rem; font-weight: 700; margin-bottom: 1rem; }
-    .summary { display: flex; align-items: center; gap: 0.85rem; padding: 1rem 1.1rem; margin-bottom: 1.25rem; }
-    .summary .badge { width: 2.4rem; height: 2.4rem; border-radius: 50%; display: grid; place-items: center; font-weight: 800; font-size: 1.15rem; flex-shrink: 0; }
-    .summary.ok .badge { background: rgba(74,222,128,0.15); color: var(--green); }
-    .summary.attention .badge { background: rgba(245,158,11,0.15); color: #f59e0b; }
-    .summary.problem .badge { background: rgba(248,113,113,0.15); color: var(--red); }
+    .summary { display: flex; align-items: center; gap: 1rem; padding: 1rem 1.1rem; margin-bottom: 1.25rem; border-radius: 20px; }
+    .ring { width: 5.6rem; height: 5.6rem; flex-shrink: 0; position: relative; }
+    .ring svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+    .ring circle { fill: none; stroke-width: 10; }
+    .ring .track { stroke: var(--border); }
+    .ring .arc { stroke: var(--green); stroke-linecap: round; transition: stroke-dasharray .5s ease; }
+    .attention .ring .arc { stroke: #f5b83d; }
+    .problem .ring .arc { stroke: var(--red); }
+    .ring .num { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; line-height: 1.05; }
+    .ring b { font-size: 1.5rem; font-variant-numeric: tabular-nums; }
+    .ring small { font-size: 0.6rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; }
+    .sum-text { min-width: 0; }
     .summary h2 { font-size: 1.05rem; margin: 0; }
-    .summary p { margin: 0.15rem 0 0; font-size: 0.8rem; color: var(--text-muted); }
-    .summary .refresh { margin-left: auto; }
+    .summary p { margin: 0.2rem 0 0.6rem; font-size: 0.8rem; color: var(--text-muted); line-height: 1.35; }
+    .area { animation: hh-slide .28s cubic-bezier(.2, .8, .2, 1); }
     .section { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); margin: 1.25rem 0 0.4rem; }
     .list { padding: 0.15rem 1rem; }
     .item { display: flex; gap: 0.75rem; padding: 0.7rem 0; border-top: 1px solid var(--border); align-items: flex-start; }
@@ -45,7 +61,6 @@ const SUMMARY: Record<HealthReport['status'], string> = {
     .dot.info { background: var(--text-muted); }
     .body { flex: 1; min-width: 0; }
     .label { font-size: 0.92rem; font-weight: 600; }
-    .group { font-weight: 400; color: var(--text-muted); font-size: 0.78rem; margin-left: 0.35rem; }
     .detail { font-size: 0.84rem; color: var(--text-muted); margin-top: 0.15rem; line-height: 1.45; overflow-wrap: anywhere; }
     .detail a { margin-left: 0.25rem; }
     .muted { color: var(--text-muted); font-size: 0.88rem; }
@@ -66,54 +81,30 @@ const SUMMARY: Record<HealthReport['status'], string> = {
   `],
   template: `
     <div class="page">
-      <h1>Health</h1>
-
-      @if (report(); as r) {
-        <div class="card summary" [class]="'card summary ' + r.status" role="status">
-          <div class="badge" aria-hidden="true">{{ r.status === 'ok' ? '✓' : '!' }}</div>
-          <div>
-            <h2>{{ summary() }}</h2>
-            <p>HomeHub {{ r.version }} · checked {{ checkedText() }}</p>
-          </div>
-          <button class="btn-sm ghost refresh" type="button" (click)="load()" [disabled]="loading()">
-            {{ loading() ? 'Checking…' : 'Check again' }}
+      @if (area(); as a) {
+        <div class="hh-pagebar">
+          <button type="button" class="hh-back" (click)="closeArea()" aria-label="Back to Health">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>
           </button>
+          <h2>{{ a }}</h2>
         </div>
-
-        @if (problems().length) {
-          <div class="section">Needs a look</div>
-          <div class="card list">
-            @for (i of problems(); track i.id) {
-              <div class="item">
-                <span class="dot" [class]="'dot ' + i.level" [attr.aria-label]="levelText[i.level]"></span>
-                <div class="body">
-                  <div class="label">{{ i.label }}@if (i.group !== i.label) {<span class="group">{{ i.group }}</span>}</div>
-                  <div class="detail">{{ i.detail }}@if (i.link) {<a [routerLink]="i.link">Open</a>}</div>
-                  <ng-container *ngTemplateOutlet="itemAction; context: { $implicit: i }" />
-                </div>
-              </div>
-            }
-          </div>
-        }
-
-        @for (g of okGroups(); track g.name) {
-          <div class="section">{{ g.name }}</div>
-          <div class="card list">
-            @for (i of g.items; track i.id) {
+        @if (report()) {
+          <div class="card list area">
+            @for (i of areaItems(); track i.id) {
               <div class="item">
                 <span class="dot" [class]="'dot ' + i.level" [attr.aria-label]="levelText[i.level]"></span>
                 <div class="body">
                   <div class="label">{{ i.label }}</div>
-                  <div class="detail">{{ i.detail }}</div>
+                  <div class="detail">{{ i.detail }}@if (i.link && i.level !== 'ok') {<a [routerLink]="i.link">Open</a>}</div>
                   <ng-container *ngTemplateOutlet="itemAction; context: { $implicit: i }" />
                 </div>
               </div>
+            } @empty {
+              <p class="muted" style="padding:0.8rem 0">Nothing to check here right now.</p>
             }
           </div>
-        }
-
-        @if (version(); as v) {
-          <div class="section">Version</div>
+          @if (a === 'HomeHub' && version(); as v) {
+            <div class="section">Version</div>
           <div class="card list">
             <div class="item">
               <span class="dot" [class]="'dot ' + (v.updateAvailable || v.running === 'dev' ? 'info' : 'ok')"></span>
@@ -151,12 +142,37 @@ const SUMMARY: Record<HealthReport['status'], string> = {
               </div>
             </div>
           </div>
+          }
+        } @else {
+          <p class="muted">Checking…</p>
         }
+      } @else {
+      <h1>Health</h1>
+
+      @if (report(); as r) {
+        <div class="card summary" [class]="'card summary ' + r.status" role="status">
+          <div class="ring" role="img" [attr.aria-label]="fine() + ' of ' + r.items.length + ' checks fine'">
+            <svg viewBox="0 0 100 100" aria-hidden="true">
+              <circle cx="50" cy="50" r="40" class="track" />
+              <circle cx="50" cy="50" r="40" class="arc" [attr.stroke-dasharray]="arc()" />
+            </svg>
+            <div class="num"><b>{{ needs() || fine() }}</b><small>{{ needs() ? (needs() === 1 ? 'needs a look' : 'need a look') : 'all fine' }}</small></div>
+          </div>
+          <div class="sum-text">
+            <h2>{{ headline() }}</h2>
+            <p>{{ fine() }} of {{ r.items.length }} checks fine · HomeHub {{ r.version }} · checked {{ checkedText() }}</p>
+            <button class="btn-sm ghost" type="button" (click)="load()" [disabled]="loading()">
+              {{ loading() ? 'Checking…' : 'Check again' }}
+            </button>
+          </div>
+        </div>
+        <app-settings-tiles [tiles]="tiles()" [searchable]="false" (open)="openArea($event)" />
       } @else if (error()) {
         <p class="err">{{ error() }}</p>
         <button class="btn-sm ghost" type="button" (click)="load()">Try again</button>
       } @else {
         <p class="muted">Checking…</p>
+      }
       }
     </div>
 
@@ -208,18 +224,66 @@ export class HealthComponent implements OnInit, OnDestroy {
 
   readonly levelText: Record<HealthItem['level'], string> = { ok: 'Working', warn: 'Needs a look', error: 'Problem', info: 'Note' };
 
-  readonly summary = computed(() => (this.report() ? SUMMARY[this.report()!.status] : ''));
-
-  readonly problems = computed(() => {
-    const rank = { error: 0, warn: 1, info: 2, ok: 3 };
-    return (this.report()?.items ?? []).filter((i) => i.level === 'error' || i.level === 'warn')
-      .sort((a, b) => rank[a.level] - rank[b.level]);
+  private readonly items = computed(() => this.report()?.items ?? []);
+  /** Checks that are fine (or just a note), and those that need a look. */
+  readonly fine = computed(() => this.items().filter((i) => i.level === 'ok' || i.level === 'info').length);
+  readonly needs = computed(() => this.items().length - this.fine());
+  readonly arc = computed(() => {
+    const n = this.items().length;
+    return `${n ? (RING * this.fine()) / n : 0} ${RING}`;
+  });
+  readonly headline = computed(() => {
+    const bad = this.items().filter((i) => i.level === 'error').length;
+    const n = this.needs();
+    if (bad) return bad === 1 ? 'Something is wrong' : `${bad} things are wrong`;
+    return n ? (n === 1 ? '1 thing needs a look' : `${n} things need a look`) : 'Everything is working';
   });
 
-  readonly okGroups = computed(() => {
-    const items = (this.report()?.items ?? []).filter((i) => i.level === 'ok' || i.level === 'info');
-    return GROUPS.map((name) => ({ name, items: items.filter((i) => i.group === name) })).filter((g) => g.items.length);
-  });
+  /** A tile for each area that has checks, with how it's doing. */
+  readonly tiles = computed<SettingsTile[]>(() => GROUPS.flatMap((g) => {
+    const items = this.items().filter((i) => i.group === g);
+    if (!items.length) return [];
+    const bad = items.filter((i) => i.level === 'error' || i.level === 'warn').sort((a, b) => RANK[a.level] - RANK[b.level]);
+    return [{
+      key: g, name: g, group: 'By area', ...AREA[g],
+      status: bad.length === 1 ? `${bad[0].label}: ${bad[0].level === 'error' ? 'a problem' : 'needs a look'}`
+        : bad.length === 2 ? bad.map((i) => i.label).join(' · ') : bad.length ? `${bad.length} things need a look` : this.fineText(g, items),
+      look: bad.some((i) => i.level === 'error') ? 'problem' as const : bad.length > 0,
+      words: items.map((i) => i.label).join(' '),
+    }];
+  }));
+
+  /** What an area that's fine says on its tile: its main measure where it has one. */
+  private fineText(g: HealthItem['group'], items: HealthItem[]): string {
+    const detail = (id: string) => items.find((i) => i.id === id)?.detail;
+    const first = (t?: string) => t?.split(/\.(\s|$)/)[0];
+    if (g === 'Devices') return first(detail('devices')) ?? `All ${items.length} fine`;
+    if (g === 'Data') { const m = detail('backups')?.match(/^Last made ([^.]+)\./); if (m) return `Backup ${m[1]}`; }
+    if (g === 'Computer') { const d = first(detail('disk')); if (d) return d; }
+    return items.length === 1 ? items[0].label : `All ${items.length} fine`;
+  }
+
+  // ── Areas as pages ─────────────────────────────────────────
+  private readonly router = inject(Router);
+  private readonly route = inject(ActivatedRoute);
+  private readonly destroyRef = inject(DestroyRef);
+  /** The open area, from the address; null shows the tiles. */
+  readonly area = signal<HealthItem['group'] | null>(null);
+  private openedHere = false;
+
+  /** The open area's checks, problems first. */
+  readonly areaItems = computed(() => this.items().filter((i) => i.group === this.area())
+    .sort((a, b) => RANK[a.level] - RANK[b.level]));
+
+  openArea(key: string): void {
+    this.openedHere = true;
+    void this.router.navigate([], { relativeTo: this.route, queryParams: { area: key } });
+  }
+
+  closeArea(): void {
+    if (this.openedHere) { this.openedHere = false; history.back(); return; }
+    void this.router.navigate([], { relativeTo: this.route, queryParams: { area: null }, replaceUrl: true });
+  }
 
   readonly checkedText = computed(() => {
     const at = this.report() ? Date.parse(this.report()!.checkedAt) : 0;
@@ -228,6 +292,13 @@ export class HealthComponent implements OnInit, OnDestroy {
   });
 
   ngOnInit(): void {
+    this.route.queryParamMap.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((q) => {
+      const a = q.get('area') as HealthItem['group'] | null;
+      const next = a && GROUPS.includes(a) ? a : null;
+      if (!next) this.openedHere = false;
+      if (next !== this.area()) window.scrollTo({ top: 0 });
+      this.area.set(next);
+    });
     this.load();
     this.svc.version().subscribe({ next: (v) => this.version.set(v), error: () => undefined });
     this.timer = setInterval(() => {

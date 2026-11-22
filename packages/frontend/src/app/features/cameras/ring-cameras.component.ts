@@ -108,6 +108,7 @@ interface AccountCamera { id: number; name: string; home: string | null; model: 
           </div>
         }
 
+        @if (!tiles()) {
         @for (c of shown(); track c.id) {
           <div class="card cam">
             @if (c.latestSnapshot; as s) {
@@ -149,6 +150,7 @@ interface AccountCamera { id: number; name: string; home: string | null; model: 
               }
             </div>
           </div>
+        }
         }
         @if (cameraMsg()) { <p class="msg err span">{{ cameraMsg() }}</p> }
       } @else if (view() === 'setup' && isAdmin()) {
@@ -270,6 +272,8 @@ export class RingCamerasComponent implements OnInit, OnDestroy {
   readonly view = input<'cameras' | 'setup' | 'none'>('cameras');
   /** The search and brand chosen on the Cameras tab. */
   readonly filter = input<CameraFilter>(NO_FILTER);
+  /** The page draws the cameras as tiles itself; this shows only notes, live view and dialogs. */
+  readonly tiles = input(false);
   readonly brandShown = brandShown;
   /** The cameras the filter keeps, on the Cameras tab. */
   readonly shown = computed(() => (this.info()?.cameras ?? []).filter((c) => cameraMatches(this.filter(), 'ring', ringWords(c))));

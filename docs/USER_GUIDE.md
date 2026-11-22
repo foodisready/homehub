@@ -202,7 +202,11 @@ Until someone signs in to Wyze, the camera bridge waits and uses almost no memor
 
 ### Watch, pause and resume
 
-On the **Cameras** page, select a camera's picture or **Live** to watch. Live video can be a few seconds behind, and starts with the sound off; the 🔇 button turns it on.
+The **Cameras** page shows every camera as a tile: its latest picture, whether it's **Watching**, **Paused** or **Offline**, and a bell on a doorbell. The counts at the top say how many are watching, paused and offline. **Rooms** groups the tiles by room (Ring and IP cameras each get their own group), and **All** shows one grid; HomeHub remembers your choice on each browser.
+
+Tap a tile to open the camera full screen, with **Live**, **Snapshot** and, for Wyze cameras, **Pause** or **Resume**. Swipe, tap the arrows or press the arrow keys for the next camera. Admins also find **Edit** (IP cameras) and **Remove** (Ring and IP cameras) there; removing asks first. **Pause all** pauses every Wyze camera that's watching, after asking; Ring and IP cameras can't be paused, so they keep watching.
+
+Select the picture or **Live** to watch. Live video can be a few seconds behind, and starts with the sound off; the 🔇 button turns it on.
 
 To zoom, pinch or double-tap on a phone, or scroll, double-click or press **+** and **−** on a computer. Drag to look around while zoomed, and double-tap or press **0** to see the whole picture again. Zoom enlarges the picture, as in the Wyze app; it doesn't turn the camera.
 
@@ -697,7 +701,7 @@ To reach HomeHub away from home, set up [Remote Access](./REMOTE_ACCESS.md). Don
 
 ## Health
 
-**More → Health** shows whether HomeHub is working, in plain words: its services, devices that aren't responding, voice speakers, the nightly backup, disk space and the computer's temperature. Anything that needs a look comes first, with what to do about it. Admins also see a notice on the Home page when something does.
+**More → Health** shows whether HomeHub is working, in plain words: its services, devices that aren't responding, voice speakers, the nightly backup, disk space and the computer's temperature. A ring at the top counts the checks that are fine and those that need a look, and **Check again** runs them all now. Below it, a tile for each area (HomeHub, Devices, Voice, Data, Computer and Settings) says how it's doing, with a yellow **Look** badge when something there needs a look, or a red **Fix** when something is wrong. Tap a tile for its checks, problems first, each with what to do about it; the arrow at the top, or your phone's Back button, goes back. Admins also see a notice on the Home page when something needs a look.
 
 HomeHub checks its computer's temperature every minute, so Health also says how hot it got in the last day if that was hotter than now. On a Raspberry Pi, it also shows whether the Pi is getting enough power. Admins get a notification when the computer stays at 80 °C or more for 5 minutes, which is where a Raspberry Pi starts slowing itself down, or when a Pi reports low power. Each notification is sent at most once every 6 hours.
 
@@ -707,7 +711,7 @@ If speakers stop answering, administrators can select **Restart voice bridge** u
 
 ### Go back a version
 
-If something stopped working after an update, open **Health**, and under **Version** select **Go back to** the version HomeHub ran before. HomeHub saves a copy of its database, switches back and restarts, which takes a minute or two. Your devices, schedules and settings stay. When a fixed version is out, the Update card on the Home page offers it as usual.
+If something stopped working after an update, open **Health → HomeHub**, and under **Version** select **Go back to** the version HomeHub ran before. HomeHub saves a copy of its database, switches back and restarts, which takes a minute or two. Your devices, schedules and settings stay. When a fixed version is out, the Update card on the Home page offers it as usual.
 
 If Health says to run the installer once more, your HomeHub was installed before going back was possible: run the installer again on the HomeHub computer, and the option appears.
 

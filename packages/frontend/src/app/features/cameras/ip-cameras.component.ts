@@ -1,3 +1,4 @@
+import { NgTemplateOutlet } from '@angular/common';
 import { Component, OnDestroy, OnInit, computed, inject, input, output, signal } from '@angular/core';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
@@ -12,6 +13,12 @@ import { SecretInputDirective } from '../../shared/secret-input/secret-input.dir
 export interface IpSnapshot { id: number; deviceId: number | null; camera: string; cameraName: string; trigger: 'motion' | 'manual' | 'doorbell'; sizeBytes: number; takenAt: string }
 type MotionState = 'off' | 'unsupported' | 'standby' | 'connecting' | 'watching' | 'error';
 /** What a search can find an IP camera by. */
+/** What an IP camera's motion detection is doing, in a word or two. */
+export const ipMotionLabel = (c: IpCamera): string => ({
+  watching: 'Watching', connecting: 'Connecting', error: 'Motion problem', off: 'Motion off',
+  unsupported: 'No motion', standby: 'Standby',
+} as Record<MotionState, string>)[c.motionState];
+
 export const ipWords = (c: IpCamera): (string | null)[] =>
   [c.name, c.maker, c.model, c.host, c.onvif ? 'onvif' : 'rtsp'];
 
@@ -33,7 +40,7 @@ interface IpInfo { relay: { state: 'ready' } | { state: 'unreachable'; detail: s
 @Component({
   selector: 'app-ip-cameras',
   standalone: true,
-  imports: [SecretInputDirective, FormsModule, AuthImgComponent, LiveViewComponent],
+  imports: [SecretInputDirective, FormsModule, AuthImgComponent, LiveViewComponent, NgTemplateOutlet],
   styleUrls: ['./camera-layout.css'],
   styles: [`
     h2 { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); margin: 1.75rem 0 0.75rem; }
@@ -87,6 +94,7 @@ interface IpInfo { relay: { state: 'ready' } | { state: 'unreachable'; detail: s
         @if (r.relay?.state === 'unreachable') {
           <div class="note"><span>Live video from IP cameras needs the camera relay. {{ $any(r.relay).detail }}</span></div>
         }
+        @if (!tiles()) {
         @for (c of shown(); track c.id) {
           <div class="card cam">
             <app-auth-img [src]="'/api/ip-cameras/' + c.id + '/live.jpg'" [refreshSeconds]="20" [alt]="c.name"
@@ -111,26 +119,7 @@ interface IpInfo { relay: { state: 'ready' } | { state: 'unreachable'; detail: s
                   <button class="btn-sm ghost" type="button" (click)="confirmRemove.set(c.id)" [disabled]="busyId() === c.id">Remove</button>
                 }
               </div>
-              @if (editing() === c.id) {
-                <div class="form">
-                  <input type="text" [(ngModel)]="editName" placeholder="Name" aria-label="Name" maxlength="80" style="grid-column:1/-1" />
-                  <input type="text" [(ngModel)]="editUser" placeholder="Camera username" aria-label="Camera username" autocomplete="off" />
-                  <input type="text" class="secret" autocomplete="off" spellcheck="false" autocapitalize="off" data-1p-ignore data-lpignore="true" data-bwignore [(ngModel)]="editPass" placeholder="New password (blank keeps it)" aria-label="Camera password" />
-                  @if (c.hasSubStream) {
-                    <select [(ngModel)]="editQuality" aria-label="Live video quality" style="grid-column:1/-1">
-                      <option value="main">Live video: full quality</option>
-                      <option value="sub">Live video: smaller, for slow Wi-Fi or phones that can't play the full stream</option>
-                    </select>
-                  }
-                  @if (c.onvif) {
-                    <label class="check" style="grid-column:1/-1"><input type="checkbox" [(ngModel)]="editMotion" /> Save a picture when it sees motion</label>
-                  }
-                  <div class="wide">
-                    <button class="btn-sm btn-primary" type="button" (click)="saveEdit(c)" [disabled]="busyId() === c.id || !editName.trim()">{{ busyId() === c.id ? 'Saving…' : 'Save' }}</button>
-                    <button class="btn-sm ghost" type="button" (click)="editing.set(null)" [disabled]="busyId() === c.id">Cancel</button>
-                  </div>
-                </div>
-              }
+              @if (editing() === c.id) { <ng-container *ngTemplateOutlet="editForm; context: { $implicit: c }" /> }
               @if (confirmRemove() === c.id) {
                 <div class="confirm">
                   <span>Take {{ c.name }} out of HomeHub? The camera isn't changed, and its snapshots stay here until they're old enough to delete.</span>
@@ -140,6 +129,7 @@ interface IpInfo { relay: { state: 'ready' } | { state: 'unreachable'; detail: s
               }
             </div>
           </div>
+        }
         }
         @if (cameraMsg()) { <p class="msg err span">{{ cameraMsg() }}</p> }
       } @else if (view() === 'setup' && isAdmin()) {
@@ -208,6 +198,36 @@ interface IpInfo { relay: { state: 'ready' } | { state: 'unreachable'; detail: s
     @if (live(); as c) {
       <app-live-view [apiBase]="'/api/ip-cameras/' + c.id" [name]="c.name" [canPan]="c.canPan" (closed)="live.set(null)" />
     }
+    @if (tiles() && editingCam(); as c) {
+      <div class="hh-scrim" (click)="editing.set(null)">
+        <div class="hh-sheet" role="dialog" aria-modal="true" aria-labelledby="ip-edit-title" (click)="$event.stopPropagation()">
+          <div class="hh-grab"></div>
+          <h3 id="ip-edit-title">Edit {{ c.name }}</h3>
+          <ng-container *ngTemplateOutlet="editForm; context: { $implicit: c }" />
+          @if (cameraMsg()) { <p class="msg err">{{ cameraMsg() }}</p> }
+        </div>
+      </div>
+    }
+    <ng-template #editForm let-c>
+    <div class="form">
+      <input type="text" [(ngModel)]="editName" placeholder="Name" aria-label="Name" maxlength="80" style="grid-column:1/-1" />
+      <input type="text" [(ngModel)]="editUser" placeholder="Camera username" aria-label="Camera username" autocomplete="off" />
+      <input type="text" class="secret" autocomplete="off" spellcheck="false" autocapitalize="off" data-1p-ignore data-lpignore="true" data-bwignore [(ngModel)]="editPass" placeholder="New password (blank keeps it)" aria-label="Camera password" />
+      @if (c.hasSubStream) {
+        <select [(ngModel)]="editQuality" aria-label="Live video quality" style="grid-column:1/-1">
+          <option value="main">Live video: full quality</option>
+          <option value="sub">Live video: smaller, for slow Wi-Fi or phones that can't play the full stream</option>
+        </select>
+      }
+      @if (c.onvif) {
+        <label class="check" style="grid-column:1/-1"><input type="checkbox" [(ngModel)]="editMotion" /> Save a picture when it sees motion</label>
+      }
+      <div class="wide">
+        <button class="btn-sm btn-primary" type="button" (click)="saveEdit(c)" [disabled]="busyId() === c.id || !editName.trim()">{{ busyId() === c.id ? 'Saving…' : 'Save' }}</button>
+        <button class="btn-sm ghost" type="button" (click)="editing.set(null)" [disabled]="busyId() === c.id">Cancel</button>
+      </div>
+    </div>
+    </ng-template>
   `,
 })
 export class IpCamerasComponent implements OnInit, OnDestroy {
@@ -222,6 +242,8 @@ export class IpCamerasComponent implements OnInit, OnDestroy {
   readonly view = input<'cameras' | 'setup' | 'none'>('cameras');
   /** The search and brand chosen on the Cameras tab. */
   readonly filter = input<CameraFilter>(NO_FILTER);
+  /** The page draws the cameras as tiles itself; this shows only notes, live view and dialogs. */
+  readonly tiles = input(false);
   readonly brandShown = brandShown;
 
   readonly isAdmin = computed(() => this.auth.user()?.role === 'admin');
@@ -236,6 +258,7 @@ export class IpCamerasComponent implements OnInit, OnDestroy {
   readonly busy = signal(false);
   readonly busyId = signal<number | null>(null);
   readonly editing = signal<number | null>(null);
+  readonly editingCam = computed(() => this.info()?.cameras.find((c) => c.id === this.editing()) ?? null);
   readonly confirmRemove = signal<number | null>(null);
   readonly live = signal<IpCamera | null>(null);
   readonly message = signal('');
@@ -275,12 +298,7 @@ export class IpCamerasComponent implements OnInit, OnDestroy {
     });
   }
 
-  motionLabel(c: IpCamera): string {
-    return ({
-      watching: 'Watching', connecting: 'Connecting', error: 'Motion problem', off: 'Motion off',
-      unsupported: 'No motion', standby: 'Standby',
-    } as Record<MotionState, string>)[c.motionState];
-  }
+  motionLabel(c: IpCamera): string { return ipMotionLabel(c); }
 
   openForm(): void {
     this.formOpen.set(true);

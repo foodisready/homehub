@@ -9,8 +9,8 @@ export interface SettingsTile {
   hue: string;
   /** A short line on how it's doing: "27 devices · 2 offline". */
   status: string;
-  /** Something there needs the person's attention. */
-  look?: boolean;
+  /** Something there needs the person's attention; 'problem' for something wrong. */
+  look?: boolean | 'problem';
   /** More words a search finds it by. */
   words: string;
 }
@@ -30,6 +30,8 @@ const ICONS = {
   link: 'M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7',
   bell: 'M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0',
   sliders: 'M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6',
+  hub: 'M7 4h10a3 3 0 0 1 3 3v10a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3zM8 9h8M8 13h5',
+  chip: 'M8 6h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2zM9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4',
 } as const;
 
 /**
@@ -62,11 +64,14 @@ const ICONS = {
     small { color: var(--text-muted); font-size: 0.76rem; line-height: 1.3; overflow-wrap: anywhere; }
     .look { position: absolute; top: 0.7rem; right: 0.7rem; font-size: 0.68rem; font-weight: 700; color: #1a1300;
       background: #f5b83d; border-radius: 999px; padding: 0.1rem 0.45rem; }
+    .look.bad { background: var(--red); color: #fff; }
     .empty { color: var(--text-muted); text-align: center; padding: 2rem 0; }
   `],
   template: `
+    @if (searchable()) {
     <input class="search" type="search" [value]="query()" (input)="query.set($any($event.target).value)" (keydown.enter)="openOnly()"
            placeholder="Search settings: password, wake word, backup…" aria-label="Search settings" />
+    }
     @for (g of groups(); track g.name) {
       <section class="group" [attr.aria-label]="g.name">
         <h2>{{ g.name }}</h2>
@@ -78,7 +83,8 @@ const ICONS = {
               </span>
               <b>{{ t.name }}</b>
               <small>{{ t.status }}</small>
-              @if (t.look) { <span class="look"><span aria-hidden="true">Look</span><span class="sr-only">Needs a look</span></span> }
+              @if (t.look === 'problem') { <span class="look bad"><span aria-hidden="true">Fix</span><span class="sr-only">Something is wrong</span></span> }
+              @else if (t.look) { <span class="look"><span aria-hidden="true">Look</span><span class="sr-only">Needs a look</span></span> }
             </button>
           }
         </div>
@@ -90,6 +96,8 @@ const ICONS = {
 })
 export class SettingsTilesComponent {
   readonly tiles = input.required<SettingsTile[]>();
+  /** Shows the search box. */
+  readonly searchable = input(true);
   readonly open = output<string>();
   readonly query = signal('');
 
