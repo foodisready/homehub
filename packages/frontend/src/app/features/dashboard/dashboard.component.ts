@@ -122,7 +122,7 @@ const isThermostat = (d: Device) => d.driverConfig?.['kind'] === 'thermostat';
         @else {
           <app-rooms-view [devices]="devices()" [busyIds]="busyIds()"
                           (toggled)="toggle($event)" (overrideSet)="setOverride($event)"
-                          (overrideCancelled)="cancelOverride($event)" (allOff)="allOff($event)" />
+                          (overrideCancelled)="cancelOverride($event)" (allOff)="allOff($event)" (roomOpened)="checkDevices($event)" />
         }
       </app-wall-frame>
     } @else {
@@ -161,7 +161,7 @@ const isThermostat = (d: Device) => d.driverConfig?.['kind'] === 'thermostat';
         @if (view() === 'rooms') {
           <app-rooms-view [devices]="roomDevices()" [busyIds]="busyIds()"
                           (toggled)="toggle($event)" (overrideSet)="setOverride($event)"
-                          (overrideCancelled)="cancelOverride($event)" (allOff)="allOff($event)" />
+                          (overrideCancelled)="cancelOverride($event)" (allOff)="allOff($event)" (roomOpened)="checkDevices($event)" />
         } @else {
         <div class="rooms">
           @for (section of sections(); track section.name) {
@@ -301,7 +301,12 @@ export class DashboardComponent implements OnInit, OnDestroy {
    */
   private catchUp(): void {
     this.loadDevices(() => this.refreshAutoOff(0));
-    this.http.post('/api/devices/check', {}).subscribe({ next: () => this.loadDevices(), error: () => undefined });
+    this.checkDevices();
+  }
+
+  /** Ask HomeHub to read these devices (all, if none) now, then show what it found. */
+  checkDevices(ids?: number[]): void {
+    this.http.post('/api/devices/check', ids ? { ids } : {}).subscribe({ next: () => this.loadDevices(), error: () => undefined });
   }
 
   ngOnDestroy(): void {

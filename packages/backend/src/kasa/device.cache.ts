@@ -40,13 +40,38 @@ export function getAllCachedStates(): Map<number, DeviceState> {
  * away rather than after the read-back a moment later. Wattage is kept when
  * turning on, since the next poll measures it.
  */
-export function noteState(deviceId: number, state: boolean): void {
+export function noteState(deviceId: number, state: boolean, now = Date.now()): void {
   const prev = cache.get(deviceId);
+  settleAfterSwitch(deviceId, now);
   // A fresh switch starts the "no power" check again: a light just turned on reads 0 W for a moment.
   lowSince.delete(deviceId);
   if (prev?.noPower) emitDeviceNoPower(deviceId, false);
   cache.set(deviceId, { state, wattage: state ? prev?.wattage ?? null : null, online: true, lastPolled: new Date() });
   recordPower(deviceId, state);   // with the cause of the work that made the switch
+}
+
+// ── Settling after a switch ────────────────────────────────────
+// Some devices take a while to show a switch: a garage door reads closed until it has moved off its
+// sensor, and open until it's fully down. A regular check landing in that time would undo the switch
+// on screen and log a change nobody made. So for a driver's `confirmAfterMs` after a switch, checks
+// leave the device alone; the read-back after the switch, or the next check, has the real state.
+
+const settling = new Map<number, number>();
+
+function settleAfterSwitch(deviceId: number, now: number): void {
+  const row = getDb().prepare('SELECT driver_type FROM devices WHERE id = ?').get(deviceId) as { driver_type: string | null } | undefined;
+  let ms: number | undefined;
+  try { ms = row ? getDriver(row.driver_type ?? 'kasa').confirmAfterMs : undefined; } catch { ms = undefined; }
+  if (ms) settling.set(deviceId, now + ms); else settling.delete(deviceId);
+}
+
+/** Still settling after a switch: a check now could read the old state. */
+export function isSettling(deviceId: number, now = Date.now()): boolean {
+  const until = settling.get(deviceId);
+  if (until === undefined) return false;
+  if (now < until) return true;
+  settling.delete(deviceId);
+  return false;
 }
 
 // ── On, but no power ───────────────────────────────────────────
@@ -137,6 +162,7 @@ async function readDevice(
     tuyaLastPolled.set(id, Date.now());
   }
 
+  if (isSettling(id)) return;
   const prev   = cache.get(id);
   const driver = getDriver(driverType);
   const started = Date.now();

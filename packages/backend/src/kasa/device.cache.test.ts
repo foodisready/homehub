@@ -65,6 +65,29 @@ describe('checking devices on a backup HomeHub', () => {
     assert.deepEqual(reads, ['kasa 10.0.0.77'], 'a few seconds later it reads again');
   });
 
+  it('leaves a garage door alone while it moves after a switch, then checks it again', async () => {
+    role('active');
+    const { getDriver } = await import('../drivers/registry');
+    const meross = getDriver('meross') as any;
+    const was = meross.getPower;
+    let reads = 0;
+    meross.getPower = async () => { reads++; return false; };   // still on its "closed" sensor
+    try {
+      db.prepare("INSERT INTO devices (alias, ip, driver_type) VALUES ('Garage', '10.0.0.50', 'meross')").run();
+      const g = id('Garage');
+      cache.noteState(g, true);                      // just tapped open
+      await cache.pollDeviceNow(g);
+      await cache.checkNow([g], Date.now() + cache.FRESH_MS);
+      assert.equal(reads, 0, 'not read while the door moves');
+      assert.equal(cache.getCachedState(g)?.state, true, 'still shows open');
+      assert.equal(cache.isSettling(g), true);
+
+      cache.noteState(g, true, Date.now() - meross.confirmAfterMs - 1);   // as if tapped long ago
+      await cache.pollDeviceNow(g);
+      assert.equal(reads, 1, 'read again once it has had time to move');
+    } finally { meross.getPower = was; }
+  });
+
   it('two callers asking about one device at once share a single read', async () => {
     const { getDriver } = await import('../drivers/registry');
     const kasa = getDriver('kasa') as any;

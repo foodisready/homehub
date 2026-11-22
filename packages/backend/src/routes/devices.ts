@@ -48,6 +48,9 @@ function confirmStateAsync(
         recordPower(deviceId, actual, { source: 'homehub', detail: "didn't respond to the switch" });
         emitDeviceState(deviceId, alias, actual, prev?.wattage ?? null);
         logger.warn({ deviceId, alias, expectedState, actual }, 'Device state mismatch after setPower — corrected');
+      } else if (prev && prev.state !== actual) {
+        // It did, but something since showed otherwise: put the screen right.
+        emitDeviceState(deviceId, alias, actual, prev.wattage ?? null);
       }
     } catch { /* device offline — next poll will handle it */ }
   }, getDriver(driverType).confirmAfterMs ?? 1200);

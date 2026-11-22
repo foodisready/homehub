@@ -1,7 +1,6 @@
 import {
   AfterViewChecked, ChangeDetectorRef, Component, ElementRef, OnDestroy, computed, effect, inject, input, output, signal, untracked, viewChild,
 } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
 import type { Device } from '../../shared/models/device.model';
 import { ThermostatService, offQuestion, shown } from '../../shared/thermostat/thermostat.service';
 import { DeviceRowComponent, OverrideRequest } from './device-row/device-row.component';
@@ -267,20 +266,21 @@ export class RoomsViewComponent implements AfterViewChecked, OnDestroy {
   readonly overrideSet = output<OverrideRequest>();
   readonly overrideCancelled = output<Device>();
   readonly allOff = output<Device[]>();
+  /** A room opened: these are its devices. */
+  readonly roomOpened = output<number[]>();
 
   private readonly thermostats = inject(ThermostatService);
   private readonly cd = inject(ChangeDetectorRef);
-  private readonly http = inject(HttpClient);
 
   /**
-   * A room just opened: read its devices now rather than show what the last regular check saw, so
-   * a garage door opened with its remote shows open. Changes arrive as live updates.
+   * A room just opened: its devices, for the page to read now rather than show what the last
+   * regular check saw, so a garage door opened with its remote shows open.
    */
-  private readonly checkOpenRoom = effect(() => {
+  private readonly announceOpenRoom = effect(() => {
     const name = this.openName();
     if (name === null) return;
     const ids = untracked(() => this.tiles().find((t) => t.name === name)?.devices.map((d) => d.id) ?? []);
-    if (ids.length) this.http.post('/api/devices/check', { ids }).subscribe({ error: () => undefined });
+    if (ids.length) this.roomOpened.emit(ids);
   });
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   private readonly map = viewChild<ElementRef<HTMLElement>>('map');
