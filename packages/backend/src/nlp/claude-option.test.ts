@@ -581,6 +581,115 @@ describe('Claude Haiku option', () => {
     }
   });
 
+  it('with Claude: what happened is looked up in Activity, read only', async () => {
+    choice.setClaudeKey(KEY); choice.setAiMode('claude');
+    db.prepare('DELETE FROM device_events').run();   // what earlier tests switched
+    const ins = db.prepare("INSERT INTO device_events (device_id, device_alias, kind, state, source, detail, user_name, at) VALUES (?, ?, 'power', ?, ?, ?, ?, ?)");
+    ins.run(2, 'Desk lamp', 1, 'app', null, 'Anna', '2026-11-22T07:43:56.298Z');
+    ins.run(1, 'Porch light', 1, 'motion', 'Porch at night', null, '2026-11-22T07:51:03.334Z');
+    ins.run(1, 'Porch light', 0, 'timer', null, null, '2026-11-22T08:01:03.334Z');
+    ins.run(1, 'Porch light', 1, 'schedule', 'Sunset', null, '2026-11-21T22:00:00.000Z');
+    try {
+      const { getHomeSettings } = await import('../home/home-settings');
+      const tz = getHomeSettings().timezone;
+      const local = (iso: string) => new Date(iso).toLocaleString('sv-SE', { timeZone: tz }).slice(0, 16);
+      anthropic.form = { action: 'question', target: null, scene: null, minutes: null, lang: 'en' };
+      anthropic.chat = [
+        tool('get_activity', { from: local('2026-11-22T05:00:00Z'), to: local('2026-11-22T10:00:00Z'), state: 'on' }),
+        message([{ type: 'text', text: 'Two things.' }]),
+      ];
+      const r = await nlp.processMessage('what got turned on between midnight and 5 this morning?', [], 's8', 'user');
+      assert.equal(r.response, 'Two things.');
+      const got = lastToolResult();
+      assert.deepEqual(got.changes.map((c: any) => [c.device, c.state, c.by]),
+        [['Desk lamp', 'on', 'the app (Anna)'], ['Porch light', 'on', 'a motion light (Porch at night)']]);
+
+      anthropic.chat = [tool('get_activity', { device: 'Porch light', newest_first: true, from: local('2026-11-21T00:00:00Z'), to: local('2026-11-23T00:00:00Z') }), message([{ type: 'text', text: 'A timer.' }])];
+      await nlp.processMessage('what turned the porch light off?', [], 's8', 'user');
+      const porch = lastToolResult().changes;
+      assert.deepEqual(porch.map((c: any) => c.state), ['off', 'on', 'on']);
+      assert.equal(porch[0].by, 'a timer');
+      assert.equal(porch[0].wasOnFor, '10 min');
+      assert.equal(switched.length, 0);
+    } finally {
+      db.prepare('DELETE FROM device_events').run();
+    }
+  });
+
+  it('with Claude: a one-time reminder says its day', async () => {
+    choice.setClaudeKey(KEY); choice.setAiMode('claude');
+    const { dayKey } = await import('../family/checkin');
+    const tomorrow = dayKey(new Date(Date.now() + 86_400_000));
+    try {
+      anthropic.chat = [tool('create_reminder', { text: 'Take the laundry out', times: ['15:00'], date: tomorrow, lang: 'en' })];
+      let r = await nlp.processMessage('remind me tomorrow at 3 to take the laundry out', [], 's9', 'user');
+      assert.equal(r.response, 'Should I add this reminder? At 3 PM tomorrow the speakers will say “Take the laundry out”.');
+      r = await nlp.processMessage('yes', [], 's9', 'user');
+      assert.equal(r.response, 'Done. The reminder is on the Family page, where you can change it.');
+      assert.equal((db.prepare('SELECT on_day FROM reminders').get() as { on_day: string }).on_day, tomorrow);
+    } finally {
+      db.prepare('DELETE FROM reminders').run();
+    }
+  });
+
+  it('with Claude: an admin sets a device’s watts from Chat, after a yes', async () => {
+    choice.setClaudeKey(KEY); choice.setAiMode('claude');
+    anthropic.form = { action: 'unclear', target: null, scene: null, minutes: null, lang: 'en' };
+    anthropic.chat = [tool('set_device_watts', { device: 'Desk lamp', watts: 36, lang: 'en' }), message([{ type: 'text', text: 'Ask an admin.' }])];
+    await nlp.processMessage('the desk lamp is 4 bulbs of 9 watts', [], 's10', 'user');
+    assert.match(lastToolResult().error, /Only an admin/);
+    anthropic.chat = [tool('set_device_watts', { device: 'Desk lamp', watts: 36, lang: 'en' })];
+    let r = await nlp.processMessage('the desk lamp is 4 bulbs of 9 watts', [], 's10', 'admin');
+    assert.equal(r.response, 'Should I set Desk lamp to 36 W? The Energy page will estimate its use from that.');
+    r = await nlp.processMessage('yes', [], 's10', 'admin');
+    assert.equal(r.response, 'Done. Desk lamp is counted at 36 W.');
+    assert.equal((db.prepare("SELECT watts FROM devices WHERE alias = 'Desk lamp'").get() as { watts: number }).watts, 36);
+    db.prepare("UPDATE devices SET watts = NULL WHERE alias = 'Desk lamp'").run();
+  });
+
+  it('with Claude: an admin pauses or moves a schedule from Chat, but never one that opens a garage door', async () => {
+    choice.setClaudeKey(KEY); choice.setAiMode('claude');
+    anthropic.form = { action: 'unclear', target: null, scene: null, minutes: null, lang: 'en' };
+    const porch = Number(db.prepare("INSERT INTO schedules (device_id, label, trigger_type, cron_expression, state) VALUES (1, 'Porch off', 'cron', '0 21 * * *', 0)").run().lastInsertRowid);
+    db.prepare("INSERT INTO devices (alias, ip, room, driver_type) VALUES ('Garage', '192.0.2.12', 'Garage', 'meross')").run();
+    const garageId = (db.prepare("SELECT id FROM devices WHERE alias = 'Garage'").get() as { id: number }).id;
+    const garage = Number(db.prepare("INSERT INTO schedules (device_id, label, trigger_type, cron_expression, state, enabled) VALUES (?, 'Garage open', 'cron', '0 7 * * *', 1, 0)").run(garageId).lastInsertRowid);
+    try {
+      anthropic.chat = [tool('update_schedule', { schedule_id: porch, cron_expression: '0 22 * * *', lang: 'en' })];
+      let r = await nlp.processMessage('move the porch light off to 10', [], 's11', 'admin');
+      assert.equal(r.response, 'Should I change Porch light’s “Porch off” schedule to turn it off every day at 10 PM?');
+      r = await nlp.processMessage('yes', [], 's11', 'admin');
+      assert.match(r.response, /^Done/);
+      assert.equal((db.prepare('SELECT cron_expression FROM schedules WHERE id = ?').get(porch) as { cron_expression: string }).cron_expression, '0 22 * * *');
+      // Named by its own time, it's renamed with it; a name of its own is kept.
+      const auto = Number(db.prepare("INSERT INTO schedules (device_id, label, trigger_type, cron_expression, state) VALUES (1, 'Every day at midnight', 'cron', '0 0 * * *', 0)").run().lastInsertRowid);
+      anthropic.chat = [tool('update_schedule', { schedule_id: auto, cron_expression: '30 23 * * *', lang: 'en' })];
+      r = await nlp.processMessage('move the midnight one to 11:30 pm', [], 's11', 'admin');
+      assert.equal(r.response, 'Should I change Porch light’s “Every day at midnight” schedule to turn it off every day at 11:30 PM?');
+      await nlp.processMessage('yes', [], 's11', 'admin');
+      assert.equal((db.prepare('SELECT label FROM schedules WHERE id = ?').get(auto) as { label: string }).label, 'Every day at 11:30 PM');
+      assert.equal((db.prepare('SELECT label FROM schedules WHERE id = ?').get(porch) as { label: string }).label, 'Porch off');
+
+      anthropic.chat = [tool('update_schedule', { schedule_id: porch, enabled: false, lang: 'en' })];
+      r = await nlp.processMessage('pause the porch schedule', [], 's11', 'admin');
+      assert.equal(r.response, 'Should I pause Porch light’s “Porch off” schedule?');
+      await nlp.processMessage('yes', [], 's11', 'admin');
+      assert.equal((db.prepare('SELECT enabled FROM schedules WHERE id = ?').get(porch) as { enabled: number }).enabled, 0);
+
+      anthropic.chat = [tool('update_schedule', { schedule_id: garage, enabled: true, lang: 'en' }), message([{ type: 'text', text: 'No.' }])];
+      await nlp.processMessage('resume the garage schedule', [], 's11', 'admin');
+      assert.match(lastToolResult().error, /doesn’t resume or move a schedule that opens Garage/);
+      assert.equal((db.prepare('SELECT enabled FROM schedules WHERE id = ?').get(garage) as { enabled: number }).enabled, 0);
+
+      anthropic.chat = [tool('update_schedule', { schedule_id: porch, cron_expression: '0 30 * * *', lang: 'en' }), message([{ type: 'text', text: 'Hm.' }])];
+      await nlp.processMessage('move it to 12:30', [], 's11', 'admin');
+      assert.match(lastToolResult().error, /minute comes first/);
+    } finally {
+      db.prepare('DELETE FROM schedules').run();
+      db.prepare("DELETE FROM devices WHERE alias = 'Garage'").run();
+    }
+  });
+
   it('the local model has no setup tools, and isn’t told it can set them up', async () => {
     await nlp.processMessage('remind me to drink water at 3pm', [], 's7', 'admin');
     const chatReq = ollama.requests.find((q) => Array.isArray(q.tools));

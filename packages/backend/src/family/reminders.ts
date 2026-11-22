@@ -38,13 +38,15 @@ export interface Reminder {
   lastSaidAt: string | null;
   /** Asks if it's done, and tells the family if nobody says yes. */
   ask: boolean;
+  /** A one-time reminder's day, YYYY-MM-DD; null for one that repeats on `days`. */
+  onDay: string | null;
   /** For one that asks: the last week's answers, newest first. */
   answers: AskDay[];
 }
 
 export interface AskDay { id: number; day: string; answer: 'yes' | 'no' | null; asks: number; answeredAt: string | null; answeredBy: string | null; toldAt: string | null }
 
-interface Row { id: number; text: string; language: string; at_time: string; days: string; enabled: number; last_day: string | null; last_status: string | null; last_said_at: string | null; ask: number }
+interface Row { id: number; text: string; language: string; at_time: string; days: string; enabled: number; last_day: string | null; last_status: string | null; last_said_at: string | null; ask: number; on_day: string | null }
 
 /** ask: the reminder_asks row this one asks about, so the speaker listens for the answer. */
 export interface Announcement { id: string; text: string; lang: VoiceLanguage; reminderId: number | null; queuedAt: number; ask: number | null; askKind?: 'checkin' }
@@ -57,12 +59,13 @@ const LATE_LIMIT_MS = 15 * 60_000;
 const ANSWER_WITHIN_MS = 2 * 60_000;
 const TICK_MS = 15_000;
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const LANGUAGES: ReminderLanguage[] = ['auto', 'en', 'yue', 'zh', 'vi'];
 
 const toReminder = (r: Row): Reminder => ({
   id: r.id, text: r.text, language: r.language as ReminderLanguage, at: r.at_time, days: [...r.days].map(Number),
   enabled: !!r.enabled, lastDay: r.last_day, lastStatus: r.last_status, lastSaidAt: r.last_said_at,
-  ask: !!r.ask, answers: r.ask ? recentAnswers(r.id) : [],
+  ask: !!r.ask, onDay: r.on_day ?? null, answers: r.ask ? recentAnswers(r.id) : [],
 });
 
 export function listReminders(): Reminder[] {
@@ -96,7 +99,7 @@ export function voiceFor(text: string, language: ReminderLanguage, on: VoiceLang
 const LANGUAGE_NAME: Record<VoiceLanguage, string> = { en: 'English', yue: 'Cantonese', zh: 'Mandarin', vi: 'Vietnamese' };
 
 /** A reminder as it would be saved, checked; throws ReminderError for what's wrong. Saves nothing. */
-export function readReminder(input: unknown, existing: Reminder | null = null): Pick<Reminder, 'text' | 'language' | 'at' | 'days' | 'enabled' | 'ask'> {
+export function readReminder(input: unknown, existing: Reminder | null = null, now = Date.now()): Pick<Reminder, 'text' | 'language' | 'at' | 'days' | 'enabled' | 'ask' | 'onDay'> {
   if (!input || typeof input !== 'object') throw new ReminderError('Expected an object');
   const b = input as Record<string, unknown>;
   const text = typeof b['text'] === 'string' ? b['text'].trim() : existing?.text ?? '';
@@ -115,24 +118,31 @@ export function readReminder(input: unknown, existing: Reminder | null = null): 
   }
   const enabled = 'enabled' in b ? b['enabled'] === true : existing?.enabled ?? true;
   const ask = 'ask' in b ? b['ask'] === true : existing?.ask ?? false;
-  return { text, language, at, days: [...new Set(days as number[])].sort(), enabled, ask };
+  const onDay = 'onDay' in b ? b['onDay'] ?? null : existing?.onDay ?? null;
+  if (onDay !== null && (typeof onDay !== 'string' || !DAY.test(onDay))) throw new ReminderError('onDay must be a day, YYYY-MM-DD, or null');
+  // A new time for a one-time reminder has to be still to come.
+  if (onDay !== null && ('onDay' in b || 'at' in b) && (onDay !== existing?.onDay || at !== existing?.at) && localTime(onDay, at) <= now) {
+    throw new ReminderError('That time has already passed');
+  }
+  return { text, language, at, days: [...new Set(days as number[])].sort(), enabled, ask, onDay: onDay as string | null };
 }
 
 export function saveReminder(input: unknown, id?: number): Reminder {
   const existing = id ? getReminder(id) : null;
   if (id && !existing) throw new ReminderError('No such reminder');
-  const { text, language, at, days, enabled, ask } = readReminder(input, existing);
-  const values = [text, language, at, days.join(''), enabled ? 1 : 0, ask ? 1 : 0];
+  const { text, language, at, days, enabled, ask, onDay } = readReminder(input, existing);
+  const values = [text, language, at, days.join(''), enabled ? 1 : 0, ask ? 1 : 0, onDay];
   const db = getDb();
   // A time already passed today waits for tomorrow, so saving at 9:05 doesn't say a 9:00 reminder now.
   const today = dayKey(new Date());
-  const passed = Date.now() >= localTime(today, at);
+  // (A one-time reminder has its own day, which is still to come.)
+  const passed = !onDay && Date.now() >= localTime(today, at);
   if (existing) {
-    const lastDay = existing.at !== at ? (passed ? today : null) : existing.lastDay;
-    db.prepare('UPDATE reminders SET text = ?, language = ?, at_time = ?, days = ?, enabled = ?, ask = ?, last_day = ? WHERE id = ?').run(...values, lastDay, existing.id);
+    const lastDay = existing.at !== at || existing.onDay !== onDay ? (passed ? today : null) : existing.lastDay;
+    db.prepare('UPDATE reminders SET text = ?, language = ?, at_time = ?, days = ?, enabled = ?, ask = ?, on_day = ?, last_day = ? WHERE id = ?').run(...values, lastDay, existing.id);
     return getReminder(existing.id)!;
   }
-  const r = db.prepare('INSERT INTO reminders (text, language, at_time, days, enabled, ask, last_day) VALUES (?, ?, ?, ?, ?, ?, ?)').run(...values, passed ? today : null);
+  const r = db.prepare('INSERT INTO reminders (text, language, at_time, days, enabled, ask, on_day, last_day) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(...values, passed ? today : null);
   return getReminder(Number(r.lastInsertRowid))!;
 }
 
@@ -214,8 +224,11 @@ export function checkReminders(now = Date.now()): number {
   const today = dayKey(new Date(now));
   const weekday = new Date(now).getDay();
   let n = 0;
+  // One-time reminders are kept a few days after their day, for the Family page, then go.
+  getDb().prepare('DELETE FROM reminders WHERE on_day IS NOT NULL AND on_day < ?').run(dayKey(new Date(now - 3 * 86_400_000)));
   for (const r of listReminders()) {
-    if (!r.enabled || r.lastDay === today || !r.days.includes(weekday)) continue;
+    if (!r.enabled || r.lastDay === today) continue;
+    if (r.onDay ? r.onDay !== today : !r.days.includes(weekday)) continue;
     const at = localTime(today, r.at);
     if (now < at) continue;
     getDb().prepare('UPDATE reminders SET last_day = ? WHERE id = ?').run(today, r.id);

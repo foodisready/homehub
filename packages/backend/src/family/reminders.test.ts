@@ -71,6 +71,28 @@ describe('spoken reminders', () => {
     assert.equal(r.checkReminders(at(17, 9, 0)), 1);
   });
 
+  it('a one-time reminder is said on its day only, and goes a few days later', () => {
+    const day = (d: number, h: number, min = 0) => new Date(2026, 11, d, h, min).getTime();
+    assert.throws(() => r.saveReminder({ text: 'Call the doctor', at: '15:00', onDay: '2026-11-01' }), /already passed/);
+    assert.throws(() => r.saveReminder({ text: 'Call the doctor', at: '15:00', onDay: 'Friday' }), /YYYY-MM-DD/);
+    const rem = r.saveReminder({ text: 'Call the doctor', at: '15:00', onDay: '2026-12-05' });
+    assert.equal(rem.onDay, '2026-12-05');
+    assert.equal(rem.lastDay, null);
+    assert.equal(r.checkReminders(day(4, 15, 0)), 0, 'not the day before');
+    assert.equal(r.checkReminders(day(5, 14, 59)), 0);
+    assert.equal(r.checkReminders(day(5, 15, 0)), 1);
+    assert.equal(r.checkReminders(day(6, 15, 0)), 0, 'not again the next day');
+    // Editing its text keeps the day, and doesn't ask for a time still to come.
+    assert.equal(r.saveReminder({ text: 'Call Dr Lee' }, rem.id).onDay, '2026-12-05');
+    assert.ok(r.getReminder(rem.id), 'kept for a few days, for the Family page');
+    r.checkReminders(day(9, 8, 0));
+    assert.equal(r.getReminder(rem.id), null, 'then gone');
+    // A repeating one is untouched by that.
+    const daily = r.saveReminder({ text: 'Pills', at: '09:00' });
+    r.checkReminders(day(20, 8, 0));
+    assert.ok(r.getReminder(daily.id));
+  });
+
   it('records which speakers said it, or why none did', () => {
     const rem = r.saveReminder({ text: 'Pills', at: '09:00' });
     const id = r.announce('Pills', 'en', rem.id);

@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, input
 import { HttpClient } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
-import { LANGUAGE_NAME, WEEKDAYS, clockText, daysText, errorText, timeIn, todayIn, type AskDay, type Family, type Reminder, type VoiceLanguage } from './family.types';
+import { LANGUAGE_NAME, WEEKDAYS, clockText, daysText, errorText, onceText, timeIn, todayIn, type AskDay, type Family, type Reminder, type VoiceLanguage } from './family.types';
 
 /** Things to say, for a quick start, in each language the speakers can say. */
 const EXAMPLES: Record<VoiceLanguage, string[]> = {
@@ -27,6 +27,7 @@ interface SayState { state: 'waiting' | 'said' | 'not said'; said: string[]; err
     :host { display: block; }
     .note { font-size: 0.85rem; line-height: 1.45; padding: 0.7rem 0.85rem; border-radius: var(--radius); background: var(--bg); margin: 0 0 0.9rem; }
     .note.warn { border-left: 3px solid #f59e0b; }
+    .once { font-size: 0.85rem; color: var(--text-muted); margin: 0; }
     .note a { color: var(--accent); }
     ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
     li { display: grid; grid-template-columns: 5.2rem 1fr auto; gap: 0.3rem 0.9rem; align-items: start; padding: 0.75rem 0; border-top: 1px solid var(--border); }
@@ -86,7 +87,7 @@ interface SayState { state: 'waiting' | 'said' | 'not said'; said: string[]; err
       <ul>
         @for (r of data().reminders; track r.id) {
           <li [class.off]="!r.enabled">
-            <span class="when">{{ clock(r.at) }}<small>{{ days(r.days) }}</small></span>
+            <span class="when">{{ clock(r.at) }}<small>{{ r.onDay ? once(r.onDay) : days(r.days) }}</small></span>
             <span>
               <span class="what">{{ r.text }}</span><span class="lang">{{ langOf(r) }}</span>
               @if (sayState()[r.id]; as s) {
@@ -143,11 +144,15 @@ interface SayState { state: 'waiting' | 'said' | 'not said'; said: string[]; err
         <input type="checkbox" [(ngModel)]="ask" name="ask" />
         <span>Ask if it’s done (“{{ askPreview() }}”). If nobody says yes after 3 tries, 10 minutes apart, the family is told.</span>
       </label>
-      <div class="days wide" role="group" aria-label="Days">
-        @for (d of order; track d) {
-          <button type="button" class="day" [attr.aria-pressed]="dayList().includes(d)" (click)="toggleDay(d)">{{ weekdays[d] }}</button>
-        }
-      </div>
+      @if (editing()?.onDay; as day) {
+        <p class="wide once">Once, {{ once(day).toLowerCase() }}. To say it on more days, add a new reminder.</p>
+      } @else {
+        <div class="days wide" role="group" aria-label="Days">
+          @for (d of order; track d) {
+            <button type="button" class="day" [attr.aria-pressed]="dayList().includes(d)" (click)="toggleDay(d)">{{ weekdays[d] }}</button>
+          }
+        </div>
+      }
       @if (error()) { <p class="err wide" role="alert">{{ error() }}</p> }
       <div class="foot wide">
         <button type="submit" class="btn-primary" [disabled]="saving() || !text.trim() || !at">{{ editing() ? 'Save' : 'Add reminder' }}</button>
@@ -171,6 +176,7 @@ export class RemindersComponent {
   readonly order = [1, 2, 3, 4, 5, 6, 0];
   readonly clock = clockText;
   readonly days = daysText;
+  once(day: string): string { return onceText(day, this.data().timezone); }
 
   text = '';
   language: 'auto' | VoiceLanguage = 'auto';

@@ -23,6 +23,7 @@ import { chatWithClaude, ClaudeChatError } from './claude-chat';
 import { warmupDone, warmupStarted, warmupStep } from './warmup';
 import { cronProblem } from '../routes/cron-check';
 import { PLAN_DECLINED, runSetupTool, setPlan, SETUP_TOOL_NAMES, SETUP_TOOLS, takePlan } from './setup-tools';
+import { HISTORY_TOOL, runHistoryTool } from './history-tool';
 
 export interface ChatMessage {
   role: 'user' | 'assistant';
@@ -540,7 +541,7 @@ async function warmSteps(
  * The local model doesn't have the setup tools (setup-tools.ts), so it says where to go instead of
  * claiming to have set something up.
  */
-const LOCAL_SETUP_NOTE = '\nYou cannot set up spoken reminders or daily check-ins here. If asked, say they can be added on the Family page, or from Chat with Claude turned on in Settings → AI.';
+const LOCAL_SETUP_NOTE = '\nYou cannot set up spoken reminders or daily check-ins here, or look up what happened earlier. If asked, say reminders and check-ins can be added on the Family page, past changes are on the Activity page, and Chat can do both with Claude turned on in Settings → AI.';
 
 export function buildSystemPrompt(names: string[] = listDeviceNames()): string {
   const list = names.length ? names.map((n) => `- ${n}`).join('\n') : '(none yet)';
@@ -815,10 +816,12 @@ export async function answerVoiceAsk(confirmId: string, answer: 'yes' | 'no'): P
 function claudeStyle(): string {
   const tz = homeTz();
   const now = new Date().toLocaleString('en-US', { timeZone: tz, weekday: 'long', hour: 'numeric', minute: '2-digit' });
+  // The date too, as YYYY-MM-DD, for reminders and looking things up ("in 20 minutes", "last night").
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: tz });
   return `
 
 Replies may be read aloud: answer in one or two short sentences of plain text, with no markdown, lists or headings.
-The home's time zone is ${tz}, and it's now ${now} there. Say times in the home's time zone, the way people say them ("5:02 PM").
+The home's time zone is ${tz}, and it's now ${now} there (${today}). Say times in the home's time zone, the way people say them ("5:02 PM").
 Switching a device asks the person first: call set_power_state for what they most likely mean, and HomeHub asks them "Should I turn on …?" itself. Don't offer to switch something in your own words, and never say something was switched.
 HomeHub learns names: when someone says yes to its question, it remembers the words they used for next time, and an admin can add nicknames on a device's page. Never say HomeHub can't remember a name.`;
 }
@@ -839,6 +842,7 @@ async function byClaudeChat(text: string, history: ChatMessage[], who: string, l
   let asked: Handled | null = null;
   const ctx: ToolContext = { who, admin };
   const execute = async (name: string, args: Record<string, unknown>): Promise<unknown> => {
+    if (name === HISTORY_TOOL.function.name) return runHistoryTool(args);
     if (SETUP_TOOL_NAMES.has(name)) {
       if (asked) return { error: 'HomeHub is already asking the user about one change. Wait for their answer.' };
       const r = runSetupTool(name, args, ctx);
@@ -869,7 +873,7 @@ async function byClaudeChat(text: string, history: ChatMessage[], who: string, l
   };
   try {
     const r = await chatWithClaude(text, history, {
-      apiKey: key, system: buildSystemPrompt() + claudeStyle(), tools: [...TOOLS, ...SETUP_TOOLS], execute, stop: () => asked !== null,
+      apiKey: key, system: buildSystemPrompt() + claudeStyle(), tools: [...TOOLS, ...SETUP_TOOLS, HISTORY_TOOL], execute, stop: () => asked !== null,
     });
     recordClaudeUse(r.inputTokens, r.outputTokens);
     if (asked) return asked;

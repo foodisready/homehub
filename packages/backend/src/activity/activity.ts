@@ -156,6 +156,11 @@ export interface ActivityQuery {
   source?: ActivitySource;
   kind?: 'power' | 'online';
   before?: number;
+  /** ISO times: changes at or after `from`, and before `to`. */
+  from?: string;
+  to?: string;
+  /** Any of these devices. */
+  deviceIds?: number[];
   limit?: number;
 }
 
@@ -168,6 +173,9 @@ export function listActivity(q: ActivityQuery = {}): ActivityEvent[] {
   if (q.source !== undefined) { where.push('source = ?'); args.push(q.source); }
   if (q.kind !== undefined) { where.push('kind = ?'); args.push(q.kind); }
   if (q.before !== undefined) { where.push('id < ?'); args.push(q.before); }
+  if (q.from !== undefined) { where.push('at >= ?'); args.push(q.from); }
+  if (q.to !== undefined) { where.push('at < ?'); args.push(q.to); }
+  if (q.deviceIds?.length) { where.push(`device_id IN (${q.deviceIds.map(() => '?').join(',')})`); args.push(...q.deviceIds); }
   const limit = Math.min(Math.max(q.limit ?? 50, 1), 200);
   const rows = getDb().prepare(`
     SELECT * FROM (

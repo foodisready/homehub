@@ -19,6 +19,8 @@ export interface Reminder {
   id: number; text: string; language: 'auto' | VoiceLanguage; at: string; days: number[]; enabled: boolean;
   lastDay: string | null; lastStatus: string | null; lastSaidAt: string | null;
   ask: boolean; answers: AskDay[];
+  /** A one-time reminder's day, YYYY-MM-DD; null for one that repeats. */
+  onDay: string | null;
 }
 
 /** A day's answer to a reminder that asks back. */
@@ -85,6 +87,15 @@ export function daysText(days: number[]): string {
   if (s === '12345') return 'Weekdays';
   if (s === '06') return 'Weekends';
   return [...days].sort((a, b) => ((a + 6) % 7) - ((b + 6) % 7)).map((d) => WEEKDAYS[d]).join(', ');
+}
+
+/** A one-time reminder's day: "Today", "Tomorrow", "Tue, Nov 24", by the home's calendar. */
+export function onceText(day: string, timezone?: string, now = Date.now()): string {
+  const key = (ms: number) => new Date(ms).toLocaleDateString('en-CA', { timeZone: timezone });
+  if (day === key(now)) return 'Today';
+  if (day === key(now + 86_400_000)) return 'Tomorrow';
+  const [y, m, d] = day.split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
 }
 
 /** A time from the server, in the home's time zone. */

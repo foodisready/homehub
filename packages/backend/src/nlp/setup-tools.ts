@@ -16,7 +16,13 @@
  */
 import { getDb } from '../db';
 import { deleteReminder, listReminders, readReminder, ReminderError, saveReminder, type Reminder } from '../family/reminders';
-import { audience, CheckinError, deleteCheckin, listCheckins, saveCheckin, type Checkin } from '../family/checkin';
+import { audience, CheckinError, dayKey, deleteCheckin, listCheckins, saveCheckin, type Checkin } from '../family/checkin';
+import { excludedReason, setWatts } from '../energy/usage';
+import { cronProblem } from '../routes/cron-check';
+import { notifyScheduler } from '../routes/schedules';
+import { describeTiming, timingPhrase } from '../routes/schedule-words';
+import { assistantMaySwitch, type PowerDevice } from '../devices/power';
+import { findDeviceByName } from './find-device';
 import type { Lang } from './confirm';
 
 // ── What's waiting for a yes, per person ────────────────────────
@@ -68,6 +74,7 @@ export const SETUP_TOOLS = [
           times: { type: 'array', items: { type: 'string' }, description: 'Times of day, 24-hour HH:MM, at most 12, e.g. ["09:00"] or ["09:00","21:00"]' },
           days:  DAYS_ARG,
           ask:   { type: 'boolean', description: 'True to ask afterwards if it was done ("did you take it?"), and tell the family if nobody says yes. For medicine, usually true.' },
+          date:  { type: 'string', description: 'For a one-time reminder, the day, YYYY-MM-DD (today’s date for "in 20 minutes" or "at 3 today"). Leave out for one that repeats every day or on days.' },
           lang:  LANG_ARG,
         },
         required: ['text', 'times', 'lang'],
@@ -137,6 +144,43 @@ export const SETUP_TOOLS = [
   {
     type: 'function',
     function: {
+      name: 'set_device_watts',
+      description: 'Set how many watts a device draws when on, for the Energy page’s estimates, e.g. "the kitchen lights are 4 bulbs of 9 W" is 36. '
+        + 'Admins only. The user is asked to confirm first.',
+      parameters: {
+        type: 'object',
+        properties: {
+          device: { type: 'string', description: 'The device’s name' },
+          watts:  { type: 'number', description: 'Watts when on, 0 to 5000, added up for several bulbs' },
+          lang:   LANG_ARG,
+        },
+        required: ['device', 'watts', 'lang'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'update_schedule',
+      description: 'Change a device schedule by id (from list_schedules): pause or resume it, or move it to a new time. '
+        + 'Give only what changes. Admins only. The user is asked to confirm first.',
+      parameters: {
+        type: 'object',
+        properties: {
+          schedule_id:          { type: 'integer' },
+          enabled:              { type: 'boolean', description: 'false pauses it, true resumes it' },
+          cron_expression:      { type: 'string', description: 'A new fixed time, as a cron expression, e.g. "0 22 * * *" for 10 PM daily' },
+          solar_event:          { type: 'string', enum: ['sunrise', 'sunset', 'dawn', 'dusk', 'goldenHour', 'solarNoon'], description: 'A new sun time' },
+          solar_offset_minutes: { type: 'integer', description: 'Minutes from the sun event, e.g. -30 for 30 minutes before' },
+          lang:                 LANG_ARG,
+        },
+        required: ['schedule_id', 'lang'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'who_gets_alerts',
       description: 'Who HomeHub tells when a check-in sees no activity, a reminder goes unanswered, or someone asks for help: the phones with HomeHub’s notifications on, and email',
       parameters: { type: 'object', properties: {} },
@@ -200,14 +244,26 @@ const asking = (plan: Plan): SetupResult => ({
   result: { asking: true, note: 'HomeHub is asking the user to confirm. Nothing is saved until they say yes.' }, ask: plan,
 });
 
-/** "9 AM and 9 PM every day"; in Chinese the days come first, with no spaces: 每日上午9點. */
-function whenWords(times: string[], days: number[], lang: Lang): string {
-  const t = listWords(times.map((x) => timeWords(x, lang)), lang);
-  return lang === 'yue' || lang === 'zh' ? `${dayWords(days, lang)}${t}` : `${t} ${dayWords(days, lang)}`;
+/** A one-time reminder's day: "today", "tomorrow", "on Tuesday, Nov 24". */
+export function dateWords(day: string, lang: Lang, now = new Date()): string {
+  if (day === dayKey(now)) return { en: 'today', vi: 'hôm nay', yue: '今日', zh: '今天' }[lang];
+  if (day === dayKey(new Date(now.getTime() + 86_400_000))) return { en: 'tomorrow', vi: 'ngày mai', yue: '聽日', zh: '明天' }[lang];
+  const [y, m, d] = day.split('-').map(Number);
+  const date = new Date(Date.UTC(y, m - 1, d, 12));
+  if (lang === 'en') return `on ${date.toLocaleDateString('en-US', { timeZone: 'UTC', weekday: 'long', month: 'short', day: 'numeric' })}`;
+  if (lang === 'vi') return `vào ${DAY_NAMES.vi[date.getUTCDay()]}, ngày ${d}/${m}`;
+  return `${m}月${d}日${DAY_NAMES[lang][date.getUTCDay()]}`;
 }
 
-const reminderLine = (r: Pick<Reminder, 'text' | 'at' | 'days'>, lang: Lang) =>
-  `${whenWords([r.at], r.days, lang)}${lang === 'yue' || lang === 'zh' ? '：' : ': '}“${r.text}”`;
+/** "9 AM and 9 PM every day", "3 PM today"; in Chinese the day comes first, with no spaces: 每日上午9點. */
+function whenWords(times: string[], days: number[], lang: Lang, onDay: string | null = null): string {
+  const t = listWords(times.map((x) => timeWords(x, lang)), lang);
+  const d = onDay ? dateWords(onDay, lang) : dayWords(days, lang);
+  return lang === 'yue' || lang === 'zh' ? `${d}${t}` : `${t} ${d}`;
+}
+
+const reminderLine = (r: Pick<Reminder, 'text' | 'at' | 'days' | 'onDay'>, lang: Lang) =>
+  `${whenWords([r.at], r.days, lang, r.onDay)}${lang === 'yue' || lang === 'zh' ? '：' : ': '}“${r.text}”`;
 
 function createReminder(args: Record<string, unknown>): SetupResult {
   const lang = asLang(args['lang']);
@@ -216,7 +272,11 @@ function createReminder(args: Record<string, unknown>): SetupResult {
   const times = [...new Set(raw.map((t) => String(t).trim().replace(/^(\d):/, '0$1:')))].sort();
   if (!times.length) return { result: { error: 'Say when: times is required, 24-hour HH:MM. Ask the user when if they didn’t say.' } };
   if (times.length > 12) return { result: { error: 'At most 12 times a day. Ask the user to space them out.' } };
-  const input = { text: args['text'], at: times[0], ask: args['ask'] === true, ...(args['days'] !== undefined ? { days: args['days'] } : {}) };
+  const onDay = typeof args['date'] === 'string' && args['date'].trim() ? args['date'].trim() : null;
+  const input = {
+    text: args['text'], at: times[0], ask: args['ask'] === true, onDay,
+    ...(args['days'] !== undefined && !onDay ? { days: args['days'] } : {}),
+  };
   let checked: ReturnType<typeof readReminder>;
   try {
     checked = readReminder(input);
@@ -225,7 +285,7 @@ function createReminder(args: Record<string, unknown>): SetupResult {
     if (err instanceof ReminderError) return { result: { error: err.message } };
     throw err;
   }
-  const when = whenWords(times, checked.days, lang);
+  const when = whenWords(times, checked.days, lang, onDay);
   const q: Record<Lang, string> = {
     en:  `Should I add ${times.length > 1 ? 'these reminders' : 'this reminder'}? At ${when} the speakers will say “${checked.text}”${checked.ask ? ', then ask if it’s done. If nobody says yes, the family is told' : ''}.`,
     vi:  `Có phải bạn muốn thêm lời nhắc này không? Lúc ${when}, loa sẽ nói “${checked.text}”${checked.ask ? ', rồi hỏi đã làm chưa. Nếu không ai trả lời có, gia đình sẽ được báo' : ''}.`,
@@ -237,7 +297,7 @@ function createReminder(args: Record<string, unknown>): SetupResult {
     run: () => {
       const saved = times.map((at) => saveReminder({ ...input, at }));
       const done: Record<Lang, string> = {
-        en: `Done. ${saved.length > 1 ? `${saved.length} reminders are` : 'The reminder is'} on the Family page, where you can change or pause ${saved.length > 1 ? 'them' : 'it'}.`,
+        en: `Done. ${saved.length > 1 ? `${saved.length} reminders are` : 'The reminder is'} on the Family page, where you can change ${onDay ? '' : 'or pause '}${saved.length > 1 ? 'them' : 'it'}.`,
         vi: 'Xong. Lời nhắc ở trang Gia đình, nơi bạn có thể sửa hoặc tạm dừng.',
         yue: '搞掂。提醒喺「家人」頁，可以喺嗰度改或者暫停。',
         zh: '好了。提醒在“家人”页面，可以在那里修改或暂停。',
@@ -351,14 +411,113 @@ function removeCheckin(args: Record<string, unknown>, ctx: SetupContext): SetupR
   });
 }
 
+const ADMIN_ONLY_DEVICES = { error: 'Only an admin can change this, as in Settings. Tell the user to ask an admin. Nothing was changed.' };
+
+function deviceWatts(args: Record<string, unknown>, ctx: SetupContext): SetupResult {
+  if (!ctx.admin) return { result: ADMIN_ONLY_DEVICES };
+  const lang = asLang(args['lang']);
+  const match = findDeviceByName(String(args['device'] ?? ''));
+  if ('error' in match) return { result: { error: match.error } };
+  const d = match.device as { id: number; alias: string; driver_type: string; driver_config: string | null };
+  const excluded = excludedReason(d);
+  if (excluded) return { result: { error: `${d.alias} is a ${excluded}: its energy isn’t estimated from watts, so there’s nothing to set.` } };
+  const watts = Number(args['watts']);
+  if (!Number.isFinite(watts) || watts < 0 || watts > 5000) return { result: { error: 'watts must be a number from 0 to 5000' } };
+  const w = Math.round(watts * 10) / 10;
+  const q: Record<Lang, string> = {
+    en: `Should I set ${d.alias} to ${w} W? The Energy page will estimate its use from that.`,
+    vi: `Có phải bạn muốn đặt ${d.alias} là ${w} W không? Trang Năng lượng sẽ ước tính từ con số này.`,
+    yue: `要唔要將${d.alias}設定為${w}瓦？能源頁會用呢個數估算。`,
+    zh: `要把${d.alias}设为${w}瓦吗？能源页会用这个数估算。`,
+  };
+  return asking({
+    lang, question: q[lang],
+    run: () => {
+      setWatts(d.id, w);
+      return { en: `Done. ${d.alias} is counted at ${w} W.`, vi: `Xong. ${d.alias} được tính là ${w} W.`, yue: `搞掂。${d.alias}而家按${w}瓦計。`, zh: `好了。${d.alias}现在按${w}瓦计算。` }[lang];
+    },
+  });
+}
+
+const SOLAR = ['sunrise', 'sunset', 'dawn', 'dusk', 'goldenHour', 'solarNoon'];
+
+interface ScheduleRow {
+  id: number; device_id: number; label: string; trigger_type: string; cron_expression: string | null; solar_event: string | null;
+  solar_offset_minutes: number; state: number; enabled: number; alias: string; driver_type: string; is_protected: number;
+}
+
+function updateSchedule(args: Record<string, unknown>, ctx: SetupContext): SetupResult {
+  if (!ctx.admin) return { result: { error: 'Only an admin can change schedules, as on the Schedules page. Tell the user to ask an admin. Nothing was changed.' } };
+  const lang = asLang(args['lang']);
+  const db = getDb();
+  const row = db.prepare(`SELECT s.*, d.alias, d.driver_type, d.is_protected FROM schedules s JOIN devices d ON d.id = s.device_id WHERE s.id = ?`)
+    .get(Number(args['schedule_id'])) as ScheduleRow | undefined;
+  if (!row) return { result: { error: 'No schedule has that id. Use list_schedules.' } };
+  if (row.trigger_type === 'auto_off') return { result: { error: 'That one turns a device off after it comes on: change it on the Schedules page.' } };
+
+  const next = { enabled: row.enabled === 1, trigger_type: row.trigger_type, cron: row.cron_expression, solar: row.solar_event, offset: row.solar_offset_minutes };
+  if (typeof args['enabled'] === 'boolean') next.enabled = args['enabled'];
+  const cron = typeof args['cron_expression'] === 'string' && args['cron_expression'].trim() ? args['cron_expression'].trim() : null;
+  const solar = typeof args['solar_event'] === 'string' && args['solar_event'] ? args['solar_event'] : null;
+  if (cron && solar) return { result: { error: 'Give a fixed time or a sun time, not both' } };
+  if (cron) {
+    const problem = cronProblem(cron);
+    if (problem) return { result: { error: `${problem} Nothing was changed.` } };
+    Object.assign(next, { trigger_type: 'cron', cron, solar: null, offset: 0 });
+  }
+  if (solar) {
+    if (!SOLAR.includes(solar)) return { result: { error: `solar_event must be one of ${SOLAR.join(', ')}` } };
+    Object.assign(next, { trigger_type: 'solar', cron: null, solar });
+  }
+  if (args['solar_offset_minutes'] !== undefined) {
+    const off = Number(args['solar_offset_minutes']);
+    if (!Number.isInteger(off) || Math.abs(off) > 720) return { result: { error: 'solar_offset_minutes must be whole minutes, up to 720 either way' } };
+    if (next.trigger_type !== 'solar') return { result: { error: 'An offset only goes with a sun time' } };
+    next.offset = off;
+  }
+  const moved = next.trigger_type !== row.trigger_type || next.cron !== row.cron_expression || next.solar !== row.solar_event || next.offset !== row.solar_offset_minutes;
+  if (!moved && next.enabled === (row.enabled === 1)) return { result: { error: 'Nothing to change: it already is like that.' } };
+  // Resuming or moving one that opens a garage door is still opening it: the page's to do, not Chat's.
+  if ((moved || next.enabled) && !assistantMaySwitch(row as unknown as PowerDevice, row.state === 1) && row.state === 1) {
+    return { result: { error: `For safety, Chat doesn’t resume or move a schedule that opens ${row.alias}. An admin can on the Schedules page.` } };
+  }
+
+  const door = row.driver_type === 'meross';
+  const verb = row.state === 1 ? 'on' : 'off';
+  const nextTiming = { trigger_type: next.trigger_type, cron_expression: next.cron, solar_event: next.solar, solar_offset_minutes: next.offset };
+  const timeText = timingPhrase(nextTiming);
+  // A schedule named by its time ("Every day at midnight") is renamed with it.
+  const label = moved && row.label === describeTiming(row) ? describeTiming(nextTiming) : row.label;
+  const what = !moved ? (next.enabled ? 'resume' : 'pause') : 'move';
+  const q: Record<Lang, string> = {
+    en: what === 'move'
+      ? `Should I change ${row.alias}’s “${row.label}” schedule to ${door ? (row.state === 1 ? 'open' : 'close') + ' it' : `turn it ${verb}`} ${timeText}${next.enabled ? '' : ', paused'}?`
+      : `Should I ${what} ${row.alias}’s “${row.label}” schedule?`,
+    vi: `Có phải bạn muốn ${what === 'pause' ? 'tạm dừng' : what === 'resume' ? 'tiếp tục' : 'đổi giờ'} lịch “${row.label}” của ${row.alias} không?`,
+    yue: `要唔要${what === 'pause' ? '暫停' : what === 'resume' ? '恢復' : '改'}${row.alias}嘅「${row.label}」時間表？`,
+    zh: `要${what === 'pause' ? '暂停' : what === 'resume' ? '恢复' : '修改'}${row.alias}的“${row.label}”时间表吗？`,
+  };
+  return asking({
+    lang, question: q[lang],
+    run: () => {
+      db.prepare('UPDATE schedules SET enabled = ?, trigger_type = ?, cron_expression = ?, solar_event = ?, solar_offset_minutes = ?, label = ? WHERE id = ?')
+        .run(next.enabled ? 1 : 0, next.trigger_type, next.cron, next.solar, next.offset, label, row.id);
+      notifyScheduler();
+      return { en: 'Done. It’s changed on the Schedules page too.', vi: 'Xong. Trang Lịch cũng đã cập nhật.', yue: '搞掂。時間表頁都改咗。', zh: '好了。时间表页面也改了。' }[lang];
+    },
+  });
+}
+
 /** Runs one of SETUP_TOOLS. */
 export function runSetupTool(name: string, args: Record<string, unknown>, ctx: SetupContext): SetupResult {
   switch (name) {
     case 'create_reminder': return createReminder(args);
     case 'delete_reminder': return deleteReminders(args);
     case 'list_reminders':
-      return { result: listReminders().map((r) => ({ id: r.id, text: r.text, at: r.at, when: reminderLine(r, 'en'), enabled: r.enabled, asksIfDone: r.ask })) };
+      return { result: listReminders().map((r) => ({ id: r.id, text: r.text, at: r.at, once: r.onDay, when: reminderLine(r, 'en'), enabled: r.enabled, asksIfDone: r.ask })) };
     case 'create_checkin': return createCheckin(args, ctx);
+    case 'set_device_watts': return deviceWatts(args, ctx);
+    case 'update_schedule': return updateSchedule(args, ctx);
     case 'delete_checkin': return removeCheckin(args, ctx);
     case 'list_checkins':
       return {
