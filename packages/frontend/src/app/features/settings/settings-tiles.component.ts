@@ -75,7 +75,7 @@ const ICONS = {
   template: `
     @if (searchable()) {
     <input class="search" type="search" [value]="query()" (input)="query.set($any($event.target).value)" (keydown.enter)="openOnly()"
-           placeholder="Search settings: password, wake word, backup…" aria-label="Search settings" />
+           [placeholder]="placeholder()" [attr.aria-label]="placeholder().split(':')[0]" />
     }
     @for (g of groups(); track g.name) {
       <section class="group" [attr.aria-label]="g.name">
@@ -103,6 +103,7 @@ export class SettingsTilesComponent {
   readonly tiles = input.required<SettingsTile[]>();
   /** Shows the search box. */
   readonly searchable = input(true);
+  readonly placeholder = input('Search settings: password, wake word, backup…');
   readonly open = output<string>();
   readonly query = signal('');
 

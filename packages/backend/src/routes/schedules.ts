@@ -3,6 +3,8 @@ import { requireAdmin } from '../middleware/auth';
 import { getDb } from '../db';
 import { logger } from '../logger';
 import { cronProblem } from './cron-check';
+import { nextRuns } from './next-run';
+import { getHomeSettings, solarLocation } from '../home/home-settings';
 
 export const schedulesRouter = Router();
 
@@ -71,7 +73,11 @@ const LIST_SQL = `
 // GET /api/schedules
 schedulesRouter.get('/', (_req: Request, res: Response) => {
   const rows = getDb().prepare(LIST_SQL).all() as (ScheduleRow & { device_alias: string })[];
-  res.json(rows.map(toPublic));
+  // When each runs next, for the page's "Coming up". A failure here never hides the list.
+  let next = new Map<number, string | null>();
+  try { next = nextRuns(rows, new Date(), getHomeSettings().timezone, solarLocation()); }
+  catch (err) { logger.warn({ err }, 'Could not work out next run times'); }
+  res.json(rows.map((r) => ({ ...toPublic(r), next: next.get(r.id) ?? null })));
 });
 
 // GET /api/schedules/:id

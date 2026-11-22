@@ -130,7 +130,7 @@ To set its temperature ranges, an administrator opens the thermostat with **Edit
 
 ### Temperature schedule
 
-Each thermostat has its own card at the top of **Schedules**: a list of changes, each setting the heating and cooling targets on some days, at a time or at sunrise or sunset. For example, "Weekdays · 6:30 AM: Heat 68°" and "Every day · 10:30 PM: Heat 61°". The thermostat's card on **Home** shows the next one, with a link to the schedule.
+Each thermostat has its own tile at the top of **Schedules**, under **Temperatures**; tap it for a list of changes, each setting the heating and cooling targets on some days, at a time or at sunrise or sunset. For example, "Weekdays · 6:30 AM: Heat 68°" and "Every day · 10:30 PM: Heat 61°". The thermostat's card on **Home** shows the next one, with a link to the schedule.
 
 - **Use a suggested schedule** fills in a start: your lowest comfortable temperature from 6:30 AM, and 7 °F (4 °C) lower from 10:30 PM. The U.S. Department of Energy estimates that lowering the heat 7–10 °F for 8 hours a day saves up to about 10% a year. Change it afterwards as you like.
 - A schedule only changes the targets. It never turns heating or cooling on or off, so a thermostat you've turned off for the summer stays off.
@@ -418,13 +418,19 @@ Your own replies can use `{device}`, `{minutes}` and `{scene}`, and must include
 
 ## Schedules
 
-Open **Schedules** to add a time for a device. Each device has its own collapsible group, and a schedule can run:
+Open **Schedules** to see what happens next and to add a time for a device.
+
+- **Coming up,** at the top, lists the next day's runs in time order, with devices switching at the same moment on one line: "6:32 PM · hallway lamp and Living room lamps on, 60 min after sunset". The first shows how long until it runs. Sun times are worked out for your home's location, the same way the scheduler does. A schedule that can never run is named under it, with **Fix it**.
+- **A tile for each device** with schedules, and each thermostat, says what it does: "On 6:32 PM · Off midnight", or **Paused** when all its schedules are paused. A red **Fix** badge means one can never run. With more than six tiles, a search box finds a device, room or time.
+- **Tap a tile** for that device's schedules. Each shows when it runs next. Its switch pauses or resumes it, **Edit** opens it in a sheet, and **Delete** asks first. **+ Add** adds one for that device. The arrow at the top, or your phone's Back button, returns to the tiles. **Schedules** under a device on **Home** opens its page too.
+
+A schedule can run:
 
 - **At a fixed time,** such as every weekday at 7 AM
 - **At a sun event,** such as 15 minutes before sunset
 - **After a device turns on,** such as turning off after 10 minutes
 
-Sun schedules need your location in `.env`.
+Sun schedules use your home's location, from **Settings → Home**.
 
 A schedule that turns a device **on** can also turn it off again: fill in **Turn off after**, in minutes or hours (up to 24 hours), and the schedule's card reads, for example, "Sunset ON for 3 h". Leave it empty and the device stays on. While it's on, the dashboard shows when it will turn off, and **Activity** names the schedule that did it. If someone switches the device in the meantime, by hand, in Chat or by voice, the turn-off is cancelled, so a lamp you turned off early doesn't come back and one you turned back on stays on. It's kept through a restart, and a device whose time ran out while HomeHub was off turns off when it starts.
 

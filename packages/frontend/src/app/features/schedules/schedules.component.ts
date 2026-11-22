@@ -1,5 +1,7 @@
-import { Component, OnInit, signal, computed, inject } from '@angular/core';
-import { ActivatedRoute } from '@angular/router';
+import { Component, DestroyRef, OnDestroy, OnInit, signal, computed, inject } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { ActivatedRoute, Router } from '@angular/router';
+import { SettingsTilesComponent, type SettingsTile } from '../settings/settings-tiles.component';
 import { ThermostatScheduleComponent } from '../../shared/thermostat/thermostat-schedule.component';
 import { AutomationsService } from '../../core/services/automations.service';
 import { HttpClient } from '@angular/common/http';
@@ -24,6 +26,8 @@ interface Schedule {
   enabled: boolean;
   /** Set when the scheduler can't read it, so it never runs. */
   problem?: string | null;
+  /** When it runs next (ISO), within two days; null otherwise. */
+  next?: string | null;
 }
 
 interface ScheduleGroup {
@@ -32,16 +36,11 @@ interface ScheduleGroup {
   schedules: Schedule[];
 }
 
-const COLLAPSED_KEY = 'homehub.schedules.collapsed';
+/** One line of "Coming up": what happens at one time. */
+interface Coming { key: string; at: number; time: string; day: string; names: string; state: boolean; why: string }
 
-function loadCollapsed(): Set<number> {
-  try {
-    const ids: unknown = JSON.parse(localStorage.getItem(COLLAPSED_KEY) ?? '[]');
-    return new Set(Array.isArray(ids) ? ids.filter((id) => typeof id === 'number') : []);
-  } catch {
-    return new Set();
-  }
-}
+/** Lists names the way a person says them: "A, B and C". */
+const joinNames = (n: string[]) => (n.length <= 1 ? n.join('') : `${n.slice(0, -1).join(', ')} and ${n.at(-1)}`);
 
 const CRON_PRESETS = [
   { label: 'Every day at midnight',  value: '0 0 * * *' },
@@ -53,14 +52,10 @@ const CRON_PRESETS = [
 @Component({
   selector: 'app-schedules',
   standalone: true,
-  imports: [FormsModule, ThermostatScheduleComponent],
+  imports: [FormsModule, ThermostatScheduleComponent, SettingsTilesComponent],
   styles: [`
-    .thermostats { display: flex; flex-direction: column; gap: 0.75rem; margin-bottom: 0.75rem; }
     .topbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.75rem; margin-bottom: 1.5rem; }
     .topbar h1 { font-size: 1.4rem; font-weight: 700; }
-    .back-link { color: var(--text-muted); font-size: 0.9rem; }
-    .back-link:hover { color: var(--text); }
-
     .btn-add {
       background: var(--accent);
       color: #fff;
@@ -69,60 +64,35 @@ const CRON_PRESETS = [
     }
     .btn-add:hover { background: var(--accent-hover); }
 
-    /* Schedule list */
-    .schedule-list { display: flex; flex-direction: column; gap: 0.75rem; }
-    .group-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 0.75rem;
-    }
-    .group-name { flex: 1; font-size: 1.05rem; font-weight: 700; min-width: 0; }
-    .group-toggle {
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      width: 100%;
-      background: transparent;
-      border: none;
-      color: var(--text);
-      font: inherit;
-      text-align: left;
-      padding: 0.2rem 0;
-    }
-    .group-toggle:hover { color: var(--accent); }
-    .group-chevron { color: var(--text-muted); transition: transform 0.15s; }
-    .group-chevron.open { transform: rotate(90deg); }
-    .group-alias { min-width: 0; overflow-wrap: anywhere; }
-    .group-count {
-      background: var(--bg);
-      border-radius: 999px;
-      color: var(--text-muted);
-      font-size: 0.75rem;
-      font-weight: 600;
-      padding: 0.1rem 0.5rem;
-    }
-    .group-add {
-      background: transparent;
-      border: 1px solid var(--border);
-      color: var(--accent);
-      padding: 0.3rem 0.8rem;
-      font-size: 0.8rem;
-      flex-shrink: 0;
-    }
-    .group-add:hover { background: var(--surface); }
-    .schedule-row {
-      display: flex;
-      align-items: center;
-      gap: 0.5rem 1rem;
-      flex-wrap: wrap;
-      margin-top: 0.75rem;
-      padding-top: 0.75rem;
-      border-top: 1px solid var(--border);
-    }
-    .schedule-row.disabled .schedule-info { opacity: 0.55; }
-    .schedule-info { flex: 1 1 14rem; min-width: 0; }
-    .schedule-actions { display: flex; align-items: center; gap: 0.5rem; margin-left: auto; }
+    .group-add { background: transparent; border: 1px solid var(--border); color: var(--accent); padding: 0.3rem 0.8rem; font-size: 0.8rem; flex-shrink: 0; }
+    .hh-pagebar h2 { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+    .paged { display: flex; flex-direction: column; gap: 0.6rem; animation: hh-slide .28s cubic-bezier(.2, .8, .2, 1); }
+    .rule { display: grid; grid-template-columns: 1fr auto; gap: 0.5rem 0.8rem; align-items: center; padding: 0.85rem 1rem; }
+    .rule.paused .rule-main { opacity: 0.55; }
+    .rule-main { min-width: 0; }
+    .rule-acts { grid-column: 1 / -1; display: flex; gap: 1.1rem; border-top: 1px solid var(--border); padding-top: 0.5rem; }
+    .link { background: none; border: none; padding: 0; color: var(--accent); font-size: 0.85rem; }
+    .link.del { color: var(--text-muted); }
+    .sw { width: 2.9rem; height: 1.7rem; border-radius: 999px; border: none; padding: 0; background: var(--border); position: relative; flex: none; transition: background .15s; }
+    .sw span { position: absolute; top: 3px; left: 3px; width: calc(1.7rem - 6px); height: calc(1.7rem - 6px); border-radius: 50%; background: #fff; transition: transform .15s; }
+    .sw[aria-checked="true"] { background: var(--green); }
+    .sw[aria-checked="true"] span { transform: translateX(1.2rem); }
+    .sw:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .coming { margin-bottom: 1.25rem; padding: 1rem 1.1rem; }
+    .coming h2 { margin: 0 0 0.6rem; font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); font-weight: 600; }
+    .coming ol { list-style: none; margin: 0; padding: 0; }
+    .coming li { display: grid; grid-template-columns: 4.6rem 1fr auto; gap: 0.7rem; align-items: center; padding: 0.5rem 0; border-top: 1px solid var(--border); }
+    .coming li:first-child { border-top: none; padding-top: 0; }
+    .coming .t { font-weight: 600; font-variant-numeric: tabular-nums; font-size: 0.9rem; }
+    .coming .t small, .coming .what small { display: block; font-weight: 400; font-size: 0.74rem; color: var(--text-muted); }
+    .coming .what { min-width: 0; overflow-wrap: anywhere; }
+    .coming .what b { font-weight: 500; font-size: 0.9rem; }
+    .coming li.first .t { color: var(--accent); font-size: 1.05rem; }
+    .coming li.first .what b { font-weight: 700; }
+    .coming .dot { width: 0.55rem; height: 0.55rem; border-radius: 50%; background: var(--text-muted); opacity: .5; }
+    .coming .dot.on { background: var(--green); opacity: 1; }
+    .coming > .link { margin-top: 0.5rem; }
+    .coming .schedule-problem { margin: 0.6rem 0 0; }
     .schedule-label { font-weight: 600; overflow-wrap: anywhere; }
     .cron-check { font-size: 0.8rem; margin: 0.35rem 0 0; overflow-wrap: anywhere; }
     .cron-check.bad { color: var(--red); }
@@ -140,45 +110,10 @@ const CRON_PRESETS = [
     .badge-on  { background: #14532d; color: var(--green); }
     .badge-off { background: #1c1917; color: var(--text-muted); }
 
-    .toggle-btn {
-      background: transparent;
-      border: 1px solid var(--border);
-      color: var(--text-muted);
-      padding: 0.3rem 0.8rem;
-      font-size: 0.8rem;
-    }
-    .toggle-btn.active { border-color: var(--green); color: var(--green); }
-    .toggle-btn:hover { background: var(--surface); }
-
-    .edit-btn {
-      background: transparent;
-      border: none;
-      color: var(--text-muted);
-      padding: 0.3rem 0.5rem;
-      font-size: 1rem;
-    }
-    .edit-btn:hover { color: var(--accent); }
-
-    .delete-btn {
-      background: transparent;
-      border: none;
-      color: var(--text-muted);
-      padding: 0.3rem 0.5rem;
-      font-size: 1rem;
-    }
-    .delete-btn:hover { color: var(--red); }
-
     .empty { text-align: center; padding: 3rem 1rem; color: var(--text-muted); }
 
     /* Create form */
-    .form-overlay {
-      position: fixed; inset: 0;
-      background: rgba(0,0,0,0.6);
-      display: flex; align-items: center; justify-content: center;
-      padding: 1rem; z-index: 100;
-    }
-    .form-card { width: 100%; max-width: 480px; max-height: 100%; overflow-y: auto; overscroll-behavior: contain; }
-    .form-card h2 { font-size: 1.2rem; font-weight: 700; margin-bottom: 1.25rem; }
+    .form-card h2 { font-size: 1.2rem; font-weight: 700; margin: 0 0 1.25rem; }
     .field { margin-bottom: 1rem; }
     label { display: block; font-size: 0.82rem; font-weight: 500; color: var(--text-muted); margin-bottom: 0.3rem; }
     select {
@@ -245,93 +180,98 @@ const CRON_PRESETS = [
   `],
   template: `
     <div class="page">
-
-      <div class="topbar">
-        <div style="display:flex; align-items:center; gap:1rem">
-          <h1>Schedules</h1>
+      @if (pageId(); as id) {
+        <div class="hh-pagebar">
+          <button type="button" class="hh-back" (click)="closePage()" aria-label="Back to Schedules">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>
+          </button>
+          <h2>{{ pageName() }}</h2>
+          @if (canEdit() && !pageThermostat()) { <button type="button" class="group-add" (click)="openCreate(id)">+ Add</button> }
         </div>
-        @if (canEdit()) {
-          <button class="btn-add" (click)="openCreate()">+ New Schedule</button>
-        }
-      </div>
-
-      <!-- Thermostats' temperatures first: a weekly list of targets, separate from on and off -->
-      @if (thermostats().length) {
-        <div class="thermostats">
-          @for (t of thermostats(); track t.id) {
-            <app-thermostat-schedule [deviceId]="t.id" [canEdit]="canEdit()" [focus]="t.id === focusThermostat" />
-          }
-        </div>
-      }
-
-      <!-- List, grouped by device -->
-      @if (groups().length === 0 && !thermostats().length) {
-        <div class="empty">No schedules yet. Create one to automate your plugs.</div>
-      } @else {
-        <div class="schedule-list">
-          @for (group of groups(); track group.deviceId) {
-            <section class="card">
-              <div class="group-header">
-                <h2 class="group-name">
-                  <button
-                    class="group-toggle"
-                    [attr.aria-expanded]="!isCollapsed(group.deviceId)"
-                    (click)="toggleGroup(group.deviceId)">
-                    <span class="group-chevron" [class.open]="!isCollapsed(group.deviceId)">▸</span>
-                    <span class="group-alias">{{ group.deviceAlias }}</span>
-                    <span class="group-count">{{ group.schedules.length }}</span>
-                  </button>
-                </h2>
+        <div class="paged">
+          @if (pageThermostat()) {
+            <app-thermostat-schedule [deviceId]="id" [canEdit]="canEdit()" />
+          } @else {
+            @for (s of pageSchedules(); track s.id) {
+              <div class="card rule" [class.paused]="!s.enabled">
+                <div class="rule-main">
+                  <div class="schedule-label">
+                    {{ timing(s) }}
+                    <span class="badge" [class.badge-on]="s.state" [class.badge-off]="!s.state">{{ s.state ? 'ON' : 'OFF' }}</span>
+                    @if (s.state && s.stayOnMinutes) { <span class="stay-on">for {{ duration(s.stayOnMinutes) }}</span> }
+                  </div>
+                  @if (s.label !== timing(s)) { <div class="schedule-meta">{{ s.label }}</div> }
+                  @if (s.problem) { <div class="schedule-problem">Never runs: {{ s.problem }} Edit it to fix the time.</div> }
+                  @else { <div class="schedule-meta">{{ !s.enabled ? 'Paused' : s.next ? 'Next: ' + when(s.next) : s.triggerType === 'auto_off' ? 'Whenever it’s switched on' : 'Not in the next two days' }}</div> }
+                </div>
                 @if (canEdit()) {
-                  <button class="group-add" (click)="openCreate(group.deviceId)">+ Add</button>
+                  <button type="button" class="sw" role="switch" [attr.aria-checked]="s.enabled" [attr.aria-label]="(s.enabled ? 'Pause ' : 'Resume ') + timing(s)" (click)="toggleEnabled(s)"><span></span></button>
+                  <div class="rule-acts">
+                    <button type="button" class="link" (click)="openEdit(s)">Edit</button>
+                    <button type="button" class="link del" (click)="deleting.set(s)">Delete</button>
+                  </div>
                 }
               </div>
-
-              @for (s of visibleSchedules(group); track s.id) {
-                <div class="schedule-row" [class.disabled]="!s.enabled">
-                  <div class="schedule-info">
-                    <div class="schedule-label">
-                      {{ timing(s) }}
-                      <span class="badge" [class.badge-on]="s.state" [class.badge-off]="!s.state">
-                        {{ s.state ? 'ON' : 'OFF' }}
-                      </span>
-                      @if (s.state && s.stayOnMinutes) {
-                        <span class="stay-on">for {{ duration(s.stayOnMinutes) }}</span>
-                      }
-                    </div>
-                    @if (s.label !== timing(s)) {
-                      <div class="schedule-meta">{{ s.label }}</div>
-                    }
-                    @if (s.problem) {
-                      <div class="schedule-problem">Never runs: {{ s.problem }} Edit it to fix the time.</div>
-                    }
-                  </div>
-
-                  @if (canEdit()) {
-                    <div class="schedule-actions">
-                      <button
-                        class="toggle-btn"
-                        [class.active]="s.enabled"
-                        (click)="toggleEnabled(s)">
-                        {{ s.enabled ? 'Enabled' : 'Disabled' }}
-                      </button>
-                      <button class="edit-btn" title="Edit" (click)="openEdit(s)">✎</button>
-                      <button class="delete-btn" title="Delete" (click)="deleteSchedule(s)">✕</button>
-                    </div>
-                  }
-                </div>
-              }
-            </section>
+            } @empty {
+              <p class="empty">No schedules for {{ pageName() }} yet.</p>
+            }
           }
         </div>
+      } @else {
+        <div class="topbar">
+          <h1>Schedules</h1>
+          @if (canEdit()) { <button class="btn-add" (click)="openCreate()">+ New schedule</button> }
+        </div>
+
+        @if (coming().length || problems().length) {
+          <section class="card coming" aria-labelledby="coming-title">
+            <h2 id="coming-title">Coming up</h2>
+            <ol>
+              @for (e of shownComing(); track e.key; let first = $first) {
+                <li [class.first]="first">
+                  <span class="t">{{ e.time }}@if (e.day) {<small>{{ e.day }}</small>}</span>
+                  <span class="what">
+                    <b>{{ e.names }} {{ e.state ? 'on' : 'off' }}</b>
+                    <small>{{ e.why }}@if (first) { · {{ inText(e.at) }} }</small>
+                  </span>
+                  <span class="dot" [class.on]="e.state" aria-hidden="true"></span>
+                </li>
+              }
+            </ol>
+            @if (coming().length > comingShown) {
+              <button type="button" class="link" (click)="allComing.set(!allComing())">{{ allComing() ? 'Show fewer' : 'Show all ' + coming().length }}</button>
+            }
+            @for (p of problems(); track p.id) {
+              <p class="schedule-problem">{{ p.deviceAlias }}: a schedule never runs. <button type="button" class="link" (click)="openPage(p.deviceId)">Fix it</button></p>
+            }
+          </section>
+        }
+
+        @if (tiles().length) {
+          <app-settings-tiles [tiles]="tiles()" [searchable]="tiles().length > 6" placeholder="Search schedules: a device or room…" (open)="openPage(+$event)" />
+        } @else {
+          <div class="empty">No schedules yet. Create one to switch a device at a time of day, or at sunset.</div>
+        }
       }
     </div>
 
+    @if (deleting(); as s) {
+      <div class="hh-scrim" (click)="deleting.set(null)">
+        <div class="hh-sheet" role="dialog" aria-modal="true" aria-labelledby="del-title" (click)="$event.stopPropagation()">
+          <div class="hh-grab"></div>
+          <h3 id="del-title">Delete this schedule?</h3>
+          <p>{{ s.deviceAlias }}: {{ timing(s) }}, {{ s.state ? 'on' : 'off' }}. To stop it for a while instead, pause it with its switch.</p>
+          <div class="hh-acts"><button type="button" (click)="deleting.set(null)">Cancel</button><button type="button" class="danger" (click)="deleteSchedule(s)">Delete</button></div>
+        </div>
+      </div>
+    }
+
     <!-- Create / Edit form modal -->
     @if (showForm()) {
-      <div class="form-overlay" (click)="closeForm()">
-        <div class="card form-card" (click)="$event.stopPropagation()">
-          <h2>{{ editingId() ? 'Edit Schedule' : 'New Schedule' }}</h2>
+      <div class="hh-scrim" (click)="closeForm()">
+        <div class="hh-sheet form-card" role="dialog" aria-modal="true" aria-labelledby="form-title" (click)="$event.stopPropagation()">
+          <div class="hh-grab"></div>
+          <h2 id="form-title">{{ editingId() ? 'Edit schedule' : 'New schedule' }}</h2>
 
           <div class="field">
             <label>Device</label>
@@ -465,7 +405,7 @@ const CRON_PRESETS = [
           <div class="form-actions">
             <button class="btn-cancel" (click)="closeForm()">Cancel</button>
             <button class="btn-primary btn-save" [disabled]="saving() || (form.triggerType === 'cron' && !!cronCheck().problem)" (click)="save()">
-              {{ saving() ? 'Saving…' : (editingId() ? 'Update Schedule' : 'Save Schedule') }}
+              {{ saving() ? 'Saving…' : 'Save' }}
             </button>
           </div>
         </div>
@@ -473,19 +413,19 @@ const CRON_PRESETS = [
     }
   `,
 })
-export class SchedulesComponent implements OnInit {
+export class SchedulesComponent implements OnInit, OnDestroy {
   readonly solarEvents  = SOLAR_EVENTS;
   readonly cronPresets  = CRON_PRESETS;
 
   private readonly _schedules = signal<Schedule[]>([]);
   private readonly _devices   = signal<Device[]>([]);
-  private readonly _collapsed = signal(loadCollapsed());
 
   readonly devices    = this._devices.asReadonly();
   /** Matter thermostats, each with its temperature schedule. */
   readonly thermostats = computed(() => this._devices().filter((d) => d.driverConfig?.['kind'] === 'thermostat'));
-  /** From the thermostat card's link: ?thermostat=<id>. */
-  readonly focusThermostat = Number(inject(ActivatedRoute).snapshot.queryParamMap.get('thermostat')) || null;
+  private readonly route = inject(ActivatedRoute);
+  private readonly router = inject(Router);
+  private readonly destroyRef = inject(DestroyRef);
   readonly groups     = computed<ScheduleGroup[]>(() => {
     const byDevice = new Map<number, ScheduleGroup>();
     for (const s of this._schedules()) {
@@ -514,13 +454,160 @@ export class SchedulesComponent implements OnInit {
   constructor(readonly auth: AuthService, private http: HttpClient) {}
 
   ngOnInit(): void {
+    this.route.queryParamMap.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((q) => {
+      // ?device=<id>, or ?thermostat=<id> from a thermostat card's link.
+      const id = Number(q.get('device') ?? q.get('thermostat')) || null;
+      if (!id) this.openedHere = false;
+      if (id !== this.pageId()) window.scrollTo({ top: 0 });
+      this.pageId.set(id);
+    });
     this.loadSchedules();
     this.http.get<Device[]>('/api/devices').subscribe((d) => this._devices.set(d));
+    this.http.get<{ timezone?: string }>('/api/home-settings').subscribe({ next: (h) => this.timeZone.set(h.timezone), error: () => undefined });
+    // The clock moves on: "in 2 h" counts down, and once something has run, its next time is fetched.
+    this.timer = setInterval(() => {
+      this.now.set(Date.now());
+      if (this._schedules().some((s) => s.enabled && s.next && Date.parse(s.next) < Date.now())) this.loadSchedules();
+    }, 30_000);
   }
+
+  ngOnDestroy(): void { clearInterval(this.timer); }
 
   private loadSchedules(): void {
     this.http.get<Schedule[]>('/api/schedules').subscribe((s) => this._schedules.set(s));
   }
+
+  // ── Pages ──────────────────────────────────────────────────────
+
+  /** The open device's page, from the address; null shows the tiles. */
+  readonly pageId = signal<number | null>(null);
+  private openedHere = false;
+  readonly pageThermostat = computed(() => this.thermostats().some((t) => t.id === this.pageId()));
+  readonly pageName = computed(() => this._devices().find((d) => d.id === this.pageId())?.alias
+    ?? this._schedules().find((s) => s.deviceId === this.pageId())?.deviceAlias ?? 'Schedules');
+  readonly pageSchedules = computed(() => this.groups().find((g) => g.deviceId === this.pageId())?.schedules ?? []);
+
+  openPage(deviceId: number): void {
+    this.openedHere = true;
+    void this.router.navigate([], { relativeTo: this.route, queryParams: { device: deviceId } });
+  }
+
+  closePage(): void {
+    if (this.openedHere) { this.openedHere = false; history.back(); return; }
+    void this.router.navigate([], { relativeTo: this.route, queryParams: { device: null, thermostat: null }, replaceUrl: true });
+  }
+
+  // ── Times ──────────────────────────────────────────────────────
+
+  private timer?: ReturnType<typeof setInterval>;
+  readonly now = signal(Date.now());
+  /** The home's time zone: times read the home's way, wherever the phone is. */
+  readonly timeZone = signal<string | undefined>(undefined);
+
+  private dayKey(ms: number): string {
+    return new Date(ms).toLocaleDateString('en-CA', { timeZone: this.timeZone() });
+  }
+  /** "6:12 PM", or "Midnight" and "Noon". */
+  clock(ms: number): string {
+    const t = new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', timeZone: this.timeZone() });
+    return /^12:00\s?AM$/i.test(t) ? 'Midnight' : /^12:00\s?PM$/i.test(t) ? 'Noon' : t.replace(':00', '');
+  }
+  /** "" for today, "Tomorrow", or the weekday. */
+  dayWord(ms: number): string {
+    const today = this.dayKey(this.now());
+    const key = this.dayKey(ms);
+    if (key === today) return '';
+    // The coming midnight is tonight, not tomorrow.
+    if (this.clock(ms) === 'Midnight' && this.dayKey(ms - 60_000) === today) return '';
+    if (key === this.dayKey(this.now() + 86_400_000)) return 'Tomorrow';
+    return new Date(ms).toLocaleDateString([], { weekday: 'long', timeZone: this.timeZone() });
+  }
+  /** "Today 6:12 PM", "Tomorrow 7 AM". */
+  when(iso: string): string {
+    const ms = Date.parse(iso);
+    const day = this.dayWord(ms), time = this.clock(ms);
+    if (time === 'Midnight') return day ? `${day} at midnight` : 'Tonight at midnight';
+    return `${day || 'Today'} ${time}`;
+  }
+  /** "in 2 h 5 min". */
+  inText(ms: number): string {
+    const min = Math.max(1, Math.round((ms - this.now()) / 60_000));
+    if (min < 60) return `in ${min} min`;
+    const h = Math.floor(min / 60), m = min % 60;
+    return `in ${h} h${m ? ` ${m} min` : ''}`;
+  }
+
+  // ── Coming up ──────────────────────────────────────────────────
+
+  readonly comingShown = 5;
+  readonly allComing = signal(false);
+
+  /**
+   * The next day's runs in time order, with schedules at the same moment doing the same thing as
+   * one line: "6:12 PM · hallway lamp and Living room lamps on". A Turn ON with "turn off after"
+   * adds its off too.
+   */
+  readonly coming = computed<Coming[]>(() => {
+    const until = this.now() + 24 * 3_600_000;
+    const runs: Array<{ at: number; name: string; state: boolean; why: string }> = [];
+    for (const s of this._schedules()) {
+      if (!s.enabled || !s.next || s.problem) continue;
+      const at = Date.parse(s.next);
+      if (at <= until) runs.push({ at, name: s.deviceAlias, state: s.state, why: this.timing(s) });
+      if (s.state && s.stayOnMinutes) {
+        const off = at + s.stayOnMinutes * 60_000;
+        if (off <= until) runs.push({ at: off, name: s.deviceAlias, state: false, why: `${describeDuration(s.stayOnMinutes)} after it came on` });
+      }
+    }
+    const lines = new Map<string, { at: number; names: string[]; state: boolean; whys: string[] }>();
+    for (const r of runs.sort((a, b) => a.at - b.at)) {
+      const key = `${Math.floor(r.at / 60_000)}-${r.state}`;
+      const l = lines.get(key) ?? { at: r.at, names: [], state: r.state, whys: [] };
+      if (!l.names.includes(r.name)) l.names.push(r.name);
+      if (!l.whys.includes(r.why)) l.whys.push(r.why);
+      lines.set(key, l);
+    }
+    return [...lines.entries()].map(([key, l]) => ({
+      key, at: l.at, time: this.clock(l.at), day: this.dayWord(l.at),
+      names: l.names.length > 3 ? `${l.names.slice(0, 2).join(', ')} and ${l.names.length - 2} more` : joinNames(l.names),
+      state: l.state, why: l.whys.join(' · '),
+    }));
+  });
+  readonly shownComing = computed(() => (this.allComing() ? this.coming() : this.coming().slice(0, this.comingShown)));
+  /** Schedules the scheduler can't read: they never run. */
+  readonly problems = computed(() => this._schedules().filter((s) => s.problem));
+
+  // ── Tiles ──────────────────────────────────────────────────────
+
+  /** A tile for each device with schedules, and each thermostat: what it does and when. */
+  readonly tiles = computed<SettingsTile[]>(() => {
+    const devices = new Map(this._devices().map((d) => [d.id, d]));
+    const out: SettingsTile[] = this.groups().filter((g) => !this.thermostats().some((t) => t.id === g.deviceId)).map((g) => {
+      const d = devices.get(g.deviceId);
+      const on = g.schedules.filter((s) => s.enabled);
+      const paused = g.schedules.length - on.length;
+      const parts = on.slice(0, 2).map((s) => `${s.state ? 'On' : 'Off'} ${s.next && s.triggerType !== 'auto_off' ? this.clock(Date.parse(s.next)).replace('Midnight', 'midnight').replace('Noon', 'noon') : this.timing(s).replace(/^Every day at /, '')}`);
+      if (on.length > 2) parts.push(`+${on.length - 2} more`);
+      const status = !on.length ? `Paused · ${g.schedules.length} ${g.schedules.length === 1 ? 'schedule' : 'schedules'}`
+        : parts.join(' · ') + (paused ? ` · ${paused} paused` : '');
+      const kind = d?.power?.excluded;
+      const look = g.schedules.some((s) => s.problem) ? 'problem' as const : false;
+      return {
+        key: String(g.deviceId), name: g.deviceAlias, group: kind === 'garage door' || kind === 'valve' ? 'Doors and water' : 'Lights and plugs', status, look,
+        icon: kind === 'garage door' ? 'house' : kind === 'valve' ? 'drop' : 'devices',
+        hue: kind === 'garage door' ? '#ff8a3d' : kind === 'valve' ? '#5ad1e6' : on.length ? '#3ddc97' : '#8e9ab4',
+        words: `${d?.room ?? ''} ${d?.nicknames?.join(' ') ?? ''} ${g.schedules.map((s) => `${s.label} ${this.timing(s)}`).join(' ')}`,
+      } satisfies SettingsTile;
+    });
+    // Lights and plugs first; by name within each. A room is found by searching for it.
+    out.sort((a, b) => b.group.localeCompare(a.group) || a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+    for (const t of this.thermostats()) {
+      out.unshift({ key: String(t.id), name: t.alias, group: 'Temperatures', icon: 'flame', hue: '#ff8a3d', status: 'Weekly temperatures', words: 'thermostat heat cool temperature' });
+    }
+    return out;
+  });
+
+  readonly deleting = signal<Schedule | null>(null);
 
   private blankForm() {
     return {
@@ -541,29 +628,6 @@ export class SchedulesComponent implements OnInit {
   toggleCronHelp(e: Event): void {
     e.stopPropagation();
     this.showCronHelp.update((v) => !v);
-  }
-
-  isCollapsed(deviceId: number): boolean {
-    return this._collapsed().has(deviceId);
-  }
-
-  visibleSchedules(group: ScheduleGroup): Schedule[] {
-    return this.isCollapsed(group.deviceId) ? [] : group.schedules;
-  }
-
-  toggleGroup(deviceId: number): void {
-    this.setCollapsed(deviceId, !this.isCollapsed(deviceId));
-  }
-
-  private setCollapsed(deviceId: number, collapsed: boolean): void {
-    const next = new Set(this._collapsed());
-    if (collapsed) next.add(deviceId); else next.delete(deviceId);
-    this._collapsed.set(next);
-    try {
-      localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...next]));
-    } catch {
-      // Without storage, the choice just lasts until the page is reloaded.
-    }
   }
 
   openCreate(deviceId?: number): void {
@@ -678,8 +742,10 @@ export class SchedulesComponent implements OnInit {
         } else {
           this._schedules.update((list) => [result, ...list]);
         }
-        this.setCollapsed(result.deviceId, false); // Show what was just saved.
         this.closeForm();
+        this.loadSchedules(); // for its next run time
+        // Show what was just saved, on its device's page.
+        if (this.pageId() !== result.deviceId) this.openPage(result.deviceId);
         this.saving.set(false);
       },
       error: (err) => {
@@ -691,12 +757,12 @@ export class SchedulesComponent implements OnInit {
 
   toggleEnabled(s: Schedule): void {
     this.http.patch<Schedule>(`/api/schedules/${s.id}/toggle`, { enabled: !s.enabled }).subscribe({
-      next: (updated) => this._schedules.update((list) => list.map((x) => x.id === s.id ? updated : x)),
+      next: (updated) => { this._schedules.update((list) => list.map((x) => x.id === s.id ? { ...updated, next: x.next } : x)); this.loadSchedules(); },
     });
   }
 
   deleteSchedule(s: Schedule): void {
-    if (!confirm(`Delete "${s.label}"?`)) return;
+    this.deleting.set(null);
     this.http.delete(`/api/schedules/${s.id}`).subscribe({
       next: () => this._schedules.update((list) => list.filter((x) => x.id !== s.id)),
     });
