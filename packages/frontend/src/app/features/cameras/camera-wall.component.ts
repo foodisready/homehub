@@ -63,6 +63,7 @@ const GROUP_KEY = 'homehub.cameras.group';
     .shot.dim::after { content: attr(data-label); position: absolute; inset: 0; display: grid; place-items: center; color: #fff; font-size: 0.82rem; font-weight: 600; background: rgba(8, 12, 22, 0.62); }
     .state { position: absolute; right: 0.4rem; top: 0.4rem; display: flex; align-items: center; gap: 0.3rem; font-size: 0.66rem; color: #fff; background: rgba(0, 0, 0, 0.55); padding: 0.1rem 0.45rem; border-radius: 999px; }
     .stamp { position: absolute; left: 0.4rem; bottom: 0.35rem; font-size: 0.66rem; color: #fff; background: rgba(0, 0, 0, 0.5); padding: 0 0.4rem; border-radius: 6px; }
+    .stamp.still { left: 0.6rem; bottom: 0.6rem; font-size: 0.78rem; padding: 0.15rem 0.55rem; background: rgba(0, 0, 0, 0.6); }
     .bell { position: absolute; left: 0.4rem; top: 0.4rem; width: 1.4rem; height: 1.4rem; border-radius: 50%; background: rgba(0, 0, 0, 0.55); color: #fff; display: grid; place-items: center; }
     svg { width: 0.85rem; height: 0.85rem; }
     .cap { padding: 0.5rem 0.65rem 0.6rem; display: grid; gap: 0.05rem; min-width: 0; }
@@ -153,7 +154,7 @@ const GROUP_KEY = 'homehub.cameras.group';
           </div>
         }
         <div class="acts">
-          <button type="button" class="primary" (click)="act.emit({ action: 'live', item: c })" [disabled]="!c.canLive">Live</button>
+          <button type="button" class="primary" (click)="act.emit({ action: 'live', item: c })" [disabled]="!c.canLive">Watch live</button>
           <button type="button" (click)="act.emit({ action: 'snapshot', item: c })" [disabled]="!c.canSnapshot || busy() === c.key">{{ busy() === c.key ? 'Saving…' : 'Snapshot' }}</button>
           @if (c.paused !== null) {
             <button type="button" (click)="c.paused ? act.emit({ action: 'resume', item: c }) : asking.set({ kind: 'pause', item: c })" [disabled]="busy() === c.key">{{ c.paused ? 'Resume' : 'Pause' }}</button>
@@ -210,7 +211,10 @@ const GROUP_KEY = 'homehub.cameras.group';
         @if (c.status !== 'paused' && c.status !== 'offline' && c.status !== 'plain') {
           <span class="state"><span class="dot" [class]="'dot ' + c.status"></span>{{ c.statusLabel }}</span>
         }
-        @if (c.stamp && c.status !== 'paused' && c.status !== 'offline') { <span class="stamp">{{ c.stamp }}</span> }
+        @if (big && c.img && c.status !== 'paused' && c.status !== 'offline') {
+          <!-- So a picture that refreshes isn't taken for live video. -->
+          <span class="stamp still">{{ c.stamp ? 'Snapshot · ' + c.stamp : c.refreshSeconds ? 'Still picture · updates every ' + Math.min(c.refreshSeconds, 10) + ' s' : 'Still picture' }}{{ c.canLive ? ' · tap for live' : '' }}</span>
+        } @else if (c.stamp && c.status !== 'paused' && c.status !== 'offline') { <span class="stamp">{{ c.stamp }}</span> }
       </span>
     </ng-template>
   `,

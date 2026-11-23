@@ -230,9 +230,9 @@ Until someone signs in to Wyze, the camera bridge waits and uses almost no memor
 
 The **Cameras** page shows every camera as a tile: its latest picture, whether it's **Watching**, **Paused** or **Offline**, and a bell on a doorbell. The counts at the top say how many are watching, paused and offline. **Rooms** groups the tiles by room (Ring and IP cameras each get their own group), and **All** shows one grid; HomeHub remembers your choice on each browser.
 
-Tap a tile to open the camera full screen, with **Live**, **Snapshot** and, for Wyze cameras, **Pause** or **Resume**. Swipe, tap the arrows or press the arrow keys for the next camera. Admins also find **Edit** (IP cameras) and **Remove** (Ring and IP cameras) there; removing asks first. **Pause all** pauses every Wyze camera that's watching, after asking; Ring and IP cameras can't be paused, so they keep watching.
+Tap a tile to open the camera full screen, with **Watch live**, **Snapshot** and, for Wyze cameras, **Pause** or **Resume**. Swipe, tap the arrows or press the arrow keys for the next camera. Admins also find **Edit** (IP cameras) and **Remove** (Ring and IP cameras) there; removing asks first. **Pause all** pauses every Wyze camera that's watching, after asking; Ring and IP cameras can't be paused, so they keep watching.
 
-Select the picture or **Live** to watch. Live video can be a few seconds behind, and starts with the sound off; the 🔇 button turns it on.
+The picture there is a still that updates every 10 seconds, as its label says. Select the picture or **Watch live** for live video. Live video can be a few seconds behind, and starts with the sound off; the 🔇 button turns it on. If a camera doesn't send video within 20 seconds, HomeHub says so, with **Try again**.
 
 To zoom, pinch or double-tap on a phone, or scroll, double-click or press **+** and **−** on a computer. Drag to look around while zoomed, and double-tap or press **0** to see the whole picture again. Zoom enlarges the picture, as in the Wyze app; it doesn't turn the camera.
 

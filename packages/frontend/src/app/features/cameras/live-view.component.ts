@@ -11,6 +11,8 @@ const DOUBLE_TAP_MS = 300;
 const TURN_REPEAT_MS = 500;
 /** How long the picture must stop before live view says it's reconnecting. */
 const STALL_MS = 2_000;
+/** How long to try before saying the camera isn't coming through. */
+const CONNECT_MS = 20_000;
 /** A tap turns the camera this long: a small nudge. */
 const MIN_TURN_MS = 250;
 
@@ -111,6 +113,7 @@ const ARROW_KEYS: Record<string, Turn> = { ArrowLeft: 'left', ArrowRight: 'right
             <div class="status">
               <span>{{ status() }}</span>
               @if (needsTap()) { <button class="close" type="button" (pointerdown)="$event.stopPropagation()" (click)="play()">Play</button> }
+              @if (failed()) { <button class="close" type="button" (pointerdown)="$event.stopPropagation()" (click)="tryAgain()">Try again</button> }
             </div>
           }
           @if (canPan()) {
@@ -165,6 +168,9 @@ export class LiveViewComponent implements AfterViewInit, OnDestroy {
   private readonly wrap = viewChild.required<ElementRef<HTMLDivElement>>('wrap');
   readonly playing = signal(false);
   readonly status = signal('Connecting…');
+  /** It gave up: Try again starts over. */
+  readonly failed = signal(false);
+  private connectTimer?: ReturnType<typeof setTimeout>;
   readonly needsTap = signal(false);
   readonly muted = signal(true);
   readonly maxZoom = MAX_ZOOM;
@@ -204,6 +210,8 @@ export class LiveViewComponent implements AfterViewInit, OnDestroy {
 
   private showPlaying(): void {
     clearTimeout(this.stallTimer);
+    clearTimeout(this.connectTimer);
+    this.failed.set(false);
     this.playing.set(true);
     this.needsTap.set(false);
   }
@@ -215,7 +223,6 @@ export class LiveViewComponent implements AfterViewInit, OnDestroy {
     const el = this.video().nativeElement;
     // The template's `muted` attribute doesn't mute a video Angular creates; browsers only autoplay muted video.
     el.muted = true;
-    const src = `${this.base()}/hls/index.m3u8`;
     el.addEventListener('playing', () => this.showPlaying());
     // Live video plays close to its newest segment, so "waiting" fires between
     // segments while the picture keeps moving: only a picture that stops for a
@@ -232,6 +239,30 @@ export class LiveViewComponent implements AfterViewInit, OnDestroy {
     window.addEventListener('blur', this.onBlur);
     document.addEventListener('visibilitychange', this.onHidden);
 
+    this.start();
+  }
+
+  /** Stops trying, and says so, with Try again. */
+  private giveUp(why: string): void {
+    clearTimeout(this.connectTimer);
+    this.hls?.destroy();
+    this.hls = undefined;
+    this.playing.set(false);
+    this.needsTap.set(false);
+    this.status.set(why);
+    this.failed.set(true);
+  }
+
+  tryAgain(): void {
+    this.retries = 0;
+    this.failed.set(false);
+    this.start();
+  }
+
+  private start(): void {
+    const el = this.video().nativeElement;
+    const src = `${this.base()}/hls/index.m3u8`;
+    this.status.set(`Connecting to ${this.name() || 'the camera'}…`);
     if (!Hls.isSupported()) {
       // Safari on iPhone plays HLS itself, without hls.js, but can't send the sign-in token.
       this.status.set('This browser can\'t play live video. Try Chrome, Safari or Firefox.');
@@ -259,8 +290,7 @@ export class LiveViewComponent implements AfterViewInit, OnDestroy {
         setTimeout(() => this.hls?.startLoad(), 2000);
         return;
       }
-      this.status.set(this.problem() ?? (code === 404 ? 'No live video from this camera. It may be off, on another network, or still connecting.' : 'Live video stopped. Close and try again.'));
-      this.playing.set(false);
+      this.giveUp(this.problem() ?? (code === 404 ? 'No live video from this camera. It may be off, on another network, or still connecting.' : 'Live video stopped.'));
     });
     this.hls.on(Hls.Events.MANIFEST_PARSED, () => {
       this.retries = 0;
@@ -268,6 +298,12 @@ export class LiveViewComponent implements AfterViewInit, OnDestroy {
     });
     this.hls.loadSource(src);
     this.hls.attachMedia(el);
+    // A camera that doesn't answer can leave it connecting for a long while: say so instead.
+    clearTimeout(this.connectTimer);
+    this.connectTimer = setTimeout(() => {
+      if (this.playing() || this.needsTap()) return;
+      this.giveUp(this.problem() ?? `${this.name() || 'The camera'} isn’t sending video. It may be busy, or its Wi-Fi weak.`);
+    }, CONNECT_MS);
   }
 
   play(): void {
@@ -483,6 +519,7 @@ export class LiveViewComponent implements AfterViewInit, OnDestroy {
 
   ngOnDestroy(): void {
     clearTimeout(this.stallTimer);
+    clearTimeout(this.connectTimer);
     if (this.pendingStop) { clearTimeout(this.pendingStop); this.send('stop'); }
     this.endTurn(true);
     clearTimeout(this.turnErrorTimer);
