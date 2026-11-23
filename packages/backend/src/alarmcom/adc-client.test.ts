@@ -7,7 +7,7 @@ import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import {
-  AdcConnection, AdcLiveSession, devBase, errorCode, hiddenField, parseCatalog, parseEvent, sensorKind, sensorState, signIn,
+  AdcConnection, AdcLiveSession, devBase, errorCode, socketUrl, hiddenField, parseCatalog, parseEvent, sensorKind, sensorState, signIn,
 } from './adc-client';
 import { AdcError } from './types';
 
@@ -354,6 +354,11 @@ describe('Alarm.com client', () => {
       assert.equal(parseEvent('not json'), null);
       assert.equal(parseEvent(JSON.stringify({ EventType: 1, CorrelatedId: 5 })), null);
       assert.equal(parseEvent(JSON.stringify({ Property: 1, PropertyValue: 2 })), null);
+    });
+
+    it('puts the live-update token in the address as issued', () => {
+      assert.equal(socketUrl('wss://w:8443', 'ab+c/d=='), 'wss://w:8443/?f=1&auth=ab+c/d==');
+      assert.equal(socketUrl('wss://w:8443', 'a&b#c'), 'wss://w:8443/?f=1&auth=a%26b%23c');
     });
 
     it('reads hidden fields and error codes', () => {

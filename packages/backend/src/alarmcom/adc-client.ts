@@ -456,6 +456,16 @@ type SocketMaker = (url: string, headers: Record<string, string>) => SocketLike;
  */
 const makeSocket: SocketMaker = (url, headers) => new WsSocket(url, { headers, handshakeTimeout: 15_000 }) as unknown as SocketLike;
 
+/**
+ * The live-update address. The token goes in as Alarm.com issued it, as the Python library sends
+ * it; escaping its "+", "/" or "=" is the likeliest reason Alarm.com turned every connection away
+ * at once (1008, seen 2026-11-22). Only a token with characters that would break the address is escaped.
+ */
+export function socketUrl(endpoint: string, token: string): string {
+  const safe = /^[A-Za-z0-9._~+/=:-]+$/.test(token);
+  return `${endpoint}/?f=1&auth=${safe ? token : encodeURIComponent(token)}`;
+}
+
 /** A connection that ends sooner than this after opening counts as refused. */
 const WS_STABLE_MS = 30_000;
 /** After this many refused connections in a row, live updates rest this long (polling carries on). */
@@ -525,7 +535,7 @@ export class AdcLiveSession implements AdcSession {
       if (stopped || this.closed) return;
       let next: SocketLike;
       try {
-        next = this.socket(`${t.endpoint}/?f=1&auth=${encodeURIComponent(t.token)}`, this.conn.socketHeaders());
+        next = this.socket(socketUrl(t.endpoint, t.token), this.conn.socketHeaders());
       } catch (err) {
         again((err as Error).message, true);
         return;
@@ -553,7 +563,7 @@ export class AdcLiveSession implements AdcSession {
       next.onclose = (e) => {
         if (ws !== next) return;
         const lived = openedAt ? Date.now() - openedAt : 0;
-        const why = `closed ${e.code}${e.reason ? ` (${String(e.reason).slice(0, 80)})` : ''}${openedAt ? ` after ${Math.round(lived / 1000)} s` : ' before opening'}${error ? `: ${error}` : ''}`;
+        const why = `closed ${e.code}${e.reason ? ` (${String(e.reason).slice(0, 80)})` : ''}${openedAt ? ` after ${Math.round(lived / 1000)} s` : ' before opening'}${error ? `: ${error}` : ''} (token: ${t.token.length} characters${/[+/=]/.test(t.token) ? ', with + / or =' : ''})`;
         again(why, lived < WS_STABLE_MS);
       };
       // Renew before Alarm.com closes it: a fresh connection, then the old one goes.
