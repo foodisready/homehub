@@ -54,7 +54,9 @@ const SETTLE_READ_MS = Number(process.env.ALARMCOM_SETTLE_MS) || 3_000;
 /** A read asked for by a browser (the app opened) at most this often. */
 const FRESH_MS = 10_000;
 /** After a command, read at these times (ms) until the alarm shows the new state. */
-const CONFIRM_AT = (process.env.ALARMCOM_CONFIRM_AT ?? '3000,8000,15000,30000,60000,90000').split(',').map(Number);
+const CONFIRM_AT = (process.env.ALARMCOM_CONFIRM_AT ?? '3000,8000,15000,30000,60000,90000,120000,180000').split(',').map(Number);
+/** How long the app waits for Alarm.com to take a command before showing it as under way. */
+const ANSWER_WAIT_MS = Number(process.env.ALARMCOM_ANSWER_WAIT_MS) || 10_000;
 /** An "opened and closed" from the websocket shows as open this long. */
 const PULSE_MS = 2_000;
 
@@ -481,10 +483,17 @@ async function send(p: AdcPartition, command: ArmCommand, target: ArmState, bypa
     publish();
     const e = err as AdcError;
     logger.warn({ partition: p.name, command, reason: e?.message, code: e?.code }, 'Alarm command failed');
-    if (e instanceof AdcError && e.kind === 'unreachable') {
-      // It may have got through: look rather than send it again.
+    if (e instanceof AdcError && e.kind === 'unreachable' && e.code === -1) {
+      // Sent, but Alarm.com is slow to answer: it may well be under way. Show it as pending and watch
+      // for it, rather than send it again; the history says if it never happens.
+      commands.set(p.id, { target, userName, at });
+      publish();
       void readNow();
-      throw new AlarmCommandError('Alarm.com didn’t answer, so HomeHub can’t tell whether it worked. Check the alarm before trying again.', 504);
+      confirm(p.id, target, at);
+      return;
+    }
+    if (e instanceof AdcError && e.kind === 'unreachable') {
+      throw new AlarmCommandError('HomeHub couldn’t reach Alarm.com, so nothing was sent. Use the keypad or the Alarm.com app.', 503);
     }
     if (e instanceof AdcError && e.kind === 'refused') {
       throw new AlarmCommandError(command === 'disarm'
@@ -516,8 +525,22 @@ export async function arm(mode: ArmMode, opts: { partitionId?: string; bypass?: 
   if (open.length && !opts.bypass) {
     throw new AlarmCommandError(`${open.map((s) => s.name).join(', ')} ${open.length === 1 ? 'is' : 'are'} open.`, 409, { open: open.map((s) => s.name), code: 'ALARM_OPEN_SENSORS' });
   }
-  await send(p, COMMAND[mode], target, open.length > 0, opts.userName);
+  await answer(send(p, COMMAND[mode], target, open.length > 0, opts.userName), p, target, opts.userName);
   return alarmView();
+}
+
+/**
+ * Waits a few seconds for Alarm.com to take the command. Some panels take over a minute to
+ * answer: then the app shows it as under way and the history notes it if it fails later.
+ */
+async function answer(sending: Promise<void>, p: AdcPartition, target: ArmState, userName: string | null): Promise<void> {
+  const timer = new Promise<'slow'>((r) => setTimeout(() => r('slow'), ANSWER_WAIT_MS).unref());
+  const first = await Promise.race([sending.then(() => 'done' as const), timer]);
+  if (first === 'done') return;
+  sending.catch((err) => {
+    log('arm', p.name, target, 'app', userName, `Failed: ${(err as Error)?.message ?? 'no answer'}`);
+    publish();
+  });
 }
 
 /** Disarms the alarm, with the alarm PIN. */
@@ -525,7 +548,7 @@ export async function disarm(pin: unknown, opts: { partitionId?: string; userNam
   const p = partitionFor(opts.partitionId);
   await checkAlarmPin(pin);
   if (p.state === 'disarmed' && !p.pending) return alarmView();
-  await send(p, 'disarm', 'disarmed', false, opts.userName);
+  await answer(send(p, 'disarm', 'disarmed', false, opts.userName), p, 'disarmed', opts.userName);
   return alarmView();
 }
 

@@ -116,6 +116,9 @@ function handle(req: http.IncomingMessage, res: http.ServerResponse, body: strin
   res.writeHead(404); res.end();
 }
 
+process.env.ALARMCOM_WS_SETTLED_MS = '60';
+process.env.ALARMCOM_WS_RETRY_MS = '5';
+
 describe('Alarm.com client', () => {
   let app: http.Server;
   let base: string;
@@ -245,25 +248,59 @@ describe('Alarm.com client', () => {
       assert.deepEqual(await s.conn.wsToken(), { token: 'tok', endpoint: 'wss://ws.example:8443' });
     });
 
-    it('opens the live connection with the token, and reads once it’s open', async () => {
-      const r = await signIn('home', 'right', 'T1', fetch, base, (url) => {
-        opened.push(url);
-        const sock = { close: () => undefined, onmessage: null, onclose: null, onopen: null, onerror: null } as never;
+    type FakeSock = { url: string; headers: Record<string, string>; onopen: (() => void) | null; onclose: ((e: { code: number; reason?: string }) => void) | null; onmessage: ((e: { data: unknown }) => void) | null; closed: boolean };
+    async function liveSession(sockets: FakeSock[]): Promise<AdcLiveSession> {
+      const r = await signIn('home', 'right', 'T1', fetch, base, (url, headers) => {
+        const sock: FakeSock = { url, headers, onopen: null, onclose: null, onmessage: null, closed: false };
         sockets.push(sock);
-        return sock;
+        return { ...sock, close() { sock.closed = true; }, set onopen(f: never) { sock.onopen = f; }, set onclose(f: never) { sock.onclose = f; }, set onmessage(f: never) { sock.onmessage = f; }, set onerror(_f: never) { /* unused */ } } as never;
       });
-      const opened: string[] = [];
-      const sockets: { onopen: (() => void) | null; onmessage: ((e: { data: unknown }) => void) | null }[] = [];
-      const s = (r as unknown as { session: AdcLiveSession }).session;
+      return (r as unknown as { session: AdcLiveSession }).session;
+    }
+    const tick = (ms: number) => new Promise((ok) => setTimeout(ok, ms));
+
+    it('opens the live connection with the token and the session’s cookies, and counts it live once it stays open', async () => {
+      const sockets: FakeSock[] = [];
+      const s = await liveSession(sockets);
       const events: unknown[] = [];
       const states: boolean[] = [];
       const stop = s.watch((e) => events.push(e), (live) => states.push(live));
-      await new Promise((ok) => setTimeout(ok, 50));
-      assert.deepEqual(opened, ['wss://ws.example:8443/?f=1&auth=tok']);
+      await tick(50);
+      assert.equal(sockets.length, 1);
+      assert.equal(sockets[0].url, 'wss://ws.example:8443/?f=1&auth=tok');
+      assert.match(sockets[0].headers.Cookie, /auth=A1/);
+      assert.equal(sockets[0].headers.Origin, base);
       sockets[0].onopen!();
-      sockets[0].onmessage!({ data: JSON.stringify({ UnitId: 555, DeviceId: 1, EventType: 15, EventValue: 0, QstringForExtraData: 'openClosedStatusWord=open', EventDateUtc: 'x' }) });
-      assert.deepEqual(events, [{ kind: 'other' }, { kind: 'sensor', id: '555-1', state: 'open' }]);
+      assert.deepEqual(states, []);             // not yet: it must stay open a moment
+      await tick(80);                            // ALARMCOM_WS_SETTLED_MS
       assert.deepEqual(states, [true]);
+      assert.deepEqual(events, [{ kind: 'other' }]);   // one read to catch up
+      sockets[0].onmessage!({ data: Buffer.from(JSON.stringify({ UnitId: 555, DeviceId: 1, EventType: 15, EventValue: 0, QstringForExtraData: 'openClosedStatusWord=open' })) });
+      assert.deepEqual(events.at(-1), { kind: 'sensor', id: '555-1', state: 'open' });
+      stop();
+      s.close();
+    });
+
+    it('backs off when Alarm.com keeps refusing the live connection, then rests', async () => {
+      const sockets: FakeSock[] = [];
+      const s = await liveSession(sockets);
+      const reasons: string[] = [];
+      const stop = s.watch(() => undefined, (_live, reason) => { if (reason) reasons.push(reason); });
+      const gaps: number[] = [];
+      let last = Date.now();
+      for (let i = 0; i < 6; i++) {
+        for (let w = 0; w < 200 && sockets.length <= i; w++) await tick(5);
+        assert.equal(sockets.length, i + 1, `connection ${i + 1}`);
+        gaps.push(Date.now() - last);
+        last = Date.now();
+        sockets[i].onopen!();
+        sockets[i].onclose!({ code: 1008, reason: 'rejected token' });   // turned away at once
+      }
+      // Each wait longer than the one before.
+      for (let i = 2; i < gaps.length; i++) assert.ok(gaps[i] > gaps[i - 1], `gaps ${gaps.join(',')}`);
+      assert.match(reasons.at(-1)!, /refused 6 times.*rejected token.*30 min/);
+      await tick(300);
+      assert.equal(sockets.length, 6);   // resting
       stop();
       s.close();
     });

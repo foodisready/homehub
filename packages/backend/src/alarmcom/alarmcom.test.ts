@@ -39,6 +39,8 @@ const fake = {
   commands: [] as { id: string; command: ArmCommand; bypass: boolean }[],
   commandError: null as Error | null,
   expireCommandOnce: false,
+  /** Alarm.com takes this long to answer a command. */
+  commandDelayMs: 0,
   /** The partition takes on this state after a command, at the next read. */
   applyCommands: true,
 };
@@ -56,6 +58,7 @@ function session(): AdcSession {
     async keepAlive() { fake.keepAlives++; },
     async command(id, command, opts) {
       if (fake.expireCommandOnce) { fake.expireCommandOnce = false; throw new AdcError('session ended', 'expired'); }
+      if (fake.commandDelayMs) await new Promise((r) => setTimeout(r, fake.commandDelayMs));
       if (fake.commandError) throw fake.commandError;
       fake.commands.push({ id, command, bypass: opts.bypass });
       if (fake.applyCommands) {
@@ -120,6 +123,7 @@ describe('Alarm.com', () => {
     process.env.DB_PATH = path.join(TMP, 'db.sqlite');
     process.env.ALARMCOM_SETTLE_MS = '50';
     process.env.ALARMCOM_CONFIRM_AT = '20,40,80';
+    process.env.ALARMCOM_ANSWER_WAIT_MS = '60';
     db = (await import('../db')).getDb();
     AdcError = (await import('./types')).AdcError;
     alarm = await import('./alarmcom');
@@ -153,7 +157,7 @@ describe('Alarm.com', () => {
     db.prepare('DELETE FROM alarm_events').run();
     Object.assign(fake, {
       password: 'right', needsCode: true, code: '123456', trust: 'trusted-1', signIns: [], sent: [], reads: 0, closes: 0, keepAlives: 0,
-      readError: null, expireOnce: false, signInError: null, changed: null, commands: [], commandError: null, expireCommandOnce: false, applyCommands: true,
+      readError: null, expireOnce: false, signInError: null, changed: null, commands: [], commandError: null, expireCommandOnce: false, commandDelayMs: 0, applyCommands: true,
       snapshot: {
         partitions: [{ id: 'p1', name: 'House', state: 'disarmed', pending: null, canNight: false, sensorIds: ['s1', 's2', 's3'] }],
         sensors: [sensor('s1', 'Front Dr', 'closed'), sensor('s2', 'Back Dr', 'open'), sensor('s3', 'Motion', 'idle', 'motion')],
@@ -448,15 +452,54 @@ describe('Alarm.com', () => {
       assert.equal(fake.commands.length, 0);
     });
 
-    it('doesn’t send a command twice when Alarm.com doesn’t answer', async () => {
+    it('shows a command Alarm.com is slow to answer as under way, and credits it when the panel arms', async () => {
       closeAll();
       await signIn();
-      fake.commandError = new AdcError('no answer', 'unreachable');
+      fake.commandDelayMs = 150;   // longer than the app waits
+      const r = await api('POST', '/api/alarm/arm', { mode: 'stay' }, 'member');
+      assert.equal(r.status, 200);
+      assert.equal(r.body.partitions[0].pending, 'armed-stay');
+      assert.equal(fake.commands.length, 0);   // still waiting on Alarm.com
+      await wait(400);
+      const v = alarm.alarmView();
+      assert.equal(v.partitions[0].state, 'armed-stay');
+      assert.equal(v.partitions[0].pending, null);
+      assert.deepEqual({ source: v.recent[0].source, user: v.recent[0].userName }, { source: 'app', user: 'Anna' });
+    });
+
+    it('notes a slow command that fails later in the history', async () => {
+      closeAll();
+      await signIn();
+      fake.commandDelayMs = 150;
+      fake.commandError = new AdcError('Not allowed', 'refused', 422);
+      const r = await api('POST', '/api/alarm/arm', { mode: 'stay' });
+      assert.equal(r.status, 200);
+      await wait(250);
+      const v = alarm.alarmView();
+      assert.equal(v.partitions[0].pending, null);
+      assert.match(v.recent[0].detail!, /^Failed: Alarm.com didn’t arm it/);
+    });
+
+    it('keeps waiting, without sending again, when Alarm.com never answers', async () => {
+      closeAll();
+      await signIn();
+      fake.applyCommands = false;
+      fake.commandError = new AdcError('no answer', 'unreachable', -1);
       const r = await api('POST', '/api/alarm/arm', { mode: 'away' });
-      assert.equal(r.status, 504);
-      assert.match(r.body.error, /Check the alarm before trying again/);
-      assert.equal(fake.commands.length, 0);
+      assert.equal(r.status, 200);
+      assert.equal(r.body.partitions[0].pending, 'armed-away');
       assert.equal(fake.signIns.length, 1);   // no sign-in and resend
+      await wait(150);
+      assert.equal(alarm.alarmView().recent[0].detail, 'Not confirmed by Alarm.com');
+    });
+
+    it('says nothing was sent when Alarm.com can’t be reached at all', async () => {
+      closeAll();
+      await signIn();
+      fake.commandError = new AdcError('no connection', 'unreachable');
+      const r = await api('POST', '/api/alarm/arm', { mode: 'away' });
+      assert.equal(r.status, 503);
+      assert.match(r.body.error, /nothing was sent/);
     });
 
     it('signs in again and sends once more when the session had ended, since Alarm.com turned it away', async () => {

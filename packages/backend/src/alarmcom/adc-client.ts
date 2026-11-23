@@ -24,6 +24,7 @@
  * so the service signs in as rarely as it can: one at a time, and never in a loop.
  */
 import os from 'node:os';
+import WsSocket from 'ws';
 import {
   AdcError,
   type AdcChallenge, type AdcConnector, type AdcEvent, type AdcPartition, type AdcSensor, type AdcSession, type AdcSignIn,
@@ -34,11 +35,15 @@ export const ADC_BASE = 'https://www.alarm.com';
 const WS_FALLBACK = 'wss://webskt.alarm.com:8443';
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36';
 const TIMEOUT_MS = 30_000;
+/** Arm and disarm wait for the panel: give them longer. */
+const COMMAND_TIMEOUT_MS = Number(process.env.ALARMCOM_COMMAND_TIMEOUT_MS) || 120_000;
 const TRUST_COOKIE = 'twoFactorAuthenticationId';
 const TWO_FACTOR = '/web/api/engines/twoFactorAuthentication/twoFactorAuthentications';
 /** Alarm.com closes its websocket about 5 minutes after the token was issued: renew before. */
 const WS_ROTATE_MS = 270_000;
 const WS_RETRY_MAX_MS = 5 * 60_000;
+/** The first wait after a refused connection, doubling each time. */
+const wsRetryMinMs = () => Number(process.env.ALARMCOM_WS_RETRY_MS) || 5_000;
 
 type Fetch = typeof fetch;
 type Json = Record<string, unknown>;
@@ -210,7 +215,7 @@ export class AdcConnection {
   constructor(private readonly fetchImpl: Fetch = fetch, readonly base = ADC_BASE) {}
 
   /** One request, following redirects a hop at a time so no cookie is missed. */
-  async request(method: string, path: string, opts: { accept?: Accept; json?: unknown; form?: URLSearchParams } = {}): Promise<Answer> {
+  async request(method: string, path: string, opts: { accept?: Accept; json?: unknown; form?: URLSearchParams; timeoutMs?: number } = {}): Promise<Answer> {
     let url = new URL(path, this.base).toString();
     let m = method;
     let body: string | undefined = opts.form ? opts.form.toString() : opts.json !== undefined ? JSON.stringify(opts.json) : undefined;
@@ -226,9 +231,11 @@ export class AdcConnection {
       };
       let res: Response;
       try {
-        res = await this.fetchImpl(url, { method: m, headers, body, redirect: 'manual', signal: AbortSignal.timeout(TIMEOUT_MS) });
+        res = await this.fetchImpl(url, { method: m, headers, body, redirect: 'manual', signal: AbortSignal.timeout(opts.timeoutMs ?? TIMEOUT_MS) });
       } catch (err) {
-        throw new AdcError(`Couldn’t reach Alarm.com (${(err as Error)?.name === 'TimeoutError' ? 'no answer' : 'no connection'})`, 'unreachable');
+        const timedOut = (err as Error)?.name === 'TimeoutError';
+        // Code -1: sent, but no answer in time, so it may have arrived.
+        throw new AdcError(`Couldn’t reach Alarm.com (${timedOut ? 'no answer' : 'no connection'})`, 'unreachable', timedOut ? -1 : undefined);
       }
       this.jar.take(res);
       const location = res.headers.get('location');
@@ -249,7 +256,7 @@ export class AdcConnection {
   }
 
   /** A JSON request on the signed-in session; throws an AdcError for Alarm.com's error codes. */
-  async api(method: string, path: string, opts: { accept?: Accept; json?: unknown } = {}): Promise<Json> {
+  async api(method: string, path: string, opts: { accept?: Accept; json?: unknown; timeoutMs?: number } = {}): Promise<Json> {
     const r = await this.request(method, path, opts);
     if (new URL(r.url).pathname.toLowerCase().startsWith('/login')) throw new AdcError('The Alarm.com session ended', 'expired');
     const code = errorCode(r.body) ?? (r.status >= 400 ? r.status : null);
@@ -415,7 +422,13 @@ export class AdcConnection {
       selectiveBypass: false,
       forceArm: false,
     };
-    await this.api('POST', `/web/api/devices/partitions/${encodeURIComponent(partitionId)}/${action}`, { json: body });
+    // Alarm.com answers once the panel has: over a minute on some panels (an NX-6, 2026-11-22).
+    await this.api('POST', `/web/api/devices/partitions/${encodeURIComponent(partitionId)}/${action}`, { json: body, timeoutMs: COMMAND_TIMEOUT_MS });
+  }
+
+  /** What the websocket needs to be let in: the session's cookies, as a browser on alarm.com would send. */
+  socketHeaders(): Record<string, string> {
+    return { 'User-Agent': UA, Origin: this.base, ...(this.jar.header() ? { Cookie: this.jar.header() } : {}) };
   }
 
   async wsToken(): Promise<{ token: string; endpoint: string }> {
@@ -429,9 +442,27 @@ export class AdcConnection {
 
 // ── Sessions ─────────────────────────────────────────────────────────
 
-type SocketLike = { close(): void; onmessage: ((e: { data: unknown }) => void) | null; onclose: ((e: { code: number }) => void) | null; onopen: (() => void) | null; onerror: (() => void) | null };
-type SocketMaker = (url: string) => SocketLike;
-const makeSocket: SocketMaker = (url) => new WebSocket(url) as unknown as SocketLike;
+type SocketLike = {
+  close(): void;
+  onmessage: ((e: { data: unknown }) => void) | null;
+  onclose: ((e: { code: number; reason?: string }) => void) | null;
+  onopen: (() => void) | null;
+  onerror: (() => void) | null;
+};
+type SocketMaker = (url: string, headers: Record<string, string>) => SocketLike;
+/**
+ * The ws package rather than Node's own WebSocket, which can't send headers: Alarm.com's websocket
+ * server turns a connection away without the session's cookies and its website's Origin.
+ */
+const makeSocket: SocketMaker = (url, headers) => new WsSocket(url, { headers, handshakeTimeout: 15_000 }) as unknown as SocketLike;
+
+/** A connection that ends sooner than this after opening counts as refused. */
+const WS_STABLE_MS = 30_000;
+/** After this many refused connections in a row, live updates rest this long (polling carries on). */
+const WS_GIVE_UP_AFTER = 6;
+const WS_REST_MS = 30 * 60_000;
+/** Open this long before it counts as live, and HomeHub reads once to catch up. */
+const wsSettledMs = () => Number(process.env.ALARMCOM_WS_SETTLED_MS) || 5_000;
 
 export class AdcLiveSession implements AdcSession {
   private closed = false;
@@ -449,20 +480,35 @@ export class AdcLiveSession implements AdcSession {
     let stopped = false;
     let ws: SocketLike | null = null;
     let rotate: NodeJS.Timeout | null = null;
+    let settled: NodeJS.Timeout | null = null;
     let retry: NodeJS.Timeout | null = null;
-    let failures = 0;
+    /** Connections in a row that were refused or ended at once. */
+    let refused = 0;
+    let isLive = false;
+    const setLive = (on: boolean, reason?: string) => {
+      if (on === isLive) return;
+      isLive = on;
+      status(on, reason);
+    };
     const clear = () => {
       if (rotate) clearTimeout(rotate);
-      rotate = null;
-      if (ws) { ws.onclose = null; ws.onmessage = null; ws.onerror = null; try { ws.close(); } catch { /* already closed */ } }
+      if (settled) clearTimeout(settled);
+      rotate = settled = null;
+      if (ws) { ws.onclose = null; ws.onmessage = null; ws.onerror = null; ws.onopen = null; try { ws.close(); } catch { /* already closed */ } }
       ws = null;
     };
-    const again = (reason: string) => {
+    const again = (reason: string, quick: boolean) => {
       clear();
       if (stopped || this.closed) return;
-      failures++;
-      status(false, reason);
-      const wait = Math.min(WS_RETRY_MAX_MS, 5_000 * 2 ** Math.min(failures - 1, 6));
+      refused = quick ? refused + 1 : 0;
+      setLive(false, reason);
+      let wait = Math.min(WS_RETRY_MAX_MS, wsRetryMinMs() * 2 ** Math.min(refused, 6));
+      if (refused >= WS_GIVE_UP_AFTER) {
+        // Alarm.com keeps turning it away: stop asking for a while rather than hammer it.
+        wait = WS_REST_MS;
+        refused = 0;
+        status(false, `refused ${WS_GIVE_UP_AFTER} times (${reason}); trying again in ${WS_REST_MS / 60_000} min`);
+      }
       retry = setTimeout(() => { retry = null; void open(); }, wait);
       retry.unref();
     };
@@ -472,26 +518,41 @@ export class AdcLiveSession implements AdcSession {
       try {
         t = await this.conn.wsToken();
       } catch (err) {
-        again((err as Error).message);
+        again((err as Error).message, true);
         return;
       }
       if (stopped || this.closed) return;
-      const next = this.socket(`${t.endpoint}/?f=1&auth=${encodeURIComponent(t.token)}`);
+      let next: SocketLike;
+      try {
+        next = this.socket(`${t.endpoint}/?f=1&auth=${encodeURIComponent(t.token)}`, this.conn.socketHeaders());
+      } catch (err) {
+        again((err as Error).message, true);
+        return;
+      }
       ws = next;
+      let openedAt = 0;
       next.onopen = () => {
-        failures = 0;
-        status(true);
-        changed({ kind: 'other' });   // events in the gap are lost: read everything once
+        openedAt = Date.now();
+        settled = setTimeout(() => {
+          settled = null;
+          if (ws !== next) return;
+          setLive(true);
+          changed({ kind: 'other' });   // events in the gap are lost: read everything once
+        }, wsSettledMs());
+        settled.unref();
       };
       next.onmessage = (e) => {
-        if (typeof e.data !== 'string') return;
-        const ev = parseEvent(e.data);
+        const text = typeof e.data === 'string' ? e.data : Buffer.isBuffer(e.data) ? e.data.toString('utf8') : null;
+        if (!text) return;
+        const ev = parseEvent(text);
         if (ev) changed(ev);
       };
       next.onerror = () => undefined;   // onclose follows
       next.onclose = (e) => {
         if (ws !== next) return;
-        again(e.code === 1008 ? 'token expired' : `closed (${e.code})`);
+        const lived = openedAt ? Date.now() - openedAt : 0;
+        const why = `closed ${e.code}${e.reason ? ` (${String(e.reason).slice(0, 80)})` : ''}${openedAt ? ` after ${Math.round(lived / 1000)} s` : ' before opening'}`;
+        again(why, lived < WS_STABLE_MS);
       };
       // Renew before Alarm.com closes it: a fresh connection, then the old one goes.
       rotate = setTimeout(() => {
@@ -500,7 +561,6 @@ export class AdcLiveSession implements AdcSession {
         ws = null;
         old.onclose = null;
         try { old.close(); } catch { /* gone */ }
-        failures = 0;
         void open();
       }, WS_ROTATE_MS);
       rotate.unref();

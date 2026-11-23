@@ -107,7 +107,7 @@ const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '', '0', '⌫'];
           <span class="text">
             <span class="title">Alarm@if (v.partitions.length) {<span class="state" [class.wait]="!!pending()">{{ pending() ? pendingWords() : armWords() }}</span>}</span>
             @if (problem(); as p) { <span class="line warn">{{ p }}</span> }
-            @else { <span class="line" [class.hot]="notable().length > 0">{{ summary() }}</span> }
+            @else { <span class="line" [class.hot]="openCount() > 0">{{ summary() }}</span> }
           </span>
           <span class="chev" aria-hidden="true">{{ open() ? '▲' : '▼' }}</span>
         </button>
@@ -229,6 +229,7 @@ export class AlarmCardComponent implements OnInit, OnDestroy {
   readonly pending = computed(() => this.view()?.partitions.find((p) => p.pending)?.pending ?? null);
   readonly pendingWords = computed(() => (this.pending() === 'disarmed' ? 'Disarming…' : 'Arming…'));
 
+  readonly openCount = computed(() => this.notable().filter((s) => s.state !== 'active').length);
   readonly notable = computed(() => (this.view()?.sensors ?? []).filter((s) => this.isNotable(s)));
   readonly sorted = computed(() => [...(this.view()?.sensors ?? [])]
     .sort((a, b) => Number(this.isNotable(b)) - Number(this.isNotable(a)) || a.name.localeCompare(b.name, undefined, { numeric: true })));
@@ -237,12 +238,9 @@ export class AlarmCardComponent implements OnInit, OnDestroy {
     const v = this.view();
     if (!v) return '';
     if (!v.sensors.length) return v.partitions.length ? 'No sensors listed' : 'Waiting for Alarm.com…';
+    // Motion stays in the list only: Alarm.com goes on reporting it for a while after it stops.
     const open = this.notable().filter((s) => s.state !== 'active');
-    const motion = this.notable().filter((s) => s.state === 'active');
-    const parts: string[] = [];
-    if (open.length) parts.push(`Open: ${open.map((s) => s.name).join(', ')}`);
-    if (motion.length) parts.push(`Motion: ${motion.map((s) => s.name).join(', ')}`);
-    return parts.length ? parts.join(' · ') : 'All doors and windows closed';
+    return open.length ? `Open: ${open.map((s) => s.name).join(', ')}` : 'All doors and windows closed';
   });
 
   /** Something wrong with the connection, in words; null when all is well. */
