@@ -7,7 +7,7 @@ import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import {
-  AdcConnection, AdcLiveSession, devBase, errorCode, socketUrl, hiddenField, parseCatalog, parseEvent, sensorKind, sensorState, signIn,
+  AdcConnection, AdcLiveSession, devBase, errorCode, parseHistory, socketUrl, hiddenField, parseCatalog, parseEvent, sensorKind, sensorState, signIn,
 } from './adc-client';
 import { AdcError } from './types';
 
@@ -112,6 +112,11 @@ function handle(req: http.IncomingMessage, res: http.ServerResponse, body: strin
   if (p.startsWith('/web/api/devices/partitions/555-127/')) {
     if (server.commandStatus !== 200) return json(res, server.commandStatus, { errors: [{ code: server.commandStatus, detail: 'Nope' }] });
     return json(res, 200, { data: { id: '555-127' } });
+  }
+  if (p === '/web/api/activity/activityDays') {
+    const page = Number(url.searchParams.get('page'));
+    const n = page === 1 ? 100 : 1;
+    return json(res, 200, { data: [], included: Array.from({ length: n }, (_, i) => ({ id: `M-${page}-${i}`, type: 'activity/history-event', attributes: { eventDate: new Date(Date.UTC(2026, 10, 22, 1, page, i % 60)).toISOString(), globalDeviceId: '555-1', eventTypeName: 'Opened' } })) });
   }
   if (p === '/web/api/websockets/token') return json(res, 200, { value: 'tok', metaData: { endpoint: 'wss://ws.example:8443' } });
   res.writeHead(404); res.end();
@@ -244,6 +249,20 @@ describe('Alarm.com client', () => {
       assert.equal(server.seen.filter((x) => x.url.startsWith('/web/api/devices/partitions/')).length, 1);
     });
 
+    it('asks for the history since a time, page by page', async () => {
+      const s = await session();
+      const got = await s.history(new Date('2026-11-22T00:00:00.000Z'));
+      assert.equal(got.length, 101);   // two pages
+      const asked = server.seen.filter((x) => x.url.startsWith('/web/api/activity/activityDays'));
+      assert.equal(asked.length, 2);
+      const q = new URL(asked[0].url, 'http://x').searchParams;
+      assert.equal(q.get('startTime'), '2026-11-22T00:00:00.000Z');
+      assert.equal(q.get('pageSize'), '100');
+      assert.equal(q.get('page'), '1');
+      assert.equal(new URL(asked[1].url, 'http://x').searchParams.get('page'), '2');
+      assert.equal(asked[0].headers.ajaxrequestuniquekey, 'AFG1');
+    });
+
     it('gets the live-update token and endpoint', async () => {
       const s = await session();
       assert.deepEqual(await s.conn.wsToken(), { token: 'tok', endpoint: 'wss://ws.example:8443' });
@@ -357,6 +376,20 @@ describe('Alarm.com client', () => {
       assert.equal(parseEvent('not json'), null);
       assert.equal(parseEvent(JSON.stringify({ EventType: 1, CorrelatedId: 5 })), null);
       assert.equal(parseEvent(JSON.stringify({ Property: 1, PropertyValue: 2 })), null);
+    });
+
+    it('reads the activity history, newest last, with who did it', () => {
+      const body = { data: [{ id: 'd1', type: 'activity/activity-day' }], included: [
+        { id: 'M-2', type: 'activity/history-event', attributes: { eventDate: '2026-11-22T23:40:02.558Z', globalDeviceId: '555-127', deviceDescription: 'System', eventTypeName: 'ArmedStay', description: 'Armed Stay by Anna', extraData: 'ew_contact_id=1&ew=Anna+B&ew_group_id=0' } },
+        { id: 'M-1', type: 'activity/history-event', attributes: { eventDate: '2026-11-22T23:34:00Z', unitId: 555, deviceId: 3, deviceDescription: 'BACK DOOR', eventTypeName: 'OpenedClosed', description: 'Opened/Closed', extraData: null } },
+        { id: 'bad', type: 'activity/history-event', attributes: { eventDate: 'never' } },
+        { id: 'x', type: 'devices/sensor', attributes: {} },
+      ] };
+      assert.deepEqual(parseHistory(body), [
+        { id: 'M-1', at: '2026-11-22T23:34:00.000Z', deviceId: '555-3', deviceName: 'BACK DOOR', type: 'OpenedClosed', description: 'Opened/Closed', who: null },
+        { id: 'M-2', at: '2026-11-22T23:40:02.558Z', deviceId: '555-127', deviceName: 'System', type: 'ArmedStay', description: 'Armed Stay by Anna', who: 'Anna B' },
+      ]);
+      assert.deepEqual(parseHistory(null), []);
     });
 
     it('puts the live-update token in the address as issued', () => {

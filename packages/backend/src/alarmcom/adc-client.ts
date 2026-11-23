@@ -28,7 +28,7 @@ import WsSocket from 'ws';
 import {
   AdcError,
   type AdcChallenge, type AdcConnector, type AdcEvent, type AdcPartition, type AdcSensor, type AdcSession, type AdcSignIn,
-  type AdcSnapshot, type ArmCommand, type ArmState, type CodeMethod, type SensorKind, type SensorState,
+  type AdcSnapshot, type AdcHistoryEvent, type ArmCommand, type ArmState, type CodeMethod, type SensorKind, type SensorState,
 } from './types';
 
 export const ADC_BASE = 'https://www.alarm.com';
@@ -123,6 +123,31 @@ export function parseCatalog(body: unknown): AdcSnapshot {
     }
   }
   return { partitions, sensors };
+}
+
+/** The events in an activity-history answer (its `included` "activity/history-event" items), oldest first. */
+export function parseHistory(body: unknown): AdcHistoryEvent[] {
+  const included = Array.isArray((body as Json)?.included) ? (body as Json).included as Json[] : [];
+  const out: AdcHistoryEvent[] = [];
+  for (const item of included) {
+    if (item.type !== 'activity/history-event') continue;
+    const a = (item.attributes ?? {}) as Json;
+    const id = str(item.id);
+    const at = str(a.eventDate ?? a.date);
+    if (!id || !at || !Number.isFinite(Date.parse(at))) continue;
+    let who: string | null = null;
+    try { who = new URLSearchParams(str(a.extraData)).get('ew')?.trim() || null; } catch { who = null; }
+    out.push({
+      id,
+      at: new Date(Date.parse(at)).toISOString(),
+      deviceId: str(a.globalDeviceId) || (a.unitId !== undefined && a.deviceId !== undefined ? `${str(a.unitId)}-${str(a.deviceId)}` : ''),
+      deviceName: str(a.deviceDescription).trim(),
+      type: str(a.eventTypeName),
+      description: str(a.description).trim(),
+      who,
+    });
+  }
+  return out.sort((x, y) => Date.parse(x.at) - Date.parse(y.at));
 }
 
 /** The error code in a JSON:API error body ({"errors":[{"code":409}]}), if there is one. */
@@ -427,6 +452,22 @@ export class AdcConnection {
     await this.api('POST', `/web/api/devices/partitions/${encodeURIComponent(partitionId)}/${action}`, { json: body, timeoutMs: COMMAND_TIMEOUT_MS });
   }
 
+  /** The activity history since `since`, a page of 100 at a time (at most 5 pages), oldest first. */
+  async history(since: Date): Promise<AdcHistoryEvent[]> {
+    const all: AdcHistoryEvent[] = [];
+    for (let page = 1; page <= 5; page++) {
+      const q = new URLSearchParams({
+        debounceTimeMs: '1000', startTime: since.toISOString(), endTime: '', page: String(page), pageSize: '100',
+        searchString: '', showOnlyOpenEyeEvents: 'false',
+      });
+      const events = parseHistory(await this.api('GET', `/web/api/activity/activityDays?${q}`));
+      all.push(...events);
+      if (events.length < 100) break;
+    }
+    const seen = new Set<string>();
+    return all.filter((e) => !seen.has(e.id) && seen.add(e.id)).sort((x, y) => Date.parse(x.at) - Date.parse(y.at));
+  }
+
   /** What the websocket needs to be let in: the session's cookies, as a browser on alarm.com would send. */
   socketHeaders(): Record<string, string> {
     return { 'User-Agent': UA, Origin: this.base, ...(this.jar.header() ? { Cookie: this.jar.header() } : {}) };
@@ -483,6 +524,7 @@ export class AdcLiveSession implements AdcSession {
 
   read(): Promise<AdcSnapshot> { return this.conn.read(); }
   keepAlive(): Promise<void> { return this.conn.keepAlive(); }
+  history(since: Date): Promise<AdcHistoryEvent[]> { return this.conn.history(since); }
   command(partitionId: string, command: ArmCommand, opts: { bypass: boolean }): Promise<void> {
     return this.conn.command(partitionId, command, opts);
   }

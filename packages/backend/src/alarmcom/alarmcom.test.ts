@@ -41,6 +41,10 @@ const fake = {
   expireCommandOnce: false,
   /** Alarm.com takes this long to answer a command. */
   commandDelayMs: 0,
+  /** Alarm.com's activity history, and what reading it does. */
+  history: [] as import('./types').AdcHistoryEvent[],
+  historyError: null as Error | null,
+  historySince: [] as string[],
   /** The partition takes on this state after a command, at the next read. */
   applyCommands: true,
 };
@@ -56,6 +60,11 @@ function session(): AdcSession {
       return structuredClone(fake.snapshot);
     },
     async keepAlive() { fake.keepAlives++; },
+    async history(since) {
+      fake.historySince.push(since.toISOString());
+      if (fake.historyError) throw fake.historyError;
+      return fake.history.filter((e) => Date.parse(e.at) >= since.getTime());
+    },
     async command(id, command, opts) {
       if (fake.expireCommandOnce) { fake.expireCommandOnce = false; throw new AdcError('session ended', 'expired'); }
       if (fake.commandDelayMs) await new Promise((r) => setTimeout(r, fake.commandDelayMs));
@@ -110,6 +119,8 @@ describe('Alarm.com', () => {
     return { status: res.status, body: text ? JSON.parse(text) : null };
   };
 
+  const pick = (e: { state: string; source: string; userName: string | null; detail: string | null }) => ({ state: e.state, source: e.source, user: e.userName, detail: e.detail });
+  const closeAllSensors = () => { for (const x of fake.snapshot.sensors) if (x.state === 'open') x.state = 'closed'; };
   const saved = (key: string) => (db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined)?.value ?? null;
 
   /** Signs in without a code, as a HomeHub Alarm.com already trusts. */
@@ -157,7 +168,7 @@ describe('Alarm.com', () => {
     db.prepare('DELETE FROM alarm_events').run();
     Object.assign(fake, {
       password: 'right', needsCode: true, code: '123456', trust: 'trusted-1', signIns: [], sent: [], reads: 0, closes: 0, keepAlives: 0,
-      readError: null, expireOnce: false, signInError: null, changed: null, commands: [], commandError: null, expireCommandOnce: false, commandDelayMs: 0, applyCommands: true,
+      readError: null, expireOnce: false, signInError: null, changed: null, commands: [], commandError: null, expireCommandOnce: false, commandDelayMs: 0, applyCommands: true, history: [], historyError: null, historySince: [],
       snapshot: {
         partitions: [{ id: 'p1', name: 'House', state: 'disarmed', pending: null, canNight: false, sensorIds: ['s1', 's2', 's3'] }],
         sensors: [sensor('s1', 'Front Dr', 'closed'), sensor('s2', 'Back Dr', 'open'), sensor('s3', 'Motion', 'idle', 'motion')],
@@ -573,6 +584,71 @@ describe('Alarm.com', () => {
       await signIn();
       fake.changed!({ kind: 'sensor', id: 's3', state: 'open' });
       assert.equal(alarm.alarmView().recent.length, 0);
+    });
+  });
+
+
+  describe('Alarm.com’s activity history', () => {
+    const ev = (id: string, minsAgo: number, type: string, deviceId: string, extra: Partial<import('./types').AdcHistoryEvent> = {}) =>
+      ({ id, at: new Date(Date.now() - minsAgo * 60_000).toISOString(), deviceId, deviceName: '', type, description: '', who: null, ...extra });
+
+    it('fills in door times from the history, even a door opened and closed between readings', async () => {
+      fake.history = [ev('M-1', 30, 'OpenedClosed', 's1'), ev('M-2', 20, 'Opened', 's2'), ev('M-3', 10, 'Closed', 's2')];
+      await signIn();
+      await alarm.readHistory();
+      const v = alarm.alarmView();
+      const s1 = v.sensors.find((x) => x.id === 's1')!;
+      assert.ok(s1.lastOpened && s1.lastClosed);
+      assert.equal(s1.lastOpened, fake.history[0].at);   // when it happened, not when HomeHub read it
+      const s2 = v.sensors.find((x) => x.id === 's2')!;
+      assert.equal(s2.lastOpened, fake.history[1].at);
+      assert.equal(s2.lastClosed, fake.history[2].at);
+      // The first read looks back a day.
+      assert.ok(Date.now() - Date.parse(fake.historySince[0]) > 23 * 3_600_000);
+    });
+
+    it('saves each event once, however often it’s read', async () => {
+      fake.history = [ev('M-1', 5, 'Opened', 's1')];
+      await signIn();
+      await alarm.readHistory();
+      await alarm.readHistory(Date.now() + 40_000);
+      assert.equal((db.prepare("SELECT COUNT(*) AS n FROM alarm_events WHERE kind = 'sensor'").get() as { n: number }).n, 1);
+    });
+
+    it('leaves motion out, and stops noting what it sees itself once the history works', async () => {
+      fake.history = [ev('M-1', 5, 'Opened', 's3')];
+      await signIn();
+      await alarm.readHistory();
+      assert.equal(alarm.alarmView().recent.length, 0);
+      fake.changed!({ kind: 'sensor', id: 's1', state: 'open' });   // the history will have it
+      assert.equal(alarm.alarmView().recent.length, 0);
+    });
+
+    it('says who armed it, and credits a command from HomeHub to the person', async () => {
+      closeAllSensors();
+      await signIn();
+      await alarm.readHistory();   // the history works
+      fake.history = [ev('M-9', 60, 'ArmedStay', 'p1', { description: 'Armed Stay by Keypad' })];
+      await alarm.readHistory(Date.now() + 40_000);
+      assert.deepEqual(pick(alarm.alarmView().recent[0]), { state: 'armed-stay', source: 'outside', user: null, detail: 'by Keypad' });
+
+      await api('POST', '/api/alarm/arm', { mode: 'away' }, 'member');
+      await new Promise((r) => setTimeout(r, 60));
+      fake.history.push(ev('M-10', 0, 'ArmedAway', 'p1', { description: 'Armed Away by Web', who: 'home' }));
+      await alarm.readHistory(Date.now() + 80_000);
+      assert.deepEqual(pick(alarm.alarmView().recent[0]), { state: 'armed-away', source: 'app', user: 'Anna', detail: null });
+      assert.equal(alarm.alarmView().recent.filter((e) => e.state === 'armed-away').length, 1);   // not also noted by HomeHub
+    });
+
+    it('goes on noting changes itself when the login can’t read the history', async () => {
+      fake.historyError = new AdcError('Not allowed', 'refused', 423);
+      await signIn();
+      await alarm.readHistory();
+      fake.changed!({ kind: 'sensor', id: 's1', state: 'open' });
+      assert.equal(alarm.alarmView().recent[0].state, 'open');
+      const tries = fake.historySince.length;
+      await alarm.readHistory(Date.now() + 60_000);   // waits an hour before trying again
+      assert.equal(fake.historySince.length, tries);
     });
   });
 

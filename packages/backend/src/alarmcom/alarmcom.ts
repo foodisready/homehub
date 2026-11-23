@@ -6,7 +6,7 @@ import { ADC_BASE, adcLibrary, devBase } from './adc-client';
 import { checkAlarmPin, hasAlarmPin, alarmPinLength } from './alarm-pin';
 import {
   AdcError,
-  type AdcChallenge, type AdcConnector, type AdcEvent, type AdcPartition, type AdcSensor, type AdcSession, type AdcSnapshot,
+  type AdcChallenge, type AdcConnector, type AdcEvent, type AdcHistoryEvent, type AdcPartition, type AdcSensor, type AdcSession, type AdcSnapshot,
   type ArmCommand, type ArmState, type CodeMethod,
 } from './types';
 
@@ -152,7 +152,7 @@ function holdReason(): Connection | null {
 }
 
 function recent(limit = 12): AlarmEvent[] {
-  return (getDb().prepare('SELECT at, kind, name, state, source, user_name, detail FROM alarm_events ORDER BY id DESC LIMIT ?').all(limit) as
+  return (getDb().prepare('SELECT at, kind, name, state, source, user_name, detail FROM alarm_events ORDER BY at DESC, id DESC LIMIT ?').all(limit) as
     { at: string; kind: 'arm' | 'sensor'; name: string; state: string; source: 'app' | 'outside'; user_name: string | null; detail: string | null }[])
     .map((r) => ({ at: r.at, kind: r.kind, name: r.name, state: r.state, source: r.source, userName: r.user_name, detail: r.detail }));
 }
@@ -216,16 +216,18 @@ function log(kind: 'arm' | 'sensor', name: string, state: string, source: 'app' 
 function sawArmState(p: AdcPartition, from: ArmState | null): void {
   if (p.state === 'unknown' || p.state === from) return;
   const cmd = commands.get(p.id);
-  if (cmd && cmd.target === p.state) {
-    commands.delete(p.id);
-    log('arm', p.name, p.state, 'app', cmd.userName);
-  } else {
-    log('arm', p.name, p.state, 'outside');
+  const ours = !!cmd && cmd.target === p.state;
+  if (ours) { commands.delete(p.id); done.push({ partitionId: p.id, target: cmd!.target, userName: cmd!.userName, at: cmd!.at }); }
+  // With Alarm.com's history read, that's the record (with the time it really happened); otherwise note it now.
+  if (!historyOk) {
+    if (ours) log('arm', p.name, p.state, 'app', cmd!.userName);
+    else log('arm', p.name, p.state, 'outside');
   }
   logger.info({ partition: p.name, from, to: p.state, byHomeHub: !!cmd && cmd.target === p.state }, 'Alarm arm state changed');
 }
 
 function sawSensor(s: AdcSensor, from: string): void {
+  if (historyOk) return;   // Alarm.com's history has it, even a door opened and closed between readings
   if (s.kind === 'motion' || s.kind === 'glass') return;   // motion would fill the history; its state shows live
   if (s.state === 'unknown' || from === 'unknown') return;
   log('sensor', s.name, s.state, 'outside');
@@ -256,7 +258,11 @@ function merge(next: AdcSnapshot, now: number): AdcSnapshot {
     else if (first) {
       // HomeHub had no reading: a command it sent may have finished meanwhile.
       const cmd = commands.get(p.id);
-      if (cmd && cmd.target === p.state) { commands.delete(p.id); log('arm', p.name, p.state, 'app', cmd.userName); }
+      if (cmd && cmd.target === p.state) {
+        commands.delete(p.id);
+        done.push({ partitionId: p.id, target: cmd.target, userName: cmd.userName, at: cmd.at });
+        if (!historyOk) log('arm', p.name, p.state, 'app', cmd.userName);
+      }
     }
   }
   return { partitions: next.partitions, sensors };
@@ -416,7 +422,122 @@ export async function readNow(now = Date.now()): Promise<void> {
 /** A browser opened the app: read if the last read is older than a few seconds. */
 export async function readIfStale(now = Date.now()): Promise<void> {
   if (now - updatedAt < FRESH_MS) return;
+  void readHistory(now);
   return readNow(now);
+}
+
+// ── Alarm.com's activity history ───────────────────────────────────
+//
+// The list the Alarm.com app shows: every door opened and closed, and every arming, with the time
+// it happened, even a door opened and closed between two readings. Read every HISTORY_MS. Each
+// event is saved once (by Alarm.com's id). A login without the "Activity" permission can't read it:
+// then HomeHub notes the changes it sees itself, as before.
+
+const HISTORY_MS = Number(process.env.ALARMCOM_HISTORY_MS) || 30_000;
+/** On the first read, look back this far, so the times show at once. */
+const HISTORY_BACKFILL_MS = 24 * 3_600_000;
+/** Each read starts this long before the last event, in case one arrived late; repeats are skipped by id. */
+const HISTORY_OVERLAP_MS = 2 * 60_000;
+/** A command sent from HomeHub matches an arming in the history within this long. */
+const MATCH_MS = 5 * 60_000;
+
+/** Whether the history can be read: null until tried. */
+let historyOk: boolean | null = null;
+let historyAt = 0;
+let historyRetryAt = 0;
+let historyBusy = false;
+let historyCursor: number | null = null;
+/** Commands from HomeHub the alarm carried out lately: the history credits them to the person. */
+const done: { partitionId: string; target: ArmState; userName: string | null; at: number }[] = [];
+
+const ARM_TYPES: Record<string, ArmState> = { ArmedStay: 'armed-stay', ArmedAway: 'armed-away', ArmedNight: 'armed-night', Disarmed: 'disarmed' };
+
+function startCursor(now: number): number {
+  const last = (getDb().prepare('SELECT MAX(at) AS at FROM alarm_events WHERE ext_id IS NOT NULL').get() as { at: string | null }).at;
+  return last ? Date.parse(last) : now - HISTORY_BACKFILL_MS;
+}
+
+/** Saves an event from the history once; true when it's new. */
+function saveHistory(ext: string, kind: 'arm' | 'sensor', name: string, state: string, source: 'app' | 'outside', userName: string | null, detailText: string | null, at: string): boolean {
+  try {
+    return getDb().prepare('INSERT OR IGNORE INTO alarm_events (kind, name, state, source, user_name, detail, at, ext_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(kind, name, state, source, userName, detailText, at, ext).changes > 0;
+  } catch (err) {
+    logger.warn({ err }, 'Couldn’t save the alarm history event');
+    return false;
+  }
+}
+
+/** "by Anna", from Alarm.com's words: its user's name, or "Armed Stay by Keypad". */
+function byWhom(e: AdcHistoryEvent): string | null {
+  if (e.who) return `by ${e.who}`;
+  const m = / by (.+)$/.exec(e.description);
+  return m ? `by ${m[1].trim()}` : null;
+}
+
+function takeHistory(events: AdcHistoryEvent[]): number {
+  let added = 0;
+  const sensors = new Map((snapshot?.sensors ?? []).map((x) => [x.id, x]));
+  const parts = new Map((snapshot?.partitions ?? []).map((x) => [x.id, x]));
+  const now = Date.now();
+  while (done.length && now - done[0].at > 30 * 60_000) done.shift();
+  for (const e of events) {
+    const arm = ARM_TYPES[e.type];
+    if (arm) {
+      const at = Date.parse(e.at);
+      const p = parts.get(e.deviceId) ?? (parts.size === 1 ? [...parts.values()][0] : undefined);
+      const mine = done.find((c) => c.target === arm && (!p || c.partitionId === p.id) && Math.abs(at - c.at) < MATCH_MS)
+        ?? [...commands.values()].find((c) => c.target === arm && Math.abs(at - c.at) < MATCH_MS);
+      const name = p?.name ?? (e.deviceName || 'Alarm');
+      if (mine) added += Number(saveHistory(e.id, 'arm', name, arm, 'app', mine.userName, null, e.at));
+      else added += Number(saveHistory(e.id, 'arm', name, arm, 'outside', null, byWhom(e), e.at));
+      continue;
+    }
+    if (e.type !== 'Opened' && e.type !== 'Closed' && e.type !== 'OpenedClosed') continue;
+    const s = sensors.get(e.deviceId);
+    if (s && (s.kind === 'motion' || s.kind === 'glass')) continue;
+    const name = s?.name ?? e.deviceName;
+    if (!name) continue;
+    if (e.type === 'OpenedClosed') {
+      added += Number(saveHistory(e.id, 'sensor', name, 'open', 'outside', null, null, e.at));
+      added += Number(saveHistory(`${e.id}:closed`, 'sensor', name, 'closed', 'outside', null, null, e.at));
+    } else {
+      added += Number(saveHistory(e.id, 'sensor', name, e.type === 'Opened' ? 'open' : 'closed', 'outside', null, null, e.at));
+    }
+  }
+  return added;
+}
+
+/** Reads what's new in Alarm.com's history. */
+export async function readHistory(now = Date.now()): Promise<void> {
+  const s = session;
+  if (!s?.history || historyBusy || now < historyRetryAt || holdReason()) return;
+  historyBusy = true;
+  historyAt = now;
+  try {
+    const cursor = historyCursor ?? startCursor(now);
+    const events = await s.history(new Date(cursor - HISTORY_OVERLAP_MS));
+    if (session !== s) return;
+    const added = takeHistory(events);
+    const newest = events.reduce((m, e) => Math.max(m, Date.parse(e.at)), cursor);
+    // Quiet for a while: move on, so each read doesn't cover hours.
+    historyCursor = Math.max(newest, Math.min(now - 10 * 60_000, Math.max(cursor, now - 60 * 60_000)));
+    if (historyOk !== true) logger.info({ events: events.length, added }, 'Alarm.com activity history read; door times now come from it');
+    historyOk = true;
+    if (added) publish();
+  } catch (err) {
+    const e = err as AdcError;
+    if (e instanceof AdcError && e.kind === 'refused') {
+      if (historyOk !== false) logger.warn({ reason: e.message, code: e.code }, 'Alarm.com activity history isn’t available to this login; HomeHub notes the changes it sees itself');
+      historyOk = false;
+      historyRetryAt = now + 60 * 60_000;
+    } else {
+      logger.debug({ reason: e?.message }, 'Alarm.com activity history read failed');
+      historyRetryAt = now + 60_000;
+    }
+  } finally {
+    historyBusy = false;
+  }
 }
 
 /** Runs every few seconds: reads when due, keeps the session alive, and lets go when it shouldn't hold on. */
@@ -428,6 +549,7 @@ export async function tick(now = Date.now()): Promise<void> {
     return;
   }
   if (busy || now < retryAt) return;
+  if (session && now - historyAt >= HISTORY_MS) void readHistory(now);
   if (now - lastPoll >= (live ? LIVE_POLL_MS : POLL_MS)) return run(now);
   if (session && now - lastKeepAlive >= KEEPALIVE_MS) {
     lastKeepAlive = now;
@@ -609,6 +731,7 @@ async function finish(username: string, password: string, s: AdcSession, trust: 
   retryAt = 0;
   quiet.clear();
   commands.clear();
+  historyOk = null; historyCursor = null; historyRetryAt = 0; historyAt = 0; done.length = 0;
   connection = 'connecting';
   logger.info({ trusted: !!trust }, 'Signed in to Alarm.com');
   if (mayConnect()) {
@@ -715,4 +838,5 @@ export function resetAlarmcomState(): void {
   lastSent = '';
   quiet.clear();
   commands.clear();
+  historyOk = null; historyCursor = null; historyRetryAt = 0; historyAt = 0; historyBusy = false; done.length = 0;
 }

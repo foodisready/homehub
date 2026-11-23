@@ -361,8 +361,10 @@ export class AlarmCardComponent implements OnInit, OnDestroy {
   eventWords(e: AlarmEvent): string {
     const what = EVENT_WORDS[e.state] ?? e.state;
     if (e.kind === 'sensor') return `${e.name} ${what}`;
-    const who = e.source === 'app' ? ` by ${e.userName ?? 'HomeHub'} in HomeHub` : ' from the keypad or Alarm.com app';
-    return `${what}${who}${e.detail ? ` · ${e.detail}` : ''}`;
+    if (e.source === 'app') return `${what} by ${e.userName ?? 'HomeHub'} in HomeHub${e.detail ? ` · ${e.detail}` : ''}`;
+    // From Alarm.com's history: "by Keypad", "by Anna".
+    if (e.detail?.startsWith('by ')) return `${what} ${e.detail}`;
+    return `${what} from the keypad or Alarm.com app${e.detail ? ` · ${e.detail}` : ''}`;
   }
 
   when(iso: string): string {

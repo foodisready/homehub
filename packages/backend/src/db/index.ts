@@ -353,6 +353,9 @@ function migrate(db: Database.Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_alarm_events_at ON alarm_events(at);
   `);
+  // Alarm.com's own id for an event read from its history, so a read twice is saved once.
+  try { db.exec('ALTER TABLE alarm_events ADD COLUMN ext_id TEXT'); } catch {}
+  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_alarm_events_ext ON alarm_events(ext_id) WHERE ext_id IS NOT NULL');
 
   // ── Camera snapshots (files under data/snapshots) ──────────────
   db.exec(`

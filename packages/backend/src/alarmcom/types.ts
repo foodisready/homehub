@@ -42,6 +42,23 @@ export type AdcEvent =
   /** Something else changed: read everything again. */
   | { kind: 'other' };
 
+/** One entry in Alarm.com's activity history, as its app lists it. */
+export interface AdcHistoryEvent {
+  /** Alarm.com's id for it ("M-1687518963333"). */
+  id: string;
+  /** When it happened (ISO, UTC). */
+  at: string;
+  /** The device, as the device resources name it ("<unit>-<device>"). */
+  deviceId: string;
+  deviceName: string;
+  /** "Opened", "Closed", "OpenedClosed", "ArmedStay", "ArmedAway", "ArmedNight", "Disarmed", … */
+  type: string;
+  /** "Armed Stay by Anna", "Opened/Closed". */
+  description: string;
+  /** Who, when Alarm.com says (a user's name), else null. */
+  who: string | null;
+}
+
 export type AdcFailure =
   /** The username or password was refused, or the account can't sign in (locked, say). */
   | 'rejected'
@@ -63,6 +80,8 @@ export interface AdcSession {
   read(): Promise<AdcSnapshot>;
   /** Keeps the session from timing out. Alarm.com expects it every minute. */
   keepAlive(): Promise<void>;
+  /** Optional: Alarm.com's activity history since `since`, oldest first. */
+  history?(since: Date): Promise<AdcHistoryEvent[]>;
   /** Sends an arm or disarm command. Never retried on its own, so a command is never sent twice. */
   command(partitionId: string, command: ArmCommand, opts: { bypass: boolean }): Promise<void>;
   /**
