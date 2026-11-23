@@ -9,6 +9,7 @@ import { DeviceFilterComponent, matchesDevice, type DeviceFilter } from '../../s
 import { SystemStatusComponent } from './system-status.component';
 import { HomeSetupNoticeComponent } from './home-setup-notice.component';
 import { CamerasCardComponent } from './cameras-card.component';
+import { AlarmCardComponent } from './alarm-card.component';
 import { AwayComponent } from './away.component';
 import { RoomsViewComponent } from './rooms-view.component';
 import { WallFrameComponent } from './wall-frame.component';
@@ -55,7 +56,7 @@ const isThermostat = (d: Device) => d.driverConfig?.['kind'] === 'thermostat';
 @Component({
   selector: 'app-dashboard',
   standalone: true,
-  imports: [DeviceRowComponent, RoomsViewComponent, DeviceFilterComponent, SystemStatusComponent, HomeSetupNoticeComponent, CamerasCardComponent, AwayComponent, DecimalPipe, WallFrameComponent],
+  imports: [DeviceRowComponent, RoomsViewComponent, DeviceFilterComponent, SystemStatusComponent, HomeSetupNoticeComponent, CamerasCardComponent, AlarmCardComponent, AwayComponent, DecimalPipe, WallFrameComponent],
   styles: [`
     .topbar {
       display: flex;
@@ -118,6 +119,7 @@ const isThermostat = (d: Device) => d.driverConfig?.['kind'] === 'thermostat';
     @if (wall) {
       <!-- The wall display (/wall): the rooms, with a clock, weather, Coming up and scenes above. -->
       <app-wall-frame>
+        <app-alarm-card />
         @if (loading()) { <div class="loading">Loading devices…</div> }
         @else {
           <app-rooms-view [devices]="devices()" [busyIds]="busyIds()"
@@ -138,6 +140,8 @@ const isThermostat = (d: Device) => d.driverConfig?.['kind'] === 'thermostat';
       <app-home-setup-notice />
       <!-- Away mode: a button when off, a banner while on -->
       <app-away />
+      <!-- The alarm, read from Alarm.com, once signed in -->
+      <app-alarm-card />
       <!-- Every camera, Ring and IP included, which aren't device rows -->
       <app-cameras-card />
 

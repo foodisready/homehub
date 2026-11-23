@@ -44,6 +44,11 @@ export function emitThermostatState(view: object): void {
   _io?.emit('thermostat:state', view);
 }
 
+/** The alarm's arm state or a sensor changed: the same shape as GET /api/alarm. */
+export function emitAlarmState(view: object): void {
+  _io?.emit('alarm:state', view);
+}
+
 export function emitDeviceState(
   deviceId: number,
   alias: string,

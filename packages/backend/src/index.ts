@@ -47,6 +47,8 @@ import { startCameraWatch } from './cameras/watch';
 import { startSnapshotPruning } from './cameras/snapshots';
 import { ringRouter } from './routes/ring';
 import { startRing } from './ring/ring';
+import { alarmRouter } from './routes/alarm';
+import { startAlarmcom } from './alarmcom/alarmcom';
 import { ipCamerasRouter } from './routes/ip-cameras';
 import { startIpCameras } from './ipcam/ipcam';
 import { activityMiddleware, startActivityPruning } from './activity/activity';
@@ -149,6 +151,7 @@ app.use('/api/system',                 systemRouter);
 app.use('/api/backups',                requireAdmin, backupsRouter);
 app.use('/api/cameras',                camerasRouter);
 app.use('/api/ring',                   ringRouter);
+app.use('/api/alarm',                  alarmRouter);
 app.use('/api/ip-cameras',             ipCamerasRouter);
 app.use('/api/activity',               activityRouter);
 app.use('/api/home-settings',          homeSettingsRouter);
@@ -187,6 +190,7 @@ httpServer.listen(PORT, async () => {
   noteRunningVersion();   // remember the version before this one, to go back to
   startMatter().catch(() => undefined);   // connect to Matter devices, if there are any
   startHoneywell();          // read Honeywell thermostats on Total Connect Comfort each minute, once signed in
+  startAlarmcom();           // read the alarm system from Alarm.com, once signed in
   // Energy: HomeHub's running times, and each device's daily hours on, for estimates.
   void import('./energy/usage').then(({ startEnergy }) => startEnergy());
   // Thermostat history: samples every 5 minutes, outdoor temperatures hourly, once there's a thermostat.

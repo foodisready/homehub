@@ -94,6 +94,12 @@ export class SocketService implements OnDestroy {
     return () => this.socket?.off('thermostat:state', callback);
   }
 
+  /** The alarm's arm state or a sensor changed: the same shape as GET /api/alarm. */
+  onAlarmState(callback: (view: unknown) => void): () => void {
+    this.socket?.on('alarm:state', callback);
+    return () => this.socket?.off('alarm:state', callback);
+  }
+
   /** A motion sensor reported. */
   onMotion(callback: (event: { deviceId: number; occupied: boolean }) => void): () => void {
     this.socket?.on('motion', callback);

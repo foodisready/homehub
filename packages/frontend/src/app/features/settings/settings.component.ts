@@ -18,6 +18,7 @@ import { InviteQrComponent } from '../welcome/invite-qr.component';
 import { MatterPairComponent } from './matter-pair.component';
 import { MerossLoginComponent } from './meross-login.component';
 import { HoneywellLoginComponent } from './honeywell-login.component';
+import { AlarmcomLoginComponent } from './alarmcom-login.component';
 import { OtherNetworksComponent } from './other-networks.component';
 import { HomeSettingsComponent } from './home-settings.component';
 import { AiConnectionComponent } from './ai-connection.component';
@@ -55,6 +56,7 @@ interface SettingsSummary {
   voice?:     { enabled: boolean; languages: string[] };
   misses?:    unknown[];
   honeywell?: { signedIn: boolean; rejected: boolean };
+  alarm?:     { signedIn: boolean; rejected: boolean };
   meross?:    { signedIn: boolean };
   ring?:      { state: string };
 }
@@ -100,7 +102,7 @@ const DRIVER_LABEL: Record<string, string> = {
 @Component({
   selector: 'app-settings',
   standalone: true,
-  imports: [SecretInputDirective, NicknameChipsComponent, ThermostatRangesComponent, FormsModule, RouterLink, InviteQrComponent, MatterPairComponent, DeviceFilterComponent, BackupsComponent, BackupSyncComponent, ServerRoleComponent, MerossLoginComponent, HoneywellLoginComponent, OtherNetworksComponent, HomeSettingsComponent, AiConnectionComponent, AiChoiceComponent, CamerasToggleComponent, TeachCommandsComponent, VoiceRepliesComponent, VoiceControlComponent, SettingsTilesComponent],
+  imports: [SecretInputDirective, NicknameChipsComponent, ThermostatRangesComponent, FormsModule, RouterLink, InviteQrComponent, MatterPairComponent, DeviceFilterComponent, BackupsComponent, BackupSyncComponent, ServerRoleComponent, MerossLoginComponent, HoneywellLoginComponent, AlarmcomLoginComponent, OtherNetworksComponent, HomeSettingsComponent, AiConnectionComponent, AiChoiceComponent, CamerasToggleComponent, TeachCommandsComponent, VoiceRepliesComponent, VoiceControlComponent, SettingsTilesComponent],
   styles: [`
     .topbar { display:flex; align-items:center; justify-content:space-between; margin-bottom:1.5rem; }
     .topbar h1 { font-size:1.4rem; font-weight:700; }
@@ -697,6 +699,11 @@ const DRIVER_LABEL: Record<string, string> = {
               <app-honeywell-login (devicesChanged)="reloadDevices()" />
             </div>
 
+            <!-- ── Alarm.com (the alarm system, read only) ───────────── -->
+            <div class="card">
+              <app-alarmcom-login />
+            </div>
+
             <!-- ── Email (BYOK SMTP) ────────────────────────────────── -->
             <div class="card">
               <div class="pref-row" style="cursor:pointer" (click)="emailExpanded.set(!emailExpanded())">
@@ -1247,6 +1254,7 @@ export class SettingsComponent implements OnInit, OnDestroy {
     get('/api/nlp/voice', 'voice');
     get('/api/nlp/misses', 'misses');
     get('/api/honeywell/login', 'honeywell');
+    get('/api/alarm/login', 'alarm');
     get('/api/meross/login', 'meross');
     get('/api/ring', 'ring');
   }
@@ -1340,6 +1348,7 @@ export class SettingsComponent implements OnInit, OnDestroy {
     if (full) {
       const linked: string[] = [];
       if (sum.honeywell?.signedIn) linked.push('Honeywell');
+      if (sum.alarm?.signedIn) linked.push('Alarm.com');
       if (sum.meross?.signedIn) linked.push('Meross');
       if (sum.ring && sum.ring.state !== 'signed-out') linked.push('Ring');
       if (this.tuyaCloudReady()) linked.push('Tuya');
@@ -1348,9 +1357,9 @@ export class SettingsComponent implements OnInit, OnDestroy {
       const ringBad = sum.ring?.state === 'expired';
       out.push({
         key: 'integrations', name: 'Integrations', group: 'Connections', icon: 'link', hue: '#4f8cff',
-        status: sum.honeywell?.rejected ? 'Honeywell: sign in again' : ringBad ? 'Ring: sign in again' : linked.length ? linked.join(' · ') : 'Accounts and services',
-        look: !!sum.honeywell?.rejected || ringBad,
-        words: 'integrations account sign in honeywell total connect comfort meross ring tuya cloud email smtp sms text twilio cameras ai assistant mcp',
+        status: sum.honeywell?.rejected ? 'Honeywell: sign in again' : sum.alarm?.rejected ? 'Alarm.com: sign in again' : ringBad ? 'Ring: sign in again' : linked.length ? linked.join(' · ') : 'Accounts and services',
+        look: !!sum.honeywell?.rejected || !!sum.alarm?.rejected || ringBad,
+        words: 'integrations account sign in honeywell total connect comfort alarm.com alarm security panel meross ring tuya cloud email smtp sms text twilio cameras ai assistant mcp',
       });
     }
     const push = this.push.state();

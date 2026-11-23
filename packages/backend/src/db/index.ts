@@ -339,6 +339,21 @@ function migrate(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_device_events_at ON device_events(at);
   `);
 
+  // ── The alarm system's history (alarmcom/alarmcom.ts): arming, disarming and sensors ──
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS alarm_events (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      kind       TEXT    NOT NULL CHECK(kind IN ('arm', 'sensor')),
+      name       TEXT    NOT NULL,   -- the partition or sensor, as Alarm.com names it
+      state      TEXT    NOT NULL,   -- 'armed-away', 'disarmed', 'open', 'closed', …
+      source     TEXT    NOT NULL,   -- 'app': from HomeHub; 'outside': the keypad, the Alarm.com app, a door
+      user_name  TEXT,               -- who, from HomeHub
+      detail     TEXT,
+      at         TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_alarm_events_at ON alarm_events(at);
+  `);
+
   // ── Camera snapshots (files under data/snapshots) ──────────────
   db.exec(`
     CREATE TABLE IF NOT EXISTS camera_snapshots (

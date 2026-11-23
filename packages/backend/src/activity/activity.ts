@@ -224,6 +224,7 @@ export function pruneActivity(now = Date.now()): number {
   const cutoff = new Date(now - keepDays() * 86_400_000).toISOString();
   const { changes } = getDb().prepare('DELETE FROM device_events WHERE at < ?').run(cutoff);
   getDb().prepare('DELETE FROM motion_seen WHERE at < ?').run(cutoff);
+  getDb().prepare('DELETE FROM alarm_events WHERE at < ?').run(cutoff);
   if (changes) logger.info({ deleted: changes }, 'Pruned old activity');
   return changes;
 }

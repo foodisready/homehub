@@ -22,6 +22,7 @@ HomeHub controls devices directly over your home network. All of them are switch
 | **IP cameras** | Reolink, Amcrest and other cameras with ONVIF or RTSP: live video, snapshots, motion snapshots and turning | Local, no cloud. See [IP cameras](#ip-cameras-reolink-amcrest-and-others) |
 | **Any Matter brand** | Plugs, lights, switches and power strips (on and off), and thermostats | Shared from Google Home, Apple Home, Alexa or SmartThings. See [Matter devices](#matter-devices) |
 | **Honeywell** | RedLINK thermostats, such as Prestige, through a RedLINK Internet Gateway | Through your Total Connect Comfort account. See [Honeywell thermostats](#honeywell-thermostats-redlink) |
+| **Alarm.com** | Alarm systems with the Alarm.com app: arm state, door, window and motion sensors, arming and disarming | Through your Alarm.com login. See [Alarm system](#alarm-system-alarmcom) |
 
 Zigbee devices aren't supported. "Works with Google or Alexa" on a box doesn't mean it works with HomeHub, but the **Matter** logo does.
 
@@ -171,6 +172,29 @@ They then work like any thermostat in HomeHub: the card, Chat and voice, tempera
 - Total Connect Comfort asks for the password every time HomeHub signs in, so HomeHub keeps it, and never shows it again. Backups include it, hidden when a backup is viewed. If you change the password in the Total Connect Comfort app, HomeHub tries the old one once, stops, and **Settings → Integrations → Honeywell** asks you to sign in again. It doesn't keep retrying, so it can't lock your account.
 - The thermostat keeps its own schedule. The card says whether it's following it. A change from the card, Chat or voice holds until the thermostat's next scheduled change, as a change at the wall does; **Back to its schedule** ends it sooner. A HomeHub temperature schedule or Away mode holds its target until it changes it. When Away mode ends, a thermostat that was following its own schedule goes back to it, unless it has a HomeHub schedule.
 - Honeywell doesn't say this works with other software. It's how Honeywell's own Total Connect Comfort website talks to its servers, and Honeywell could change that.
+
+### Alarm system (Alarm.com)
+
+If your alarm system has the Alarm.com app, HomeHub can show whether it's armed and which doors and windows are open, and arm and disarm it.
+
+1. Open **Settings → Integrations → Alarm.com**, enter the username and password you use in the Alarm.com app, and select **Sign in**. A separate Alarm.com login just for HomeHub is safer: in the Alarm.com app, the account owner can add one under **Users** or **Login Info**. Allow it to arm and disarm.
+2. Alarm.com usually wants a code the first time. Choose text or email (or enter the code from your authenticator app), then enter it. Alarm.com then trusts this HomeHub and doesn't ask again.
+3. To disarm from HomeHub, set an **Alarm PIN** in the same place: 4 to 8 digits. Share it only with people who should disarm the alarm. Without one, HomeHub can arm but not disarm.
+
+The **Alarm** card on the Dashboard and the wall display shows:
+
+- **Disarmed** in green or **Armed · Stay** or **Armed · Away** in red, and whether any doors or windows are open.
+- **Arm Stay** and **Arm Away**, or **Disarm**. Arming asks you to confirm. If a door or window is open, it says which and asks before arming anyway: the alarm then bypasses that sensor, so it isn't protected until disarmed. Disarming asks for the alarm PIN every time. After 5 wrong PINs, HomeHub makes everyone wait before trying again, longer after each further miss.
+- Tap the card for every sensor and the latest arming, disarming and doors opening, with who armed or disarmed it from HomeHub. That history is kept as long as Activity.
+
+A few things to know:
+
+- Arming and disarming are only in the app. Chat, voice, scenes, schedules and AI assistants can't arm or disarm the alarm. The keypad and the Alarm.com app work as before, and Alarm.com and your monitoring company see a change from HomeHub as they would one from the Alarm.com app.
+- Changes show within seconds: Alarm.com tells HomeHub as they happen. If that link drops, HomeHub checks every minute until it's back.
+- Each time HomeHub signs in, Alarm.com may send a "successful login" alert and sign out the Alarm.com website. HomeHub keeps its session going so that's rare: normally only after a restart or an update.
+- Alarm.com asks for the password when a session ends, so HomeHub keeps it, as with Honeywell. If you change the password, HomeHub tries the old one once, stops, and Settings asks you to sign in again. It doesn't keep retrying, so it can't lock your account. If Alarm.com asks for a new code, Settings asks you to sign in again too.
+- Only the active HomeHub connects. A backup HomeHub needs signing in on its own after it becomes active, because Alarm.com trusts each HomeHub separately.
+- Alarm.com offers no public connection for homeowners. HomeHub uses the one its website uses, as Home Assistant does. If Alarm.com changes it, the Alarm card may stop working until HomeHub is updated. The alarm itself and its monitoring aren't affected.
 
 ## Cameras
 
