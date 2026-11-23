@@ -564,7 +564,7 @@ One sensor can switch several lights, such as the kitchen lights and the cabinet
 So motion doesn't light a room that's bright already, choose when motion may turn the light on, under **Turn on when motion starts → Only**:
 
 - **Any time:** the default.
-- **When the room is dark:** the Shelly Motion measures the light each time it sees motion, and HomeHub turns the light on only below the level you choose, such as **Dark (below 100 lux)** or **Dim (below 300 lux)**. This follows the room itself, so a cloudy afternoon or closed blinds count as dark. The card shows the last reading, which helps you pick a level: wave at the sensor at a time you'd want the light, and see what it reads.
+- **When the room is dark:** the Shelly Motion measures the light each time it sees motion, and HomeHub turns the light on only below the level you choose, such as **Dark (below 100 lux)** or **Dim (below 300 lux)**. This follows the room itself, so a cloudy afternoon or closed blinds count as dark. The card shows the last reading, which helps you pick a level: wave at the sensor at a time you'd want the light, and see what it reads. Readings taken while the room's lights are already on aren't kept, since they're mostly the lights' own light.
 - **Between sunset and sunrise:** uses your home's location from **Settings → Home**, and follows the seasons. To start earlier and end later, add minutes, such as 30 for a room that gets dark before sunset. The card shows today's times.
 - **Between set hours:** for example **17:00 until 08:00**, which runs overnight.
 

@@ -153,13 +153,18 @@ export async function handleMotion(token: string, occupied: boolean, now = new D
 
   // Daylight, by the sensor's light reading, the sun or the clock, as the rule chose.
   const decision = await decideTurnOn(rule, now);
-  if (decision.lux !== undefined) {
-    db.prepare('UPDATE motion_rules SET last_lux = ?, last_lux_at = ? WHERE token = ?').run(decision.lux, now.toISOString(), token);
+  // With the lights already on, a reading is mostly their own light: it isn't kept as the room's
+  // light level, and "left off" isn't said of lights that are on.
+  const lit = lights.every((light) => getCachedState(light.device_id)?.state === true);
+  if (!lit) {
+    if (decision.lux !== undefined) {
+      db.prepare('UPDATE motion_rules SET last_lux = ?, last_lux_at = ? WHERE token = ?').run(decision.lux, now.toISOString(), token);
+    }
+    db.prepare('UPDATE motion_rules SET skipped_at = ?, skipped_reason = ? WHERE token = ?')
+      .run(decision.on ? null : now.toISOString(), decision.on ? null : decision.reason, token);
   }
-  db.prepare('UPDATE motion_rules SET skipped_at = ?, skipped_reason = ? WHERE token = ?')
-    .run(decision.on ? null : now.toISOString(), decision.on ? null : decision.reason, token);
   if (!decision.on) {
-    logger.info({ rule: rule.name, reason: decision.reason }, 'Motion, light left off');
+    if (!lit) logger.info({ rule: rule.name, reason: decision.reason }, 'Motion, light left off');
     return true;
   }
 

@@ -215,6 +215,17 @@ describe('motion rules', () => {
         assert.match(rule().skipped_reason, /bright enough \(650 lux; turns on below 100\)/);
       });
 
+      it('doesn\'t keep a reading taken with the lights already on: it\'s mostly their own light', async () => {
+        useSensor();
+        sensorLux = 40;
+        await motion.handleMotion(token, true);   // dark: on
+        cache.set(lightId, { state: true, wattage: null, online: true, lastPolled: new Date() });
+        sensorLux = 650;
+        await motion.handleMotion(token, true, new Date(Date.now() + 60_000));
+        assert.equal(rule().last_lux, 40);
+        assert.equal(rule().skipped_at, null);
+      });
+
       it('uses the rule\'s own threshold', async () => {
         useSensor();
         db.prepare('UPDATE motion_rules SET dark_below_lux = 300').run();
@@ -285,6 +296,7 @@ describe('motion rules', () => {
         db.prepare("UPDATE motion_rules SET hours_from = '06:00', hours_to = '09:00'").run();
         await motion.handleMotion(token, true, local(7));
         assert.equal(calls.length, 1);
+        lightOff();   // switched off since: with it still on, there's nothing to say
         await motion.handleMotion(token, true, local(10));
         assert.equal(calls.length, 1);
         assert.match((db.prepare('SELECT skipped_reason FROM motion_rules').get() as any).skipped_reason, /outside 06:00–09:00/);
