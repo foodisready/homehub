@@ -237,7 +237,14 @@ a { color: #93c5fd; }
 .clip { margin: 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
 .clip video { display: block; width: 100%; height: auto; aspect-ratio: 390 / 844; background: #0a1020; }
 .clip figcaption { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px 12px; }
-@media (max-width: 700px) { .clips { grid-template-columns: minmax(0, 1fr); justify-items: center; } .clip { width: min(100%, 320px); } }
+.clip.wide { grid-column: 1 / -1; max-width: 760px; }
+.clip.wide video { aspect-ratio: 1280 / 800; }
+.new { margin-top: 22px; max-width: 760px; }
+.new h3 { font-size: 16px; margin-bottom: 6px; }
+.new ul { margin: 0; padding-left: 20px; color: var(--text-muted); line-height: 1.55; font-size: 14px; }
+.new li { margin: 4px 0; }
+.new strong { color: var(--text); }
+@media (max-width: 700px) { .clips { grid-template-columns: minmax(0, 1fr); justify-items: center; } .clip { width: min(100%, 320px); } .clip.wide { grid-column: auto; width: 100%; } }
 
 .foot { max-width: 1320px; margin: 0 auto; padding: 4px 16px 28px; color: var(--text-faint); font-size: 13px; }
 

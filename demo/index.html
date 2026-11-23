@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>HomeHub Demo</title>
-  <meta name="description" content="Try HomeHub in your browser: turn a pretend kitchen's lights on and off by chat, in four languages, and watch its schedules run through a day.">
+  <meta name="description" content="Try HomeHub in your browser: turn a pretend kitchen's lights on and off by chat, in four languages, and watch its schedules run through a day. Then watch the real app: rooms, a wall display, scenes, schedules and more.">
   <meta name="theme-color" content="#0f172a">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%233b82f6'/%3E%3Cpath d='M8 16 16 9l8 7v8h-5v-5h-6v5H8z' fill='%23fff'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="demo.css">
@@ -104,11 +104,23 @@
     <h2 id="watchTitle">Watch it work</h2>
     <p class="muted small">Short recordings of the real HomeHub app, with a made-up home.</p>
     <div class="clips">
+      <figure class="clip wide">
+        <video controls playsinline muted preload="none" poster="videos/wall-poster.jpg" width="1280" height="800">
+          <source src="videos/wall.mp4" type="video/mp4">
+        </video>
+        <figcaption><strong>Wall display</strong><span class="muted small">An always-on tablet: the time, the weather, what’s coming up, scenes and every room. It locks itself, and a PIN opens it. 29 s</span></figcaption>
+      </figure>
+      <figure class="clip">
+        <video controls playsinline muted preload="none" poster="videos/rooms-poster.jpg" width="390" height="844">
+          <source src="videos/rooms.mp4" type="video/mp4">
+        </video>
+        <figcaption><strong>Rooms</strong><span class="muted small">Every room at a glance. Open one, tap a light, and swipe to the next room. 29 s</span></figcaption>
+      </figure>
       <figure class="clip">
         <video controls playsinline muted preload="none" poster="videos/lights-poster.jpg" width="390" height="844">
           <source src="videos/lights.mp4" type="video/mp4">
         </video>
-        <figcaption><strong>Switch lights</strong><span class="muted small">Tap a switch, or ask in English, 廣東話, 普通话 or Tiếng Việt. 54 s</span></figcaption>
+        <figcaption><strong>Switch lights</strong><span class="muted small">Tap a light, or ask in English, 廣東話, 普通话 or Tiếng Việt. 35 s</span></figcaption>
       </figure>
       <figure class="clip">
         <video controls playsinline muted preload="none" poster="videos/scenes-poster.jpg" width="390" height="844">
@@ -140,6 +152,16 @@
         </video>
         <figcaption><strong>After an update</strong><span class="muted small">HomeHub says when voice is starting, and when speakers are listening again. 49 s</span></figcaption>
       </figure>
+    </div>
+      <div class="new">
+      <h3>Also in HomeHub</h3>
+      <ul>
+        <li><strong>Thermostats</strong>: Matter thermostats and Honeywell RedLINK, with temperature schedules and a heating and cooling history.</li>
+        <li><strong>Cameras and doorbells</strong>: Wyze, Ring and IP cameras, with motion snapshots and live view.</li>
+        <li><strong>Alarm systems</strong> with the Alarm.com app: armed or not, which doors and windows are open, arming, and disarming with a PIN.</li>
+        <li><strong>Daily check-in</strong>: for someone living alone. If nothing at home shows they’re up by a set time, the family is told.</li>
+        <li><strong>Away mode, motion lights and energy</strong>: lamps that make the house look lived-in, lights that come on when you walk in, and what each device costs.</li>
+      </ul>
     </div>
   </section>
 
