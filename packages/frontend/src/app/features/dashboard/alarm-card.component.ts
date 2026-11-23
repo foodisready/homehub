@@ -10,7 +10,14 @@ type SensorState = 'open' | 'closed' | 'active' | 'idle' | 'wet' | 'dry' | 'unkn
 type Mode = 'stay' | 'away' | 'night';
 
 interface Partition { id: string; name: string; state: ArmState; pending: ArmState | null; canNight: boolean; sensorIds: string[] }
-interface Sensor { id: string; name: string; kind: SensorKind; state: SensorState; bypassed: boolean; lowBattery: boolean; changedAt: string | null }
+interface Sensor {
+  id: string; name: string; kind: SensorKind; state: SensorState; bypassed: boolean; lowBattery: boolean; changedAt: string | null;
+  /** Alarm.com's words for a state HomeHub doesn't name. */
+  label?: string | null;
+  /** When HomeHub last saw it open and close (null: not seen). */
+  lastOpened?: string | null;
+  lastClosed?: string | null;
+}
 interface AlarmEvent { at: string; kind: 'arm' | 'sensor'; name: string; state: string; source: 'app' | 'outside'; userName: string | null; detail: string | null }
 export interface AlarmView {
   connection: 'signed-out' | 'standby' | 'connecting' | 'ready' | 'expired' | 'error';
@@ -82,6 +89,7 @@ const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '', '0', '⌫'];
     .list li { display: flex; align-items: center; gap: .6rem; padding: .38rem 0; font-size: .85rem; border-bottom: 1px solid #ffffff0d; }
     .list li:last-child { border-bottom: none; }
     .name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+    .name small { display: block; font-size: .72rem; color: var(--text-muted); }
     .what { color: var(--text-muted); white-space: nowrap; font-size: .8rem; }
     .hot .what { color: #fbbf24; font-weight: 600; }
     .list i { width: 7px; height: 7px; border-radius: 50%; background: #64748b; flex-shrink: 0; }
@@ -133,10 +141,10 @@ const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '', '0', '⌫'];
               @for (s of sorted(); track s.id) {
                 <li [class.hot]="isNotable(s)">
                   <i aria-hidden="true"></i>
-                  <span class="name">{{ s.name }}</span>
+                  <span class="name">{{ s.name }}@if (seen(s); as t) {<small>{{ t }}</small>}</span>
                   @if (s.bypassed) { <span class="tag">Bypassed</span> }
                   @if (s.lowBattery) { <span class="tag">Low battery</span> }
-                  <span class="what">{{ stateWords(s.state) }}@if (s.changedAt && isNotable(s)) { · {{ ago(s.changedAt) }}}</span>
+                  <span class="what">{{ s.state === 'unknown' ? (s.label || '—') : stateWords(s.state) }}@if (s.changedAt && isNotable(s)) { · {{ ago(s.changedAt) }}}</span>
                 </li>
               }
             </ul>
@@ -353,15 +361,28 @@ export class AlarmCardComponent implements OnInit, OnDestroy {
   eventWords(e: AlarmEvent): string {
     const what = EVENT_WORDS[e.state] ?? e.state;
     if (e.kind === 'sensor') return `${e.name} ${what}`;
-    const who = e.source === 'app' ? ` by ${e.userName ?? 'HomeHub'} in HomeHub` : ' at the keypad or Alarm.com app';
+    const who = e.source === 'app' ? ` by ${e.userName ?? 'HomeHub'} in HomeHub` : ' from the keypad or Alarm.com app';
     return `${what}${who}${e.detail ? ` · ${e.detail}` : ''}`;
   }
 
   when(iso: string): string {
     const d = new Date(iso);
-    const today = new Date(this.now()).toDateString() === d.toDateString();
+    const now = new Date(this.now());
     const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-    return today ? time : `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })}, ${time}`;
+    if (now.toDateString() === d.toDateString()) return time;
+    const y = new Date(now); y.setDate(y.getDate() - 1);
+    if (y.toDateString() === d.toDateString()) return `yesterday ${time}`;
+    return `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })}, ${time}`;
+  }
+
+  /** "Opened 7:12 PM · closed 7:15 PM": the last times HomeHub saw a door or window change. */
+  seen(s: Sensor): string | null {
+    const parts: string[] = [];
+    if (s.lastOpened) parts.push(`opened ${this.when(s.lastOpened)}`);
+    if (s.lastClosed) parts.push(`closed ${this.when(s.lastClosed)}`);
+    if (!parts.length) return null;
+    const text = parts.join(' · ');
+    return text[0].toUpperCase() + text.slice(1);
   }
 
   ago(iso: string): string {

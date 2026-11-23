@@ -29,6 +29,8 @@ export interface AdcSensor {
   lowBattery: boolean;
   /** When Alarm.com says it last changed, if it says. */
   changedAt: string | null;
+  /** Alarm.com's own words for the state ("Not Reset", "Idle"), shown when HomeHub can't name it. */
+  label?: string | null;
 }
 export interface AdcSnapshot { partitions: AdcPartition[]; sensors: AdcSensor[] }
 

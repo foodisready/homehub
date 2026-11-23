@@ -97,11 +97,17 @@ export type Connection = 'signed-out' | 'standby' | 'connecting' | 'ready' | 'ex
 
 export interface AlarmEvent { at: string; kind: 'arm' | 'sensor'; name: string; state: string; source: 'app' | 'outside'; userName: string | null; detail: string | null }
 
+/** A sensor as the app shows it: with when HomeHub last saw it open and close. */
+export interface SensorView extends AdcSensor {
+  lastOpened: string | null;
+  lastClosed: string | null;
+}
+
 export interface AlarmView {
   connection: Connection;
   detail: string | null;
   partitions: AdcPartition[];
-  sensors: AdcSensor[];
+  sensors: SensorView[];
   /** When Alarm.com last answered. */
   updatedAt: string | null;
   /** Alarm.com is telling HomeHub about changes as they happen. */
@@ -151,6 +157,23 @@ function recent(limit = 12): AlarmEvent[] {
     .map((r) => ({ at: r.at, kind: r.kind, name: r.name, state: r.state, source: r.source, userName: r.user_name, detail: r.detail }));
 }
 
+/**
+ * When each door and window was last seen opening and closing, from the history (kept as long as
+ * Activity). Changes HomeHub saw: with readings a minute apart, a door opened and closed within the
+ * minute isn't seen.
+ */
+function withHistory(sensors: AdcSensor[]): SensorView[] {
+  const rows = getDb().prepare(`SELECT name, state, MAX(at) AS at FROM alarm_events WHERE kind = 'sensor' AND state IN ('open', 'closed') GROUP BY name, state`)
+    .all() as { name: string; state: 'open' | 'closed'; at: string }[];
+  const last = new Map<string, { open?: string; closed?: string }>();
+  for (const r of rows) {
+    const e = last.get(r.name) ?? {};
+    if (r.state === 'open') e.open = r.at; else e.closed = r.at;
+    last.set(r.name, e);
+  }
+  return sensors.map((s) => ({ ...s, lastOpened: last.get(s.name)?.open ?? null, lastClosed: last.get(s.name)?.closed ?? null }));
+}
+
 export function alarmView(): AlarmView {
   const hold = holdReason();
   const conn = hold ?? connection;
@@ -162,7 +185,7 @@ export function alarmView(): AlarmView {
       const cmd = commands.get(p.id);
       return cmd && !p.pending && p.state !== cmd.target ? { ...p, pending: cmd.target } : p;
     }),
-    sensors: out ? [] : snapshot?.sensors ?? [],
+    sensors: out ? [] : withHistory(snapshot?.sensors ?? []),
     updatedAt: updatedAt && !out ? new Date(updatedAt).toISOString() : null,
     live: !hold && live,
     pinLength: alarmPinLength(),

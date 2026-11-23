@@ -118,6 +118,7 @@ export function parseCatalog(body: unknown): AdcSnapshot {
         lowBattery: a.lowBattery === true || a.criticalBattery === true
           || (typeof a.batteryLevelClassification === 'number' && a.batteryLevelClassification <= 1),
         changedAt: null,
+        label: str(a.displayStateText).trim().slice(0, 40) || null,
       });
     }
   }
@@ -470,7 +471,7 @@ export function socketUrl(endpoint: string, token: string): string {
 const WS_STABLE_MS = 30_000;
 /** After this many refused connections in a row, live updates rest this long (polling carries on). */
 const WS_GIVE_UP_AFTER = 6;
-const WS_REST_MS = 30 * 60_000;
+const WS_REST_MS = 4 * 60 * 60_000;
 /** Open this long before it counts as live, and HomeHub reads once to catch up. */
 const wsSettledMs = () => Number(process.env.ALARMCOM_WS_SETTLED_MS) || 5_000;
 
@@ -518,7 +519,7 @@ export class AdcLiveSession implements AdcSession {
         // Alarm.com keeps turning it away: stop asking for a while rather than hammer it.
         wait = WS_REST_MS;
         refused = 0;
-        status(false, `refused ${WS_GIVE_UP_AFTER} times (${reason}); trying again in ${WS_REST_MS / 60_000} min`);
+        status(false, `refused ${WS_GIVE_UP_AFTER} times (${reason}); trying again in ${WS_REST_MS / 3_600_000} h`);
       }
       retry = setTimeout(() => { retry = null; void open(); }, wait);
       retry.unref();

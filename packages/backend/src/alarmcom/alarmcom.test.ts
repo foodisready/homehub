@@ -558,6 +558,17 @@ describe('Alarm.com', () => {
       assert.equal(alarm.alarmView().sensors[2].state, 'active');
     });
 
+    it('shows when each door was last opened and closed', async () => {
+      await signIn();
+      assert.equal(alarm.alarmView().sensors[0].lastOpened, null);   // nothing seen yet
+      fake.changed!({ kind: 'sensor', id: 's1', state: 'open' });
+      fake.changed!({ kind: 'sensor', id: 's1', state: 'closed' });
+      const s1 = alarm.alarmView().sensors.find((x) => x.id === 's1')!;
+      assert.ok(s1.lastOpened && s1.lastClosed);
+      assert.ok(s1.lastClosed >= s1.lastOpened);
+      assert.equal(alarm.alarmView().sensors.find((x) => x.id === 's2')!.lastOpened, null);
+    });
+
     it('doesn’t fill the history with motion', async () => {
       await signIn();
       fake.changed!({ kind: 'sensor', id: 's3', state: 'open' });

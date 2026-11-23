@@ -31,6 +31,7 @@ const CATALOG = {
     { id: '555-1', type: 'devices/sensor', attributes: { description: 'GARAGE DR', deviceType: 1, state: 2, isBypassed: false } },
     { id: '555-8', type: 'devices/sensor', attributes: { description: 'L Family Wndw', deviceType: 1, state: 1, lowBattery: true } },
     { id: '555-5', type: 'devices/sensor', attributes: { description: 'MOTION', deviceType: 2, state: 4 } },
+    { id: '555-12', type: 'devices/sensor', attributes: { description: 'CENTER BASEMENT', deviceType: 1, state: 10, displayStateText: 'Not Reset' } },
     { id: '555-19', type: 'devices/sensor', attributes: { description: 'Glass', deviceType: 19, state: 1, isBypassed: true } },
     { id: '555-99', type: 'devices/lock', attributes: { description: 'Front lock' } },
   ],
@@ -163,7 +164,7 @@ describe('Alarm.com client', () => {
       assert.equal(done.trust, 'T1');   // set on a redirect hop
       const snap = await done.session.read();
       assert.equal(snap.partitions.length, 1);
-      assert.equal(snap.sensors.length, 4);
+      assert.equal(snap.sensors.length, 5);
       const trust = server.seen.find((s) => s.url.endsWith('/trustTwoFactorDevice'))!;
       assert.match(JSON.parse(trust.body).deviceName, /^HomeHub/);
     });
@@ -298,7 +299,7 @@ describe('Alarm.com client', () => {
       }
       // Each wait longer than the one before.
       for (let i = 2; i < gaps.length; i++) assert.ok(gaps[i] > gaps[i - 1], `gaps ${gaps.join(',')}`);
-      assert.match(reasons.at(-1)!, /refused 6 times.*rejected token.*30 min/);
+      assert.match(reasons.at(-1)!, /refused 6 times.*rejected token.*4 h/);
       await tick(300);
       assert.equal(sockets.length, 6);   // resting
       stop();
@@ -314,8 +315,10 @@ describe('Alarm.com client', () => {
         ['GARAGE DR', 'door', 'open', false, false],
         ['L Family Wndw', 'window', 'closed', false, true],
         ['MOTION', 'motion', 'active', false, false],
+        ['CENTER BASEMENT', 'door', 'unknown', false, false],
         ['Glass', 'glass', 'idle', true, false],
       ]);
+      assert.equal(snap.sensors.find((x) => x.name === 'CENTER BASEMENT')!.label, 'Not Reset');
     });
 
     it('treats an unreadable answer as empty, not a crash', () => {

@@ -190,7 +190,8 @@ The **Alarm** card on the Dashboard and the wall display shows:
 A few things to know:
 
 - Arming and disarming are only in the app. Chat, voice, scenes, schedules and AI assistants can't arm or disarm the alarm. The keypad and the Alarm.com app work as before, and Alarm.com and your monitoring company see a change from HomeHub as they would one from the Alarm.com app.
-- Changes show within seconds: Alarm.com tells HomeHub as they happen. If that link drops, HomeHub checks every minute until it's back.
+- HomeHub checks the alarm every minute, so a change at the keypad or a door opening shows within a minute. Alarm.com's instant updates don't work with HomeHub yet; HomeHub tries them every few hours.
+- Under each door and window, the card shows when HomeHub last saw it open and close. A door opened and closed within the same minute may not show; the Alarm.com app has the full history.
 - Each time HomeHub signs in, Alarm.com may send a "successful login" alert and sign out the Alarm.com website. HomeHub keeps its session going so that's rare: normally only after a restart or an update.
 - Alarm.com asks for the password when a session ends, so HomeHub keeps it, as with Honeywell. If you change the password, HomeHub tries the old one once, stops, and Settings asks you to sign in again. It doesn't keep retrying, so it can't lock your account. If Alarm.com asks for a new code, Settings asks you to sign in again too.
 - Only the active HomeHub connects. A backup HomeHub needs signing in on its own after it becomes active, because Alarm.com trusts each HomeHub separately.
