@@ -17,7 +17,11 @@ interface Sensor {
   /** When HomeHub last saw it open and close (null: not seen). */
   lastOpened?: string | null;
   lastClosed?: string | null;
+  /** A garage door's opener (not on the alarm); its device id in HomeHub. */
+  opener?: number;
 }
+/** A garage door with an opener HomeHub controls: not on the alarm, shown with its doors. */
+interface GarageDoor { id: number; name: string; state: 'open' | 'closed' | 'unknown'; lastOpened: string | null; lastClosed: string | null }
 interface AlarmEvent { at: string; kind: 'arm' | 'sensor'; name: string; state: string; source: 'app' | 'outside'; userName: string | null; detail: string | null }
 export interface AlarmView {
   connection: 'signed-out' | 'standby' | 'connecting' | 'ready' | 'expired' | 'error';
@@ -28,6 +32,7 @@ export interface AlarmView {
   live: boolean;
   pinLength: number | null;
   recent: AlarmEvent[];
+  garage?: GarageDoor[];
 }
 
 /** What the sheet is asking. */
@@ -136,12 +141,13 @@ const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '', '0', '⌫'];
         }
 
         @if (open()) {
-          @if (v.sensors.length) {
-            <ul class="list" aria-label="Alarm sensors">
+          @if (doors().length) {
+            <ul class="list" aria-label="Alarm sensors and garage doors">
               @for (s of sorted(); track s.id) {
                 <li [class.hot]="isNotable(s)">
                   <i aria-hidden="true"></i>
                   <span class="name">{{ s.name }}@if (seen(s); as t) {<small>{{ t }}</small>}</span>
+                  @if (s.opener) { <span class="tag" title="From the garage door opener. The alarm doesn’t watch this door.">Opener</span> }
                   @if (s.bypassed) { <span class="tag">Bypassed</span> }
                   @if (s.lowBattery) { <span class="tag">Low battery</span> }
                   <span class="what">{{ s.state === 'unknown' ? (s.label || '—') : stateWords(s.state) }}@if (s.changedAt && isNotable(s)) { · {{ ago(s.changedAt) }}}</span>
@@ -238,8 +244,18 @@ export class AlarmCardComponent implements OnInit, OnDestroy {
   readonly pendingWords = computed(() => (this.pending() === 'disarmed' ? 'Disarming…' : 'Arming…'));
 
   readonly openCount = computed(() => this.notable().filter((s) => s.state !== 'active').length);
-  readonly notable = computed(() => (this.view()?.sensors ?? []).filter((s) => this.isNotable(s)));
-  readonly sorted = computed(() => [...(this.view()?.sensors ?? [])]
+  /** The alarm's sensors, and the garage doors HomeHub's openers report. */
+  readonly doors = computed<Sensor[]>(() => {
+    const v = this.view();
+    if (!v) return [];
+    const garage = (v.garage ?? []).map((g): Sensor => ({
+      id: `opener-${g.id}`, name: g.name, kind: 'door', state: g.state, bypassed: false, lowBattery: false, changedAt: null,
+      label: g.state === 'unknown' ? 'Not answering' : null, lastOpened: g.lastOpened, lastClosed: g.lastClosed, opener: g.id,
+    }));
+    return [...v.sensors, ...garage];
+  });
+  readonly notable = computed(() => this.doors().filter((s) => this.isNotable(s)));
+  readonly sorted = computed(() => [...this.doors()]
     .sort((a, b) => Number(this.isNotable(b)) - Number(this.isNotable(a)) || a.name.localeCompare(b.name, undefined, { numeric: true })));
 
   readonly summary = computed(() => {
@@ -268,17 +284,24 @@ export class AlarmCardComponent implements OnInit, OnDestroy {
   readonly slots = computed(() => Array.from({ length: this.view()?.pinLength ?? 4 }, (_, i) => i < this.entry().length));
 
   private stop?: () => void;
+  private stopDoors?: () => void;
   private timer?: ReturnType<typeof setInterval>;
 
   ngOnInit(): void {
     this.load();
     this.stop = this.socket.onAlarmState((v) => this.take(v as AlarmView));
+    // A garage door opener changed: its state and times come with the alarm's view.
+    this.stopDoors = this.socket.onDeviceState((e) => {
+      const door = this.view()?.garage?.find((g) => g.id === e.id);
+      if (door && (door.state === 'open') !== e.state) this.load();
+    });
     this.timer = setInterval(() => { if (!document.hidden) this.now.set(Date.now()); }, 1_000);
     document.addEventListener('visibilitychange', this.onVisible);
   }
 
   ngOnDestroy(): void {
     this.stop?.();
+    this.stopDoors?.();
     if (this.timer) clearInterval(this.timer);
     document.removeEventListener('visibilitychange', this.onVisible);
   }

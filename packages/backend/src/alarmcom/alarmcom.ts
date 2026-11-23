@@ -2,6 +2,7 @@ import { getDb } from '../db';
 import { logger } from '../logger';
 import { isActiveServer } from '../system/role';
 import { emitAlarmState } from '../socket';
+import { getCachedState } from '../kasa/device.cache';
 import { ADC_BASE, adcLibrary, devBase } from './adc-client';
 import { checkAlarmPin, hasAlarmPin, alarmPinLength } from './alarm-pin';
 import {
@@ -114,8 +115,41 @@ export interface AlarmView {
   live: boolean;
   /** Disarming asks for a PIN this many digits long; null when no PIN is set (so no disarming). */
   pinLength: number | null;
-  /** The latest arming, disarming and sensor changes, newest first. */
+  /** The latest arming, disarming and sensor changes, garage doors' too, newest first. */
   recent: AlarmEvent[];
+  /**
+   * Garage doors with an opener HomeHub controls (Meross): not on the alarm, but shown with its
+   * doors. Their state and times come from the opener, read every 30 seconds.
+   */
+  garage: GarageDoorView[];
+}
+
+export interface GarageDoorView {
+  /** The device's id in HomeHub. */
+  id: number;
+  name: string;
+  /** 'unknown' while the opener isn't answering. */
+  state: 'open' | 'closed' | 'unknown';
+  lastOpened: string | null;
+  lastClosed: string | null;
+}
+
+interface GarageRow { id: number; alias: string }
+const garageRows = () => getDb().prepare("SELECT id, alias FROM devices WHERE driver_type = 'meross' ORDER BY alias").all() as GarageRow[];
+
+function garageDoors(rows: GarageRow[]): GarageDoorView[] {
+  const last = getDb().prepare("SELECT state, MAX(at) AS at FROM device_events WHERE device_id = ? AND kind = 'power' GROUP BY state");
+  return rows.map((d) => {
+    const c = getCachedState(d.id);
+    const times = last.all(d.id) as { state: 0 | 1; at: string }[];
+    return {
+      id: d.id,
+      name: d.alias,
+      state: !c || !c.online ? 'unknown' : c.state ? 'open' : 'closed',
+      lastOpened: times.find((t) => t.state === 1)?.at ?? null,
+      lastClosed: times.find((t) => t.state === 0)?.at ?? null,
+    };
+  });
 }
 
 let connector: AdcConnector = adcLibrary;
@@ -151,10 +185,21 @@ function holdReason(): Connection | null {
   return null;
 }
 
-function recent(limit = 12): AlarmEvent[] {
-  return (getDb().prepare('SELECT at, kind, name, state, source, user_name, detail FROM alarm_events ORDER BY at DESC, id DESC LIMIT ?').all(limit) as
+function recent(garage: GarageRow[], limit = 12): AlarmEvent[] {
+  const alarm = (getDb().prepare('SELECT at, kind, name, state, source, user_name, detail FROM alarm_events ORDER BY at DESC, id DESC LIMIT ?').all(limit) as
     { at: string; kind: 'arm' | 'sensor'; name: string; state: string; source: 'app' | 'outside'; user_name: string | null; detail: string | null }[])
     .map((r) => ({ at: r.at, kind: r.kind, name: r.name, state: r.state, source: r.source, userName: r.user_name, detail: r.detail }));
+  if (!garage.length) return alarm;
+  // The garage doors' openings and closings, named as the device is named now.
+  const names = new Map(garage.map((d) => [d.id, d.alias]));
+  const doors = (getDb().prepare(`SELECT device_id, state, source, user_name, at FROM device_events
+      WHERE kind = 'power' AND device_id IN (${garage.map(() => '?').join(', ')}) ORDER BY at DESC, id DESC LIMIT ?`)
+    .all(...garage.map((d) => d.id), limit) as { device_id: number; state: 0 | 1; source: string; user_name: string | null; at: string }[])
+    .map((r): AlarmEvent => ({
+      at: r.at, kind: 'sensor', name: names.get(r.device_id) ?? '', state: r.state ? 'open' : 'closed',
+      source: r.source === 'outside' ? 'outside' : 'app', userName: r.user_name, detail: null,
+    }));
+  return [...alarm, ...doors].sort((a, b) => b.at.localeCompare(a.at)).slice(0, limit);
 }
 
 /**
@@ -178,6 +223,7 @@ export function alarmView(): AlarmView {
   const hold = holdReason();
   const conn = hold ?? connection;
   const out = hold === 'signed-out';
+  const garage = garageRows();
   return {
     connection: conn,
     detail: conn === 'expired' ? setting(MESSAGE) ?? detail : conn === 'error' ? detail : null,
@@ -189,7 +235,8 @@ export function alarmView(): AlarmView {
     updatedAt: updatedAt && !out ? new Date(updatedAt).toISOString() : null,
     live: !hold && live,
     pinLength: alarmPinLength(),
-    recent: out ? [] : recent(),
+    recent: out ? [] : recent(garage),
+    garage: out ? [] : garageDoors(garage),
   };
 }
 

@@ -180,7 +180,7 @@ describe('Alarm.com', () => {
     it('shows nothing until someone signs in', async () => {
       const r = await api('GET', '/api/alarm');
       assert.equal(r.status, 200);
-      assert.deepEqual(r.body, { connection: 'signed-out', detail: null, partitions: [], sensors: [], updatedAt: null, live: false, pinLength: null, recent: [] });
+      assert.deepEqual(r.body, { connection: 'signed-out', detail: null, partitions: [], sensors: [], updatedAt: null, live: false, pinLength: null, recent: [], garage: [] });
       assert.equal(fake.signIns.length, 0);
     });
 
@@ -649,6 +649,36 @@ describe('Alarm.com', () => {
       const tries = fake.historySince.length;
       await alarm.readHistory(Date.now() + 60_000);   // waits an hour before trying again
       assert.equal(fake.historySince.length, tries);
+    });
+  });
+
+  describe('garage doors', () => {
+    it('shows a garage door opener with the alarm’s doors, with its times and in Recent', async () => {
+      const id = Number(db.prepare("INSERT INTO devices (alias, ip, driver_type) VALUES ('Garage Left', '10.0.0.9', 'meross')").run().lastInsertRowid);
+      try {
+        closeAllSensors();
+        await signIn();
+        // Not heard from yet: its state isn't known.
+        assert.deepEqual(alarm.alarmView().garage, [{ id, name: 'Garage Left', state: 'unknown', lastOpened: null, lastClosed: null }]);
+        const opened = '2026-11-23T15:55:16.739Z', closed = '2026-11-23T15:55:46.738Z';
+        const ins = db.prepare("INSERT INTO device_events (device_id, device_alias, kind, state, source, at) VALUES (?, 'Garage Left', ?, ?, 'outside', ?)");
+        ins.run(id, 'power', 1, opened);
+        ins.run(id, 'power', 0, closed);
+        ins.run(id, 'online', 1, '2026-11-23T16:00:00.000Z');   // not an opening
+        const cache = await import('../kasa/device.cache');
+        cache.noteState(id, true);
+        const v = alarm.alarmView();
+        assert.equal(v.garage[0].state, 'open');
+        assert.equal(v.garage[0].lastClosed, closed);
+        assert.ok(v.garage[0].lastOpened! > closed);   // the switch just noted
+        assert.deepEqual(v.recent.filter((e) => e.name === 'Garage Left').map((e) => e.state), ['open', 'closed', 'open']);
+        // Not an alarm sensor: arming doesn't ask about it.
+        const r = await api('POST', '/api/alarm/arm', { mode: 'stay' }, 'member');
+        assert.notEqual(r.status, 409);
+      } finally {
+        db.prepare('DELETE FROM device_events WHERE device_id = ?').run(id);
+        db.prepare('DELETE FROM devices WHERE id = ?').run(id);
+      }
     });
   });
 
