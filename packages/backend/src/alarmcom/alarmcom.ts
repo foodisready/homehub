@@ -328,7 +328,12 @@ function startWatching(s: AdcSession): void {
   stopWatch = s.watch(
     (e) => { if (session === s) applyEvent(e); },
     (isLive, reason) => {
-      if (session !== s || live === isLive) return;
+      if (session !== s) return;
+      if (live === isLive) {
+        // Another try that didn't work: worth knowing why. Tries are spaced out, so this stays quiet.
+        if (!isLive && reason) logger.info({ reason }, 'Alarm.com live updates not connected; reading every minute');
+        return;
+      }
       live = isLive;
       logger.info({ reason }, isLive ? 'Alarm.com live updates on' : 'Alarm.com live updates paused; reading every minute');
       publish();

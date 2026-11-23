@@ -127,7 +127,7 @@ const MAX_WIRED = 8;
     .bubbles { position: relative; z-index: 1; display: grid; grid-template-columns: repeat(var(--cols), 1fr); gap: 1.6rem 0.5rem; margin-top: 3.2rem; }
     .bubbles.grid { margin-top: 1rem; }
     .bubble { border: 0; background: none; color: var(--text); display: flex; flex-direction: column; align-items: center; gap: 0.45rem; padding: 0;
-      -webkit-touch-callout: none; user-select: none; touch-action: manipulation; }
+      -webkit-touch-callout: none; user-select: none; touch-action: pan-y; }
     .orb { width: 4.7rem; height: 4.7rem; border-radius: 50%; display: grid; place-items: center; background: var(--surface); border: 2px solid var(--line);
       color: var(--text-muted); position: relative; transition: transform .18s ease, box-shadow .25s ease, background .25s ease, border-color .25s ease; }
     .bubble:active:not(:disabled) .orb { transform: scale(.93); }
@@ -155,6 +155,9 @@ const MAX_WIRED = 8;
   `],
   template: `
     @if (room(); as r) {
+      <!-- Swipe left or right for the next or previous room, as the buttons below do. -->
+      <div [class]="'hh-swipe ' + slide()" (pointerdown)="swipeStart($event)" (pointermove)="swipeMove($event)"
+           (pointerup)="swipeEnd($event)" (pointercancel)="swipe = null" (animationend)="slide.set('')">
       <div class="head" [style.--lit]="r.lit" [style.view-transition-name]="vt(r.name)">
         <span class="glow"></span>
         <div class="bar">
@@ -196,7 +199,8 @@ const MAX_WIRED = 8;
           }
         </div>
       </div>
-      <p class="hint">{{ wired(r) ? '' : 'More than 8 devices, so they\\'re shown as a grid. ' }}Tap to switch · press and hold for controls</p>
+      <p class="hint">{{ wired(r) ? '' : 'More than 8 devices, so they\\'re shown as a grid. ' }}Tap to switch · press and hold for controls{{ tiles().length > 1 ? ' · swipe for the next room' : '' }}</p>
+      </div>
       @if (tiles().length > 1) {
         <div class="nextprev">
           <button type="button" (click)="step(-1)">‹ {{ neighbour(-1) }}</button>
@@ -360,6 +364,38 @@ export class RoomsViewComponent implements AfterViewChecked, OnDestroy {
     const list = this.tiles(), i = list.findIndex((t) => t.name === this.openName());
     if (i < 0) return;
     this.openName.set(list[(i + dir + list.length) % list.length].name);
+    const still = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+    this.slide.set(still ? '' : dir > 0 ? 'next' : 'prev');
+  }
+
+  // ── Swiping between rooms (touch only; a mouse uses the buttons) ──
+
+  readonly slide = signal<'' | 'next' | 'prev'>('');
+  swipe: { x: number; y: number; at: number; id: number; moved: boolean } | null = null;
+  /** A swipe just ended: the tap that follows it mustn't switch a device. */
+  private swiped = false;
+
+  swipeStart(e: PointerEvent): void {
+    if (e.pointerType !== 'touch' || this.tiles().length < 2) return;
+    this.swipe = { x: e.clientX, y: e.clientY, at: Date.now(), id: e.pointerId, moved: false };
+  }
+
+  swipeMove(e: PointerEvent): void {
+    const s = this.swipe;
+    if (!s || e.pointerId !== s.id || s.moved) return;
+    // Moving sideways: a swipe, not a press, so no controls pop up.
+    if (Math.abs(e.clientX - s.x) > 12 && Math.abs(e.clientX - s.x) > Math.abs(e.clientY - s.y)) { s.moved = true; this.release(); }
+  }
+
+  swipeEnd(e: PointerEvent): void {
+    const s = this.swipe;
+    this.swipe = null;
+    if (!s || e.pointerId !== s.id) return;
+    const dx = e.clientX - s.x, dy = e.clientY - s.y;
+    if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 1.5 || Date.now() - s.at > 800) return;
+    this.swiped = true;
+    setTimeout(() => { this.swiped = false; }, 350);
+    this.step(dx < 0 ? 1 : -1);
   }
   neighbour(dir: -1 | 1): string {
     const list = this.tiles(), i = list.findIndex((t) => t.name === this.openName());
@@ -441,6 +477,7 @@ export class RoomsViewComponent implements AfterViewChecked, OnDestroy {
   release(): void { clearTimeout(this.holdTimer); }
 
   tap(d: Device): void {
+    if (this.swiped) return;
     if (this.held) { this.held = false; return; }
     if (!d.online) { this.controls.set(d.id); return; }
     if (this.busyIds().has(d.id)) return;

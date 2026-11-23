@@ -170,6 +170,11 @@ input.own-clear::-webkit-search-cancel-button { -webkit-appearance: none; appear
 
 /* Settings as tiles: each section opens as its own page, sliding in, with a bar to go back. */
 @keyframes hh-slide { from { transform: translateX(32px); opacity: 0; } }
+@keyframes hh-slide-r { from { transform: translateX(-32px); opacity: 0; } }
+/* The open room on the Dashboard: swiped sideways to the next room (rooms-view). */
+.hh-swipe { touch-action: pan-y; }
+.hh-swipe.next { animation: hh-slide .22s ease-out; }
+.hh-swipe.prev { animation: hh-slide-r .22s ease-out; }
 .page.hh-tiles .section > .section-toggle { display: none; }
 .page.hh-tiles > .section { margin-bottom: 0; }
 .hh-tiles .section > :not(.section-toggle) { animation: hh-slide .28s cubic-bezier(.2, .8, .2, 1); }

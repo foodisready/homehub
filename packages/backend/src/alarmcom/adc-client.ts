@@ -447,7 +447,7 @@ type SocketLike = {
   onmessage: ((e: { data: unknown }) => void) | null;
   onclose: ((e: { code: number; reason?: string }) => void) | null;
   onopen: (() => void) | null;
-  onerror: (() => void) | null;
+  onerror: ((e?: { message?: string }) => void) | null;
 };
 type SocketMaker = (url: string, headers: Record<string, string>) => SocketLike;
 /**
@@ -501,7 +501,8 @@ export class AdcLiveSession implements AdcSession {
       clear();
       if (stopped || this.closed) return;
       refused = quick ? refused + 1 : 0;
-      setLive(false, reason);
+      if (isLive) setLive(false, reason);
+      else status(false, reason);   // each failed try, so the log says why
       let wait = Math.min(WS_RETRY_MAX_MS, wsRetryMinMs() * 2 ** Math.min(refused, 6));
       if (refused >= WS_GIVE_UP_AFTER) {
         // Alarm.com keeps turning it away: stop asking for a while rather than hammer it.
@@ -531,6 +532,7 @@ export class AdcLiveSession implements AdcSession {
       }
       ws = next;
       let openedAt = 0;
+      let error = '';
       next.onopen = () => {
         openedAt = Date.now();
         settled = setTimeout(() => {
@@ -547,11 +549,11 @@ export class AdcLiveSession implements AdcSession {
         const ev = parseEvent(text);
         if (ev) changed(ev);
       };
-      next.onerror = () => undefined;   // onclose follows
+      next.onerror = (e) => { error = String(e?.message ?? '').slice(0, 120); };   // onclose follows
       next.onclose = (e) => {
         if (ws !== next) return;
         const lived = openedAt ? Date.now() - openedAt : 0;
-        const why = `closed ${e.code}${e.reason ? ` (${String(e.reason).slice(0, 80)})` : ''}${openedAt ? ` after ${Math.round(lived / 1000)} s` : ' before opening'}`;
+        const why = `closed ${e.code}${e.reason ? ` (${String(e.reason).slice(0, 80)})` : ''}${openedAt ? ` after ${Math.round(lived / 1000)} s` : ' before opening'}${error ? `: ${error}` : ''}`;
         again(why, lived < WS_STABLE_MS);
       };
       // Renew before Alarm.com closes it: a fresh connection, then the old one goes.
