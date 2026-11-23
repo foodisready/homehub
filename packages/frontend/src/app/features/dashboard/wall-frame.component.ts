@@ -4,6 +4,7 @@ import { Router } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { LockService } from '../../core/lock/lock.service';
 import { AuthService } from '../../core/auth/auth.service';
+import { setWallHome } from '../../core/wall-home';
 
 interface Weather { unit: 'C' | 'F'; temperature: number; summary: string; today: { high: number; low: number; rain: number } }
 interface Scene { id: number; name: string; icon: string | null }
@@ -179,8 +180,8 @@ const joinNames = (n: string[]) => (n.length <= 1 ? n.join('') : n.length > 3
           @if (pinMsg()) { <p class="ok" role="status">{{ pinMsg() }}</p> }
           <div class="hh-acts">
             @if (lock.pinSet()) { <button type="button" (click)="menu.set(false); lock.lockNow()">Lock now</button> }
-            <button type="button" (click)="fullscreen()">{{ isFull() ? 'Leave full screen' : 'Full screen' }}</button>
-            <button type="button" (click)="leave()">Leave wall display</button>
+            <button type="button" data-no-auto-full (click)="fullscreen()">{{ isFull() ? 'Leave full screen' : 'Full screen' }}</button>
+            <button type="button" data-no-auto-full (click)="leave()">Leave wall display</button>
           </div>
         </div>
       </div>
@@ -279,6 +280,7 @@ export class WallFrameComponent implements OnInit, OnDestroy {
   });
 
   ngOnInit(): void {
+    setWallHome(true);
     this.timers.push(setInterval(() => this.now.set(Date.now()), 15_000));
     this.http.get<{ timezone?: string }>('/api/home-settings').subscribe({ next: (h) => this.timeZone.set(h.timezone), error: () => undefined });
     this.loadWeather();
@@ -289,12 +291,14 @@ export class WallFrameComponent implements OnInit, OnDestroy {
     void this.holdScreen();
     document.addEventListener('visibilitychange', this.onVisible);
     document.addEventListener('fullscreenchange', this.onFull);
+    document.addEventListener('pointerup', this.onTouch, true);
   }
 
   ngOnDestroy(): void {
     this.timers.forEach(clearInterval);
     document.removeEventListener('visibilitychange', this.onVisible);
     document.removeEventListener('fullscreenchange', this.onFull);
+    document.removeEventListener('pointerup', this.onTouch, true);
     void this.screenLock?.release().catch(() => undefined);
     this.screenLock = null;
   }
@@ -315,6 +319,19 @@ export class WallFrameComponent implements OnInit, OnDestroy {
     void this.holdScreen();
   };
   private readonly onFull = () => this.isFull.set(!!document.fullscreenElement);
+
+  /** Set by "Leave full screen": touches stop going full screen until "Full screen" is chosen. */
+  private stayWindowed = false;
+  /**
+   * A browser goes full screen only from a touch, so the first touch on a touch screen does it,
+   * and the tap still does what it was on. Again after the tablet wakes or Chrome leaves it.
+   */
+  private readonly onTouch = (e: PointerEvent) => {
+    if (e.pointerType !== 'touch' || this.stayWindowed || document.fullscreenElement) return;
+    // The menu's own Full screen and Leave buttons decide for themselves.
+    if ((e.target as Element | null)?.closest?.('[data-no-auto-full]')) return;
+    void document.documentElement.requestFullscreen?.().catch(() => undefined);
+  };
 
   private async holdScreen(): Promise<void> {
     const nav = navigator as Navigator & { wakeLock?: { request(type: 'screen'): Promise<{ release(): Promise<void>; addEventListener(t: string, f: () => void): void }> } };
@@ -382,6 +399,7 @@ export class WallFrameComponent implements OnInit, OnDestroy {
   }
 
   fullscreen(): void {
+    this.stayWindowed = !!document.fullscreenElement;
     if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined);
     else void document.documentElement.requestFullscreen?.().catch(() => undefined);
   }
@@ -389,6 +407,7 @@ export class WallFrameComponent implements OnInit, OnDestroy {
   leave(): void {
     this.menu.set(false);
     if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined);
+    setWallHome(false);
     void this.router.navigateByUrl('/dashboard');
   }
 }

@@ -1,8 +1,10 @@
 import { Routes } from '@angular/router';
 import { authGuard } from './core/auth/auth.guard';
+import { isWallHome } from './core/wall-home';
 
 export const routes: Routes = [
-  { path: '', redirectTo: 'dashboard', pathMatch: 'full' },
+  // A wall display's home-screen shortcut opens "/": send it back to the wall display.
+  { path: '', redirectTo: () => (isWallHome() ? 'wall' : 'dashboard'), pathMatch: 'full' },
   {
     path: 'login',
     loadComponent: () => import('./features/login/login.component').then((m) => m.LoginComponent),
