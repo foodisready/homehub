@@ -163,6 +163,10 @@ export interface RobotStatus {
   activity: Activity;
   /** Out on a cleaning job, paused or recharging part way included: "on" to the rest of HomeHub. */
   cleaning: boolean;
+  /** It holds a job it hasn't finished: running, paused, or paused back on its dock. */
+  jobOpen:  boolean;
+  /** Sitting on its dock. */
+  onDock:   boolean;
   battery:  number | null;
   binFull:  boolean;
   /** In words, when the robot reports a problem. */
@@ -293,17 +297,19 @@ export function statusOf(r: Reported): RobotStatus | null {
   else if (phase === 'hmUsrDock' || phase === 'hmPostMsn') activity = 'returning';
   else if (phase === 'evac') activity = 'emptying';
   // On its dock with a job unfinished: recharging to carry on only if it says when it will. A job
-  // sent home part way stays unfinished on the robot, but it won't set off again by itself.
-  else if (phase === 'charge') activity = job && willCarryOn(mission, r.batPct) ? 'recharging' : 'docked';
+  // sent home part way is paused there, as the iRobot app shows it: it won't set off by itself.
+  else if (phase === 'charge') activity = !job ? 'docked' : willCarryOn(mission, r.batPct) ? 'recharging' : 'paused';
   else if (phase === 'stop' || phase === 'pause') activity = job ? 'paused' : 'idle';
   else activity = 'idle';
 
-  // On a job unless it's heading home for good, or home with no plan to set off again. Emptying
-  // part way is still the job.
-  const cleaning = job && activity !== 'returning' && activity !== 'docked';
+  const onDock = phase === 'charge' || phase === 'evac';
+  // On a job unless it's heading home for good, or paused at home. Emptying part way is still the job.
+  const cleaning = job && activity !== 'returning' && !(activity === 'paused' && onDock);
   return {
     activity,
     cleaning,
+    jobOpen: job,
+    onDock,
     battery: typeof r.batPct === 'number' ? r.batPct : null,
     binFull: r.bin?.full === true,
     error: code ? errorText(code) : null,

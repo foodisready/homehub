@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import { getDb } from '../db';
 import { discover, fetchPassword } from '../roomba/protocol';
 import { closeLink, readStatus, sendCommand } from '../roomba/link';
-import { cleanRooms, deviceForRobot } from '../roomba/service';
+import { cleanRooms, deviceForRobot, endJob } from '../roomba/service';
 import { RoomError, nameRoom, removeRoom, roomsView } from '../roomba/rooms';
 import { emitVacuumRooms } from '../socket';
 import { loginOf } from '../drivers/RoombaDriver';
@@ -140,7 +140,7 @@ roombaRouter.post('/:id/pause', async (req: Request, res: Response) => {
 const roomsNow = (id: number) => roomsView((getDb().prepare('SELECT driver_config FROM devices WHERE id = ?').get(id) as { driver_config: string | null } | undefined)?.driver_config ?? null);
 
 function roomFailure(res: Response, err: unknown, what: string) {
-  if (err instanceof RoomError) return res.status(err.status).json({ error: err.message, code: err.status === 404 ? 'NOT_FOUND' : err.status === 409 ? 'CONFLICT' : 'VALIDATION_ERROR' });
+  if (err instanceof RoomError) return res.status(err.status).json({ error: err.message, code: err.status === 404 ? 'NOT_FOUND' : err.status === 409 ? 'CONFLICT' : err.status === 502 ? 'DEVICE_DID_NOT_RESPOND' : 'VALIDATION_ERROR' });
   logger.warn({ reason: (err as Error).message }, what);
   return res.status(503).json({ error: 'Couldn’t reach the robot', code: 'DEVICE_UNREACHABLE' });
 }
@@ -175,7 +175,16 @@ roombaRouter.post('/:id/rooms/remove', requireAdmin, (req: Request, res: Respons
   }
 });
 
-/** POST /api/roomba/:id/clean { rooms: [key, …] } — cleans these named rooms, in this order. */
+/** POST /api/roomba/:id/end — ends the job it holds, as the iRobot app's "End now". */
+roombaRouter.post('/:id/end', async (req: Request, res: Response) => {
+  try {
+    res.json(await endJob(Number(req.params.id)));
+  } catch (err) {
+    roomFailure(res, err, 'Could not end Roomba job');
+  }
+});
+
+/** POST /api/roomba/:id/clean { rooms: [key, …] } — cleans these named rooms, in this order; none, the whole house. */
 roombaRouter.post('/:id/clean', async (req: Request, res: Response) => {
   const { rooms } = req.body as { rooms?: unknown };
   if (!Array.isArray(rooms) || rooms.some((r) => typeof r !== 'string')) {

@@ -81,12 +81,15 @@ describe('Roomba status', () => {
     assert.deepEqual([counting.activity, counting.cleaning], ['recharging', true]);
   });
 
-  it('is docked and off when a job was sent home part way: it won’t set off again by itself', () => {
+  it('is paused at home, and off, when a job was sent home part way: it won’t set off again by itself', () => {
     const parked = at('clean', 'charge', { cleanMissionStatus: { cycle: 'clean', phase: 'charge', error: 0, rechrgM: 0 } });
-    assert.deepEqual([parked.activity, parked.cleaning], ['docked', false]);
+    assert.deepEqual([parked.activity, parked.cleaning, parked.jobOpen, parked.onDock], ['paused', false, true, true]);
     // A robot that doesn't count the minutes: full and still on the dock.
     const full = at('clean', 'charge', { batPct: 100 });
-    assert.deepEqual([full.activity, full.cleaning], ['docked', false]);
+    assert.deepEqual([full.activity, full.cleaning], ['paused', false]);
+    // Paused out on the floor is still out.
+    assert.deepEqual([at('clean', 'stop').onDock, at('clean', 'stop').cleaning], [false, true]);
+    assert.equal(at('none', 'charge').jobOpen, false);
   });
 
   it('is off once heading home for good, whether sent or finished', () => {

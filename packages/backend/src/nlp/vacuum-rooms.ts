@@ -12,9 +12,8 @@
 import { getDb } from '../db';
 import { normalize } from './find-device';
 import { placeNames } from './nickname-suggest';
-import { runGroupCommand } from './commands';
-import { cleanRooms, VacuumBusyError } from '../roomba/service';
-import { roomsOf } from '../roomba/rooms';
+import { cleanRooms, VacuumBusyError, VacuumDidNotStartError } from '../roomba/service';
+import { RoomError, roomsOf } from '../roomba/rooms';
 import { assistantMaySwitch, type PowerDevice } from '../devices/power';
 import type { ActionTaken } from './nlp.service';
 import { logger } from '../logger';
@@ -87,6 +86,7 @@ const REPLIES = {
     en: (a: string) => `${a} is already cleaning. Send it home first, then start the rooms.`,
     yue: () => '掃地機而家做緊嘢，叫佢返去先，再叫佢掃。', zh: () => '扫地机正在打扫，请先让它回去充电，再开始。', vi: () => 'Robot đang hút bụi. Cho nó về sạc trước rồi bắt đầu lại.',
   },
+  didNotStart: { en: (a: string) => `${a} didn't start. Check it in the iRobot app.`, yue: () => '掃地機冇郁，請喺 iRobot app 睇下。', zh: () => '扫地机没有启动，请在 iRobot 应用里查看。', vi: () => 'Robot hút bụi không chạy. Hãy xem trong ứng dụng iRobot.' },
   unreachable: { en: (a: string) => `I couldn't reach ${a}.`, yue: () => '連唔到掃地機。', zh: () => '连不上扫地机。', vi: () => 'Không kết nối được với robot hút bụi.' },
   protected: { en: (a: string) => `${a} is protected, so use its tile on the dashboard.`, yue: () => '掃地機受保護，請用主頁上面嘅掣。', zh: () => '扫地机受保护，请用主页上的按钮。', vi: () => 'Robot hút bụi được bảo vệ, hãy dùng nút trên trang chính.' },
 };
@@ -107,13 +107,7 @@ async function vacuumJob(text: string): Promise<Handled | null> {
   if (!robots.length) return null;
   const { lang } = said;
 
-  if (said.rooms.length === 1 && WHOLE_HOUSE.test(said.rooms[0])) {
-    const robot = robots[0];
-    if (!assistantMaySwitch(robot, true)) return { response: REPLIES.protected[lang](robot.alias), actions: [], lang };
-    const result = await runGroupCommand([robot], { name: robot.alias, state: true });
-    const ok = result.actions.every((a) => (a.result as { success?: boolean } | undefined)?.success);
-    return { response: ok ? REPLIES.house[lang](robot.alias) : REPLIES.unreachable[lang](robot.alias), actions: result.actions, lang };
-  }
+  if (said.rooms.length === 1 && WHOLE_HOUSE.test(said.rooms[0])) return start(robots[0], [], [], lang);
 
   // Each room said must be one robot's named room.
   for (const robot of robots) {
@@ -128,24 +122,28 @@ async function vacuumJob(text: string): Promise<Handled | null> {
       names.push(room.name!);
     }
     if (keys.length !== said.rooms.length) continue;
-
-    const args = { alias: robot.alias, rooms: names.join(', ') };
-    if (!assistantMaySwitch(robot, true)) return { response: REPLIES.protected[lang](robot.alias), actions: [], lang };
-    try {
-      await cleanRooms(robot.id, keys);
-      const spokenNames = join([...new Set(names)].map((n) => sayName(n, lang)), lang);
-      return { response: REPLIES.rooms[lang](spokenNames), actions: [{ tool: 'clean_rooms', args, result: { success: true, ...args } }], lang };
-    } catch (err) {
-      const busy = err instanceof VacuumBusyError;
-      if (!busy) logger.warn({ id: robot.id, reason: (err as Error).message }, 'Room clean by voice or Chat failed');
-      return {
-        response: busy ? REPLIES.busy[lang](robot.alias) : REPLIES.unreachable[lang](robot.alias),
-        actions: [{ tool: 'clean_rooms', args, result: { error: (err as Error).message } }],
-        lang,
-      };
-    }
+    return start(robot, keys, names, lang);
   }
   return null;
+}
+
+/** Sets the robot off on these rooms, or with none the whole house, and says how it went. */
+async function start(robot: Robot, keys: string[], names: string[], lang: VacuumLang): Promise<Handled> {
+  const args = { alias: robot.alias, rooms: keys.length ? names.join(', ') : 'whole house' };
+  if (!assistantMaySwitch(robot, true)) return { response: REPLIES.protected[lang](robot.alias), actions: [], lang };
+  try {
+    await cleanRooms(robot.id, keys);
+    const response = keys.length
+      ? REPLIES.rooms[lang](join([...new Set(names)].map((n) => sayName(n, lang)), lang))
+      : REPLIES.house[lang](robot.alias);
+    return { response, actions: [{ tool: 'clean_rooms', args, result: { success: true, ...args } }], lang };
+  } catch (err) {
+    const reply = err instanceof VacuumBusyError ? REPLIES.busy : err instanceof VacuumDidNotStartError ? REPLIES.didNotStart : REPLIES.unreachable;
+    if (reply === REPLIES.unreachable) logger.warn({ id: robot.id, reason: (err as Error).message }, 'Robot vacuum job by voice or Chat failed');
+    // HomeHub's own explanation, in English, beats "couldn't reach" when it has one.
+    const own = reply === REPLIES.unreachable && err instanceof RoomError && lang === 'en';
+    return { response: own ? (err as Error).message : reply[lang](robot.alias), actions: [{ tool: 'clean_rooms', args, result: { error: (err as Error).message } }], lang };
+  }
 }
 
 /** For the chat models' clean_rooms tool: room names separated by commas, or "whole house". */

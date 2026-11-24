@@ -63,7 +63,7 @@ describe('auto-off', () => {
   it('counts down a motion rule once the room is empty', () => {
     const id = addDevice('Kitchen lights', true, 20);
     addRule(id, { occupied: false, lastMotionMinAgo: 3 });
-    assert.deepEqual(autoOff.pendingAutoOff(NOW).get(id), { at: '2026-11-02T20:07:00.000Z', cause: 'motion', detail: 'Kitchen sensor' });
+    assert.deepEqual(autoOff.pendingAutoOff(NOW).get(id), { at: '2026-11-02T20:07:00.000Z', cause: 'motion', detail: 'Kitchen sensor', afterMinutes: 10 });
   });
 
   it("counts down each of a motion rule's lights from when it came on", () => {
@@ -74,7 +74,7 @@ describe('auto-off', () => {
     db.prepare('INSERT INTO motion_rule_devices (rule_id, device_id) VALUES (?, ?)').run(ruleId, strip);
     const pending = autoOff.pendingAutoOff(NOW);
     assert.equal(pending.get(first)?.at, '2026-11-02T20:07:00.000Z');
-    assert.deepEqual(pending.get(strip), { at: '2026-11-02T20:09:00.000Z', cause: 'motion', detail: 'Kitchen sensor' });
+    assert.deepEqual(pending.get(strip), { at: '2026-11-02T20:09:00.000Z', cause: 'motion', detail: 'Kitchen sensor', afterMinutes: 10 });
   });
 
   it('says a motion rule is waiting while the room is occupied', () => {

@@ -7,6 +7,10 @@ export interface VacuumStatus {
   activity: VacuumActivity;
   /** Out on a cleaning job, paused or recharging part way included: the device's "on". */
   cleaning: boolean;
+  /** It holds a job it hasn't finished: running, paused, or paused back on its dock. */
+  jobOpen?: boolean;
+  /** Sitting on its dock. */
+  onDock?: boolean;
   battery: number | null;
   binFull: boolean;
   /** A problem it reports, in words. */
@@ -38,6 +42,7 @@ export function vacuumDetail(v: VacuumStatus | null | undefined, on: boolean): s
   if (!v) return vacuumWord(v, on);
   const head = v.activity === 'stuck' ? `Stuck: ${v.error ?? 'needs help'}`
     : v.activity === 'recharging' ? 'Recharging, then carries on'
+    : v.activity === 'paused' && v.onDock ? 'Job paused at home'
     : vacuumWord(v, on);
   return [
     head,
@@ -46,6 +51,9 @@ export function vacuumDetail(v: VacuumStatus | null | undefined, on: boolean): s
     v.error && v.activity !== 'stuck' && v.error !== 'Bin full' ? v.error : '',
   ].filter(Boolean).join(' · ');
 }
+
+/** Busy with a job it would have to drop for a new one. Paused, at home or not, it isn't. */
+export const vacuumBusy = (v: VacuumStatus | null | undefined) => !!v && ['cleaning', 'returning', 'emptying', 'recharging'].includes(v.activity);
 
 /** Wants someone to look: stuck, a problem, or a full bin. */
 export const vacuumNeedsHelp = (v: VacuumStatus | null | undefined) => !!v && (v.activity === 'stuck' || !!v.error || v.binFull);

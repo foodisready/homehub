@@ -6,7 +6,7 @@ import type { Device } from '../../../shared/models/device.model';
 import { type ActivityEvent, actionWord, causeText, clock, when } from '../../../shared/activity/activity-text';
 import { ThermostatControlComponent } from '../../../shared/thermostat/thermostat-control.component';
 import { ThermostatService, offQuestion, summary } from '../../../shared/thermostat/thermostat.service';
-import { isVacuum, vacuumDetail, vacuumNeedsHelp } from '../../../shared/vacuum';
+import { isVacuum, vacuumBusy, vacuumDetail, vacuumNeedsHelp } from '../../../shared/vacuum';
 import { AuthService } from '../../../core/auth/auth.service';
 
 export interface OverrideRequest { device: Device; durationMinutes: number; }
@@ -112,7 +112,7 @@ export interface OverrideRequest { device: Device; durationMinutes: number; }
         }
         @if (isThermostat()) { <app-thermostat-control [deviceId]="device().id" /> }
         @if (isVac()) {
-          @if (namedRooms().length && !device().vacuum?.cleaning) {
+          @if (namedRooms().length && !vacOnJob()) {
             <span class="panel-label">Clean</span>
             <div class="buttons" role="group" aria-label="Rooms to clean">
               <button class="small" type="button" [class.picked]="!picked().length" [attr.aria-pressed]="!picked().length" (click)="picked.set([])">Whole house</button>
@@ -122,8 +122,11 @@ export interface OverrideRequest { device: Device; durationMinutes: number; }
             </div>
           }
           <div class="buttons">
+            @if (device().vacuum?.activity === 'paused') {
+              <button class="small go" type="button" [disabled]="busy() || vacBusy() || !device().online" (click)="vacuumResume()">Resume</button>
+            }
             @if (vacuumCanStart()) {
-              <button class="small go" type="button" [disabled]="busy() || vacBusy() || !device().online" (click)="vacuumStart()">{{ startLabel() }}</button>
+              <button class="small" type="button" [class.go]="device().vacuum?.activity !== 'paused'" [disabled]="busy() || vacBusy() || !device().online" (click)="vacuumStart()">{{ startLabel() }}</button>
             }
             @if (device().vacuum?.activity === 'cleaning') {
               <button class="small" type="button" [disabled]="busy() || vacBusy() || !device().online" (click)="vacuumPause()">Pause</button>
@@ -131,8 +134,11 @@ export interface OverrideRequest { device: Device; durationMinutes: number; }
             @if (vacuumCanSendHome()) {
               <button class="small" type="button" [disabled]="busy() || vacBusy() || !device().online" (click)="vacuumHome()">Send home</button>
             }
+            @if (device().vacuum?.activity === 'paused') {
+              <button class="small" type="button" [disabled]="busy() || vacBusy() || !device().online" (click)="vacuumEnd()">End job</button>
+            }
           </div>
-          @if (namedRooms().length && device().vacuum?.cleaning) {
+          @if (namedRooms().length && vacOnJob()) {
             <p class="vac-msg">It's on a job now. To clean particular rooms, send it home first and they'll show here.</p>
           }
           @if (vacError()) { <p class="vac-msg err">{{ vacError() }}</p> }
@@ -237,6 +243,10 @@ export class DeviceRowComponent implements OnDestroy {
     return v ? v.cleaning || v.activity === 'idle' : this.device().state;
   });
   readonly vacBusy = signal(false);
+  /** Sent a job and waiting to see it set off. */
+  readonly vacStarting = signal(false);
+  /** Out on a job it would have to drop for a new one: room choices wait until it's done. */
+  readonly vacOnJob = computed(() => vacuumBusy(this.device().vacuum));
   readonly vacError = signal('');
   private readonly auth = inject(AuthService);
   readonly isAdmin = computed(() => this.auth.user()?.role === 'admin');
@@ -250,10 +260,12 @@ export class DeviceRowComponent implements OnDestroy {
   readonly ROOM_NAMES = ['Kitchen', 'Living Room', 'Family Room', 'Dining Room', 'Breakfast Room', 'Bedroom', 'Master Bedroom',
     'Bathroom', 'Master Bath', 'Hallway', 'Entryway', 'Front Door', 'Laundry Room', 'Office', 'Closet', 'Playroom', 'Basement'];
   readonly startLabel = computed(() => {
+    if (this.vacStarting()) return 'Starting…';
     const keys = this.picked().filter((k) => this.namedRooms().some((r) => r.key === k));
     if (keys.length === 1) return `Clean ${this.namedRooms().find((r) => r.key === keys[0])!.name}`;
     if (keys.length > 1) return `Clean ${keys.length} rooms`;
-    return this.device().vacuum?.activity === 'paused' ? 'Resume' : this.namedRooms().length ? 'Clean whole house' : 'Start cleaning';
+    const paused = this.device().vacuum?.activity === 'paused';
+    return this.namedRooms().length ? 'Clean whole house' : paused ? 'Start a new job' : 'Start cleaning';
   });
   private readonly thermostats = inject(ThermostatService);
   private readonly watchThermostat = effect(() => { if (this.isThermostat()) untracked(() => this.thermostats.watch(this.device().id)); });
@@ -409,15 +421,36 @@ export class DeviceRowComponent implements OnDestroy {
     else this.toggled.emit(this.device());
   }
 
-  /** Start the picked rooms; or the whole house, or carry on with a paused job: the device's "on". */
+  /**
+   * A new job: the picked rooms, or the whole house. HomeHub ends a job it holds paused first, and
+   * answers once the robot has set off. Heading home, it just turns round: the device's "on".
+   */
   vacuumStart(): void {
     this.vacError.set('');
+    const v = this.device().vacuum;
+    if (!v || v.activity === 'returning') { this.toggled.emit({ ...this.device(), state: false }); return; }
     const keys = this.picked().filter((k) => this.namedRooms().some((r) => r.key === k));
-    if (!keys.length) { this.toggled.emit({ ...this.device(), state: false }); return; }
     this.vacBusy.set(true);
+    this.vacStarting.set(true);
     this.http.post(`/api/roomba/${this.device().id}/clean`, { rooms: keys }).subscribe({
-      next: () => { this.vacBusy.set(false); this.picked.set([]); },
-      error: (e) => { this.vacBusy.set(false); this.vacError.set(e?.error?.error ?? 'Couldn’t start it.'); },
+      next: () => { this.vacBusy.set(false); this.vacStarting.set(false); this.picked.set([]); },
+      error: (e) => { this.vacBusy.set(false); this.vacStarting.set(false); this.vacError.set(e?.error?.error ?? 'Couldn’t start it.'); },
+    });
+  }
+
+  /** Carry on with the paused job, as the iRobot app's play button: the device's "on". */
+  vacuumResume(): void {
+    this.vacError.set('');
+    this.toggled.emit({ ...this.device(), state: false });
+  }
+
+  /** Finish with the job it holds, leaving it where it is: the iRobot app's "End now". */
+  vacuumEnd(): void {
+    this.vacError.set('');
+    this.vacBusy.set(true);
+    this.http.post(`/api/roomba/${this.device().id}/end`, {}).subscribe({
+      next: () => this.vacBusy.set(false),
+      error: (e) => { this.vacBusy.set(false); this.vacError.set(e?.error?.error ?? 'Couldn’t end the job.'); },
     });
   }
 

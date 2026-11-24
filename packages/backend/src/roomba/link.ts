@@ -154,7 +154,8 @@ class Link {
     const said = mission && `${mission.cycle}/${mission.phase}/${mission.rechrgM ?? '-'}`;
     if (said && said !== this.lastMission) {
       this.lastMission = said;
-      logger.info({ ip: this.ip, cycle: mission!.cycle, phase: mission!.phase, rechrgM: mission!.rechrgM, last: (this.reported as Reported).lastCommand?.command }, 'Roomba mission');
+      // All of it, to learn what each robot reports (no login in it).
+      logger.info({ ip: this.ip, mission, last: (this.reported as Reported).lastCommand?.command }, 'Roomba mission');
     }
     const next = statusOf(this.reported as Reported);
     if (!next) return;

@@ -1,6 +1,7 @@
 import {
   AfterViewChecked, ChangeDetectorRef, Component, ElementRef, OnDestroy, computed, effect, inject, input, output, signal, untracked, viewChild,
 } from '@angular/core';
+import { NgTemplateOutlet } from '@angular/common';
 import type { Device } from '../../shared/models/device.model';
 import { ThermostatService, offQuestion, shown } from '../../shared/thermostat/thermostat.service';
 import { DeviceRowComponent, OverrideRequest } from './device-row/device-row.component';
@@ -54,6 +55,7 @@ const PATHS: Record<string, string> = {
   vacuum: 'M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18ZM5 9h14M12 13.5h.01',
   door_: 'M3 21V9l9-5 9 5v12M6 21v-9h12v9M6 15h12M6 18h12',
   back: 'M15 5l-7 7 7 7',
+  grid: 'M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z',
 };
 
 interface RoomTile {
@@ -75,16 +77,27 @@ interface RoomTile {
 const UNASSIGNED = 'Other devices';
 /** More devices than this and the room view is a grid: lines from the hub to each would tangle. */
 const MAX_WIRED = 8;
+/** Remembered per screen: the rooms view opens on every room at once rather than the cards. */
+const ALL_KEY = 'homehub.rooms.all';
+/** Wide enough for a tap in the every-room view to switch a device rather than open its room. */
+const WIDE = '(min-width: 700px)';
 
 /**
  * Home as rooms: a tile per room that glows warmer the more of its lights are on, and,
  * tapped, the room itself, its devices as bubbles hanging off it, lit when on. Tap a
  * bubble to switch it; press and hold for its controls (the same panel as the list's).
  */
+function readAll(): boolean {
+  try { return localStorage.getItem(ALL_KEY) === '1'; } catch { return false; }
+}
+function saveAll(on: boolean): void {
+  try { if (on) localStorage.setItem(ALL_KEY, '1'); else localStorage.removeItem(ALL_KEY); } catch { /* this visit only */ }
+}
+
 @Component({
   selector: 'app-rooms-view',
   standalone: true,
-  imports: [DeviceRowComponent],
+  imports: [DeviceRowComponent, NgTemplateOutlet],
   styles: [`
     :host { display: block; scroll-margin-top: 4.5rem; --warm: #fbbf24; --heat: #fb923c; --cool: #60a5fa; --line: #33445e; --surface-2: #26354d; }
     .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(46%, 190px), 1fr)); gap: 0.75rem; }
@@ -145,7 +158,7 @@ const MAX_WIRED = 8;
     .bubble.on .st { color: #4ade80; }
     .bubble.light.on .st { color: var(--warm); }
     .bubble.door.on .st { color: #fbbf24; }
-    .ring { position: absolute; inset: -2px; width: calc(100% + 4px); height: calc(100% + 4px); transform: rotate(135deg); }
+    .orb .ring { position: absolute; inset: -2px; width: calc(100% + 4px); height: calc(100% + 4px); transform: rotate(135deg); }
     .ring circle { fill: none; stroke-width: 4; stroke-linecap: round; }
     .deg { font-size: 1.15rem; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
     .watts { position: absolute; bottom: -2px; right: -0.4rem; font-size: 0.64rem; background: var(--surface-2); border: 1px solid var(--line); border-radius: 999px; padding: 0 0.3rem; color: var(--text-muted); }
@@ -160,12 +173,15 @@ const MAX_WIRED = 8;
     @if (room(); as r) {
       <!-- Swipe left or right for the next or previous room, as the buttons below do. -->
       <div [class]="'hh-swipe ' + slide()" (pointerdown)="swipeStart($event)" (pointermove)="swipeMove($event)"
-           (pointerup)="swipeEnd($event)" (pointercancel)="swipe = null" (animationend)="slide.set('')">
+           (pointerup)="swipeEnd($event)" (pointercancel)="swipe = null; pinchUp($event)" (animationend)="slide.set('')">
       <div class="head" [style.--lit]="r.lit" [style.view-transition-name]="vt(r.name)">
         <span class="glow"></span>
         <div class="bar">
-          <button class="back" type="button" (click)="close()" aria-label="Back to rooms"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path [attr.d]="path('back')" /></svg></button>
+          <button class="back" type="button" (click)="close()" [attr.aria-label]="cameFromAll() ? 'Back to all rooms' : 'Back to rooms'"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path [attr.d]="path('back')" /></svg></button>
           <h2>{{ r.name }}</h2>
+          @if (!cameFromAll()) {
+          <button class="back" type="button" (click)="showAll()" aria-label="All rooms" title="All rooms"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path [attr.d]="path('grid')" /></svg></button>
+          }
           @if (canTurnOff(r)) { <button class="all-off" type="button" (click)="allOff.emit(r.devices)">All off</button> }
         </div>
         <div class="sub">{{ subtitle(r) }}</div>
@@ -182,27 +198,14 @@ const MAX_WIRED = 8;
                     [attr.aria-label]="d.alias + ': ' + stateText(d) + '. Tap to switch; press and hold for controls.'"
                     (pointerdown)="press(d)" (pointerup)="release()" (pointerleave)="release()" (pointercancel)="release()"
                     (contextmenu)="$event.preventDefault()" (click)="tap(d)">
-              <span class="orb">
-                @if (kind(d) === 'thermostat') {
-                  @if (therm(d); as t) {
-                    <svg class="ring" viewBox="0 0 80 80" aria-hidden="true">
-                      <circle cx="40" cy="40" r="36" stroke="var(--line)" [attr.stroke-dasharray]="ARC + ' ' + C" />
-                      <circle cx="40" cy="40" r="36" [attr.stroke]="ringColor(d)" [attr.stroke-dasharray]="ringLen(d) + ' ' + C" />
-                    </svg>
-                    <span class="deg">{{ t.temperature === null ? '–' : shown(t.temperature, t.unit) + '°' }}</span>
-                  } @else { <span class="deg">–</span> }
-                } @else {
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path [attr.d]="path(kind(d) === 'door' ? 'door_' : kind(d))" /></svg>
-                  @if (kind(d) === 'plug' && isOn(d) && d.wattage) { <span class="watts">{{ round(d.wattage) }} W</span> }
-                }
-              </span>
+              <span class="orb"><ng-container *ngTemplateOutlet="orbInside; context: { $implicit: d }" /></span>
               <span class="lbl">{{ d.alias }}</span>
-              <span class="st">{{ stateText(d) }}</span>
+              <span class="st" [class.counting]="!!d.autoOff?.at">{{ stateText(d) }}</span>
             </button>
           }
         </div>
       </div>
-      <p class="hint">{{ wired(r) ? '' : 'More than 8 devices, so they\\'re shown as a grid. ' }}Tap to switch · press and hold for controls{{ tiles().length > 1 ? ' · swipe for the next room' : '' }}</p>
+      <p class="hint">{{ wired(r) ? '' : 'More than 8 devices, so they\\'re shown as a grid. ' }}Tap to switch · press and hold for controls{{ tiles().length > 1 ? ' · swipe for the next room' : '' }}{{ touch ? ' · pinch for all rooms' : '' }}</p>
       </div>
       @if (tiles().length > 1) {
         <div class="nextprev">
@@ -210,7 +213,49 @@ const MAX_WIRED = 8;
           <button type="button" (click)="step(1)">{{ neighbour(1) }} ›</button>
         </div>
       }
+    } @else if (overview()) {
+      <div class="house" (pointerdown)="pinchDown($event)" (pointermove)="pinchMove($event)" (pointerup)="pinchUp($event)" (pointercancel)="pinchUp($event)">
+        <div class="head" [style.--lit]="houseLit()">
+          <span class="glow"></span>
+          <div class="bar">
+            <button class="back" type="button" (click)="closeAll()" aria-label="Back to room cards"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path [attr.d]="path('back')" /></svg></button>
+            <h2>All rooms</h2>
+          </div>
+          <div class="sub">{{ houseSummary() }}</div>
+        </div>
+        <div class="panels">
+          @for (r of tiles(); track r.name) {
+            <section class="panel" [class.lit]="r.lit > 0" [style.--lit]="r.lit" [attr.data-room]="r.name">
+              <span class="glow"></span>
+              <button class="ptitle" type="button" [style.view-transition-name]="vt(r.name)" [attr.aria-label]="'Open ' + r.name + ', ' + tileSummary(r)" (click)="open(r.name, true)">
+                <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path [attr.d]="path(r.icon)" /></svg></span>
+                <span class="pname">{{ r.name }}</span>
+                <span class="go" aria-hidden="true">›</span>
+              </button>
+              <div class="minis">
+                @for (d of r.devices; track d.id) {
+                  <button type="button" [attr.data-id]="d.id"
+                          [class]="'bubble mini ' + kind(d) + (isOn(d) ? ' on' : '') + (d.online ? '' : ' offline') + (busyIds().has(d.id) ? ' busy' : '')"
+                          [attr.aria-label]="d.alias + ': ' + stateText(d) + (wide() ? '. Tap to switch; press and hold for controls.' : '. Tap to open ' + r.name + '.')"
+                          (pointerdown)="press(d)" (pointerup)="release()" (pointerleave)="release()" (pointercancel)="release()"
+                          (contextmenu)="$event.preventDefault()" (click)="miniTap(d, r.name)">
+                    <span class="orb"><ng-container *ngTemplateOutlet="orbInside; context: { $implicit: d }" /></span>
+                    <span class="lbl">{{ d.alias }}</span>
+                    <span class="st" [class.counting]="!!d.autoOff?.at">{{ stateText(d) }}</span>
+                  </button>
+                }
+              </div>
+            </section>
+          }
+        </div>
+        <p class="hint">{{ wide() ? 'Tap to switch · press and hold for controls · tap a room’s name to go in' : 'Tap a room to go in · press and hold for controls' }}{{ touch ? ' · pinch out on a room to go in' : '' }}</p>
+      </div>
     } @else {
+      @if (tiles().length > 1) {
+        <div class="tiles-bar">
+          <button class="to-all" type="button" (click)="showAll()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path [attr.d]="path('grid')" /></svg>All rooms at a glance</button>
+        </div>
+      }
       <div class="tiles">
         @for (r of tiles(); track r.name) {
           <button class="tile" type="button" [class.lit]="r.lit > 0" [style.--lit]="r.lit" [style.view-transition-name]="vt(r.name)"
@@ -263,6 +308,25 @@ const MAX_WIRED = 8;
         </div>
       </div>
     }
+
+    <!-- Inside a device's circle: a thermostat's temperature and ring, or its icon, watts and time left. -->
+    <ng-template #orbInside let-d>
+            @if (kind(d) === 'thermostat') {
+              @if (therm(d); as t) {
+                <svg class="ring" viewBox="0 0 80 80" aria-hidden="true">
+                  <circle cx="40" cy="40" r="36" stroke="var(--line)" [attr.stroke-dasharray]="ARC + ' ' + C" />
+                  <circle cx="40" cy="40" r="36" [attr.stroke]="ringColor(d)" [attr.stroke-dasharray]="ringLen(d) + ' ' + C" />
+                </svg>
+                <span class="deg">{{ t.temperature === null ? '–' : shown(t.temperature, t.unit) + '°' }}</span>
+              } @else { <span class="deg">–</span> }
+            } @else {
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path [attr.d]="path(kind(d) === 'door' ? 'door_' : kind(d))" /></svg>
+              @if (kind(d) === 'plug' && isOn(d) && d.wattage) { <span class="watts">{{ round(d.wattage) }} W</span> }
+              @if (leftFraction(d); as f) {
+                <svg class="ring left" viewBox="0 0 80 80" aria-hidden="true"><circle cx="40" cy="40" r="37" [attr.stroke-dasharray]="(f * C2).toFixed(1) + ' ' + C2" /></svg>
+              }
+            }
+    </ng-template>
   `,
 })
 export class RoomsViewComponent implements AfterViewChecked, OnDestroy {
@@ -296,9 +360,30 @@ export class RoomsViewComponent implements AfterViewChecked, OnDestroy {
   readonly shown = shown;
   readonly C = 2 * Math.PI * 36;
   readonly ARC = this.C * 0.75;
+  readonly C2 = 2 * Math.PI * 37;
 
-  /** The room open, or null for the tiles. */
+  /** Ticks each second while something in the open room is counting down to off. */
+  readonly now = signal(Date.now());
+  private ticker?: ReturnType<typeof setInterval>;
+  private readonly tick = effect(() => {
+    const shown = this.overview() ? this.devices() : this.room()?.devices ?? [];
+    const counting = shown.some((d) => d.online && d.state && d.autoOff?.at);
+    if (counting && !this.ticker) { this.now.set(Date.now()); this.ticker = setInterval(() => this.now.set(Date.now()), 1000); }
+    if (!counting && this.ticker) { clearInterval(this.ticker); this.ticker = undefined; }
+  });
+
+  /** The room open, or null for the tiles or every room at once. */
   readonly openName = signal<string | null>(null);
+  /** Every room at once, instead of the cards. Remembered on this screen. */
+  readonly overview = signal(readAll());
+  /** The room open was opened from every room at once: back goes back there. */
+  readonly cameFromAll = signal(false);
+  /** Wide enough to switch devices from every room at once; a phone opens the room first. */
+  readonly wide = signal(typeof matchMedia === 'function' && matchMedia(WIDE).matches);
+  private readonly wideQuery = typeof matchMedia === 'function' ? matchMedia(WIDE) : null;
+  private readonly onWide = (e: MediaQueryListEvent) => this.wide.set(e.matches);
+  /** A touch screen: pinching moves between one room and all of them. */
+  readonly touch = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
   readonly asking = signal<{ device: Device; question: string; detail: string; action: string } | null>(null);
   readonly controls = signal<number | null>(null);
   readonly wires = signal<{ id: number; d: string; cls: string }[]>([]);
@@ -356,12 +441,77 @@ export class RoomsViewComponent implements AfterViewChecked, OnDestroy {
     doc.startViewTransition(() => { change(); this.cd.detectChanges(); });
   }
 
-  open(name: string): void {
-    this.transition(() => this.openName.set(name));
+  open(name: string, fromAll = false): void {
+    this.cameFromAll.set(fromAll);
+    this.transition(() => { this.overview.set(false); this.openName.set(name); });
     // The room starts at the top of the screen, wherever its tile was.
     requestAnimationFrame(() => this.host.nativeElement.scrollIntoView({ block: 'start' }));
   }
-  close(): void { this.transition(() => this.openName.set(null)); }
+  close(): void {
+    if (this.cameFromAll()) { this.showAll(); return; }
+    this.transition(() => this.openName.set(null));
+  }
+
+  /** Every room at once, from a room or the cards. */
+  showAll(): void {
+    this.cameFromAll.set(false);
+    this.transition(() => { this.openName.set(null); this.overview.set(true); });
+    saveAll(true);
+    requestAnimationFrame(() => this.host.nativeElement.scrollIntoView({ block: 'start' }));
+  }
+  /** Back to the room cards. */
+  closeAll(): void {
+    this.transition(() => this.overview.set(false));
+    saveAll(false);
+  }
+
+  /** In every room at once: wide, a tap switches the device as in its room; on a phone, it opens the room. */
+  miniTap(d: Device, room: string): void {
+    if (this.wide() || this.held) { this.tap(d); return; }
+    if (this.swiped) return;
+    this.open(room, true);
+  }
+
+  // ── Pinching: in to see every room, out on a room to go into it ──
+
+  private readonly fingers = new Map<number, { x: number; y: number }>();
+  private pinchFrom = 0;
+  private spread(): number {
+    const [a, b] = [...this.fingers.values()];
+    return Math.hypot(a.x - b.x, a.y - b.y);
+  }
+  pinchDown(e: PointerEvent): void {
+    if (e.pointerType !== 'touch') return;
+    this.fingers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (this.fingers.size === 2) {
+      this.pinchFrom = this.spread();
+      this.release();          // two fingers: not a press and hold
+      this.swipe = null;       // nor a swipe
+    }
+  }
+  pinchMove(e: PointerEvent): void {
+    if (!this.fingers.has(e.pointerId)) return;
+    this.fingers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (this.fingers.size !== 2 || !this.pinchFrom) return;
+    const ratio = this.spread() / this.pinchFrom;
+    if (this.overview() && ratio > 1.35) {
+      const [a, b] = [...this.fingers.values()];
+      const at = document.elementFromPoint((a.x + b.x) / 2, (a.y + b.y) / 2)?.closest<HTMLElement>('[data-room]');
+      this.pinchFrom = 0;
+      this.swiped = true;      // the lifting fingers mustn't tap anything
+      setTimeout(() => { this.swiped = false; }, 350);
+      if (at?.dataset['room']) this.open(at.dataset['room'], true);
+    } else if (!this.overview() && this.room() && ratio < 0.7) {
+      this.pinchFrom = 0;
+      this.swiped = true;
+      setTimeout(() => { this.swiped = false; }, 350);
+      this.showAll();
+    }
+  }
+  pinchUp(e: PointerEvent): void {
+    this.fingers.delete(e.pointerId);
+    if (this.fingers.size < 2) this.pinchFrom = 0;
+  }
 
   step(dir: -1 | 1): void {
     const list = this.tiles(), i = list.findIndex((t) => t.name === this.openName());
@@ -379,11 +529,14 @@ export class RoomsViewComponent implements AfterViewChecked, OnDestroy {
   private swiped = false;
 
   swipeStart(e: PointerEvent): void {
+    this.pinchDown(e);
+    if (this.fingers.size > 1) return;
     if (e.pointerType !== 'touch' || this.tiles().length < 2) return;
     this.swipe = { x: e.clientX, y: e.clientY, at: Date.now(), id: e.pointerId, moved: false };
   }
 
   swipeMove(e: PointerEvent): void {
+    this.pinchMove(e);
     const s = this.swipe;
     if (!s || e.pointerId !== s.id || s.moved) return;
     // Moving sideways: a swipe, not a press, so no controls pop up.
@@ -391,6 +544,7 @@ export class RoomsViewComponent implements AfterViewChecked, OnDestroy {
   }
 
   swipeEnd(e: PointerEvent): void {
+    this.pinchUp(e);
     const s = this.swipe;
     this.swipe = null;
     if (!s || e.pointerId !== s.id) return;
@@ -436,8 +590,35 @@ export class RoomsViewComponent implements AfterViewChecked, OnDestroy {
       case 'camera': return d.state ? 'Watching' : 'Paused';
       case 'door': return d.state ? 'Open' : 'Closed';
       case 'vacuum': return vacuumWord(d.vacuum, d.state);
-      default: return d.state ? 'On' : 'Off';
+      default: return (d.state && this.offIn(d)) || (d.state ? 'On' : 'Off');
     }
+  }
+
+  /**
+   * When a light or plug on a timer, schedule or motion rule goes off: "Off in 4:32" in the last ten
+   * minutes, "Off in 25 min", "Off at 9:30 PM" further off, or "On · motion" while a motion rule
+   * waits for the room to empty. Null with no turn-off coming.
+   */
+  offIn(d: Device): string | null {
+    const a = d.autoOff;
+    if (!a || !d.online || !d.state) return null;
+    if (a.at === null) return a.cause === 'motion' ? 'On · motion' : null;
+    const left = Date.parse(a.at) - this.now();
+    if (left <= 0) return 'Turning off…';
+    if (left < 10 * 60_000) {
+      const s = Math.ceil(left / 1000);
+      return `Off in ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+    }
+    if (left < 60 * 60_000) return `Off in ${Math.ceil(left / 60_000)} min`;
+    return `Off at ${new Date(a.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
+  }
+
+  /** How much of a motion rule's wait is left, for the ring round the light; null when not counting. */
+  leftFraction(d: Device): number | null {
+    const a = d.autoOff;
+    if (!a?.at || !a.afterMinutes || !d.online || !d.state) return null;
+    const left = Date.parse(a.at) - this.now();
+    return left > 0 ? Math.min(1, left / (a.afterMinutes * 60_000)) : null;
   }
 
   ringColor(d: Device): string {
@@ -451,6 +632,20 @@ export class RoomsViewComponent implements AfterViewChecked, OnDestroy {
     if (!t || t.temperature === null) return 0;
     const f = t.temperature * 9 / 5 + 32;
     return this.ARC * Math.max(0, Math.min(1, (f - 50) / 40));
+  }
+
+  /** "5 lights and plugs on in 3 rooms", or "One light or plug on, in Kitchen", for the top of every room at once. */
+  houseSummary(): string {
+    const rooms = this.tiles().filter((r) => r.on > 0);
+    const on = rooms.reduce((n, r) => n + r.on, 0);
+    if (!on) return 'Everything’s off';
+    if (rooms.length === 1) return `${on === 1 ? 'One light or plug' : `${on} lights and plugs`} on, in ${rooms[0].name}`;
+    return `${on} lights and plugs on in ${rooms.length} rooms`;
+  }
+  /** How warm the top glows: the share of rooms with a light on. */
+  houseLit(): number {
+    const t = this.tiles();
+    return t.length ? t.filter((r) => r.lit > 0).length / t.length : 0;
   }
 
   tileSummary(r: RoomTile): string {
@@ -520,19 +715,27 @@ export class RoomsViewComponent implements AfterViewChecked, OnDestroy {
     this.drawWires();
   }
 
-  ngOnDestroy(): void { this.observer?.disconnect(); clearTimeout(this.holdTimer); }
+  constructor() { this.wideQuery?.addEventListener('change', this.onWide); }
+
+  ngOnDestroy(): void {
+    this.observer?.disconnect(); clearTimeout(this.holdTimer); if (this.ticker) clearInterval(this.ticker);
+    this.wideQuery?.removeEventListener('change', this.onWide);
+  }
 
   private drawWires(): void {
     const map = this.map()?.nativeElement, hub = this.hub()?.nativeElement, r = this.room();
     if (!map || !hub || !r || !this.wired(r)) { if (this.lastWires) { this.lastWires = ''; this.wires.set([]); } return; }
     const m = map.getBoundingClientRect(), h = hub.getBoundingClientRect();
-    const x0 = h.left + h.width / 2 - m.left, y0 = h.bottom - m.top;
+    // Measured on screen, drawn in the map's own pixels: under CSS zoom (the wall tablet's larger
+    // rooms) the two differ, and lines drawn with screen sizes would miss their devices.
+    const z = map.offsetWidth ? m.width / map.offsetWidth : 1;
+    const x0 = (h.left + h.width / 2 - m.left) / z, y0 = (h.bottom - m.top) / z;
     const out: { id: number; d: string; cls: string }[] = [];
     for (const el of Array.from(map.querySelectorAll<HTMLElement>('.bubble'))) {
       const d = r.devices.find((x) => String(x.id) === el.dataset['id']);
       const orb = el.querySelector('.orb')?.getBoundingClientRect();
       if (!d || !orb) continue;
-      const x1 = orb.left + orb.width / 2 - m.left, y1 = orb.top - m.top, my = (y0 + y1) / 2;
+      const x1 = (orb.left + orb.width / 2 - m.left) / z, y1 = (orb.top - m.top) / z, my = (y0 + y1) / 2;
       const k = kindOf(d), t = k === 'thermostat' ? this.therm(d) : undefined;
       const cls = !this.isOn(d) ? '' : k === 'light' ? 'on light' : t?.running === 'heating' ? 'on heat' : 'on';
       out.push({ id: d.id, d: `M${x0.toFixed(1)},${y0.toFixed(1)} C${x0.toFixed(1)},${my.toFixed(1)} ${x1.toFixed(1)},${my.toFixed(1)} ${x1.toFixed(1)},${y1.toFixed(1)}`, cls });

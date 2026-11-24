@@ -18,7 +18,7 @@ export interface AutoOff {
   cause: 'timer' | 'motion' | 'schedule';
   /** The motion rule or schedule's name. */
   detail: string | null;
-  /** For a waiting motion rule: minutes after motion stops. */
+  /** For a motion rule: minutes after motion stops, whether it's waiting or counting them down. */
   afterMinutes?: number;
 }
 
@@ -65,7 +65,7 @@ export function pendingAutoOff(now = Date.now()): Map<number, AutoOff> {
   for (const rule of rules) {
     if (!on.has(rule.device_id)) continue;
     const status = motionStatus(rule, now);
-    if (status.kind === 'counting') offer(rule.device_id, { at: status.offAt, cause: 'motion', detail: rule.name });
+    if (status.kind === 'counting') offer(rule.device_id, { at: status.offAt, cause: 'motion', detail: rule.name, afterMinutes: rule.off_after_minutes });
     else if (status.kind === 'occupied') {
       offer(rule.device_id, { at: null, cause: 'motion', detail: rule.name, afterMinutes: rule.off_after_minutes });
     }

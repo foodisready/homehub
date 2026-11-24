@@ -30,6 +30,8 @@ class FakeRobot extends EventEmitter {
   sent: Record<string, unknown>[] = [];
   phase = 'charge';
   cycle = 'none';
+  /** Takes no notice of anything sent. */
+  deaf = false;
   lastCommand: Record<string, unknown> = { command: 'start', initiator: 'rmtApp' };
   start(): this {
     setImmediate(() => { this.connected = true; this.emit('connect'); this.report(); });
@@ -40,7 +42,10 @@ class FakeRobot extends EventEmitter {
     const cmd = JSON.parse(payload);
     this.sent.push(cmd);
     cb();
-    if (cmd.command === 'start') { this.cycle = 'clean'; this.phase = 'run'; this.lastCommand = cmd; this.report(); }
+    if (this.deaf) return;
+    // Like an i-series: a job it holds paused has to be ended before it takes a new one.
+    if (cmd.command === 'stop') { this.cycle = 'none'; this.phase = this.phase === 'charge' ? 'charge' : 'stop'; this.report(); }
+    if (cmd.command === 'start' && this.cycle === 'none') { this.cycle = 'clean'; this.phase = 'run'; this.lastCommand = cmd; this.report(); }
   }
   /** Someone started a job in the iRobot app. */
   appJob(regions: string[]) {
@@ -70,6 +75,7 @@ describe('Roomba rooms', () => {
     voice = await import('../nlp/vacuum-rooms');
     protocol = await import('./protocol');
     service.startRoombaUpdates();
+    service.setWaitsForTests({ endMs: 300, startMs: 300, stepMs: 20 });
   });
 
   after(() => {
@@ -157,6 +163,37 @@ describe('Roomba rooms', () => {
     robot.cycle = 'clean'; robot.phase = 'run'; robot.report(); await tick();
     await assert.rejects(service.cleanRooms(deviceId, [rooms.roomsOf(deviceId)[0].key]), /already cleaning/);
     assert.equal(robot.sent.length, 0);
+  });
+
+  it('ends a job it holds paused on its dock before starting the rooms: it ignores a new job until then', async () => {
+    robot.appJob(['7']); await tick();
+    const [k] = rooms.roomsOf(deviceId);
+    rooms.nameRoom(deviceId, k.key, 'Kitchen');
+    robot.cycle = 'clean'; robot.phase = 'charge'; robot.report(); await tick();
+    // Sent home part way: full, and not counting down to carry on.
+    robot.emit('message', 'shadow', Buffer.from(JSON.stringify({ state: { reported: { batPct: 100, cleanMissionStatus: { rechrgM: 0 } } } })));
+    await tick();
+    assert.equal((await link.readStatus('10.0.0.55', { blid: 'BLID', password: 'pw' })).activity, 'paused');
+    await service.cleanRooms(deviceId, [k.key]);
+    assert.deepEqual(robot.sent.map((c) => c.command), ['stop', 'start']);
+    assert.deepEqual((robot.sent[1].regions as { region_id: string }[]).map((r) => r.region_id), ['7']);
+  });
+
+  it('says so, and records nothing, when the robot doesn’t set off', async () => {
+    robot.appJob(['7']); await tick();
+    const [k] = rooms.roomsOf(deviceId);
+    rooms.nameRoom(deviceId, k.key, 'Kitchen');
+    robot.deaf = true;
+    await assert.rejects(service.cleanRooms(deviceId, [k.key]), /didn’t start/);
+    const started = db.prepare("SELECT COUNT(*) AS n FROM device_events WHERE device_id = ? AND kind = 'power' AND state = 1").get(deviceId) as { n: number };
+    assert.equal(started.n, 0);
+  });
+
+  it('ends a job on request, as the app’s End now', async () => {
+    robot.cycle = 'clean'; robot.phase = 'stop'; robot.report(); await tick();
+    await service.endJob(deviceId);
+    assert.deepEqual(robot.sent.map((c) => c.command), ['stop']);
+    await assert.rejects(service.endJob(deviceId), /no job to end/);
   });
 
   it('won’t clean a room that hasn’t been named', async () => {
