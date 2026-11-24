@@ -173,6 +173,8 @@ export interface RobotStatus {
   jobRooms: string[] | 'all' | null;
   /** When the job it holds began, in seconds since 1970: matches it to a start HomeHub saw earlier. */
   jobBegan: number | null;
+  /** Why it last went home, as HomeHub saw it: null when it didn't see (connected while it sat there). */
+  wentHomeFor: 'recharge' | 'empty' | 'sent' | null;
   battery:  number | null;
   binFull:  boolean;
   /** In words, when the robot reports a problem. */
@@ -295,7 +297,9 @@ function willCarryOn(mission: NonNullable<Reported['cleanMissionStatus']>, r: Re
   if (typeof mission.rechrgM === 'number' && mission.rechrgM > 0) return true;
   // After emptying, a robot low on charge charges before carrying on; a full one should be off again.
   if (r.homeFor === 'empty') return typeof r.batPct === 'number' && r.batPct < 90;
-  if (r.homeFor) return r.homeFor === 'recharge';
+  // Home to recharge, and charged: one that hasn't set off by now is waiting to be told.
+  if (r.homeFor === 'recharge') return typeof r.batPct !== 'number' || r.batPct < 95;
+  if (r.homeFor) return false;
   return typeof r.batPct !== 'number' || r.batPct < 100;
 }
 
@@ -330,6 +334,7 @@ export function statusOf(r: Reported): RobotStatus | null {
     jobOpen: job,
     onDock,
     stoppedAfterEmptying: job && phase === 'charge' && r.homeFor === 'empty' && activity === 'paused',
+    wentHomeFor: r.homeFor ?? null,
     jobBegan: job && typeof mission.mssnStrtTm === 'number' && mission.mssnStrtTm > 0 ? mission.mssnStrtTm : null,
     jobRooms: !job || !r.jobStart ? null
       : Array.isArray(r.jobStart.regions) && r.jobStart.regions.length ? r.jobStart.regions.map((x) => String(x.region_id)) : 'all',

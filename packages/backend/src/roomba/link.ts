@@ -60,6 +60,8 @@ class Link {
   private down = false;
   /** Cycle, phase and recharge minutes last logged, to log only changes. */
   private lastMission = '';
+  /** Names of the fields this robot has reported, to log each new one once: what a model offers. */
+  private fieldsSeen = new Set<string>();
   /** The last room job reported, so one seen again on reconnecting isn't news. */
   private lastJob = '';
   lastUsed = Date.now();
@@ -148,6 +150,7 @@ class Link {
     }
     const reported = (update as { state?: { reported?: unknown } })?.state?.reported;
     if (!reported || typeof reported !== 'object') return;
+    this.noteFields(reported as Record<string, unknown>);
     mergeReported(this.reported, reported as Record<string, unknown>);
     // lastCommand is replaced whole, not merged: a whole-house job has no rooms to keep from the last.
     if ('lastCommand' in (reported as Record<string, unknown>)) this.reported.lastCommand = (reported as Record<string, unknown>).lastCommand;
@@ -197,6 +200,20 @@ class Link {
     this.status = next;
     this.wake();
     if (changed) for (const listener of listeners) listener(this.login.blid, next);
+  }
+
+  /**
+   * Logs the names of fields it hasn't reported before, one level down too ("pose.point"), never
+   * their values: which robots say where they are, or how far through a job they are.
+   */
+  private noteFields(reported: Record<string, unknown>): void {
+    const fresh: string[] = [];
+    for (const [k, v] of Object.entries(reported)) {
+      const names = [k, ...(v && typeof v === 'object' && !Array.isArray(v) ? Object.keys(v).map((c) => `${k}.${c}`) : [])];
+      for (const n of names) if (!this.fieldsSeen.has(n)) { this.fieldsSeen.add(n); fresh.push(n); }
+    }
+    // Names only: the login's in no report, but a value such as the Wi-Fi name would be private.
+    if (fresh.length) logger.info({ ip: this.ip, fields: fresh.sort() }, 'Roomba reports fields');
   }
 
   private wake(): void {

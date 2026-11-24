@@ -13,6 +13,8 @@ export interface VacuumStatus {
   onDock?: boolean;
   /** Went home part way to empty its bin and stopped there instead of carrying on. */
   stoppedAfterEmptying?: boolean;
+  /** HomeHub carries on a job the robot stopped at home once it's charged. */
+  autoResume?: boolean;
   /** The job it holds: the whole house, or these rooms in order (null for one not named yet). */
   job?: { whole: boolean; rooms: (string | null)[] } | null;
   battery: number | null;

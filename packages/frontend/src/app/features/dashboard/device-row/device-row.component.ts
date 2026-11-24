@@ -16,6 +16,8 @@ export interface OverrideRequest { device: Device; durationMinutes: number; }
   standalone: true,
   imports: [DecimalPipe, RouterLink, ThermostatControlComponent],
   styles: [`
+    .vac-auto { display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; color: var(--text-muted); margin: 0.6rem 0 0.2rem; }
+    .vac-auto input { width: 1.1rem; height: 1.1rem; flex: none; margin: 0; padding: 0; }
     :host { display: block; border-top: 1px solid var(--border); }
     :host(:first-child) { border-top: none; }
     .row { display: flex; align-items: center; gap: 0.6rem; min-height: 3.2rem; padding: 0.25rem 0; }
@@ -147,6 +149,10 @@ export interface OverrideRequest { device: Device; durationMinutes: number; }
           @else if (device().vacuum?.stoppedAfterEmptying) { <p class="vac-msg err">It went home to empty its bin and stopped instead of carrying on. The Clean Base’s bag may be full, or something is stuck where the bin empties into the base.</p> }
           @else if (device().vacuum?.binFull) { <p class="vac-msg err">Its bin is full. Empty it so it can clean properly.</p> }
           @else if (device().vacuum?.activity === 'stuck') { <p class="vac-msg err">It needs a hand where it stopped. The iRobot app shows where that is.</p> }
+          @if (isAdmin() && device().vacuum; as v) {
+            <label class="vac-auto"><input type="checkbox" [checked]="v.autoResume !== false" [disabled]="vacBusy()" (change)="setAutoResume($any($event.target).checked)" />
+              Carry on a job it stops at home, once it’s charged</label>
+          }
           @if (isAdmin()) {
             @for (room of unnamedRooms(); track room.key) {
               <span class="panel-label">New room seen {{ seen(room.seenAt) }}. What's it called?</span>
@@ -446,6 +452,16 @@ export class DeviceRowComponent implements OnDestroy {
   vacuumResume(): void {
     this.vacError.set('');
     this.toggled.emit({ ...this.device(), state: false });
+  }
+
+  /** Whether HomeHub resumes a job the robot went home from by itself and then sat on, charged. */
+  setAutoResume(on: boolean): void {
+    this.vacError.set('');
+    this.vacBusy.set(true);
+    this.http.put(`/api/roomba/${this.device().id}/auto-resume`, { on }).subscribe({
+      next: () => this.vacBusy.set(false),
+      error: (e) => { this.vacBusy.set(false); this.vacError.set(e?.error?.error ?? 'Couldn’t change that.'); },
+    });
   }
 
   /** Finish with the job it holds, leaving it where it is: the iRobot app's "End now". */

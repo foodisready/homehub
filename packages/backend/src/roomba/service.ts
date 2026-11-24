@@ -10,17 +10,27 @@ import { cancelPowerTimer } from '../devices/power';
 import { loginOf } from '../drivers/RoombaDriver';
 import { onJobStart, onRobotStatus, onRoomJob, peekStatus, readStatus, sendCommand, sendRoomJob, type RobotLogin } from './link';
 import type { RobotStatus } from './protocol';
-import { RoomError, jobFor, keepStart, keptRoomsFor, learnFromJob, roomsOf, roomsView } from './rooms';
+import { RoomError, autoResumeOn, jobFor, keepStart, keptRoomsFor, learnFromJob, roomsOf, roomsView } from './rooms';
+import { withActivity } from '../activity/activity';
+import { sendPushToUsers } from '../push/push.service';
 import type { RoomJob } from './protocol';
 import { logger } from '../logger';
 
 /** What the dashboard shows of a robot vacuum: its job's rooms by name. */
-export type VacuumView = Omit<RobotStatus, 'name' | 'jobRooms' | 'jobBegan'> & {
+export type VacuumView = Omit<RobotStatus, 'name' | 'jobRooms' | 'jobBegan' | 'wentHomeFor'> & {
+  /** HomeHub carries on a job the robot stopped at home, once it's charged. */
+  autoResume: boolean;
   /** The job it holds: the whole house, or these rooms in order (one not named yet as null). */
   job: { whole: boolean; rooms: (string | null)[] } | null;
 };
 
-function view(deviceId: number, { name: _name, jobRooms: reported, jobBegan, ...rest }: RobotStatus): VacuumView {
+function view(deviceId: number, status: RobotStatus): VacuumView {
+  let autoResume = true;
+  try { autoResume = autoResumeOn(deviceId); } catch { /* removed meanwhile */ }
+  return { ...jobView(deviceId, status), autoResume };
+}
+
+function jobView(deviceId: number, { name: _name, jobRooms: reported, jobBegan, wentHomeFor: _why, ...rest }: RobotStatus): Omit<VacuumView, 'autoResume'> {
   // The robot names the job's rooms only until its next command; after a restart, the start kept then does.
   let jobRooms = reported;
   if (!jobRooms && rest.jobOpen) { try { jobRooms = keptRoomsFor(deviceId, jobBegan); } catch { /* removed meanwhile */ } }
@@ -144,11 +154,74 @@ export async function endJob(deviceId: number): Promise<{ alias: string }> {
   return { alias: device.alias };
 }
 
+// ── Carrying on a job the robot stopped at home ──────────────────
+// A robot that went home part way, to recharge or empty its bin, sometimes sits there with a full
+// battery instead of carrying on. HomeHub resumes it then, but only when it saw the robot go home by
+// itself (never when someone sent it), after giving it a while to carry on unaided, and only twice a
+// job: a robot that keeps stopping needs a person, so HomeHub says so instead.
+
+const auto = { waitMs: 5 * 60_000, maxTries: 2, fullAt: 95, checkMs: 60_000 };
+export function setAutoResumeForTests(w: Partial<typeof auto>): void { Object.assign(auto, w); watches.clear(); }
+
+interface Watch { since: number; job: number | null; tries: number; gaveUp: boolean }
+const watches = new Map<number, Watch>();
+
+/** Stopped at home, by its own choice, ready to go again. */
+export function readyToCarryOn(s: RobotStatus): boolean {
+  return s.activity === 'paused' && s.onDock && s.jobOpen
+    && (s.wentHomeFor === 'recharge' || s.wentHomeFor === 'empty')
+    && (s.battery ?? 0) >= auto.fullAt && !s.binFull && !s.error;
+}
+
+export async function checkAutoResume(now = Date.now()): Promise<void> {
+  const rows = getDb().prepare("SELECT id, alias, ip, driver_config FROM devices WHERE driver_type = 'roomba'").all() as
+    { id: number; alias: string; ip: string; driver_config: string | null }[];
+  for (const d of rows) {
+    const blid = blidOf(d.driver_config);
+    const s = blid ? peekStatus(blid) : null;
+    if (!s || !autoResumeOn(d.id)) { watches.delete(d.id); continue; }
+    let w = watches.get(d.id);
+    if (w && w.job !== s.jobBegan) { watches.delete(d.id); w = undefined; }
+    if (!readyToCarryOn(s)) { if (w) w.since = 0; continue; }
+    if (!w) { w = { since: now, job: s.jobBegan, tries: 0, gaveUp: false }; watches.set(d.id, w); }
+    if (!w.since) w.since = now;
+    if (now - w.since < auto.waitMs) continue;
+    if (w.tries >= auto.maxTries) {
+      if (!w.gaveUp) {
+        w.gaveUp = true;
+        logger.warn({ id: d.id }, 'Roomba keeps stopping at home; not carrying on again');
+        const admins = (getDb().prepare("SELECT id FROM users WHERE role = 'admin'").all() as { id: number }[]).map((u) => u.id);
+        sendPushToUsers(admins, `${d.alias} keeps stopping`, 'It went home part way and stopped again. Check its bin, the bin’s sensors and the Clean Base’s bag.', { url: '/dashboard', deviceId: d.id });
+      }
+      continue;
+    }
+    w.tries++;
+    w.since = 0;
+    const why = s.wentHomeFor === 'empty' ? 'after emptying its bin' : 'after recharging';
+    try {
+      const login = loginOf(d.driver_config ? JSON.parse(d.driver_config) : undefined);
+      starting.add(d.id);
+      try {
+        await sendCommand(d.ip, login, 'resume');
+        if (!(await waitFor(d.ip, login, (x) => x.cleaning && x.activity !== 'paused', waits.startMs))) throw new Error('didn’t set off');
+      } finally {
+        starting.delete(d.id);
+      }
+      withActivity({ source: 'homehub', detail: `HomeHub carried on the job ${why}` }, () => noteState(d.id, true));
+      emitDeviceState(d.id, d.alias, true, null);
+      logger.info({ id: d.id, try: w.tries, why }, 'Roomba job carried on');
+    } catch (err) {
+      logger.warn({ id: d.id, reason: (err as Error).message }, 'Could not carry on the Roomba’s job');
+    }
+  }
+}
+
 let started = false;
 
 export function startRoombaUpdates(): void {
   if (started) return;
   started = true;
+  setInterval(() => { checkAutoResume().catch((err) => logger.warn({ err }, 'Roomba carry-on check failed')); }, auto.checkMs).unref();
   onRobotStatus((blid, status) => {
     const device = deviceForRobot(blid);
     if (!device) return;

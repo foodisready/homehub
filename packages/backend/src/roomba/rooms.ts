@@ -26,6 +26,8 @@ interface RoombaConfig {
   maps?: Record<string, string>;
   /** The last start the robot reported, kept for after a restart: the robot forgets it at its next command. */
   lastStart?: { time: number; rooms: string[] | 'all' };
+  /** Off when someone doesn't want HomeHub carrying on a job the robot stopped at home. On if unset. */
+  autoResume?: boolean;
   [k: string]: unknown;
 }
 
@@ -107,6 +109,13 @@ export function removeRoom(deviceId: number, key: string): void {
   const rooms = (config.rooms ?? []).filter((r) => r.key !== key);
   if (rooms.length === (config.rooms ?? []).length) throw new RoomError('That room isn’t known any more', 404);
   write(deviceId, { ...config, rooms });
+}
+
+/** Whether HomeHub carries on a job the robot stopped at home with a full battery. */
+export const autoResumeOn = (deviceId: number): boolean => read(deviceId).autoResume !== false;
+
+export function setAutoResume(deviceId: number, on: boolean): void {
+  write(deviceId, { ...read(deviceId), autoResume: on });
 }
 
 /** Keeps the start the robot reported last. */

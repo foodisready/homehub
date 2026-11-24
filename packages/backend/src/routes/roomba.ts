@@ -2,9 +2,9 @@ import { Router, Request, Response } from 'express';
 import { getDb } from '../db';
 import { discover, fetchPassword } from '../roomba/protocol';
 import { closeLink, readStatus, sendCommand } from '../roomba/link';
-import { cleanRooms, deviceForRobot, endJob } from '../roomba/service';
-import { RoomError, nameRoom, removeRoom, roomsView } from '../roomba/rooms';
-import { emitVacuumRooms } from '../socket';
+import { cleanRooms, deviceForRobot, endJob, vacuumViewOf } from '../roomba/service';
+import { RoomError, nameRoom, removeRoom, roomsView, setAutoResume } from '../roomba/rooms';
+import { emitVacuumRooms, emitVacuumStatus } from '../socket';
 import { loginOf } from '../drivers/RoombaDriver';
 import { pollDeviceNow } from '../kasa/device.cache';
 import { requireAdmin } from '../middleware/auth';
@@ -172,6 +172,22 @@ roombaRouter.post('/:id/rooms/remove', requireAdmin, (req: Request, res: Respons
     res.json({ rooms });
   } catch (err) {
     roomFailure(res, err, 'Could not remove Roomba room');
+  }
+});
+
+/** PUT /api/roomba/:id/auto-resume { on } — whether HomeHub carries on a job the robot stopped at home. */
+roombaRouter.put('/:id/auto-resume', requireAdmin, (req: Request, res: Response) => {
+  const id = Number(req.params.id);
+  const { on } = req.body as { on?: unknown };
+  if (typeof on !== 'boolean') return res.status(400).json({ error: 'on must be true or false', code: 'VALIDATION_ERROR' });
+  try {
+    setAutoResume(id, on);
+    const row = getDb().prepare('SELECT driver_config FROM devices WHERE id = ?').get(id) as { driver_config: string | null };
+    const vacuum = vacuumViewOf(id, row.driver_config);
+    if (vacuum) emitVacuumStatus(id, vacuum);
+    res.json({ autoResume: on });
+  } catch (err) {
+    roomFailure(res, err, 'Could not change Roomba carry-on');
   }
 });
 

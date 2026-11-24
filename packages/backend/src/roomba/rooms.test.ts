@@ -34,6 +34,7 @@ class FakeRobot extends EventEmitter {
   deaf = false;
   /** When its job began, in seconds: set when it sets off. */
   missionStart = 0;
+  battery = 90;
   lastCommand: Record<string, unknown> = { command: 'start', initiator: 'rmtApp' };
   start(): this {
     setImmediate(() => { this.connected = true; this.emit('connect'); this.report(); });
@@ -46,6 +47,7 @@ class FakeRobot extends EventEmitter {
     cb();
     if (this.deaf) return;
     // Like an i-series: a job it holds paused has to be ended before it takes a new one.
+    if (cmd.command === 'resume' && this.cycle !== 'none') { this.phase = 'run'; this.report(); }
     if (cmd.command === 'stop') { this.cycle = 'none'; this.phase = this.phase === 'charge' ? 'charge' : 'stop'; this.report(); }
     if (cmd.command === 'start' && this.cycle === 'none') { this.cycle = 'clean'; this.phase = 'run'; this.lastCommand = cmd; this.missionStart = Number(cmd.time) + 2; this.report(); }
   }
@@ -57,7 +59,7 @@ class FakeRobot extends EventEmitter {
   }
   report() {
     this.emit('message', 'shadow', Buffer.from(JSON.stringify({ state: { reported: {
-      batPct: 90, cleanMissionStatus: { cycle: this.cycle, phase: this.phase, error: 0, mssnStrtTm: this.missionStart }, lastCommand: this.lastCommand,
+      batPct: this.battery, cleanMissionStatus: { cycle: this.cycle, phase: this.phase, error: 0, mssnStrtTm: this.missionStart }, lastCommand: this.lastCommand,
     } } })));
   }
   end() { this.connected = false; }
@@ -225,6 +227,58 @@ describe('Roomba rooms', () => {
     // A job that began long after that start isn't it.
     robot.missionStart += 3600; robot.report(); await tick();
     assert.equal(service.vacuumViewOf(deviceId, JSON.stringify({ blid: 'BLID' }))?.job, null);
+  });
+
+  describe('carrying on a job it stopped at home', () => {
+    beforeEach(() => { service.setAutoResumeForTests({ waitMs: 0, maxTries: 2 }); });
+    /** Out on a job, then home part way for `phase`, then sitting there full. */
+    async function stopsAtHome(wentHome: 'hmMidMsn' | 'hmUsrDock') {
+      robot.cycle = 'clean'; robot.phase = 'run'; robot.battery = 40; robot.report(); await tick();
+      robot.phase = wentHome; robot.report(); await tick();
+      robot.phase = 'charge'; robot.battery = 100; robot.report(); await tick();
+      robot.sent = [];
+    }
+
+    it('carries on, once charged, a job it went home to recharge from, and records it as HomeHub’s', async () => {
+      await stopsAtHome('hmMidMsn');
+      assert.equal((await link.readStatus('10.0.0.55', { blid: 'BLID', password: 'pw' })).activity, 'paused');
+      await service.checkAutoResume();
+      assert.deepEqual(robot.sent.map((c) => c.command), ['resume']);
+      const last = db.prepare("SELECT state, source, detail FROM device_events WHERE device_id = ? AND kind = 'power' ORDER BY id DESC").get(deviceId) as { state: number; source: string; detail: string };
+      assert.deepEqual([last.state, last.source], [1, 'homehub']);
+      assert.match(last.detail, /after recharging/);
+    });
+
+    it('never carries on a job someone sent home', async () => {
+      await stopsAtHome('hmUsrDock');
+      await service.checkAutoResume();
+      assert.deepEqual(robot.sent, []);
+    });
+
+    it('waits for its battery to be full', async () => {
+      await stopsAtHome('hmMidMsn');
+      robot.battery = 80; robot.report(); await tick();
+      await service.checkAutoResume();
+      assert.deepEqual(robot.sent, []);
+    });
+
+    it('stays out of it when turned off', async () => {
+      rooms.setAutoResume(deviceId, false);
+      await stopsAtHome('hmMidMsn');
+      await service.checkAutoResume();
+      assert.deepEqual(robot.sent, []);
+      rooms.setAutoResume(deviceId, true);
+    });
+
+    it('tries twice a job, then leaves it to a person', async () => {
+      await stopsAtHome('hmMidMsn');
+      robot.deaf = true;
+      await service.checkAutoResume();
+      await service.checkAutoResume();
+      await service.checkAutoResume();
+      await service.checkAutoResume();
+      assert.deepEqual(robot.sent.map((c) => c.command), ['resume', 'resume']);
+    });
   });
 
   it('won’t clean a room that hasn’t been named', async () => {
