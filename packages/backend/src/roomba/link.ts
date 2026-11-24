@@ -32,6 +32,15 @@ export function onRobotStatus(listener: Listener): void {
 
 type JobListener = (blid: string, job: RoomJob) => void;
 const jobListeners: JobListener[] = [];
+/** A start the robot reported: when it was sent, and its rooms or the whole house. */
+export interface StartSeen { time: number; rooms: string[] | 'all' }
+type StartListener = (blid: string, start: StartSeen) => void;
+const startListeners: StartListener[] = [];
+
+/** Each new start the robot reports, for keeping: the robot forgets it once another command comes. */
+export function onJobStart(listener: StartListener): void {
+  startListeners.push(listener);
+}
 
 /** Runs when the robot reports a room job it was given, from HomeHub, the iRobot app or its own schedule. */
 export function onRoomJob(listener: JobListener): void {
@@ -160,6 +169,10 @@ class Link {
       const newer = !prev || typeof start.time !== 'number' || typeof prev.time !== 'number' || start.time > prev.time;
       if (rooms || newer) {
         rep.jobStart = start;
+        if (typeof start.time === 'number') {
+          const seen: StartSeen = { time: start.time, rooms: rooms ? start.regions!.map((r) => String(r.region_id)) : 'all' };
+          for (const listener of startListeners) listener(this.login.blid, seen);
+        }
         logger.info({ ip: this.ip, time: start.time, initiator: start.initiator, rooms: rooms ? start.regions!.map((r) => String(r.region_id)) : 'all' }, 'Roomba job start seen');
       } else {
         logger.info({ ip: this.ip, time: start.time, initiator: start.initiator }, 'Roomba repeated its start without rooms; keeping the job’s rooms');

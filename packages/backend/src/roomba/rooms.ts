@@ -24,6 +24,8 @@ interface RoombaConfig {
   rooms?: VacuumRoom[];
   /** Each map's latest version, from the last job seen on it: a room job names the version it's for. */
   maps?: Record<string, string>;
+  /** The last start the robot reported, kept for after a restart: the robot forgets it at its next command. */
+  lastStart?: { time: number; rooms: string[] | 'all' };
   [k: string]: unknown;
 }
 
@@ -105,6 +107,25 @@ export function removeRoom(deviceId: number, key: string): void {
   const rooms = (config.rooms ?? []).filter((r) => r.key !== key);
   if (rooms.length === (config.rooms ?? []).length) throw new RoomError('That room isn’t known any more', 404);
   write(deviceId, { ...config, rooms });
+}
+
+/** Keeps the start the robot reported last. */
+export function keepStart(deviceId: number, start: { time: number; rooms: string[] | 'all' }): void {
+  const config = read(deviceId);
+  if (config.lastStart && config.lastStart.time >= start.time) return;
+  write(deviceId, { ...config, lastStart: start });
+}
+
+/** A job sets off within moments of the start that began it. */
+const START_TO_JOB_S = 300;
+
+/** The rooms of a job that began then, from the start kept for it; null if none fits. */
+export function keptRoomsFor(deviceId: number, began: number | null): string[] | 'all' | null {
+  if (began === null) return null;
+  const start = read(deviceId).lastStart;
+  if (!start) return null;
+  const gap = began - start.time;
+  return gap >= -5 && gap <= START_TO_JOB_S ? start.rooms : null;
 }
 
 /** The job for these named rooms, in the order given. They must all be on one map. */

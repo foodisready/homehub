@@ -32,6 +32,8 @@ class FakeRobot extends EventEmitter {
   cycle = 'none';
   /** Takes no notice of anything sent. */
   deaf = false;
+  /** When its job began, in seconds: set when it sets off. */
+  missionStart = 0;
   lastCommand: Record<string, unknown> = { command: 'start', initiator: 'rmtApp' };
   start(): this {
     setImmediate(() => { this.connected = true; this.emit('connect'); this.report(); });
@@ -45,7 +47,7 @@ class FakeRobot extends EventEmitter {
     if (this.deaf) return;
     // Like an i-series: a job it holds paused has to be ended before it takes a new one.
     if (cmd.command === 'stop') { this.cycle = 'none'; this.phase = this.phase === 'charge' ? 'charge' : 'stop'; this.report(); }
-    if (cmd.command === 'start' && this.cycle === 'none') { this.cycle = 'clean'; this.phase = 'run'; this.lastCommand = cmd; this.report(); }
+    if (cmd.command === 'start' && this.cycle === 'none') { this.cycle = 'clean'; this.phase = 'run'; this.lastCommand = cmd; this.missionStart = Number(cmd.time) + 2; this.report(); }
   }
   /** Someone started a job in the iRobot app. */
   appJob(regions: string[]) {
@@ -55,7 +57,7 @@ class FakeRobot extends EventEmitter {
   }
   report() {
     this.emit('message', 'shadow', Buffer.from(JSON.stringify({ state: { reported: {
-      batPct: 90, cleanMissionStatus: { cycle: this.cycle, phase: this.phase, error: 0 }, lastCommand: this.lastCommand,
+      batPct: 90, cleanMissionStatus: { cycle: this.cycle, phase: this.phase, error: 0, mssnStrtTm: this.missionStart }, lastCommand: this.lastCommand,
     } } })));
   }
   end() { this.connected = false; }
@@ -201,6 +203,28 @@ describe('Roomba rooms', () => {
     await service.endJob(deviceId);
     assert.deepEqual(robot.sent.map((c) => c.command), ['stop']);
     await assert.rejects(service.endJob(deviceId), /no job to end/);
+  });
+
+  it('still knows the job’s rooms after another command and a restart: the start was kept', async () => {
+    robot.appJob(['7']); await tick();
+    robot.appJob(['9']); await tick();
+    const [k, l] = rooms.roomsOf(deviceId);
+    rooms.nameRoom(deviceId, k.key, 'Kitchen');
+    rooms.nameRoom(deviceId, l.key, 'Living Room');
+    robot.cycle = 'none'; robot.phase = 'charge'; robot.report(); await tick();
+    await service.cleanRooms(deviceId, [l.key, k.key]);
+    await tick();
+    // The iRobot app asks about the dock: the robot's last command is no longer the start.
+    robot.lastCommand = { command: 'querydock', initiator: 'rmtApp' };
+    robot.phase = 'charge'; robot.report(); await tick();
+    // HomeHub restarts: it connects afresh and hears only the query.
+    link.closeAll();
+    await link.readStatus('10.0.0.55', { blid: 'BLID', password: 'pw' });
+    await tick();
+    assert.deepEqual(service.vacuumViewOf(deviceId, JSON.stringify({ blid: 'BLID' }))?.job, { whole: false, rooms: ['Living Room', 'Kitchen'] });
+    // A job that began long after that start isn't it.
+    robot.missionStart += 3600; robot.report(); await tick();
+    assert.equal(service.vacuumViewOf(deviceId, JSON.stringify({ blid: 'BLID' }))?.job, null);
   });
 
   it('won’t clean a room that hasn’t been named', async () => {

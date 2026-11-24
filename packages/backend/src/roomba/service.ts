@@ -8,19 +8,22 @@ import { emitDeviceState, emitVacuumRooms, emitVacuumStatus } from '../socket';
 import { getCachedState, noteState, pollDeviceNow } from '../kasa/device.cache';
 import { cancelPowerTimer } from '../devices/power';
 import { loginOf } from '../drivers/RoombaDriver';
-import { onRobotStatus, onRoomJob, peekStatus, readStatus, sendCommand, sendRoomJob, type RobotLogin } from './link';
+import { onJobStart, onRobotStatus, onRoomJob, peekStatus, readStatus, sendCommand, sendRoomJob, type RobotLogin } from './link';
 import type { RobotStatus } from './protocol';
-import { RoomError, jobFor, learnFromJob, roomsOf, roomsView } from './rooms';
+import { RoomError, jobFor, keepStart, keptRoomsFor, learnFromJob, roomsOf, roomsView } from './rooms';
 import type { RoomJob } from './protocol';
 import { logger } from '../logger';
 
 /** What the dashboard shows of a robot vacuum: its job's rooms by name. */
-export type VacuumView = Omit<RobotStatus, 'name' | 'jobRooms'> & {
+export type VacuumView = Omit<RobotStatus, 'name' | 'jobRooms' | 'jobBegan'> & {
   /** The job it holds: the whole house, or these rooms in order (one not named yet as null). */
   job: { whole: boolean; rooms: (string | null)[] } | null;
 };
 
-function view(deviceId: number, { name: _name, jobRooms, ...rest }: RobotStatus): VacuumView {
+function view(deviceId: number, { name: _name, jobRooms: reported, jobBegan, ...rest }: RobotStatus): VacuumView {
+  // The robot names the job's rooms only until its next command; after a restart, the start kept then does.
+  let jobRooms = reported;
+  if (!jobRooms && rest.jobOpen) { try { jobRooms = keptRoomsFor(deviceId, jobBegan); } catch { /* removed meanwhile */ } }
   if (!jobRooms) return { ...rest, job: null };
   if (jobRooms === 'all') return { ...rest, job: { whole: true, rooms: [] } };
   let known: { id: string; name: string | null }[] = [];
@@ -155,6 +158,12 @@ export function startRoombaUpdates(): void {
     if (cached && cached.state !== status.cleaning && !starting.has(device.id)) {
       pollDeviceNow(device.id).catch((err) => logger.debug({ err, id: device.id }, 'Roomba re-read failed'));
     }
+  });
+  // Every start, kept, so the job's rooms are still known after the robot's next command or a restart.
+  onJobStart((blid, start) => {
+    const device = deviceForRobot(blid);
+    if (!device) return;
+    try { keepStart(device.id, start); } catch (err) { logger.warn({ err, id: device.id }, 'Could not keep the Roomba’s start'); }
   });
   // A job for one room, from anywhere: its room is learned, for someone to name.
   onRoomJob((blid, job) => {

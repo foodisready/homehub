@@ -171,6 +171,8 @@ export interface RobotStatus {
   stoppedAfterEmptying: boolean;
   /** The rooms of the job it holds, by room id, in order; 'all' for the whole house; null with no job or not known. */
   jobRooms: string[] | 'all' | null;
+  /** When the job it holds began, in seconds since 1970: matches it to a start HomeHub saw earlier. */
+  jobBegan: number | null;
   battery:  number | null;
   binFull:  boolean;
   /** In words, when the robot reports a problem. */
@@ -188,6 +190,8 @@ export interface Reported {
     cycle?: string; phase?: string; error?: number; notReady?: number;
     /** Minutes until it sets off again after charging part way through a job; 0 when it won't by itself. */
     rechrgM?: number;
+    /** When the job it holds began, in seconds since 1970; 0 with none. */
+    mssnStrtTm?: number;
   };
   /** The last job it was given, from any app: a room clean names its map and rooms. */
   lastCommand?: { command?: string; time?: number; initiator?: string; pmap_id?: string; user_pmapv_id?: string; regions?: { region_id?: unknown; type?: unknown }[] };
@@ -326,6 +330,7 @@ export function statusOf(r: Reported): RobotStatus | null {
     jobOpen: job,
     onDock,
     stoppedAfterEmptying: job && phase === 'charge' && r.homeFor === 'empty' && activity === 'paused',
+    jobBegan: job && typeof mission.mssnStrtTm === 'number' && mission.mssnStrtTm > 0 ? mission.mssnStrtTm : null,
     jobRooms: !job || !r.jobStart ? null
       : Array.isArray(r.jobStart.regions) && r.jobStart.regions.length ? r.jobStart.regions.map((x) => String(x.region_id)) : 'all',
     battery: typeof r.batPct === 'number' ? r.batPct : null,
