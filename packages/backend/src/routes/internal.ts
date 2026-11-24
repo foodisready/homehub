@@ -32,6 +32,9 @@ import { VOICE_LANGUAGES, bridgeInstructions, recordBridgeReport, voiceConfig, v
 import { noteBridgeReport } from '../system/voice-ready';
 import { cancelPowerTimer, setScheduleTimer } from '../devices/power';
 import { MAX_STAY_ON_MINUTES } from './schedules';
+import { scheduledClean } from '../roomba/service';
+import { RoomError } from '../roomba/rooms';
+import { sendPushToUsers } from '../push/push.service';
 
 export const internalRouter = Router();
 
@@ -216,9 +219,10 @@ internalRouter.post(['/voice/sos', '/voice/family/sos'], async (req: Request, re
   res.status(400).json({ error: '`action` must be raise or cancel', code: 'VALIDATION_ERROR' });
 });
 
-// POST /internal/devices/:id/execute  { state: boolean, label?, stayOnMinutes? }
+// POST /internal/devices/:id/execute  { state: boolean, label?, stayOnMinutes?, rooms? }
 // Called by the scheduler when a scheduled action fires. stayOnMinutes, on a
-// Turn ON schedule, sets the device's timer to turn it off again.
+// Turn ON schedule, sets the device's timer to turn it off again. A robot vacuum's
+// Turn ON is a clean: of `rooms` (room keys), or with none the whole house.
 internalRouter.post('/devices/:id/execute', async (req: Request, res: Response) => {
   const db = getDb();
   const device = db.prepare('SELECT id, alias, ip, driver_type, driver_config FROM devices WHERE id = ?')
@@ -228,7 +232,7 @@ internalRouter.post('/devices/:id/execute', async (req: Request, res: Response) 
     return res.status(404).json({ error: 'Device not found', code: 'DEVICE_NOT_FOUND' });
   }
 
-  const { state, label, stayOnMinutes } = req.body as { state: boolean; label?: unknown; stayOnMinutes?: unknown };
+  const { state, label, stayOnMinutes, rooms } = req.body as { state: boolean; label?: unknown; stayOnMinutes?: unknown; rooms?: unknown };
   if (typeof state !== 'boolean') {
     return res.status(400).json({ error: '`state` must be a boolean', code: 'VALIDATION_ERROR' });
   }
@@ -247,6 +251,8 @@ internalRouter.post('/devices/:id/execute', async (req: Request, res: Response) 
     logger.info({ deviceId: device.id, alias: device.alias }, 'Scheduled action skipped — active override');
     return res.json({ alias: device.alias, state, skipped: true });
   }
+
+  if (device.driver_type === 'roomba' && state) return runScheduledClean(device, label, rooms, res);
 
   try {
     const config = device.driver_config ? JSON.parse(device.driver_config) : undefined;
@@ -271,6 +277,31 @@ internalRouter.post('/devices/:id/execute', async (req: Request, res: Response) 
     res.status(503).json({ error: 'Device unreachable', code: 'DEVICE_UNREACHABLE' });
   }
 });
+
+/**
+ * A robot vacuum's Clean schedule, started the way the dashboard and voice start one: a job it holds
+ * paused is ended first, and HomeHub waits to see it set off. A robot already out on a job keeps it.
+ * If it doesn't start, admins are told, since nobody is there to see it.
+ */
+async function runScheduledClean(device: DeviceRow, label: unknown, rooms: unknown, res: Response): Promise<void> {
+  const name = typeof label === 'string' && label ? label : 'Schedule';
+  try {
+    const done = await withActivity({ source: 'schedule', detail: typeof label === 'string' ? label : null }, () => scheduledClean(device.id, rooms));
+    if ('skipped' in done) {
+      logger.info({ deviceId: device.id, alias: device.alias, schedule: name }, 'Scheduled clean skipped — the robot is already on a job');
+      res.json({ alias: device.alias, state: true, skipped: true, busy: true });
+      return;
+    }
+    logger.info({ deviceId: device.id, alias: device.alias, rooms: done.names.length ? done.names : 'whole house', ...(done.missing ? { missing: done.missing } : {}) }, 'Scheduled clean started');
+    res.json({ alias: device.alias, state: true, rooms: done.names, ...(done.missing ? { missing: done.missing } : {}) });
+  } catch (err) {
+    const why = err instanceof RoomError ? err.message : 'HomeHub couldn’t reach it.';
+    logger.warn({ deviceId: device.id, alias: device.alias, schedule: name, reason: (err as Error).message }, 'Scheduled clean failed');
+    const admins = (getDb().prepare("SELECT id FROM users WHERE role = 'admin'").all() as { id: number }[]).map((u) => u.id);
+    sendPushToUsers(admins, `${device.alias} didn’t start “${name}”`, why, { url: '/schedules', deviceId: device.id });
+    res.status(503).json({ error: why, code: err instanceof RoomError ? 'VACUUM_DID_NOT_START' : 'DEVICE_UNREACHABLE' });
+  }
+}
 
 // ── AuraFlow sensor ingestion ──────────────────────────────────────────────
 

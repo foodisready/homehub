@@ -8,7 +8,8 @@ import { HttpClient } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
 import { AuthService } from '../../core/auth/auth.service';
 import { Device } from '../../shared/models/device.model';
-import { SOLAR_EVENTS, cronProblem, describeCron, describeDuration, describeTiming, timingOrder } from './schedule-text';
+import { SOLAR_EVENTS, cronProblem, daysTimeCron, describeCron, describeDuration, describeTiming, readDaysTime, timingOrder } from './schedule-text';
+import { isVacuum } from '../../shared/vacuum';
 
 interface Schedule {
   id: number;
@@ -22,6 +23,9 @@ interface Schedule {
   durationMinutes: number | null;
   /** On a Turn ON schedule: turns the device off again this many minutes later. */
   stayOnMinutes?: number | null;
+  /** A robot vacuum's Clean schedule: its rooms' keys, and their names now (null: forgotten). Null: the whole house. */
+  rooms?: string[] | null;
+  roomNames?: (string | null)[] | null;
   state: boolean;
   enabled: boolean;
   /** Set when the scheduler can't read it, so it never runs. */
@@ -37,7 +41,7 @@ interface ScheduleGroup {
 }
 
 /** One line of "Coming up": what happens at one time. */
-interface Coming { key: string; at: number; time: string; day: string; names: string; state: boolean; why: string }
+interface Coming { key: string; at: number; time: string; day: string; names: string; state: boolean; verb: string; why: string }
 
 /** Lists names the way a person says them: "A, B and C". */
 const joinNames = (n: string[]) => (n.length <= 1 ? n.join('') : `${n.slice(0, -1).join(', ')} and ${n.at(-1)}`);
@@ -48,6 +52,9 @@ const CRON_PRESETS = [
   { label: 'Every day at 9 PM',      value: '0 21 * * *' },
   { label: 'Every weekday at 8 AM',  value: '0 8 * * 1-5' },
   { label: 'Custom…',                value: '' }];
+
+/** The week as people read it, Monday first: cron's day number and a short name. */
+const WEEK = [1, 2, 3, 4, 5, 6, 0].map((n) => ({ n, short: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][n] }));
 
 @Component({
   selector: 'app-schedules',
@@ -177,6 +184,13 @@ const CRON_PRESETS = [
     .cron-help table { border-collapse: collapse; width: 100%; margin: 0.3rem 0; }
     .cron-help th { color: var(--text); font-size: 0.7rem; text-align: left; padding: 0.1rem 0.4rem 0.1rem 0; }
     .cron-help td { padding: 0.1rem 0.4rem 0.1rem 0; }
+    .chips { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+    .chip { background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: 999px; padding: 0.4rem 0.8rem; font-size: 0.85rem; min-height: 2.2rem; }
+    .chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .chip i { font-style: normal; font-size: 0.7rem; opacity: .8; margin-left: 0.3rem; }
+    .day { min-width: 3rem; }
+    #at-time { color-scheme: dark; }
+    .field > .field-label { display: block; font-size: 0.82rem; font-weight: 500; color: var(--text-muted); }
   `],
   template: `
     <div class="page">
@@ -197,10 +211,11 @@ const CRON_PRESETS = [
                 <div class="rule-main">
                   <div class="schedule-label">
                     {{ timing(s) }}
-                    <span class="badge" [class.badge-on]="s.state" [class.badge-off]="!s.state">{{ s.state ? 'ON' : 'OFF' }}</span>
+                    <span class="badge" [class.badge-on]="s.state" [class.badge-off]="!s.state">{{ actionWord(s).toUpperCase() }}</span>
                     @if (s.state && s.stayOnMinutes) { <span class="stay-on">for {{ duration(s.stayOnMinutes) }}</span> }
                   </div>
                   @if (s.label !== timing(s)) { <div class="schedule-meta">{{ s.label }}</div> }
+                  @if (roomsText(s); as r) { <div class="schedule-meta">{{ r }}</div> }
                   @if (s.problem) { <div class="schedule-problem">Never runs: {{ s.problem }} Edit it to fix the time.</div> }
                   @else { <div class="schedule-meta">{{ !s.enabled ? 'Paused' : s.next ? 'Next: ' + when(s.next) : s.triggerType === 'auto_off' ? 'Whenever it’s switched on' : 'Not in the next two days' }}</div> }
                 </div>
@@ -231,7 +246,7 @@ const CRON_PRESETS = [
                 <li [class.first]="first">
                   <span class="t">{{ e.time }}@if (e.day) {<small>{{ e.day }}</small>}</span>
                   <span class="what">
-                    <b>{{ e.names }} {{ e.state ? 'on' : 'off' }}</b>
+                    <b>{{ e.names }} {{ e.verb }}</b>
                     <small>{{ e.why }}@if (first) { · {{ inText(e.at) }} }</small>
                   </span>
                   <span class="dot" [class.on]="e.state" aria-hidden="true"></span>
@@ -260,7 +275,7 @@ const CRON_PRESETS = [
         <div class="hh-sheet" role="dialog" aria-modal="true" aria-labelledby="del-title" (click)="$event.stopPropagation()">
           <div class="hh-grab"></div>
           <h3 id="del-title">Delete this schedule?</h3>
-          <p>{{ s.deviceAlias }}: {{ timing(s) }}, {{ s.state ? 'on' : 'off' }}. To stop it for a while instead, pause it with its switch.</p>
+          <p>{{ s.deviceAlias }}: {{ timing(s) }}, {{ actionWord(s).toLowerCase() }}. To stop it for a while instead, pause it with its switch.</p>
           <div class="hh-acts"><button type="button" (click)="deleting.set(null)">Cancel</button><button type="button" class="danger" (click)="deleteSchedule(s)">Delete</button></div>
         </div>
       </div>
@@ -275,7 +290,7 @@ const CRON_PRESETS = [
 
           <div class="field">
             <label>Device</label>
-            <select [(ngModel)]="form.deviceId">
+            <select [(ngModel)]="form.deviceId" (ngModelChange)="deviceChanged()">
               <option value="">Select a device…</option>
               @for (d of devices(); track d.id) {
                 <option [value]="d.id">{{ d.alias }}</option>
@@ -285,24 +300,25 @@ const CRON_PRESETS = [
 
           <div class="field">
             <label>Label (optional)</label>
-            <input type="text" [(ngModel)]="form.label" placeholder="e.g. Porch on at sunset" />
+            <input type="text" [(ngModel)]="form.label" [placeholder]="formVacuum() ? 'e.g. Vacuum the house' : 'e.g. Porch on at sunset'" />
           </div>
 
           <div class="row-2">
             <div class="field">
               <label>Trigger type</label>
               <select [(ngModel)]="form.triggerType">
+                <option value="days">Days and time</option>
                 <option value="solar">Solar event</option>
-                <option value="cron">Cron (fixed time)</option>
-                <option value="auto_off">Auto-off timer</option>
+                <option value="cron">Cron (advanced)</option>
+                @if (!formVacuum()) { <option value="auto_off">Auto-off timer</option> }
               </select>
             </div>
             @if (form.triggerType !== 'auto_off') {
               <div class="field">
                 <label>Action</label>
                 <select [(ngModel)]="form.state">
-                  <option [ngValue]="true">Turn ON</option>
-                  <option [ngValue]="false">Turn OFF</option>
+                  <option [ngValue]="true">{{ formVacuum() ? 'Clean' : 'Turn ON' }}</option>
+                  <option [ngValue]="false">{{ formVacuum() ? 'Send home' : 'Turn OFF' }}</option>
                 </select>
               </div>
             }
@@ -325,7 +341,40 @@ const CRON_PRESETS = [
             </div>
           }
 
-          @if (form.triggerType !== 'auto_off' && form.state) {
+          @if (form.triggerType === 'days') {
+            <div class="field">
+              <span class="field-label" id="days-label">Days</span>
+              <div class="chips" role="group" aria-labelledby="days-label" style="margin-top:0.3rem">
+                @for (d of week; track d.n) {
+                  <button type="button" class="chip day" [attr.aria-pressed]="form.days[d.n]" (click)="form.days[d.n] = !form.days[d.n]">{{ d.short }}</button>
+                }
+              </div>
+            </div>
+            <div class="field">
+              <label for="at-time">Time</label>
+              <input id="at-time" type="time" [(ngModel)]="form.time" required aria-describedby="days-check" />
+              <p id="days-check" class="cron-check" [class.bad]="!!daysCheck().problem" [class.ok]="!daysCheck().problem">{{ daysCheck().problem ?? 'Runs: ' + daysCheck().words }}</p>
+            </div>
+          }
+
+          @if (formVacuum() && form.state && form.triggerType !== 'auto_off') {
+            <div class="field">
+              <span class="field-label" id="rooms-label">Rooms</span>
+              <div class="chips" role="group" aria-labelledby="rooms-label" style="margin-top:0.3rem">
+                <button type="button" class="chip" [attr.aria-pressed]="!form.rooms.length" (click)="form.rooms = []">Whole house</button>
+                @for (r of formRooms(); track r.key) {
+                  <button type="button" class="chip" [attr.aria-pressed]="form.rooms.includes(r.key)" (click)="toggleRoom(r.key)">{{ r.name }}@if (form.rooms.length > 1 && form.rooms.includes(r.key)) {<i>{{ form.rooms.indexOf(r.key) + 1 }}</i>}</button>
+                }
+              </div>
+              <p class="field-help">
+                @if (!formRooms().length) { To pick rooms, name them first on the robot’s card. }
+                @else if (form.rooms.length > 1) { Cleaned in the order picked. }
+                @else { It stops by itself when it’s done. If it’s already out on a job then, it carries on with that one. }
+              </p>
+            </div>
+          }
+
+          @if (form.triggerType !== 'auto_off' && form.state && !formVacuum()) {
             <div class="field">
               <label for="stay-on">Turn off after (optional)</label>
               <div class="stay-row">
@@ -404,7 +453,7 @@ const CRON_PRESETS = [
 
           <div class="form-actions">
             <button class="btn-cancel" (click)="closeForm()">Cancel</button>
-            <button class="btn-primary btn-save" [disabled]="saving() || (form.triggerType === 'cron' && !!cronCheck().problem)" (click)="save()">
+            <button class="btn-primary btn-save" [disabled]="saving() || (form.triggerType === 'cron' && !!cronCheck().problem) || (form.triggerType === 'days' && !!daysCheck().problem)" (click)="save()">
               {{ saving() ? 'Saving…' : 'Save' }}
             </button>
           </div>
@@ -416,6 +465,7 @@ const CRON_PRESETS = [
 export class SchedulesComponent implements OnInit, OnDestroy {
   readonly solarEvents  = SOLAR_EVENTS;
   readonly cronPresets  = CRON_PRESETS;
+  readonly week         = WEEK;
 
   private readonly _schedules = signal<Schedule[]>([]);
   private readonly _devices   = signal<Device[]>([]);
@@ -549,20 +599,21 @@ export class SchedulesComponent implements OnInit, OnDestroy {
    */
   readonly coming = computed<Coming[]>(() => {
     const until = this.now() + 24 * 3_600_000;
-    const runs: Array<{ at: number; name: string; state: boolean; why: string }> = [];
+    const runs: Array<{ at: number; name: string; state: boolean; verb: string; why: string }> = [];
     for (const s of this._schedules()) {
       if (!s.enabled || !s.next || s.problem) continue;
       const at = Date.parse(s.next);
-      if (at <= until) runs.push({ at, name: s.deviceAlias, state: s.state, why: this.timing(s) });
+      const rooms = this.roomsText(s);
+      if (at <= until) runs.push({ at, name: s.deviceAlias, state: s.state, verb: this.comingVerb(s), why: this.timing(s) + (rooms ? ` · ${rooms}` : '') });
       if (s.state && s.stayOnMinutes) {
         const off = at + s.stayOnMinutes * 60_000;
-        if (off <= until) runs.push({ at: off, name: s.deviceAlias, state: false, why: `${describeDuration(s.stayOnMinutes)} after it came on` });
+        if (off <= until) runs.push({ at: off, name: s.deviceAlias, state: false, verb: 'off', why: `${describeDuration(s.stayOnMinutes)} after it came on` });
       }
     }
-    const lines = new Map<string, { at: number; names: string[]; state: boolean; whys: string[] }>();
+    const lines = new Map<string, { at: number; names: string[]; state: boolean; verb: string; whys: string[] }>();
     for (const r of runs.sort((a, b) => a.at - b.at)) {
-      const key = `${Math.floor(r.at / 60_000)}-${r.state}`;
-      const l = lines.get(key) ?? { at: r.at, names: [], state: r.state, whys: [] };
+      const key = `${Math.floor(r.at / 60_000)}-${r.verb}`;
+      const l = lines.get(key) ?? { at: r.at, names: [], state: r.state, verb: r.verb, whys: [] };
       if (!l.names.includes(r.name)) l.names.push(r.name);
       if (!l.whys.includes(r.why)) l.whys.push(r.why);
       lines.set(key, l);
@@ -570,7 +621,7 @@ export class SchedulesComponent implements OnInit, OnDestroy {
     return [...lines.entries()].map(([key, l]) => ({
       key, at: l.at, time: this.clock(l.at), day: this.dayWord(l.at),
       names: l.names.length > 3 ? `${l.names.slice(0, 2).join(', ')} and ${l.names.length - 2} more` : joinNames(l.names),
-      state: l.state, why: l.whys.join(' · '),
+      state: l.state, verb: l.verb, why: l.whys.join(' · '),
     }));
   });
   readonly shownComing = computed(() => (this.allComing() ? this.coming() : this.coming().slice(0, this.comingShown)));
@@ -586,12 +637,16 @@ export class SchedulesComponent implements OnInit, OnDestroy {
       const d = devices.get(g.deviceId);
       const on = g.schedules.filter((s) => s.enabled);
       const paused = g.schedules.length - on.length;
-      const parts = on.slice(0, 2).map((s) => `${s.state ? 'On' : 'Off'} ${s.next && s.triggerType !== 'auto_off' ? this.clock(Date.parse(s.next)).replace('Midnight', 'midnight').replace('Noon', 'noon') : this.timing(s).replace(/^Every day at /, '')}`);
+      const parts = on.slice(0, 2).map((s) => `${this.actionWord(s)} ${s.next && s.triggerType !== 'auto_off' ? this.clock(Date.parse(s.next)).replace('Midnight', 'midnight').replace('Noon', 'noon') : this.timing(s).replace(/^Every day at /, '')}`);
       if (on.length > 2) parts.push(`+${on.length - 2} more`);
       const status = !on.length ? `Paused · ${g.schedules.length} ${g.schedules.length === 1 ? 'schedule' : 'schedules'}`
         : parts.join(' · ') + (paused ? ` · ${paused} paused` : '');
       const kind = d?.power?.excluded;
       const look = g.schedules.some((s) => s.problem) ? 'problem' as const : false;
+      if (d && isVacuum(d)) {
+        return { key: String(g.deviceId), name: g.deviceAlias, group: 'Robot vacuum', status, look, icon: 'vacuum', hue: on.length ? '#7aa2ff' : '#8e9ab4',
+          words: `vacuum robot clean ${d.room ?? ''} ${d.nicknames?.join(' ') ?? ''} ${g.schedules.map((s) => `${s.label} ${this.timing(s)} ${this.roomsText(s) ?? ''}`).join(' ')}` } satisfies SettingsTile;
+      }
       return {
         key: String(g.deviceId), name: g.deviceAlias, group: kind === 'garage door' || kind === 'valve' ? 'Doors and water' : 'Lights and plugs', status, look,
         icon: kind === 'garage door' ? 'house' : kind === 'valve' ? 'drop' : 'devices',
@@ -613,7 +668,7 @@ export class SchedulesComponent implements OnInit, OnDestroy {
     return {
       deviceId:           '' as number | '',
       label:              '',
-      triggerType:        'solar' as 'solar' | 'cron' | 'auto_off',
+      triggerType:        'solar' as 'days' | 'solar' | 'cron' | 'auto_off',
       state:              true,
       solarEvent:         'sunset',
       solarOffsetMinutes: 0,
@@ -622,6 +677,11 @@ export class SchedulesComponent implements OnInit, OnDestroy {
       durationMinutes:    15,
       stayOnValue:        '' as number | '',
       stayOnUnit:         'min' as 'min' | 'h',
+      /** "Days and time": which days, by cron's numbers (0 is Sunday), and when. */
+      days:               [true, true, true, true, true, true, true],
+      time:               '09:00',
+      /** A robot vacuum's Clean: its rooms' keys in the order picked; none for the whole house. */
+      rooms:              [] as string[],
     };
   }
 
@@ -632,6 +692,7 @@ export class SchedulesComponent implements OnInit, OnDestroy {
 
   openCreate(deviceId?: number): void {
     this.form = { ...this.blankForm(), deviceId: deviceId ?? '' };
+    if (this.formVacuum()) this.form.triggerType = 'days';
     this.showForm.set(true);
   }
 
@@ -639,11 +700,13 @@ export class SchedulesComponent implements OnInit, OnDestroy {
     this.editingId.set(s.id);
     const expr = s.cronExpression ?? '';
     const matchedPreset = CRON_PRESETS.find((p) => p.value !== '' && p.value === expr);
+    // A time on some days opens as days and a time; anything else stays as its cron expression.
+    const simple = s.triggerType === 'cron' ? readDaysTime(expr) : null;
     this.form = {
       deviceId:           s.deviceId,
       // An automatic label is left blank so it follows any change to the time.
       label:              s.label === this.timing(s) ? '' : s.label,
-      triggerType:        s.triggerType,
+      triggerType:        simple ? 'days' : s.triggerType,
       state:              s.state,
       solarEvent:         s.solarEvent ?? 'sunset',
       solarOffsetMinutes: s.solarOffsetMinutes,
@@ -653,8 +716,72 @@ export class SchedulesComponent implements OnInit, OnDestroy {
       // Whole hours show as hours.
       stayOnValue:        s.stayOnMinutes ? (s.stayOnMinutes % 60 === 0 ? s.stayOnMinutes / 60 : s.stayOnMinutes) : '',
       stayOnUnit:         s.stayOnMinutes && s.stayOnMinutes % 60 === 0 ? 'h' : 'min',
+      days:               simple?.days ?? this.blankForm().days,
+      time:               simple?.time ?? '09:00',
+      rooms:              [...(s.rooms ?? [])],
     };
+    // A room forgotten since can't be picked, so it isn't kept.
+    this.form.rooms = this.form.rooms.filter((k) => this.formRooms().some((r) => r.key === k));
     this.showForm.set(true);
+  }
+
+  // ── Robot vacuums ──────────────────────────────────────────────
+
+  /** The device the form is for, when it's a robot vacuum. */
+  formVacuum(): boolean {
+    const d = this._devices().find((x) => x.id === Number(this.form.deviceId));
+    return !!d && isVacuum(d);
+  }
+
+  /** The robot's named rooms, to pick from; a room picked before and forgotten since isn't offered. */
+  formRooms(): { key: string; name: string }[] {
+    const d = this._devices().find((x) => x.id === Number(this.form.deviceId));
+    return (d?.vacuumRooms ?? []).filter((r): r is { key: string; name: string; seenAt: string } => !!r.name)
+      .map(({ key, name }) => ({ key, name })).sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  toggleRoom(key: string): void {
+    this.form.rooms = this.form.rooms.includes(key) ? this.form.rooms.filter((k) => k !== key) : [...this.form.rooms, key];
+  }
+
+  /** A robot has no auto-off or "Turn off after"; other devices have no rooms. */
+  deviceChanged(): void {
+    if (this.formVacuum()) {
+      if (this.form.triggerType === 'auto_off' || (!this.editingId() && this.form.triggerType === 'solar')) this.form.triggerType = 'days';
+      this.form.stayOnValue = '';
+    } else {
+      this.form.rooms = [];
+    }
+  }
+
+  private isVacuumId(id: number): boolean {
+    const d = this._devices().find((x) => x.id === id);
+    return !!d && isVacuum(d);
+  }
+
+  /** "On" and "Off", or for a robot vacuum "Clean" and "Home". */
+  actionWord(s: Schedule): string {
+    return this.isVacuumId(s.deviceId) ? (s.state ? 'Clean' : 'Home') : (s.state ? 'On' : 'Off');
+  }
+
+  private comingVerb(s: Schedule): string {
+    return this.isVacuumId(s.deviceId) ? (s.state ? 'cleans' : 'goes home') : (s.state ? 'on' : 'off');
+  }
+
+  /** A robot's Clean schedule's rooms: "Kitchen, then Living room", or "Whole house". */
+  roomsText(s: Schedule): string | null {
+    if (!s.state || s.triggerType === 'auto_off' || !this.isVacuumId(s.deviceId)) return null;
+    if (!s.roomNames?.length) return 'Whole house';
+    const names = s.roomNames.map((n) => n ?? 'a room it no longer knows');
+    return names.length > 1 ? `${names.slice(0, -1).join(', ')}, then ${names.at(-1)}` : names[0];
+  }
+
+  /** What the days and time mean, or what's missing. */
+  daysCheck(): { problem: string | null; words: string } {
+    const cron = daysTimeCron(this.form.days, this.form.time);
+    if (!this.form.days.some(Boolean)) return { problem: 'Pick at least one day.', words: '' };
+    if (!cron) return { problem: 'Choose a time.', words: '' };
+    return { problem: null, words: describeCron(cron) };
   }
 
   closeForm(): void {
@@ -703,11 +830,16 @@ export class SchedulesComponent implements OnInit, OnDestroy {
   }
 
   save(): void {
-    const { deviceId, triggerType, state, solarEvent, solarOffsetMinutes, cronExpression, durationMinutes } = this.form;
+    const { deviceId, state, solarEvent, solarOffsetMinutes, durationMinutes } = this.form;
     if (!deviceId) { this.formError.set('Device is required.'); return; }
+    // Days and a time are saved as the cron expression they make.
+    if (this.form.triggerType === 'days' && this.daysCheck().problem) { this.formError.set(this.daysCheck().problem!); return; }
+    const triggerType = this.form.triggerType === 'days' ? 'cron' : this.form.triggerType;
+    const cronExpression = this.form.triggerType === 'days' ? daysTimeCron(this.form.days, this.form.time)! : this.form.cronExpression;
+    const vacuum = this.formVacuum();
     if (triggerType === 'cron' && !cronExpression) { this.formError.set('Cron expression is required.'); return; }
     if (triggerType === 'auto_off' && (!durationMinutes || durationMinutes <= 0)) { this.formError.set('Duration must be greater than 0.'); return; }
-    const stayOn = triggerType !== 'auto_off' && state ? this.stayOnMinutes() : null;
+    const stayOn = triggerType !== 'auto_off' && state && !vacuum ? this.stayOnMinutes() : null;
     if (stayOn !== null && Number.isNaN(stayOn)) { this.formError.set('Turn off after must be from 1 minute to 24 hours, or empty.'); return; }
 
     this.saving.set(true);
@@ -728,6 +860,7 @@ export class SchedulesComponent implements OnInit, OnDestroy {
       ...(triggerType === 'cron'     ? { cronExpression } : {}),
       ...(triggerType === 'auto_off' ? { durationMinutes: Number(durationMinutes) } : {}),
       stayOnMinutes: stayOn,
+      ...(vacuum && state && triggerType !== 'auto_off' ? { rooms: this.form.rooms } : {}),
     };
 
     const id = this.editingId();

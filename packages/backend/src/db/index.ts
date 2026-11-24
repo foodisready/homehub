@@ -209,6 +209,8 @@ function migrate(db: Database.Database): void {
   // A Turn ON schedule's "Turn off after": the device's timer it sets when it runs.
   // After the rebuild above, which would drop it.
   try { db.exec('ALTER TABLE schedules ADD COLUMN stay_on_minutes INTEGER'); } catch {}
+  // A robot vacuum's Clean schedule: the rooms it cleans, as a JSON list of room keys. Null: the whole house.
+  try { db.exec('ALTER TABLE schedules ADD COLUMN rooms TEXT'); } catch {}
 
   // ── AuraFlow / sensor subsystem ────────────────────────────────
   db.exec(`

@@ -73,6 +73,39 @@ export function describeCron(expression: string): string {
   return `${days} at ${joinList(hourList.map((hour) => formatTime(hour, min)))}`;
 }
 
+/**
+ * The cron expression for a time on some days: days by cron's numbers (0 is Sunday), time as
+ * "HH:MM". Every day is "*". Null when no day is picked or the time isn't one.
+ */
+export function daysTimeCron(days: boolean[], time: string): string | null {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(time ?? '');
+  if (!m || Number(m[1]) > 23 || Number(m[2]) > 59) return null;
+  const picked = [0, 1, 2, 3, 4, 5, 6].filter((d) => days[d]);
+  if (!picked.length) return null;
+  return `${Number(m[2])} ${Number(m[1])} * * ${picked.length === 7 ? '*' : picked.join(',')}`;
+}
+
+/** A cron expression that is one time on some days, as those days and "HH:MM"; null for anything else. */
+export function readDaysTime(expression: string): { days: boolean[]; time: string } | null {
+  const fields = expression.trim().split(/\s+/);
+  if (fields.length !== 5) return null;
+  const [minute, hour, dayOfMonth, month, weekday] = fields;
+  if (dayOfMonth !== '*' || month !== '*' || !/^\d{1,2}$/.test(minute) || !/^\d{1,2}$/.test(hour)) return null;
+  if (Number(minute) > 59 || Number(hour) > 23) return null;
+  const days = [false, false, false, false, false, false, false];
+  if (weekday === '*') days.fill(true);
+  else {
+    for (const part of weekday.split(',')) {
+      const m = /^(\d)(?:-(\d))?$/.exec(part);
+      if (!m) return null;
+      const first = Number(m[1]), last = Number(m[2] ?? m[1]);
+      if (first > last || last > 7) return null;
+      for (let d = first; d <= last; d++) days[d % 7] = true;
+    }
+  }
+  return { days, time: `${hour.padStart(2, '0')}:${minute.padStart(2, '0')}` };
+}
+
 export function describeTiming(schedule: ScheduleTiming): string {
   if (schedule.triggerType === 'cron') return describeCron(schedule.cronExpression ?? '');
   if (schedule.triggerType === 'auto_off') return `${schedule.durationMinutes} min after turning on`;

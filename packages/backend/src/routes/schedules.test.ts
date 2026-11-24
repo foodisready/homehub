@@ -75,6 +75,71 @@ describe('Schedules: Turn off after', () => {
     assert.equal((await send('POST', base, sunset({ stayOnMinutes: 1440 }))).status, 201, 'a whole day is fine');
   });
 
+  describe('a robot vacuum’s Clean schedule', () => {
+    let robotId = 0;
+    const seen = '2026-11-20T10:00:00.000Z';
+    const room = (pmapId: string, id: string, name: string | null) => ({ key: `${pmapId}:${id}`, pmapId, id, type: 'rid', name, seenAt: seen });
+    const clean = (extra: Record<string, unknown>) => ({ deviceId: robotId, label: 'Vacuum', triggerType: 'cron', cronExpression: '0 10 * * 1,3,5', state: true, ...extra });
+
+    before(async () => {
+      const db = (await import('../db')).getDb();
+      robotId = Number(db.prepare("INSERT INTO devices (alias, ip, driver_type, driver_config) VALUES ('Roomba i8', '10.9.2.55', 'roomba', ?)")
+        .run(JSON.stringify({ blid: 'B', password: 'secret-pw', maps: { M: 'V1', N: 'V2' },
+          rooms: [room('M', '1', 'Kitchen'), room('M', '2', 'Living Room'), room('M', '3', null), room('N', '1', 'Basement')] })).lastInsertRowid);
+    });
+
+    it('keeps its rooms, in order, and lists them by name', async () => {
+      const r = await send('POST', base, clean({ rooms: ['M:2', 'M:1', 'M:2'] }));
+      assert.equal(r.status, 201);
+      assert.deepEqual(r.body.rooms, ['M:2', 'M:1']);
+      assert.deepEqual(r.body.roomNames, ['Living Room', 'Kitchen']);
+      assert.equal(r.body.problem, null);
+      const listed = (await (await fetch(base)).json() as any[]).find((s) => s.id === r.body.id);
+      assert.deepEqual(listed.roomNames, ['Living Room', 'Kitchen']);
+      assert.ok(!JSON.stringify(listed).includes('secret-pw'), 'the robot’s login stays private');
+      const edited = await send('PUT', `${base}/${r.body.id}`, clean({ rooms: [] }));
+      assert.equal(edited.body.rooms, null, 'no rooms: the whole house');
+    });
+
+    it('is the whole house with no rooms', async () => {
+      const r = await send('POST', base, clean({}));
+      assert.equal(r.body.rooms, null);
+      assert.equal(r.body.roomNames, null);
+    });
+
+    it('refuses a room that isn’t named or known, or rooms on two maps', async () => {
+      for (const rooms of [['M:3'], ['M:9'], ['M:1', 'N:1'], 'M:1', [1], new Array(31).fill('M:1')]) {
+        const r = await send('POST', base, clean({ rooms }));
+        assert.equal(r.status, 400, JSON.stringify(rooms));
+        assert.equal(r.body.code, 'INVALID_ROOMS');
+      }
+    });
+
+    it('has no "Turn off after", which would send it home part way, and no rooms on Send home', async () => {
+      const r = await send('POST', base, clean({ rooms: ['M:1'], stayOnMinutes: 60 }));
+      assert.equal(r.body.stayOnMinutes, null);
+      const home = await send('POST', base, clean({ state: false, rooms: ['M:1'] }));
+      assert.equal(home.body.rooms, null);
+    });
+
+    it('ignores rooms on anything but a robot', async () => {
+      const r = await send('POST', base, sunset({ rooms: ['M:1'] }));
+      assert.equal(r.status, 201);
+      assert.equal(r.body.rooms, null);
+    });
+
+    it('says it never cleans once none of its rooms is known', async () => {
+      const r = await send('POST', base, clean({ rooms: ['M:1'] }));
+      const db = (await import('../db')).getDb();
+      const config = JSON.parse((db.prepare('SELECT driver_config FROM devices WHERE id = ?').get(robotId) as { driver_config: string }).driver_config);
+      db.prepare('UPDATE devices SET driver_config = ? WHERE id = ?').run(JSON.stringify({ ...config, rooms: config.rooms.filter((x: { key: string }) => x.key !== 'M:1') }), robotId);
+      const got = (await send('GET', `${base}/${r.body.id}`, undefined));
+      assert.deepEqual(got.body.roomNames, [null]);
+      assert.match(got.body.problem, /None of its rooms/);
+      db.prepare('UPDATE devices SET driver_config = ? WHERE id = ?').run(JSON.stringify(config), robotId);
+    });
+  });
+
   it('lists it', async () => {
     const list = await (await fetch(base)).json() as any[];
     assert.ok(list.some((s) => s.stayOnMinutes === 180 || s.stayOnMinutes === 90));

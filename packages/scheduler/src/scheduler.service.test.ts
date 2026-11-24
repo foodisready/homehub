@@ -61,6 +61,22 @@ describe('Running a schedule', () => {
     assert.deepEqual(received.pop(), { path: '/internal/devices/7/execute', key: 'test-key', state: false, label: 'Off at 11' });
   });
 
+  it('sends a robot vacuum’s Clean rooms along, and none for the whole house or Send home', async () => {
+    // Older databases have no rooms column: the schedules above ran without it.
+    db.exec('ALTER TABLE schedules ADD COLUMN rooms TEXT');
+    db.prepare(`INSERT INTO schedules (id, device_id, label, trigger_type, cron_expression, rooms, state) VALUES
+      (4, 40, 'Vacuum', 'cron', '0 10 * * 1,3,5', '["M:2","M:1"]', 1),
+      (5, 40, 'Whole house', 'cron', '0 10 * * 6', NULL, 1),
+      (6, 40, 'Home', 'cron', '0 12 * * *', '["M:1"]', 0),
+      (7, 40, 'Garbled', 'cron', '0 9 * * *', 'not json', 1)`).run();
+    await run(4);
+    assert.deepEqual(received.pop(), { path: '/internal/devices/40/execute', key: 'test-key', state: true, label: 'Vacuum', rooms: ['M:2', 'M:1'] });
+    for (const [id, state, label] of [[5, true, 'Whole house'], [6, false, 'Home'], [7, true, 'Garbled']] as const) {
+      await run(id);
+      assert.deepEqual(received.pop(), { path: '/internal/devices/40/execute', key: 'test-key', state, label });
+    }
+  });
+
   it('skips a schedule turned off since it was loaded', async () => {
     db.prepare('UPDATE schedules SET enabled = 0 WHERE id = 1').run();
     await run(1);

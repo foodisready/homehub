@@ -5,6 +5,7 @@ import { logger } from '../logger';
 import { cronProblem } from './cron-check';
 import { nextRuns } from './next-run';
 import { getHomeSettings, solarLocation } from '../home/home-settings';
+import { RoomError, jobFor, roomsView } from '../roomba/rooms';
 
 export const schedulesRouter = Router();
 
@@ -22,12 +23,29 @@ export interface ScheduleRow {
   duration_minutes: number | null;
   /** On a Turn ON schedule: turn the device off again this many minutes later. */
   stay_on_minutes: number | null;
+  /** A robot vacuum's Clean schedule: its rooms' keys as JSON; null for the whole house. */
+  rooms?: string | null;
   state: number;
   enabled: number;
   created_at: string;
 }
 
-function toPublic(row: ScheduleRow & { device_alias?: string }) {
+/** A schedule's row with its device's name and kind. */
+type Listed = ScheduleRow & { device_alias?: string; driver_type?: string | null; driver_config?: string | null };
+
+/** A robot's schedule's rooms, by key, with each one's name now (null when forgotten); null for the whole house. */
+function roomsOf(row: Listed): { keys: string[]; names: (string | null)[] } | null {
+  if (row.driver_type !== 'roomba' || !row.rooms) return null;
+  let keys: unknown;
+  try { keys = JSON.parse(row.rooms); } catch { return null; }
+  if (!Array.isArray(keys) || !keys.length) return null;
+  const known = new Map(roomsView(row.driver_config ?? null).map((r) => [r.key, r.name]));
+  const list = keys.filter((k): k is string => typeof k === 'string');
+  return { keys: list, names: list.map((k) => known.get(k) ?? null) };
+}
+
+function toPublic(row: Listed) {
+  const rooms = roomsOf(row);
   return {
     id:                 row.id,
     deviceId:           row.device_id,
@@ -39,11 +57,15 @@ function toPublic(row: ScheduleRow & { device_alias?: string }) {
     solarOffsetMinutes: row.solar_offset_minutes,
     durationMinutes:    row.duration_minutes,
     stayOnMinutes:      row.stay_on_minutes ?? null,
+    /** A robot vacuum's Clean schedule: its rooms, by key and name; null for the whole house. */
+    rooms:              rooms?.keys ?? null,
+    roomNames:          rooms?.names ?? null,
     state:              row.state === 1,
     enabled:            row.enabled === 1,
     createdAt:          row.created_at,
     /** Why the scheduler can't run it, so it never fires; null when fine. */
-    problem:            row.trigger_type === 'cron' ? cronProblem(row.cron_expression ?? '') : null,
+    problem:            (row.trigger_type === 'cron' ? cronProblem(row.cron_expression ?? '') : null)
+      ?? (rooms && rooms.names.every((n) => n === null) ? 'None of its rooms is known any more, so it won’t clean.' : null),
   };
 }
 
@@ -63,16 +85,36 @@ function stayOnMinutes(body: { stayOnMinutes?: unknown; state?: unknown; trigger
   return v;
 }
 
-const LIST_SQL = `
-  SELECT s.*, d.alias AS device_alias
-  FROM schedules s
-  JOIN devices d ON d.id = s.device_id
-  ORDER BY s.created_at DESC
-`;
+const SELECT = 'SELECT s.*, d.alias AS device_alias, d.driver_type, d.driver_config FROM schedules s JOIN devices d ON d.id = s.device_id';
+const LIST_SQL = `${SELECT} ORDER BY s.created_at DESC`;
+const ONE_SQL = `${SELECT} WHERE s.id = ?`;
+
+/** Most rooms one Clean schedule can name. */
+const MAX_ROOMS = 30;
+
+/**
+ * A robot vacuum's Clean schedule's rooms, checked as a job for them would be: named, and on one map.
+ * JSON for the rooms column; null for the whole house, and for anything but a robot's Clean schedule.
+ */
+function scheduleRooms(body: { rooms?: unknown; state?: unknown; triggerType?: unknown }, device: { id: number; driver_type: string | null }): string | null | { error: string } {
+  const v = body.rooms;
+  if (device.driver_type !== 'roomba' || body.state !== true || body.triggerType === 'auto_off') return null;
+  if (v === undefined || v === null) return null;
+  if (!Array.isArray(v) || v.length > MAX_ROOMS || v.some((k) => typeof k !== 'string' || !k)) {
+    return { error: `rooms must be a list of up to ${MAX_ROOMS} room keys, or left out for the whole house` };
+  }
+  if (!v.length) return null;
+  const keys = [...new Set(v as string[])];
+  try { jobFor(device.id, keys); } catch (err) {
+    if (err instanceof RoomError) return { error: err.message };
+    throw err;
+  }
+  return JSON.stringify(keys);
+}
 
 // GET /api/schedules
 schedulesRouter.get('/', (_req: Request, res: Response) => {
-  const rows = getDb().prepare(LIST_SQL).all() as (ScheduleRow & { device_alias: string })[];
+  const rows = getDb().prepare(LIST_SQL).all() as Listed[];
   // When each runs next, for the page's "Coming up". A failure here never hides the list.
   let next = new Map<number, string | null>();
   try { next = nextRuns(rows, new Date(), getHomeSettings().timezone, solarLocation()); }
@@ -82,9 +124,7 @@ schedulesRouter.get('/', (_req: Request, res: Response) => {
 
 // GET /api/schedules/:id
 schedulesRouter.get('/:id', (req: Request, res: Response) => {
-  const row = getDb().prepare(
-    'SELECT s.*, d.alias AS device_alias FROM schedules s JOIN devices d ON d.id = s.device_id WHERE s.id = ?'
-  ).get(req.params.id) as (ScheduleRow & { device_alias: string }) | undefined;
+  const row = getDb().prepare(ONE_SQL).get(req.params.id) as Listed | undefined;
   if (!row) return res.status(404).json({ error: 'Schedule not found', code: 'NOT_FOUND' });
   res.json(toPublic(row));
 });
@@ -114,22 +154,22 @@ schedulesRouter.post('/', requireAdmin, (req: Request, res: Response) => {
   if (triggerType === 'auto_off' && (!durationMinutes || durationMinutes <= 0)) {
     return res.status(400).json({ error: 'durationMinutes (>0) required for auto_off trigger', code: 'VALIDATION_ERROR' });
   }
-  const stayOn = stayOnMinutes(req.body);
-  if (stayOn !== null && typeof stayOn === 'object') return res.status(400).json({ error: stayOn.error, code: 'VALIDATION_ERROR' });
-
   const db = getDb();
-  const device = db.prepare('SELECT id FROM devices WHERE id = ?').get(deviceId);
+  const device = db.prepare('SELECT id, driver_type FROM devices WHERE id = ?').get(deviceId) as { id: number; driver_type: string | null } | undefined;
   if (!device) return res.status(404).json({ error: 'Device not found', code: 'DEVICE_NOT_FOUND' });
+  // A robot vacuum stops when its job is done, so "Turn off after" would only send it home part way.
+  const stayOn = device.driver_type === 'roomba' ? null : stayOnMinutes(req.body);
+  if (stayOn !== null && typeof stayOn === 'object') return res.status(400).json({ error: stayOn.error, code: 'VALIDATION_ERROR' });
+  const rooms = scheduleRooms(req.body, device);
+  if (rooms !== null && typeof rooms === 'object') return res.status(400).json({ error: rooms.error, code: 'INVALID_ROOMS' });
 
   try {
     const result = db.prepare(`
-      INSERT INTO schedules (device_id, label, trigger_type, cron_expression, solar_event, solar_offset_minutes, duration_minutes, stay_on_minutes, state)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(deviceId, label, triggerType, cronExpression ?? null, solarEvent ?? null, solarOffsetMinutes, durationMinutes ?? null, stayOn, state ? 1 : 0);
+      INSERT INTO schedules (device_id, label, trigger_type, cron_expression, solar_event, solar_offset_minutes, duration_minutes, stay_on_minutes, rooms, state)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(deviceId, label, triggerType, cronExpression ?? null, solarEvent ?? null, solarOffsetMinutes, durationMinutes ?? null, stayOn, rooms, state ? 1 : 0);
 
-    const created = db.prepare(
-      'SELECT s.*, d.alias AS device_alias FROM schedules s JOIN devices d ON d.id = s.device_id WHERE s.id = ?'
-    ).get(result.lastInsertRowid) as (ScheduleRow & { device_alias: string });
+    const created = db.prepare(ONE_SQL).get(result.lastInsertRowid) as Listed;
 
     notifyScheduler();
     logger.info({ scheduleId: created.id, label, triggerType }, 'Schedule created');
@@ -164,25 +204,25 @@ schedulesRouter.put('/:id', requireAdmin, (req: Request, res: Response) => {
   if (triggerType === 'auto_off' && (!durationMinutes || durationMinutes <= 0)) {
     return res.status(400).json({ error: 'durationMinutes (>0) required for auto_off trigger', code: 'VALIDATION_ERROR' });
   }
-  const stayOn = stayOnMinutes(req.body);
-  if (stayOn !== null && typeof stayOn === 'object') return res.status(400).json({ error: stayOn.error, code: 'VALIDATION_ERROR' });
-
   const db = getDb();
-  const device = db.prepare('SELECT id FROM devices WHERE id = ?').get(deviceId);
+  const device = db.prepare('SELECT id, driver_type FROM devices WHERE id = ?').get(deviceId) as { id: number; driver_type: string | null } | undefined;
   if (!device) return res.status(404).json({ error: 'Device not found', code: 'DEVICE_NOT_FOUND' });
+  // A robot vacuum stops when its job is done, so "Turn off after" would only send it home part way.
+  const stayOn = device.driver_type === 'roomba' ? null : stayOnMinutes(req.body);
+  if (stayOn !== null && typeof stayOn === 'object') return res.status(400).json({ error: stayOn.error, code: 'VALIDATION_ERROR' });
+  const rooms = scheduleRooms(req.body, device);
+  if (rooms !== null && typeof rooms === 'object') return res.status(400).json({ error: rooms.error, code: 'INVALID_ROOMS' });
 
   const result = db.prepare(`
     UPDATE schedules
     SET device_id = ?, label = ?, trigger_type = ?, cron_expression = ?,
-        solar_event = ?, solar_offset_minutes = ?, duration_minutes = ?, stay_on_minutes = ?, state = ?
+        solar_event = ?, solar_offset_minutes = ?, duration_minutes = ?, stay_on_minutes = ?, rooms = ?, state = ?
     WHERE id = ?
-  `).run(deviceId, label, triggerType, cronExpression ?? null, solarEvent ?? null, solarOffsetMinutes, durationMinutes ?? null, stayOn, state ? 1 : 0, req.params.id);
+  `).run(deviceId, label, triggerType, cronExpression ?? null, solarEvent ?? null, solarOffsetMinutes, durationMinutes ?? null, stayOn, rooms, state ? 1 : 0, req.params.id);
 
   if (result.changes === 0) return res.status(404).json({ error: 'Schedule not found', code: 'NOT_FOUND' });
 
-  const updated = db.prepare(
-    'SELECT s.*, d.alias AS device_alias FROM schedules s JOIN devices d ON d.id = s.device_id WHERE s.id = ?'
-  ).get(req.params.id) as (ScheduleRow & { device_alias: string });
+  const updated = db.prepare(ONE_SQL).get(req.params.id) as Listed;
 
   notifyScheduler();
   logger.info({ scheduleId: updated.id, label, triggerType }, 'Schedule updated');
@@ -201,9 +241,7 @@ schedulesRouter.patch('/:id/toggle', requireAdmin, (req: Request, res: Response)
     .run(enabled ? 1 : 0, req.params.id);
   if (result.changes === 0) return res.status(404).json({ error: 'Schedule not found', code: 'NOT_FOUND' });
 
-  const updated = db.prepare(
-    'SELECT s.*, d.alias AS device_alias FROM schedules s JOIN devices d ON d.id = s.device_id WHERE s.id = ?'
-  ).get(req.params.id) as (ScheduleRow & { device_alias: string });
+  const updated = db.prepare(ONE_SQL).get(req.params.id) as Listed;
 
   notifyScheduler();
   res.json(toPublic(updated));

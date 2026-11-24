@@ -25,8 +25,19 @@ interface ScheduleRow {
   duration_minutes: number | null;
   /** On a Turn ON schedule: the backend turns the device off this many minutes later. Older databases lack it. */
   stay_on_minutes?: number | null;
+  /** A robot vacuum's Clean schedule: its rooms' keys, as JSON. Older databases lack it. */
+  rooms?: string | null;
   state: number;
   enabled: number;
+}
+
+/** A Clean schedule's room keys, or null for the whole house (and for anything unreadable). */
+function roomsOf(row: ScheduleRow): string[] | null {
+  if (!row.rooms) return null;
+  try {
+    const keys: unknown = JSON.parse(row.rooms);
+    return Array.isArray(keys) && keys.length ? keys.filter((k): k is string => typeof k === 'string') : null;
+  } catch { return null; }
 }
 
 export class SchedulerService {
@@ -276,6 +287,7 @@ export class SchedulerService {
         state: row.state === 1,
         label: row.label,
         ...(row.state === 1 && row.stay_on_minutes ? { stayOnMinutes: row.stay_on_minutes } : {}),
+        ...(row.state === 1 && roomsOf(row) ? { rooms: roomsOf(row) } : {}),
       }),
     });
 

@@ -121,6 +121,8 @@ Once rooms are named, the robot's row has **Whole house** and a button for each 
 
 **A job paused at home.** A robot sent home part way through a job keeps the job open, as the iRobot app shows with its play button and **End now**. HomeHub shows it as **Job paused at home** with **Resume** to carry on and **End job** to finish with it. Starting rooms or the whole house ends the paused job first, since the robot won't take a new one while it holds the old. HomeHub waits to see the robot set off, and if it doesn't, it says so rather than recording a clean that didn't happen. While a job is on, the robot's row says which rooms it's for, in order, or the whole house. When it goes home part way to recharge, it shows **Recharging, then carries on**; **End job** there stops it carrying on. When it goes home part way because its bin is full, it shows **Going home to empty its bin**, then **Emptying its bin, then carries on** at the Clean Base. If it stops there instead of carrying on, the row says so: the Clean Base's bag may be full, or something is stuck where the bin empties into the base. A robot that went home part way by itself, to recharge or empty its bin, sometimes sits there charged instead of carrying on. HomeHub then carries on the job for it after 5 minutes, once its battery is at least 95%, its bin isn't full and it reports no problem. It never does this when someone sent the robot home, nor straight after HomeHub restarts, when it can't tell. It tries twice a job; if the robot stops again, HomeHub notifies administrators to check the bin and Clean Base instead. Administrators can turn this off with **Carry on a job it stops at home** on the robot's row.
 
+**On a schedule.** In **Schedules**, add one for the robot. Its actions are **Clean** and **Send home**. For **Clean**, choose **Whole house** or rooms you've named, in the order to clean them, and the days and time. For example: Mon, Wed and Fri at 10 AM, Living room then Kitchen. It has no **Turn off after**, since the robot goes home by itself when it's done. A clean starts as it does from the dashboard: a job paused at home is ended first. If the robot is already out on a job then, it carries on with that one and the schedule is skipped. If it doesn't start, administrators get a notification. A room forgotten since the schedule was made is left out. If none of its rooms is left, it doesn't clean at all, and its card says so. Keep the robot's schedules in one place: a schedule in the iRobot app too would start it twice.
+
 A room's **All off** doesn't send the robot home, and it isn't one of a room's lights by voice. Its energy isn't estimated: it charges on its dock whether or not it's cleaning.
 
 The robot takes one local connection at a time. HomeHub keeps it, and the iRobot app then works through iRobot's cloud as usual. A backup HomeHub doesn't connect to the robot.
@@ -477,9 +479,12 @@ Open **Schedules** to see what happens next and to add a time for a device.
 
 A schedule can run:
 
-- **At a fixed time,** such as every weekday at 7 AM
+- **On days and at a time:** tap the days, such as **Mon**, **Wed** and **Fri**, and choose a time. Under it, the form says when it runs: "Runs: Every Mon, Wed and Fri at 10 AM".
 - **At a sun event,** such as 15 minutes before sunset
+- **At a cron time** (**Cron (advanced)**), for anything days and a time can't say, such as 8 AM and 8 PM every day (`0 8,20 * * *`)
 - **After a device turns on,** such as turning off after 10 minutes
+
+Editing a schedule that runs at one time on some days opens it as days and a time.
 
 Sun schedules use your home's location, from **Settings → Home**.
 

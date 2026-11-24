@@ -122,6 +122,24 @@ export async function cleanRooms(deviceId: number, keys: string[]): Promise<{ al
   return { alias: device.alias, names };
 }
 
+/**
+ * A schedule's clean: these rooms, or with none the whole house. Rooms forgotten since the schedule
+ * was made are left out; if none is left, it doesn't clean at all rather than the whole house. A robot
+ * already busy with a job keeps it: the schedule is skipped.
+ */
+export async function scheduledClean(deviceId: number, rooms: unknown): Promise<{ skipped: 'busy' } | { alias: string; names: string[]; missing: number }> {
+  const asked = Array.isArray(rooms) ? [...new Set(rooms.filter((k): k is string => typeof k === 'string'))] : [];
+  const known = new Set(roomsOf(deviceId).filter((r) => r.name).map((r) => r.key));
+  const keys = asked.filter((k) => known.has(k));
+  if (asked.length && !keys.length) throw new RoomError('None of this schedule’s rooms is known any more. Edit the schedule to choose its rooms again.', 404);
+  try {
+    return { ...(await cleanRooms(deviceId, keys)), missing: asked.length - keys.length };
+  } catch (err) {
+    if (err instanceof VacuumBusyError) return { skipped: 'busy' };
+    throw err;
+  }
+}
+
 /** Ends a job it holds paused, sends the new one and waits to see it set off. */
 async function startJob(device: { id: number; alias: string; ip: string }, login: RobotLogin, status: RobotStatus, job: RoomJob | null): Promise<void> {
   if (status.jobOpen) {

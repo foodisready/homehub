@@ -281,6 +281,95 @@ describe('Roomba rooms', () => {
     });
   });
 
+  describe('on a schedule', () => {
+    let server: import('node:http').Server;
+    let url = '';
+    const KEY = 'rooms-test-internal-key';
+    const run = (body: Record<string, unknown>) => fetch(`${url}/internal/devices/${deviceId}/execute`, {
+      method: 'POST', headers: { 'content-type': 'application/json', 'x-internal-key': KEY }, body: JSON.stringify({ state: true, label: 'Vacuum Mon, Wed, Fri', ...body }),
+    }).then(async (r) => ({ status: r.status, body: await r.json() as any }));
+    /** Two named rooms, the robot docked with no job, known off a while. */
+    const twoRooms = async () => {
+      robot.appJob(['7']); await tick();
+      robot.appJob(['9']); await tick();
+      const [k, l] = rooms.roomsOf(deviceId);
+      rooms.nameRoom(deviceId, k.key, 'Kitchen');
+      rooms.nameRoom(deviceId, l.key, 'Living Room');
+      robot.cycle = 'none'; robot.phase = 'charge'; robot.report(); await tick();
+      (await import('../kasa/device.cache')).noteState(deviceId, false, Date.now() - 60_000);
+      return { kitchen: k.key, living: l.key };
+    };
+
+    before(async () => {
+      process.env.INTERNAL_API_KEY = KEY;
+      const express = (await import('express')).default;
+      const { internalRouter } = await import('../routes/internal');
+      const app = express();
+      app.use(express.json());
+      app.use('/internal', internalRouter);
+      await new Promise<void>((ok) => { server = app.listen(0, '127.0.0.1', () => ok()); });
+      url = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+    });
+    after(async () => { await new Promise<void>((ok) => server.close(() => ok())); });
+
+    it('cleans its rooms in order, recorded as the schedule', async () => {
+      const { kitchen, living } = await twoRooms();
+      const r = await run({ rooms: [living, kitchen] });
+      assert.equal(r.status, 200);
+      assert.deepEqual(r.body.rooms, ['Living Room', 'Kitchen']);
+      assert.deepEqual((robot.sent.at(-1)!.regions as { region_id: string }[]).map((x) => x.region_id), ['9', '7']);
+      await tick();
+      const events = db.prepare("SELECT source, detail FROM device_events WHERE device_id = ? AND kind = 'power' AND state = 1").all(deviceId) as { source: string; detail: string }[];
+      assert.deepEqual(events, [{ source: 'schedule', detail: 'Vacuum Mon, Wed, Fri' }]);
+    });
+
+    it('cleans the whole house with no rooms, ending a job it held paused first', async () => {
+      await twoRooms();
+      robot.cycle = 'clean'; robot.phase = 'charge'; robot.report(); await tick();
+      robot.emit('message', 'shadow', Buffer.from(JSON.stringify({ state: { reported: { batPct: 100, cleanMissionStatus: { rechrgM: 0 } } } })));
+      await tick();
+      const r = await run({});
+      assert.equal(r.status, 200);
+      assert.deepEqual(r.body.rooms, []);
+      assert.deepEqual(robot.sent.map((c) => c.command), ['stop', 'start']);
+      assert.equal(robot.sent[1].regions, undefined, 'a plain start: the whole house');
+    });
+
+    it('leaves out a room forgotten since, and cleans nothing when none is left', async () => {
+      const { kitchen, living } = await twoRooms();
+      rooms.removeRoom(deviceId, living);
+      const r = await run({ rooms: [living, kitchen] });
+      assert.equal(r.status, 200);
+      assert.deepEqual(r.body.rooms, ['Kitchen']);
+      assert.equal(r.body.missing, 1);
+
+      robot.cycle = 'none'; robot.phase = 'charge'; robot.report(); await tick();
+      robot.sent.length = 0;
+      rooms.removeRoom(deviceId, kitchen);
+      const none = await run({ rooms: [living, kitchen] });
+      assert.equal(none.status, 503);
+      assert.match(none.body.error, /None of this schedule’s rooms/);
+      assert.equal(robot.sent.length, 0, 'not the whole house instead');
+    });
+
+    it('leaves a robot already out on a job to it', async () => {
+      const { kitchen } = await twoRooms();
+      robot.cycle = 'clean'; robot.phase = 'run'; robot.report(); await tick();
+      const r = await run({ rooms: [kitchen] });
+      assert.equal(r.status, 200);
+      assert.equal(r.body.skipped, true);
+      assert.equal(robot.sent.length, 0);
+    });
+
+    it('says so when the robot doesn’t set off', async () => {
+      await twoRooms();
+      robot.deaf = true;
+      const r = await run({});
+      assert.equal(r.status, 503);
+      assert.match(r.body.error, /didn’t start/);
+    });
+  });
+
   it('won’t clean a room that hasn’t been named', async () => {
     robot.appJob(['7']); await tick();
     assert.throws(() => rooms.jobFor(deviceId, [rooms.roomsOf(deviceId)[0].key]), /isn’t known/);
