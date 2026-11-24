@@ -11,6 +11,7 @@ interface Scene { id: number; name: string; icon: string | null }
 interface Schedule { id: number; deviceAlias: string; state: boolean; enabled: boolean; next?: string | null; problem?: string | null; stayOnMinutes?: number | null }
 interface Coming { key: string; at: number; names: string; state: boolean }
 
+const WINDOWED_KEY = 'homehub.wall.windowed';
 const NIGHT_KEY = 'homehub.wall.night';
 /** How long a tap keeps the night screen away. */
 const AWAKE_MS = 2 * 60_000;
@@ -321,7 +322,15 @@ export class WallFrameComponent implements OnInit, OnDestroy {
   private readonly onFull = () => this.isFull.set(!!document.fullscreenElement);
 
   /** Set by "Leave full screen": touches stop going full screen until "Full screen" is chosen. */
-  private stayWindowed = false;
+  private get stayWindowed(): boolean {
+    try { return sessionStorage.getItem(WINDOWED_KEY) === '1'; } catch { return this.windowed; }
+  }
+  private set stayWindowed(on: boolean) {
+    this.windowed = on;
+    try { if (on) sessionStorage.setItem(WINDOWED_KEY, '1'); else sessionStorage.removeItem(WINDOWED_KEY); } catch { /* this page only */ }
+  }
+  /** Kept for the tab, so a reload for an update doesn't undo it. */
+  private windowed = false;
   /**
    * A browser goes full screen only from a touch, so the first touch on a touch screen does it,
    * and the tap still does what it was on. Again after the tablet wakes or Chrome leaves it.
