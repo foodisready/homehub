@@ -48,7 +48,9 @@ const WORDS: Word[] = [
   { en: ['guest room', 'guest bedroom'], kind: 'place', vi: ['phòng ngủ khách'], yue: '客房', zh: '客房' },
   { en: ['bedroom'], kind: 'place', vi: ['phòng ngủ'], yue: '睡房', zh: '卧室' },
   { en: ['office', 'study'], kind: 'place', vi: ['phòng làm việc', 'văn phòng'], yue: '書房', zh: '书房' },
+  { en: ['master bath', 'master bathroom', 'main bathroom'], kind: 'place', vi: ['phòng tắm chính'], yue: '主人浴室', zh: '主卧浴室' },
   { en: ['bathroom', 'restroom', 'toilet'], kind: 'place', vi: ['phòng tắm'], yue: '浴室', zh: '浴室' },
+  { en: ['closet', 'walk-in closet', 'wardrobe'], kind: 'place', vi: ['phòng thay đồ'], yue: '衣帽間', zh: '衣帽间' },
   { en: ['hallway', 'hall', 'corridor'], kind: 'place', vi: ['hành lang'], yue: '走廊', zh: '走廊' },
   { en: ['laundry room', 'laundry'], kind: 'place', vi: ['phòng giặt'], yue: '洗衣房', zh: '洗衣房' },
   { en: ['basement'], kind: 'place', vi: ['tầng hầm'], yue: '地庫', zh: '地下室' },
@@ -218,4 +220,14 @@ export function suggestNicknames(device: SuggestDevice, languages: SuggestLangua
     }
   }
   return out;
+}
+
+/**
+ * A room's name in the other languages, when HomeHub knows its words: "Kitchen" is 廚房, 厨房,
+ * nhà bếp. For a robot vacuum's rooms, so "掃廚房" finds the room named Kitchen.
+ */
+export function placeNames(name: string): { yue: string | null; zh: string | null; vi: string[] } {
+  const r = readName(name);
+  const w = r && !r.owner && !r.pos && !r.mod ? (r.place && !r.thing ? r.place : r.thing && !r.place ? r.thing : null) : null;
+  return w ? { yue: w.yue, zh: w.zh, vi: w.vi } : { yue: null, zh: null, vi: [] };
 }

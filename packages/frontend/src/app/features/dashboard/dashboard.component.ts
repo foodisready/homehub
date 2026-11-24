@@ -269,6 +269,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
   private unsubOnline?: () => void;
   private unsubNoPower?: () => void;
   private unsubVacuum?: () => void;
+  private unsubVacuumRooms?: () => void;
   private unsubOverride?: () => void;
   private unsubMotion?: () => void;
   private unsubReconnect?: () => void;
@@ -320,6 +321,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.unsubOnline?.();
     this.unsubNoPower?.();
     this.unsubVacuum?.();
+    this.unsubVacuumRooms?.();
     this.unsubOverride?.();
     this.unsubMotion?.();
     this.unsubReconnect?.();
@@ -361,6 +363,9 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
     this.unsubVacuum = this.socket.onVacuumStatus((ev) => {
       this._devices.update((list) => list.map((d) => d.id === ev.id ? { ...d, vacuum: ev.vacuum } : d));
+    });
+    this.unsubVacuumRooms = this.socket.onVacuumRooms((ev) => {
+      this._devices.update((list) => list.map((d) => d.id === ev.id ? { ...d, vacuumRooms: ev.rooms } : d));
     });
 
     this.unsubNoPower = this.socket.onDeviceNoPower((ev) => {

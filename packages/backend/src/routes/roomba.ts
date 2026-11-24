@@ -2,7 +2,9 @@ import { Router, Request, Response } from 'express';
 import { getDb } from '../db';
 import { discover, fetchPassword } from '../roomba/protocol';
 import { closeLink, readStatus, sendCommand } from '../roomba/link';
-import { deviceForRobot } from '../roomba/service';
+import { cleanRooms, deviceForRobot } from '../roomba/service';
+import { RoomError, nameRoom, removeRoom, roomsView } from '../roomba/rooms';
+import { emitVacuumRooms } from '../socket';
 import { loginOf } from '../drivers/RoombaDriver';
 import { pollDeviceNow } from '../kasa/device.cache';
 import { requireAdmin } from '../middleware/auth';
@@ -132,5 +134,56 @@ roombaRouter.post('/:id/pause', async (req: Request, res: Response) => {
   } catch (err) {
     logger.warn({ id: device.id, reason: (err as Error).message }, 'Could not pause Roomba');
     res.status(503).json({ error: `Couldn’t reach ${device.alias}`, code: 'DEVICE_UNREACHABLE' });
+  }
+});
+
+const roomsNow = (id: number) => roomsView((getDb().prepare('SELECT driver_config FROM devices WHERE id = ?').get(id) as { driver_config: string | null } | undefined)?.driver_config ?? null);
+
+function roomFailure(res: Response, err: unknown, what: string) {
+  if (err instanceof RoomError) return res.status(err.status).json({ error: err.message, code: err.status === 404 ? 'NOT_FOUND' : err.status === 409 ? 'CONFLICT' : 'VALIDATION_ERROR' });
+  logger.warn({ reason: (err as Error).message }, what);
+  return res.status(503).json({ error: 'Couldn’t reach the robot', code: 'DEVICE_UNREACHABLE' });
+}
+
+/** PUT /api/roomba/:id/rooms { key, name } — names a room the robot was seen cleaning. */
+roombaRouter.put('/:id/rooms', requireAdmin, (req: Request, res: Response) => {
+  const id = Number(req.params.id);
+  const { key, name } = req.body as { key?: unknown; name?: unknown };
+  if (typeof key !== 'string') return res.status(400).json({ error: 'key is required', code: 'VALIDATION_ERROR' });
+  try {
+    nameRoom(id, key, name);
+    const rooms = roomsNow(id);
+    emitVacuumRooms(id, rooms);
+    res.json({ rooms });
+  } catch (err) {
+    roomFailure(res, err, 'Could not name Roomba room');
+  }
+});
+
+/** POST /api/roomba/:id/rooms/remove { key } — forgets a room, e.g. one learned by mistake. */
+roombaRouter.post('/:id/rooms/remove', requireAdmin, (req: Request, res: Response) => {
+  const id = Number(req.params.id);
+  const { key } = req.body as { key?: unknown };
+  if (typeof key !== 'string') return res.status(400).json({ error: 'key is required', code: 'VALIDATION_ERROR' });
+  try {
+    removeRoom(id, key);
+    const rooms = roomsNow(id);
+    emitVacuumRooms(id, rooms);
+    res.json({ rooms });
+  } catch (err) {
+    roomFailure(res, err, 'Could not remove Roomba room');
+  }
+});
+
+/** POST /api/roomba/:id/clean { rooms: [key, …] } — cleans these named rooms, in this order. */
+roombaRouter.post('/:id/clean', async (req: Request, res: Response) => {
+  const { rooms } = req.body as { rooms?: unknown };
+  if (!Array.isArray(rooms) || rooms.some((r) => typeof r !== 'string')) {
+    return res.status(400).json({ error: 'rooms must be a list of room keys', code: 'VALIDATION_ERROR' });
+  }
+  try {
+    res.json(await cleanRooms(Number(req.params.id), rooms as string[]));
+  } catch (err) {
+    roomFailure(res, err, 'Could not start Roomba room clean');
   }
 });

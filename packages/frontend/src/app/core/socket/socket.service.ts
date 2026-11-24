@@ -1,7 +1,7 @@
 import { Injectable, OnDestroy } from '@angular/core';
 import { io, Socket } from 'socket.io-client';
 import { AuthService } from '../auth/auth.service';
-import type { VacuumStatus } from '../../shared/vacuum';
+import type { VacuumRoom, VacuumStatus } from '../../shared/vacuum';
 
 export interface DeviceStateEvent {
   id: number;
@@ -128,6 +128,12 @@ export class SocketService implements OnDestroy {
   onVacuumStatus(callback: (event: { id: number; vacuum: VacuumStatus }) => void): () => void {
     this.socket?.on('vacuum:status', callback);
     return () => this.socket?.off('vacuum:status', callback);
+  }
+
+  /** A robot vacuum learned a room, or one was named or forgotten. */
+  onVacuumRooms(callback: (event: { id: number; rooms: VacuumRoom[] }) => void): () => void {
+    this.socket?.on('vacuum:rooms', callback);
+    return () => this.socket?.off('vacuum:rooms', callback);
   }
 
   onDeviceOverride(callback: (event: DeviceOverrideEvent) => void): () => void {

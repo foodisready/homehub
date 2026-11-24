@@ -1,4 +1,5 @@
 import { announcementDone, answerAsk, openAsks, pendingAnnouncements } from '../family/reminders';
+import { runVacuumCommand } from '../nlp/vacuum-rooms';
 import { cancel as cancelSos, openAlert as openSos, raise as raiseSos, reach as sosReach } from '../family/sos';
 import { answerCheckinAsk, openCheckinAsks } from '../family/checkin';
 import { Router, Request, Response } from 'express';
@@ -132,7 +133,7 @@ internalRouter.post('/voice/command', async (req: Request, res: Response) => {
   const said = typeof heard === 'string' && heard.trim() ? heard.trim() : null;
   const reading = { who: 'voice', lang: language, heard: said, timeoutMs: 4_000, windowMs: FOLLOW_UP_MS.voice };
 
-  const ruled = await withActivity({ source: 'voice' }, () => runPowerCommand(spoken));
+  const ruled = await withActivity({ source: 'voice' }, async () => await runVacuumCommand(spoken) ?? runPowerCommand(spoken));
   if (ruled?.ask) {
     // Turning a thermostat off: the speaker asks first and listens for the yes, on the bridge's
     // quick first hearing too (it sends ask only on its careful second one, but listens for a

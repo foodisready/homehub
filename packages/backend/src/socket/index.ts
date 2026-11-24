@@ -118,6 +118,11 @@ export function emitSensorAlert(
   _io?.emit('sensor:flow:alert', { id: sensorRowId, sensorId: sensorKey, eventId, alertLevel, rateM3h });
 }
 
+/** A robot vacuum learned a room, or one was named: the device's rooms as the device list has them. */
+export function emitVacuumRooms(deviceId: number, rooms: object[]): void {
+  _io?.emit('vacuum:rooms', { id: deviceId, rooms });
+}
+
 /** A robot vacuum's status changed: what it's doing, its battery, bin or a problem. */
 export function emitVacuumStatus(deviceId: number, vacuum: object): void {
   _io?.emit('vacuum:status', { id: deviceId, vacuum });

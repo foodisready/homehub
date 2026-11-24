@@ -13,6 +13,9 @@ export interface VacuumStatus {
   error: string | null;
 }
 
+/** A room learned from a job the robot was given: named, or waiting for a name. */
+export interface VacuumRoom { key: string; name: string | null; seenAt: string }
+
 export const isVacuum = (d: Pick<Device, 'driverType'>) => d.driverType === 'roomba';
 
 /** "Cleaning", "Going home", "Charging"… one or two words, for a small tile. */

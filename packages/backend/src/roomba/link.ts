@@ -9,8 +9,8 @@
 import mqtt, { type MqttClient } from 'mqtt';
 import { logger } from '../logger';
 import {
-  MQTT_PORT, TLS_OPTIONS, commandPayload, mergeReported, statusOf,
-  type Command, type Reported, type RobotStatus,
+  MQTT_PORT, TLS_OPTIONS, commandPayload, mergeReported, roomJobOf, roomsPayload, statusOf,
+  type Command, type Reported, type RobotStatus, type RoomJob,
 } from './protocol';
 
 export interface RobotLogin { blid: string; password: string }
@@ -30,6 +30,14 @@ export function onRobotStatus(listener: Listener): void {
   listeners.push(listener);
 }
 
+type JobListener = (blid: string, job: RoomJob) => void;
+const jobListeners: JobListener[] = [];
+
+/** Runs when the robot reports a room job it was given, from HomeHub, the iRobot app or its own schedule. */
+export function onRoomJob(listener: JobListener): void {
+  jobListeners.push(listener);
+}
+
 /** For tests: replaces how a connection is made. */
 let connect: (url: string, options: mqtt.IClientOptions) => MqttClient = (url, options) => mqtt.connect(url, options);
 export function setConnectForTests(fn: typeof connect): void { connect = fn; }
@@ -41,6 +49,8 @@ class Link {
   private waiting: (() => void)[] = [];
   /** The last try to connect failed: say so at once rather than wait for the next. */
   private down = false;
+  /** The last room job reported, so one seen again on reconnecting isn't news. */
+  private lastJob = '';
   lastUsed = Date.now();
 
   constructor(readonly ip: string, readonly login: RobotLogin) {}
@@ -65,12 +75,21 @@ class Link {
   }
 
   async send(command: Command): Promise<void> {
+    await this.publish(commandPayload(command));
+    logger.info({ ip: this.ip, command }, 'Roomba command sent');
+  }
+
+  async sendRooms(job: RoomJob): Promise<void> {
+    await this.publish(roomsPayload(job));
+    logger.info({ ip: this.ip, rooms: job.regions.map((r) => r.id) }, 'Roomba room clean sent');
+  }
+
+  private async publish(payload: string): Promise<void> {
     this.lastUsed = Date.now();
     await this.read();   // connected, or throws
     await new Promise<void>((resolve, reject) => {
-      this.client!.publish('cmd', commandPayload(command), { qos: 0 }, (err) => (err ? reject(err) : resolve()));
+      this.client!.publish('cmd', payload, { qos: 0 }, (err) => (err ? reject(err) : resolve()));
     });
-    logger.info({ ip: this.ip, command }, 'Roomba command sent');
   }
 
   private open(): void {
@@ -119,6 +138,16 @@ class Link {
     const reported = (update as { state?: { reported?: unknown } })?.state?.reported;
     if (!reported || typeof reported !== 'object') return;
     mergeReported(this.reported, reported as Record<string, unknown>);
+    // lastCommand is replaced whole, not merged: a whole-house job has no rooms to keep from the last.
+    if ('lastCommand' in (reported as Record<string, unknown>)) this.reported.lastCommand = (reported as Record<string, unknown>).lastCommand;
+    const job = 'lastCommand' in (reported as Record<string, unknown>) ? roomJobOf(this.reported as Reported) : null;
+    if (job) {
+      const key = JSON.stringify(job);
+      if (key !== this.lastJob) {
+        this.lastJob = key;
+        for (const listener of jobListeners) listener(this.login.blid, job);
+      }
+    }
     const next = statusOf(this.reported as Reported);
     if (!next) return;
     const changed = !this.status || (Object.keys(next) as (keyof RobotStatus)[]).some((k) => next[k] !== this.status![k]);
@@ -162,6 +191,8 @@ function linkFor(ip: string, login: RobotLogin): Link {
 export const readStatus = (ip: string, login: RobotLogin): Promise<RobotStatus> => linkFor(ip, login).read();
 
 export const sendCommand = (ip: string, login: RobotLogin, command: Command): Promise<void> => linkFor(ip, login).send(command);
+
+export const sendRoomJob = (ip: string, login: RobotLogin, job: RoomJob): Promise<void> => linkFor(ip, login).sendRooms(job);
 
 /** The robot's status as last reported, or null if HomeHub isn't connected to it. */
 export const peekStatus = (blid: string): RobotStatus | null => links.get(blid)?.peek() ?? null;

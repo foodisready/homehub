@@ -12,6 +12,7 @@ import { applyPower, assistantMaySwitch, isProtectedDevice, type PowerDevice } f
 import { logger } from '../logger';
 import { findDeviceByName, findDeviceGroup, listDeviceNames, NOT_A_LIGHT } from './find-device';
 import { isCamera, isGarageDoor, runGroupCommand, runPowerCommand, type ThermostatAsk } from './commands';
+import { runVacuumCommand, cleanRoomsByName } from './vacuum-rooms';
 import { hasChinese, MANDARIN, runNativeCommand } from './native-commands';
 import { recordCommand } from './command-log';
 import { looksLikeToolCall, toolArguments, toolCallInText } from './tool-args';
@@ -89,6 +90,20 @@ export const TOOLS: OllamaTool[] = [
           minutes: { type: 'string', description: 'Only with state "on": turn the device off after this many minutes, e.g. "60" for an hour' },
         },
         required: ['alias', 'state'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'clean_rooms',
+      description: 'Send the robot vacuum to clean particular rooms, or the whole house. Rooms are the names it was given in HomeHub.',
+      parameters: {
+        type: 'object',
+        properties: {
+          rooms: { type: 'string', description: 'Room names separated by commas, e.g. "Kitchen, Living Room", or "whole house"' },
+        },
+        required: ['rooms'],
       },
     },
   },
@@ -205,6 +220,13 @@ async function executeTool(name: string, args: Record<string, unknown>, userMess
         off:     states.filter((d) => d.cached?.online && !d.cached.state).map((d) => d.alias),
         offline: states.filter((d) => !d.cached?.online).map((d) => d.alias),
       };
+    }
+
+    case 'clean_rooms': {
+      if (asksForLater(userMessage)) {
+        return { error: 'The user asked for this at a later time or on a schedule, not now. Use create_schedule, or ask them when. Nothing was started.' };
+      }
+      return cleanRoomsByName(String(args.rooms ?? ''));
     }
 
     case 'set_power_state': {
@@ -634,7 +656,7 @@ type Handled = { response: string; actions: ActionTaken[] };
 const CHAT_QUESTION = { timeoutMs: 6_000, windowMs: FOLLOW_UP_MS.chat };
 
 const byRules = async (text: string, who: string): Promise<Handled | null> => {
-  const ruled = await runPowerCommand(text) ?? await runNativeCommand(text);
+  const ruled = await runVacuumCommand(text) ?? await runPowerCommand(text) ?? await runNativeCommand(text);
   if (ruled?.ask) {
     // Turning a thermostat off: asked first, and done on a yes (byAnswer).
     const lang: Lang = 'lang' in ruled && typeof ruled.lang === 'string' ? ruled.lang as Lang : 'en';

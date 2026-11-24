@@ -115,6 +115,10 @@ HomeHub asks the robot for its own password while you hold the button, and keeps
 
 On the dashboard, the robot's switch is on while it's out cleaning, and turning it off sends it home to its dock. Its row says what it's doing, such as **Cleaning · 64%**, **Going home** or **Charging · 88% · Bin full**, and turns amber when it's stuck or its bin is full. Open the row for **Start cleaning**, **Pause**, **Resume** and **Send home**, or to send it home after 30 minutes, 1 hour or 2 hours. Schedules and scenes can start it or send it home, and Activity shows when it started and went home, including jobs started by the iRobot app or the robot's own schedule.
 
+**Cleaning particular rooms.** The robot knows its rooms only by number; the names are in iRobot's cloud. So HomeHub learns each room once: in the iRobot app, tap **New job**, pick one room and start it (you can stop it straight away). The robot's row on the dashboard then says **New room seen** and asks for its name. Do this once for each room you want. A job with several rooms doesn't teach HomeHub anything, since it doesn't say which number is which room.
+
+Once rooms are named, the robot's row has **Whole house** and a button for each room: pick one or more and select **Clean**. They're cleaned in the order you picked them. By voice or in Chat, say "vacuum the kitchen", "clean the breakfast room and the living room", "vacuum the whole house", "掃廚房", "打扫厨房" or "hút bụi nhà bếp". HomeHub won't start rooms while the robot is out on a job, since that would replace the job it's on: send it home first. An administrator can rename or forget rooms from the same row.
+
 A room's **All off** doesn't send the robot home, and it isn't one of a room's lights by voice. Its energy isn't estimated: it charges on its dock whether or not it's cleaning.
 
 The robot takes one local connection at a time. HomeHub keeps it, and the iRobot app then works through iRobot's cloud as usual. A backup HomeHub doesn't connect to the robot.

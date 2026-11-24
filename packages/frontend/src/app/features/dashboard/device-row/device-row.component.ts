@@ -7,6 +7,7 @@ import { type ActivityEvent, actionWord, causeText, clock, when } from '../../..
 import { ThermostatControlComponent } from '../../../shared/thermostat/thermostat-control.component';
 import { ThermostatService, offQuestion, summary } from '../../../shared/thermostat/thermostat.service';
 import { isVacuum, vacuumDetail, vacuumNeedsHelp } from '../../../shared/vacuum';
+import { AuthService } from '../../../core/auth/auth.service';
 
 export interface OverrideRequest { device: Device; durationMinutes: number; }
 
@@ -34,6 +35,9 @@ export interface OverrideRequest { device: Device; durationMinutes: number; }
     .small:disabled { opacity: 0.5; }
     .vac-msg { font-size: 0.78rem; margin: 0; color: var(--text-muted); }
     .vac-msg.err { color: #fbbf24; }
+    .small.picked { border-color: var(--green); color: var(--green); }
+    .room-name { flex: 1 1 9rem; min-width: 0; font-size: 0.85rem; padding: 0.4rem 0.6rem; }
+    .link-btn { background: none; border: none; padding: 0; color: var(--accent, #60a5fa); font-size: 0.8rem; cursor: pointer; text-align: left; }
 
     .name {
       flex: 1; min-width: 0; padding: 0.3rem 0; background: transparent; color: var(--text);
@@ -108,9 +112,18 @@ export interface OverrideRequest { device: Device; durationMinutes: number; }
         }
         @if (isThermostat()) { <app-thermostat-control [deviceId]="device().id" /> }
         @if (isVac()) {
+          @if (namedRooms().length && !device().vacuum?.cleaning) {
+            <span class="panel-label">Clean</span>
+            <div class="buttons" role="group" aria-label="Rooms to clean">
+              <button class="small" type="button" [class.picked]="!picked().length" [attr.aria-pressed]="!picked().length" (click)="picked.set([])">Whole house</button>
+              @for (room of namedRooms(); track room.key) {
+                <button class="small" type="button" [class.picked]="picked().includes(room.key)" [attr.aria-pressed]="picked().includes(room.key)" (click)="togglePick(room.key)">{{ room.name }}</button>
+              }
+            </div>
+          }
           <div class="buttons">
             @if (vacuumCanStart()) {
-              <button class="small go" type="button" [disabled]="busy() || vacBusy() || !device().online" (click)="vacuumStart()">{{ device().vacuum?.activity === 'paused' ? 'Resume' : 'Start cleaning' }}</button>
+              <button class="small go" type="button" [disabled]="busy() || vacBusy() || !device().online" (click)="vacuumStart()">{{ startLabel() }}</button>
             }
             @if (device().vacuum?.activity === 'cleaning') {
               <button class="small" type="button" [disabled]="busy() || vacBusy() || !device().online" (click)="vacuumPause()">Pause</button>
@@ -122,6 +135,38 @@ export interface OverrideRequest { device: Device; durationMinutes: number; }
           @if (vacError()) { <p class="vac-msg err">{{ vacError() }}</p> }
           @else if (device().vacuum?.binFull) { <p class="vac-msg err">Its bin is full. Empty it so it can clean properly.</p> }
           @else if (device().vacuum?.activity === 'stuck') { <p class="vac-msg err">It needs a hand where it stopped. The iRobot app shows where that is.</p> }
+          @if (isAdmin()) {
+            @for (room of unnamedRooms(); track room.key) {
+              <span class="panel-label">New room seen {{ seen(room.seenAt) }}. What's it called?</span>
+              <div class="buttons">
+                <input class="room-name" type="text" maxlength="40" placeholder="e.g. Kitchen" [attr.list]="'vac-rooms-' + device().id"
+                       [attr.aria-label]="'Name for the room seen ' + time(room.seenAt)" [value]="drafts()[room.key] ?? ''" (input)="setDraft(room.key, $event)" (keydown.enter)="saveRoom(room.key)" />
+                <button class="small go" type="button" [disabled]="vacBusy() || !(drafts()[room.key] ?? '').trim()" (click)="saveRoom(room.key)">Save</button>
+                <button class="small" type="button" [disabled]="vacBusy()" (click)="forgetRoom(room.key)">Forget</button>
+              </div>
+            }
+            @if (namedRooms().length) {
+              <button class="link-btn" type="button" [attr.aria-expanded]="editingRooms()" (click)="editingRooms.set(!editingRooms())">{{ editingRooms() ? 'Done' : 'Rename or forget rooms' }}</button>
+              @if (editingRooms()) {
+                @for (room of namedRooms(); track room.key) {
+                  <div class="buttons">
+                    <input class="room-name" type="text" maxlength="40" [attr.list]="'vac-rooms-' + device().id" [attr.aria-label]="'Name for ' + room.name"
+                           [value]="drafts()[room.key] ?? room.name" (input)="setDraft(room.key, $event)" (keydown.enter)="saveRoom(room.key)" />
+                    <button class="small" type="button" [disabled]="vacBusy() || !(drafts()[room.key] ?? '').trim() || drafts()[room.key] === room.name" (click)="saveRoom(room.key)">Rename</button>
+                    <button class="small" type="button" [disabled]="vacBusy()" (click)="forgetRoom(room.key)">Forget</button>
+                  </div>
+                }
+              }
+            }
+            <datalist [id]="'vac-rooms-' + device().id">
+              @for (n of ROOM_NAMES; track n) { <option [value]="n"></option> }
+            </datalist>
+          }
+          @if (!namedRooms().length && !unnamedRooms().length) {
+            <p class="vac-msg">To clean single rooms from here, start a clean of one room in the iRobot app (New job, then pick one room). HomeHub learns that room and asks for its name. Do it once for each room.</p>
+          } @else if (unnamedRooms().length && !isAdmin()) {
+            <p class="vac-msg">The robot cleaned a room HomeHub hasn't got a name for yet. An administrator can name it here.</p>
+          }
         }
         <span class="panel-label">
           {{ isVac() ? 'iRobot Roomba' + (device().model ? ' · ' + device().model : '') : (device().model ?? device().driverType) }}
@@ -190,6 +235,23 @@ export class DeviceRowComponent implements OnDestroy {
   });
   readonly vacBusy = signal(false);
   readonly vacError = signal('');
+  private readonly auth = inject(AuthService);
+  readonly isAdmin = computed(() => this.auth.user()?.role === 'admin');
+  readonly namedRooms = computed(() => (this.device().vacuumRooms ?? []).filter((r) => r.name));
+  readonly unnamedRooms = computed(() => (this.device().vacuumRooms ?? []).filter((r) => !r.name));
+  /** Rooms picked to clean, in the order they were picked. None is the whole house. */
+  readonly picked = signal<string[]>([]);
+  readonly drafts = signal<Record<string, string | undefined>>({});
+  readonly editingRooms = signal(false);
+  /** Suggested names: the usual rooms a robot vacuum cleans. */
+  readonly ROOM_NAMES = ['Kitchen', 'Living Room', 'Family Room', 'Dining Room', 'Breakfast Room', 'Bedroom', 'Master Bedroom',
+    'Bathroom', 'Master Bath', 'Hallway', 'Entryway', 'Front Door', 'Laundry Room', 'Office', 'Closet', 'Playroom', 'Basement'];
+  readonly startLabel = computed(() => {
+    const keys = this.picked().filter((k) => this.namedRooms().some((r) => r.key === k));
+    if (keys.length === 1) return `Clean ${this.namedRooms().find((r) => r.key === keys[0])!.name}`;
+    if (keys.length > 1) return `Clean ${keys.length} rooms`;
+    return this.device().vacuum?.activity === 'paused' ? 'Resume' : this.namedRooms().length ? 'Clean whole house' : 'Start cleaning';
+  });
   private readonly thermostats = inject(ThermostatService);
   private readonly watchThermostat = effect(() => { if (this.isThermostat()) untracked(() => this.thermostats.watch(this.device().id)); });
 
@@ -327,6 +389,9 @@ export class DeviceRowComponent implements OnDestroy {
     return t.charAt(0).toUpperCase() + t.slice(1);
   };
 
+  /** "today 9:56 PM", "yesterday 7:10 AM", "Nov 1, 6:12 PM". */
+  seen = (iso: string) => this.time(iso).replace(/^(Today|Yesterday)/, (w) => w.toLowerCase());
+
   recentText(e: ActivityEvent): string {
     return `${actionWord(e.driverType, e.state)} ${causeText(e)}`;
   }
@@ -341,10 +406,45 @@ export class DeviceRowComponent implements OnDestroy {
     else this.toggled.emit(this.device());
   }
 
-  /** Start, or carry on with a paused job: the device's "on". */
+  /** Start the picked rooms; or the whole house, or carry on with a paused job: the device's "on". */
   vacuumStart(): void {
     this.vacError.set('');
-    this.toggled.emit({ ...this.device(), state: false });
+    const keys = this.picked().filter((k) => this.namedRooms().some((r) => r.key === k));
+    if (!keys.length) { this.toggled.emit({ ...this.device(), state: false }); return; }
+    this.vacBusy.set(true);
+    this.http.post(`/api/roomba/${this.device().id}/clean`, { rooms: keys }).subscribe({
+      next: () => { this.vacBusy.set(false); this.picked.set([]); },
+      error: (e) => { this.vacBusy.set(false); this.vacError.set(e?.error?.error ?? 'Couldn’t start it.'); },
+    });
+  }
+
+  togglePick(key: string): void {
+    this.picked.update((p) => (p.includes(key) ? p.filter((k) => k !== key) : [...p, key]));
+  }
+
+  setDraft(key: string, event: Event): void {
+    const value = (event.target as HTMLInputElement).value;
+    this.drafts.update((d) => ({ ...d, [key]: value }));
+  }
+
+  saveRoom(key: string): void {
+    const name = (this.drafts()[key] ?? '').trim();
+    if (!name) return;
+    this.vacError.set('');
+    this.vacBusy.set(true);
+    this.http.put(`/api/roomba/${this.device().id}/rooms`, { key, name }).subscribe({
+      next: () => { this.vacBusy.set(false); this.drafts.update((d) => { const { [key]: _gone, ...rest } = d; return rest; }); },
+      error: (e) => { this.vacBusy.set(false); this.vacError.set(e?.error?.error ?? 'Couldn’t save the name.'); },
+    });
+  }
+
+  forgetRoom(key: string): void {
+    this.vacError.set('');
+    this.vacBusy.set(true);
+    this.http.post(`/api/roomba/${this.device().id}/rooms/remove`, { key }).subscribe({
+      next: () => { this.vacBusy.set(false); this.picked.update((p) => p.filter((k) => k !== key)); },
+      error: (e) => { this.vacBusy.set(false); this.vacError.set(e?.error?.error ?? 'Couldn’t forget the room.'); },
+    });
   }
 
   /** Back to its dock: the device's "off". */

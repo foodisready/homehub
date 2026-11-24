@@ -177,7 +177,40 @@ export interface Reported {
   batPct?: number;
   bin?: { present?: boolean; full?: boolean };
   cleanMissionStatus?: { cycle?: string; phase?: string; error?: number; notReady?: number };
+  /** The last job it was given, from any app: a room clean names its map and rooms. */
+  lastCommand?: { command?: string; pmap_id?: string; user_pmapv_id?: string; regions?: { region_id?: unknown; type?: unknown }[] };
 }
+
+/** A room on the robot's map: its id there, and "rid" for a room ("zid" is a zone drawn in the app). */
+export interface Region { id: string; type: string }
+
+/** A job for particular rooms: which map, which version of it, and the rooms in order. */
+export interface RoomJob { pmapId: string; versionId: string; regions: Region[] }
+
+/**
+ * The rooms the robot was last sent to, from its reported lastCommand. The robot knows rooms
+ * only by number; their names live in iRobot's cloud, so HomeHub learns each from a job run once.
+ */
+export function roomJobOf(r: Reported): RoomJob | null {
+  const c = r.lastCommand;
+  if (!c || c.command !== 'start' || typeof c.pmap_id !== 'string' || !c.pmap_id || !Array.isArray(c.regions)) return null;
+  const regions = c.regions
+    .map((x) => ({ id: typeof x?.region_id === 'string' || typeof x?.region_id === 'number' ? String(x.region_id) : '', type: typeof x?.type === 'string' ? x.type : 'rid' }))
+    .filter((x) => x.id);
+  if (!regions.length) return null;
+  return { pmapId: c.pmap_id, versionId: typeof c.user_pmapv_id === 'string' ? c.user_pmapv_id : '', regions };
+}
+
+/** Starts a job for these rooms, in this order, as the iRobot app does. */
+export const roomsPayload = (job: RoomJob, now = Date.now()): string => JSON.stringify({
+  command: 'start',
+  ordered: 1,
+  pmap_id: job.pmapId,
+  regions: job.regions.map((r) => ({ region_id: r.id, type: r.type })),
+  ...(job.versionId ? { user_pmapv_id: job.versionId } : {}),
+  time: Math.floor(now / 1000),
+  initiator: 'localApp',
+});
 
 /**
  * The common problems, in words. Codes from iRobot's app as Home Assistant
