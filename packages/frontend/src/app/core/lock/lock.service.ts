@@ -81,11 +81,41 @@ export class LockService {
   }
 
   lockNow(): void {
+    this.cancelAsk();
     if (this.pinSet()) this.setLocked(true);
   }
 
+  /** What the PIN is being asked for, when it's asked before doing something rather than to unlock. */
+  readonly asking = signal<string | null>(null);
+  private then: (() => void) | null = null;
+
+  /**
+   * Asks for the PIN before doing something, such as leaving the wall display, on the lock screen
+   * with a Cancel. With no PIN on this login it just does it. Cancelling leaves the screen as it was.
+   */
+  askPin(what: string, then: () => void): void {
+    if (!this.pinSet()) { then(); return; }
+    this.then = then;
+    this.asking.set(what);
+    this.setLocked(true);
+  }
+
+  cancelAsk(): void {
+    if (this.asking() === null) return;
+    this.then = null;
+    this.asking.set(null);
+    this.setLocked(false);
+  }
+
   unlock(pin: string): Observable<unknown> {
-    return this.http.post('/api/lock/check', { pin }).pipe(tap(() => { this.lastTouch = Date.now(); this.setLocked(false); }));
+    return this.http.post('/api/lock/check', { pin }).pipe(tap(() => {
+      this.lastTouch = Date.now();
+      this.setLocked(false);
+      const then = this.then;
+      this.then = null;
+      this.asking.set(null);
+      then?.();
+    }));
   }
 
   saveSettings(s: LockSettings): void {

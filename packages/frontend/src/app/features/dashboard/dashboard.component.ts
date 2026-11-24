@@ -1,6 +1,7 @@
 import { Component, OnInit, OnDestroy, signal, computed } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { ActivatedRoute, Router } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
+import { isWallHome } from '../../core/wall-home';
 import { DecimalPipe } from '@angular/common';
 import { AuthService } from '../../core/auth/auth.service';
 import { SocketService, DeviceStateEvent, DeviceOnlineEvent, DeviceOverrideEvent } from '../../core/socket/socket.service';
@@ -57,8 +58,10 @@ const isThermostat = (d: Device) => d.driverConfig?.['kind'] === 'thermostat';
 @Component({
   selector: 'app-dashboard',
   standalone: true,
-  imports: [DeviceRowComponent, RoomsViewComponent, DeviceFilterComponent, SystemStatusComponent, HomeSetupNoticeComponent, CamerasCardComponent, AlarmCardComponent, AwayComponent, DecimalPipe, WallFrameComponent],
+  imports: [DeviceRowComponent, RoomsViewComponent, DeviceFilterComponent, SystemStatusComponent, HomeSetupNoticeComponent, CamerasCardComponent, AlarmCardComponent, AwayComponent, DecimalPipe, WallFrameComponent, RouterLink],
   styles: [`
+    .back-to-wall { display: flex; align-items: center; justify-content: center; min-height: 3rem; margin: 0 0 0.75rem; border-radius: 14px;
+      background: var(--accent); color: #fff; font-weight: 650; text-decoration: none; }
     .topbar {
       display: flex;
       align-items: center;
@@ -136,6 +139,8 @@ const isThermostat = (d: Device) => d.driverConfig?.['kind'] === 'thermostat';
         <h1>HomeHub</h1>
       </div>
 
+      <!-- A wall tablet visiting the rest of HomeHub: one tap back. -->
+      @if (wallTablet) { <a class="back-to-wall" routerLink="/wall">‹ Back to wall display</a> }
       <!-- HomeHub self-update card (shows when an upstream release is available) -->
       <app-system-status />
       <app-home-setup-notice />
@@ -205,6 +210,9 @@ const isThermostat = (d: Device) => d.driverConfig?.['kind'] === 'thermostat';
   `,
 })
 export class DashboardComponent implements OnInit, OnDestroy {
+  /** This tablet is a wall display, visiting the Dashboard. */
+  readonly wallTablet = isWallHome();
+
 
   private readonly _devices  = signal<Device[]>([]);
   private readonly _busyIds  = signal<Set<number>>(new Set());

@@ -73,6 +73,10 @@ const joinNames = (n: string[]) => (n.length <= 1 ? n.join('') : n.length > 3
     .pin-row { display: flex; gap: 0.6rem; align-items: flex-end; flex-wrap: wrap; margin-bottom: 0.6rem; }
     .pin-row label { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.8rem; color: var(--text-muted); }
     .pin-row input { width: 7.5rem; letter-spacing: 0.3em; }
+    /* PINs are typed into plain boxes that hide the digits: a password box would have the browser offer
+       to save the PIN as the site's password, and replace the real one. */
+    .pin-row input.pin { -webkit-text-security: disc; text-security: disc; }
+    .pin-row input::placeholder { letter-spacing: normal; }
     .pin-row button { padding: 0.55rem 1rem; border-radius: 10px; }
     .err { color: var(--red); font-size: 0.85rem; margin: 0 0 0.6rem; }
     .danger-btn { background: var(--red); color: #fff; border: none; padding: 0.55rem 1rem; border-radius: 10px; font-weight: 600; }
@@ -159,16 +163,16 @@ const joinNames = (n: string[]) => (n.length <= 1 ? n.join('') : n.length > 3
           @if (lock.pinSet() === false || pinMode() === 'change') {
             <p class="tip">{{ lock.pinSet() ? 'Enter the PIN now, then the new one.' : 'So only people who know it can use this screen. It locks by hand with the lock button, or by itself after a while without a touch, and the PIN opens it.' }}</p>
             <div class="pin-row">
-              @if (lock.pinSet()) { <label>PIN now <input type="password" inputmode="numeric" autocomplete="off" maxlength="8" [(ngModel)]="pinCurrent" /></label> }
-              <label>New PIN <input type="password" inputmode="numeric" autocomplete="new-password" maxlength="8" [(ngModel)]="pinNew" placeholder="4–8 digits" /></label>
-              <label>Again <input type="password" inputmode="numeric" autocomplete="new-password" maxlength="8" [(ngModel)]="pinAgain" /></label>
+              @if (lock.pinSet()) { <label>PIN now <input type="text" class="pin" spellcheck="false" data-lpignore="true" data-1p-ignore inputmode="numeric" autocomplete="off" maxlength="8" [(ngModel)]="pinCurrent" /></label> }
+              <label>New PIN <input type="text" class="pin" spellcheck="false" data-lpignore="true" data-1p-ignore inputmode="numeric" autocomplete="off" maxlength="8" [(ngModel)]="pinNew" placeholder="4–8 digits" /></label>
+              <label>Again <input type="text" class="pin" spellcheck="false" data-lpignore="true" data-1p-ignore inputmode="numeric" autocomplete="off" maxlength="8" [(ngModel)]="pinAgain" /></label>
               <button type="button" class="btn-primary" (click)="savePin()" [disabled]="pinBusy()">Save</button>
               @if (pinMode() === 'change') { <button type="button" class="linkish" (click)="pinMode.set('')">Cancel</button> }
             </div>
           } @else if (lock.pinSet()) {
             @if (pinMode() === 'remove') {
               <div class="pin-row">
-                <label>PIN now <input type="password" inputmode="numeric" autocomplete="off" maxlength="8" [(ngModel)]="pinCurrent" /></label>
+                <label>PIN now <input type="text" class="pin" spellcheck="false" data-lpignore="true" data-1p-ignore inputmode="numeric" autocomplete="off" maxlength="8" [(ngModel)]="pinCurrent" /></label>
                 <button type="button" class="danger-btn" (click)="removePin()" [disabled]="pinBusy()">Remove PIN</button>
                 <button type="button" class="linkish" (click)="pinMode.set('')">Cancel</button>
               </div>
@@ -191,6 +195,8 @@ const joinNames = (n: string[]) => (n.length <= 1 ? n.join('') : n.length > 3
             <button type="button" data-no-auto-full (click)="fullscreen()">{{ isFull() ? 'Leave full screen' : 'Full screen' }}</button>
             <button type="button" data-no-auto-full (click)="leave()">Leave wall display</button>
           </div>
+          <p class="tip">Leaving opens the rest of HomeHub for a while: <b>Home</b> comes back here, and so does the tablet by itself after 2 minutes without a touch.{{ lock.pinSet() ? ' Leaving asks for the PIN.' : '' }}
+            <button type="button" class="linkish" (click)="stopBeingWall()">Stop using this tablet as a wall display</button></p>
           @if (version(); as v) {
             <p class="tip ver">HomeHub {{ v }}{{ updates.outdated() ? ' · this screen has an older version and loads the new one once nobody’s using it' : '' }}</p>
           }
@@ -434,10 +440,22 @@ export class WallFrameComponent implements OnInit, OnDestroy {
     else void document.documentElement.requestFullscreen?.().catch(() => undefined);
   }
 
+  /** Off to the rest of HomeHub for a while, after the PIN: it's still a wall tablet, so Home and time bring it back. */
   leave(): void {
     this.menu.set(false);
-    if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined);
-    setWallHome(false);
-    void this.router.navigateByUrl('/dashboard');
+    this.lock.askPin('leave the wall display', () => {
+      if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined);
+      void this.router.navigateByUrl('/dashboard');
+    });
+  }
+
+  /** For good, after the PIN: HomeHub opens on the Dashboard here again, and doesn't come back by itself. */
+  stopBeingWall(): void {
+    this.menu.set(false);
+    this.lock.askPin('stop using this tablet as a wall display', () => {
+      if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined);
+      setWallHome(false);
+      void this.router.navigateByUrl('/dashboard');
+    });
   }
 }

@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, OnDestroy, OnInit, computed, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnDestroy, OnInit, computed, effect, inject, signal, untracked } from '@angular/core';
 import { Router } from '@angular/router';
 import { AuthService } from '../auth/auth.service';
 import { LockService } from './lock.service';
@@ -43,7 +43,7 @@ const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '', '0', '⌫'];
           </div>
         } @else {
           <div class="pad">
-            <h2>Enter the PIN</h2>
+            <h2>{{ lock.asking() ? 'Enter the PIN to ' + lock.asking() : 'Enter the PIN' }}</h2>
             <div class="dots" aria-hidden="true">@for (d of slots(); track $index) { <i [class.on]="d"></i> }</div>
             <p class="msg" role="alert">{{ message() }}</p>
             <div class="keys">
@@ -52,7 +52,8 @@ const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '', '0', '⌫'];
                 @else { <button type="button" (click)="press(k)" [disabled]="busy() || waiting() > 0" [attr.aria-label]="k === '⌫' ? 'Delete' : k">{{ k }}</button> }
               }
             </div>
-            <button type="button" class="forgot" (click)="forgot()">Forgot the PIN? Sign out</button>
+            @if (lock.asking()) { <button type="button" class="forgot" (click)="$event.stopPropagation(); cancel()">Cancel</button> }
+            @else { <button type="button" class="forgot" (click)="forgot()">Forgot the PIN? Sign out</button> }
           </div>
         }
       </div>
@@ -101,10 +102,22 @@ export class LockScreenComponent implements OnInit, OnDestroy {
     return s >= 60 ? `${Math.ceil(s / 60)} min` : `${s} s`;
   }
 
-  /** The pad goes back to the clock after half a minute untouched. */
+  /** The pad goes back to the clock after half a minute untouched; a PIN asked for something is let go. */
   private keepPad(): void {
     clearTimeout(this.padTimer);
-    this.padTimer = setTimeout(() => { this.padOpen.set(false); this.entry.set(''); if (!this.waiting()) this.message.set(''); }, 30_000);
+    this.padTimer = setTimeout(() => {
+      if (this.lock.asking()) { this.cancel(); return; }
+      this.padOpen.set(false); this.entry.set(''); if (!this.waiting()) this.message.set('');
+    }, 30_000);
+  }
+
+  /** Asked for the PIN to do something: straight to the pad. */
+  private readonly padForAsk = effect(() => { if (this.lock.asking()) untracked(() => this.openPad()); });
+
+  cancel(): void {
+    clearTimeout(this.padTimer);
+    this.entry.set(''); this.message.set(''); this.padOpen.set(false);
+    this.lock.cancelAsk();
   }
 
   openPad(): void {
