@@ -32,6 +32,14 @@ roombaRouter.post('/pair', requireAdmin, async (req: Request, res: Response) => 
     return res.status(400).json({ error: 'ip must be an IPv4 address', code: 'VALIDATION_ERROR' });
   }
   const address = ip.trim();
+  // Checked before waiting at the robot: the address can still be saved for a device that moved.
+  const holder = getDb().prepare("SELECT alias FROM devices WHERE ip = ? AND driver_type != 'roomba'").get(address) as { alias: string } | undefined;
+  if (holder) {
+    return res.status(409).json({
+      error: `${holder.alias} is saved at ${address}. Change its address or remove it, then pair the robot.`,
+      code: 'CONFLICT',
+    });
+  }
   const [robot] = await discover([address], 2500);
   if (!robot) return res.status(404).json({ error: `No Roomba answered at ${address}. Is it on and connected to Wi-Fi?`, code: 'DEVICE_NOT_FOUND' });
 

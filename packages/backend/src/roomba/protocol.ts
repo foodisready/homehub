@@ -61,7 +61,7 @@ export function parseDiscovery(ip: string, payload: Buffer | string): FoundRobot
  * Asks for robots: on each broadcast address, or one robot when `to` is its
  * address. Answers arrive within a second; `waitMs` allows for a slow one.
  */
-export function discover(to: string[], waitMs = 2500): Promise<FoundRobot[]> {
+export function discover(to: string[], waitMs = 4000): Promise<FoundRobot[]> {
   return new Promise((resolve) => {
     const found = new Map<string, FoundRobot>();
     const socket = dgram.createSocket('udp4');
@@ -79,14 +79,14 @@ export function discover(to: string[], waitMs = 2500): Promise<FoundRobot[]> {
     const ask = () => {
       for (const address of to) socket.send(Buffer.from('irobotmcs'), DISCOVERY_PORT, address, () => undefined);
     };
-    // UDP can be lost: ask three times.
+    // UDP can be lost, and a robot saving power on its dock can miss the first asks: ask five times.
     let resend: ReturnType<typeof setInterval> | undefined;
     const timer = setTimeout(done, waitMs);
     socket.bind(() => {
       socket.setBroadcast(true);
       ask();
       let asked = 1;
-      resend = setInterval(() => { if (++asked > 3) clearInterval(resend); else ask(); }, 600);
+      resend = setInterval(() => { if (++asked > 5) clearInterval(resend); else ask(); }, 600);
     });
   });
 }

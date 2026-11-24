@@ -78,6 +78,8 @@ interface DiscoveredDevice {
   driverConfig?: Record<string, unknown>;
   mac?:         string;
   needsLogin?:  boolean;
+  /** A device of another kind is saved at this address but isn't answering: it moved, and this one has it now. */
+  staleOwner?:  string;
   moved?:       { deviceId: number; alias: string; previousIp: string };
   // editable before registering
   pendingAlias?:    string;
@@ -268,6 +270,7 @@ const DRIVER_LABEL: Record<string, string> = {
     .discover-key input { font-size:0.8rem; padding:0.25rem 0.5rem; width:100%; }
     .discover-key-label { font-size:0.72rem; color:var(--text-muted); display:block; margin-bottom:2px; }
     .discover-login-note { flex-basis:100%; margin:0.2rem 0 0; font-size:0.78rem; color:var(--text-muted); }
+    .discover-login-note.stale { color:#fbbf24; }
     .discover-ip    { font-size:0.78rem; color:var(--text-muted); white-space:nowrap; }
     .discover-model { font-size:0.72rem; color:var(--text-muted); white-space:nowrap; }
     .discover-footer { display:flex; align-items:center; justify-content:space-between; margin-top:0.5rem; }
@@ -532,14 +535,19 @@ const DRIVER_LABEL: Record<string, string> = {
                   @for (d of discoveredDevices(); track d.ip) {
                     <div class="discover-row">
                       <input type="checkbox" [checked]="isSelected(d.ip)" (change)="toggleSelect(d.ip)"
-                             [disabled]="d.driverType === 'roomba' || (d.driverType === 'meross' && d.needsLogin) || (d.driverType === 'tuya' && (!d.pendingKey?.trim() || (!d.driverConfig?.['deviceId'] && !d.pendingDeviceId?.trim())))" />
+                             [disabled]="d.driverType === 'roomba' || !!d.staleOwner || (d.driverType === 'meross' && d.needsLogin) || (d.driverType === 'tuya' && (!d.pendingKey?.trim() || (!d.driverConfig?.['deviceId'] && !d.pendingDeviceId?.trim())))" />
                       <div class="discover-alias">
                         <input type="text" [(ngModel)]="d.pendingAlias" placeholder="Alias" />
                       </div>
                       <span class="discover-ip">{{ d.ip }}</span>
                       @if (d.model && d.model !== d.ip) { <span class="discover-model">{{ d.model }}</span> }
                       <span class="driver-badge" [class]="'driver-badge ' + d.driverType">{{ driverLabel(d.driverType) }}</span>
-                      @if (d.needsLogin && d.driverType === 'meross') {
+                      @if (d.staleOwner) {
+                        <p class="discover-login-note stale">
+                          {{ d.staleOwner }} is saved at {{ d.ip }}, but it isn't answering there: this device has that address now.
+                          Change {{ d.staleOwner }}'s address under its settings, or remove it, then select Discover again.
+                        </p>
+                      } @else if (d.needsLogin && d.driverType === 'meross') {
                         <span class="discover-key-label">Sign in under Integrations → Meross, then Discover again</span>
                       } @else if (d.driverType === 'roomba') {
                         <p class="discover-login-note">
@@ -2052,11 +2060,18 @@ export class SettingsComponent implements OnInit, OnDestroy {
         }
         this.checkMerossAccount(found);
         const moved       = found.filter((f) => f.moved);
-        const existingIps = new Set(this._devices().map((d) => d.ip));
+        const byIp        = new Map(this._devices().map((d) => [d.ip, d]));
+        // Saved at this address: hidden, unless what's saved there is another kind of device that isn't
+        // answering. That one moved, and its old address went to this one, so it's shown with a note.
+        const staleOwner  = (f: DiscoveredDevice) => {
+          const d = byIp.get(f.ip);
+          return d && d.driverType !== f.driverType && !d.online ? d.alias : undefined;
+        };
         const newDevices  = found
-          .filter((f) => !f.moved && !existingIps.has(f.ip))
+          .filter((f) => !f.moved && (!byIp.has(f.ip) || staleOwner(f)))
           .map((f) => ({
             ...f,
+            staleOwner: staleOwner(f),
             pendingAlias: f.alias && f.alias !== f.ip ? f.alias : '',
             // A Kasa plug that refused the saved login: start from the saved email, so only the password is typed.
             ...(f.needsLogin && f.driverType === 'kasa' && this.kasaUsername ? { pendingUser: this.kasaUsername } : {}),
