@@ -179,9 +179,7 @@ function saveAll(on: boolean): void {
         <div class="bar">
           <button class="back" type="button" (click)="close()" [attr.aria-label]="cameFromAll() ? 'Back to all rooms' : 'Back to rooms'"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path [attr.d]="path('back')" /></svg></button>
           <h2>{{ r.name }}</h2>
-          @if (!cameFromAll()) {
           <button class="back" type="button" (click)="showAll()" aria-label="All rooms" title="All rooms"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path [attr.d]="path('grid')" /></svg></button>
-          }
           @if (canTurnOff(r)) { <button class="all-off" type="button" (click)="allOff.emit(r.devices)">All off</button> }
         </div>
         <div class="sub">{{ subtitle(r) }}</div>
@@ -596,13 +594,14 @@ export class RoomsViewComponent implements AfterViewChecked, OnDestroy {
 
   /**
    * When a light or plug on a timer, schedule or motion rule goes off: "Off in 4:32" in the last ten
-   * minutes, "Off in 25 min", "Off at 9:30 PM" further off, or "On · motion" while a motion rule
+   * minutes, "Off in 25 min", "Off at 9:30 PM" further off, or "On · off 10 min after motion stops" while a motion rule
    * waits for the room to empty. Null with no turn-off coming.
    */
   offIn(d: Device): string | null {
     const a = d.autoOff;
     if (!a || !d.online || !d.state) return null;
-    if (a.at === null) return a.cause === 'motion' ? 'On · motion' : null;
+    // Its time starts only once the sensor says the room is empty.
+    if (a.at === null) return a.cause === 'motion' ? `On · off ${a.afterMinutes ?? ''} min after motion stops`.replace('  ', ' ') : null;
     const left = Date.parse(a.at) - this.now();
     if (left <= 0) return 'Turning off…';
     if (left < 10 * 60_000) {
