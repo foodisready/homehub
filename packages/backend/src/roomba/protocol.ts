@@ -176,7 +176,11 @@ export interface Reported {
   name?: string;
   batPct?: number;
   bin?: { present?: boolean; full?: boolean };
-  cleanMissionStatus?: { cycle?: string; phase?: string; error?: number; notReady?: number };
+  cleanMissionStatus?: {
+    cycle?: string; phase?: string; error?: number; notReady?: number;
+    /** Minutes until it sets off again after charging part way through a job; 0 when it won't by itself. */
+    rechrgM?: number;
+  };
   /** The last job it was given, from any app: a room clean names its map and rooms. */
   lastCommand?: { command?: string; pmap_id?: string; user_pmapv_id?: string; regions?: { region_id?: unknown; type?: unknown }[] };
 }
@@ -266,6 +270,13 @@ export function mergeReported(into: Record<string, unknown>, update: Record<stri
   return into;
 }
 
+/** Charging part way through a job, it'll set off again: it counts the minutes until then. */
+function willCarryOn(mission: NonNullable<Reported['cleanMissionStatus']>, battery: number | undefined): boolean {
+  if (typeof mission.rechrgM === 'number') return mission.rechrgM > 0;
+  // A robot that doesn't say: full and still sitting there, it isn't waiting to charge.
+  return typeof battery !== 'number' || battery < 100;
+}
+
 /** What the robot is doing, from what it reported; null until it has said. */
 export function statusOf(r: Reported): RobotStatus | null {
   const mission = r.cleanMissionStatus;
@@ -281,12 +292,15 @@ export function statusOf(r: Reported): RobotStatus | null {
   else if (phase === 'hmMidMsn') activity = 'recharging';
   else if (phase === 'hmUsrDock' || phase === 'hmPostMsn') activity = 'returning';
   else if (phase === 'evac') activity = 'emptying';
-  else if (phase === 'charge') activity = job ? 'recharging' : 'docked';
+  // On its dock with a job unfinished: recharging to carry on only if it says when it will. A job
+  // sent home part way stays unfinished on the robot, but it won't set off again by itself.
+  else if (phase === 'charge') activity = job && willCarryOn(mission, r.batPct) ? 'recharging' : 'docked';
   else if (phase === 'stop' || phase === 'pause') activity = job ? 'paused' : 'idle';
   else activity = 'idle';
 
-  // On a job unless it's heading home for good. Emptying part way is still the job.
-  const cleaning = job && activity !== 'returning';
+  // On a job unless it's heading home for good, or home with no plan to set off again. Emptying
+  // part way is still the job.
+  const cleaning = job && activity !== 'returning' && activity !== 'docked';
   return {
     activity,
     cleaning,

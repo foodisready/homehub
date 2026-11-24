@@ -49,6 +49,8 @@ class Link {
   private waiting: (() => void)[] = [];
   /** The last try to connect failed: say so at once rather than wait for the next. */
   private down = false;
+  /** Cycle, phase and recharge minutes last logged, to log only changes. */
+  private lastMission = '';
   /** The last room job reported, so one seen again on reconnecting isn't news. */
   private lastJob = '';
   lastUsed = Date.now();
@@ -148,6 +150,12 @@ class Link {
         for (const listener of jobListeners) listener(this.login.blid, job);
       }
     }
+    const mission = (this.reported as Reported).cleanMissionStatus;
+    const said = mission && `${mission.cycle}/${mission.phase}/${mission.rechrgM ?? '-'}`;
+    if (said && said !== this.lastMission) {
+      this.lastMission = said;
+      logger.info({ ip: this.ip, cycle: mission!.cycle, phase: mission!.phase, rechrgM: mission!.rechrgM, last: (this.reported as Reported).lastCommand?.command }, 'Roomba mission');
+    }
     const next = statusOf(this.reported as Reported);
     if (!next) return;
     const changed = !this.status || (Object.keys(next) as (keyof RobotStatus)[]).some((k) => next[k] !== this.status![k]);
@@ -172,6 +180,7 @@ class Link {
     this.client = null;
     this.status = null;
     this.reported = {};
+    this.lastMission = '';
     this.wake();
   }
 }

@@ -132,6 +132,9 @@ export interface OverrideRequest { device: Device; durationMinutes: number; }
               <button class="small" type="button" [disabled]="busy() || vacBusy() || !device().online" (click)="vacuumHome()">Send home</button>
             }
           </div>
+          @if (namedRooms().length && device().vacuum?.cleaning) {
+            <p class="vac-msg">It's on a job now. To clean particular rooms, send it home first and they'll show here.</p>
+          }
           @if (vacError()) { <p class="vac-msg err">{{ vacError() }}</p> }
           @else if (device().vacuum?.binFull) { <p class="vac-msg err">Its bin is full. Empty it so it can clean properly.</p> }
           @else if (device().vacuum?.activity === 'stuck') { <p class="vac-msg err">It needs a hand where it stopped. The iRobot app shows where that is.</p> }

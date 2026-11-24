@@ -77,6 +77,16 @@ describe('Roomba status', () => {
     assert.equal(at('clean', 'hmMidMsn').activity, 'recharging');
     assert.equal(at('clean', 'charge').activity, 'recharging');
     assert.equal(at('clean', 'charge').cleaning, true);
+    const counting = at('clean', 'charge', { cleanMissionStatus: { cycle: 'clean', phase: 'charge', error: 0, rechrgM: 35 } });
+    assert.deepEqual([counting.activity, counting.cleaning], ['recharging', true]);
+  });
+
+  it('is docked and off when a job was sent home part way: it won’t set off again by itself', () => {
+    const parked = at('clean', 'charge', { cleanMissionStatus: { cycle: 'clean', phase: 'charge', error: 0, rechrgM: 0 } });
+    assert.deepEqual([parked.activity, parked.cleaning], ['docked', false]);
+    // A robot that doesn't count the minutes: full and still on the dock.
+    const full = at('clean', 'charge', { batPct: 100 });
+    assert.deepEqual([full.activity, full.cleaning], ['docked', false]);
   });
 
   it('is off once heading home for good, whether sent or finished', () => {
