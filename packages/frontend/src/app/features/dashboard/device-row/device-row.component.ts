@@ -6,7 +6,7 @@ import type { Device } from '../../../shared/models/device.model';
 import { type ActivityEvent, actionWord, causeText, clock, when } from '../../../shared/activity/activity-text';
 import { ThermostatControlComponent } from '../../../shared/thermostat/thermostat-control.component';
 import { ThermostatService, offQuestion, summary } from '../../../shared/thermostat/thermostat.service';
-import { isVacuum, vacuumBusy, vacuumDetail, vacuumNeedsHelp } from '../../../shared/vacuum';
+import { isVacuum, vacuumBusy, vacuumDetail, vacuumJobText, vacuumNeedsHelp } from '../../../shared/vacuum';
 import { AuthService } from '../../../core/auth/auth.service';
 
 export interface OverrideRequest { device: Device; durationMinutes: number; }
@@ -112,6 +112,7 @@ export interface OverrideRequest { device: Device; durationMinutes: number; }
         }
         @if (isThermostat()) { <app-thermostat-control [deviceId]="device().id" /> }
         @if (isVac()) {
+          @if (jobText()) { <p class="vac-msg">{{ jobText() }}</p> }
           @if (namedRooms().length && !vacOnJob()) {
             <span class="panel-label">Clean</span>
             <div class="buttons" role="group" aria-label="Rooms to clean">
@@ -132,7 +133,8 @@ export interface OverrideRequest { device: Device; durationMinutes: number; }
               <button class="small" type="button" [disabled]="busy() || vacBusy() || !device().online" (click)="vacuumPause()">Pause</button>
             }
             @if (vacuumCanSendHome()) {
-              <button class="small" type="button" [disabled]="busy() || vacBusy() || !device().online" (click)="vacuumHome()">Send home</button>
+              <!-- On its dock recharging part way, it's home already: what's left is to stop it carrying on. -->
+              <button class="small" type="button" [disabled]="busy() || vacBusy() || !device().online" (click)="device().vacuum?.onDock ? vacuumEnd() : vacuumHome()">{{ device().vacuum?.onDock ? 'End job' : 'Send home' }}</button>
             }
             @if (device().vacuum?.activity === 'paused') {
               <button class="small" type="button" [disabled]="busy() || vacBusy() || !device().online" (click)="vacuumEnd()">End job</button>
@@ -247,6 +249,7 @@ export class DeviceRowComponent implements OnDestroy {
   readonly vacStarting = signal(false);
   /** Out on a job it would have to drop for a new one: room choices wait until it's done. */
   readonly vacOnJob = computed(() => vacuumBusy(this.device().vacuum));
+  readonly jobText = computed(() => vacuumJobText(this.device().vacuum));
   readonly vacError = signal('');
   private readonly auth = inject(AuthService);
   readonly isAdmin = computed(() => this.auth.user()?.role === 'admin');

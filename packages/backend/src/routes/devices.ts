@@ -129,7 +129,7 @@ function mergeWithCache(
     /** What it draws when on, for energy estimates; null `excluded` if it isn't a plug load. */
     power:        powerOf(device),
     /** A robot vacuum's status: null while HomeHub isn't connected to it. */
-    ...(device.driver_type === 'roomba' ? { vacuum: vacuumViewOf(device.driver_config), vacuumRooms: roomsView(device.driver_config) } : {}),
+    ...(device.driver_type === 'roomba' ? { vacuum: vacuumViewOf(device.id, device.driver_config), vacuumRooms: roomsView(device.driver_config) } : {}),
   };
 }
 

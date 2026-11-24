@@ -10,13 +10,23 @@ import { cancelPowerTimer } from '../devices/power';
 import { loginOf } from '../drivers/RoombaDriver';
 import { onRobotStatus, onRoomJob, peekStatus, readStatus, sendCommand, sendRoomJob, type RobotLogin } from './link';
 import type { RobotStatus } from './protocol';
-import { RoomError, jobFor, learnFromJob, roomsView } from './rooms';
+import { RoomError, jobFor, learnFromJob, roomsOf, roomsView } from './rooms';
+import type { RoomJob } from './protocol';
 import { logger } from '../logger';
 
-/** What the dashboard shows of a robot vacuum. */
-export type VacuumView = Omit<RobotStatus, 'name'>;
+/** What the dashboard shows of a robot vacuum: its job's rooms by name. */
+export type VacuumView = Omit<RobotStatus, 'name' | 'jobRooms'> & {
+  /** The job it holds: the whole house, or these rooms in order (one not named yet as null). */
+  job: { whole: boolean; rooms: (string | null)[] } | null;
+};
 
-const view = ({ name: _name, ...rest }: RobotStatus): VacuumView => rest;
+function view(deviceId: number, { name: _name, jobRooms, ...rest }: RobotStatus): VacuumView {
+  if (!jobRooms) return { ...rest, job: null };
+  if (jobRooms === 'all') return { ...rest, job: { whole: true, rooms: [] } };
+  let known: { id: string; name: string | null }[] = [];
+  try { known = roomsOf(deviceId); } catch { /* removed meanwhile */ }
+  return { ...rest, job: { whole: false, rooms: jobRooms.map((id) => known.find((r) => r.id === id)?.name ?? null) } };
+}
 
 const blidOf = (driverConfig: string | null): string | null => {
   try {
@@ -28,11 +38,14 @@ const blidOf = (driverConfig: string | null): string | null => {
 };
 
 /** The robot's status for the device list, or null while HomeHub isn't connected to it. */
-export function vacuumViewOf(driverConfig: string | null): VacuumView | null {
+export function vacuumViewOf(deviceId: number, driverConfig: string | null): VacuumView | null {
   const blid = blidOf(driverConfig);
   const status = blid ? peekStatus(blid) : null;
-  return status ? view(status) : null;
+  return status ? view(deviceId, status) : null;
 }
+
+/** Robots HomeHub is starting: their setting off is HomeHub's, recorded once it's seen, not "outside". */
+const starting = new Set<number>();
 
 /** The device for a robot, by its id. */
 export function deviceForRobot(blid: string): { id: number; alias: string } | undefined {
@@ -83,6 +96,21 @@ export async function cleanRooms(deviceId: number, keys: string[]): Promise<{ al
   const login = loginOf(device.driver_config ? JSON.parse(device.driver_config) : undefined);
   const status = await readStatus(device.ip, login);
   if (vacuumBusy(status)) throw new VacuumBusyError(device.alias);
+  starting.add(device.id);
+  try {
+    await startJob(device, login, status, job);
+  } finally {
+    starting.delete(device.id);
+  }
+  noteState(device.id, true);
+  getDb().prepare("UPDATE devices SET turned_on_at = datetime('now') WHERE id = ?").run(device.id);
+  cancelPowerTimer(device.id);
+  emitDeviceState(device.id, device.alias, true, null);
+  return { alias: device.alias, names };
+}
+
+/** Ends a job it holds paused, sends the new one and waits to see it set off. */
+async function startJob(device: { id: number; alias: string; ip: string }, login: RobotLogin, status: RobotStatus, job: RoomJob | null): Promise<void> {
   if (status.jobOpen) {
     await sendCommand(device.ip, login, 'stop');
     if (!(await waitFor(device.ip, login, (s) => !s.jobOpen, waits.endMs))) {
@@ -96,11 +124,6 @@ export async function cleanRooms(deviceId: number, keys: string[]): Promise<{ al
     logger.warn({ id: device.id, rooms: job?.regions.map((r) => r.id) ?? 'all' }, 'Roomba didn’t take the job');
     throw new VacuumDidNotStartError(device.alias);
   }
-  noteState(device.id, true);
-  getDb().prepare("UPDATE devices SET turned_on_at = datetime('now') WHERE id = ?").run(device.id);
-  cancelPowerTimer(device.id);
-  emitDeviceState(device.id, device.alias, true, null);
-  return { alias: device.alias, names };
 }
 
 /** Ends the job it holds, running or paused, leaving it where it is: the iRobot app's "End now". */
@@ -126,10 +149,10 @@ export function startRoombaUpdates(): void {
   onRobotStatus((blid, status) => {
     const device = deviceForRobot(blid);
     if (!device) return;
-    emitVacuumStatus(device.id, view(status));
+    emitVacuumStatus(device.id, view(device.id, status));
     // A job started or ended from the robot, the iRobot app or its schedule: show it now.
     const cached = getCachedState(device.id);
-    if (cached && cached.state !== status.cleaning) {
+    if (cached && cached.state !== status.cleaning && !starting.has(device.id)) {
       pollDeviceNow(device.id).catch((err) => logger.debug({ err, id: device.id }, 'Roomba re-read failed'));
     }
   });

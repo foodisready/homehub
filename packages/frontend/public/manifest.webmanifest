@@ -1,12 +1,19 @@
 {
+  "id": "/",
   "name": "HomeHub",
   "short_name": "HomeHub",
-  "description": "Local smart plug automation and control",
+  "description": "Your home, run at home: lights, plugs, cameras and more",
   "start_url": "/",
   "display": "standalone",
+  "launch_handler": {
+    "client_mode": [
+      "focus-existing",
+      "auto"
+    ]
+  },
   "background_color": "#0f172a",
   "theme_color": "#3b82f6",
-  "orientation": "portrait-primary",
+  "orientation": "any",
   "icons": [
     {
       "src": "icons/icon-192.png",

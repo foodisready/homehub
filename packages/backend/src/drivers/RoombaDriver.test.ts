@@ -102,6 +102,15 @@ describe('Roomba driver', () => {
     assert.deepEqual(robot.commands, ['dock']);
   });
 
+  it('turning off a robot recharging on its dock part way ends the job, rather than sending it home', async () => {
+    use(new FakeRobot('clean', 'hmMidMsn'));
+    await driver.getPower('10.0.0.9', config);
+    robot.set('clean', 'charge');
+    assert.equal(await driver.getPower('10.0.0.9', config), true);   // it will carry on
+    await driver.setPower('10.0.0.9', false, config);
+    assert.deepEqual(robot.commands, ['stop']);
+  });
+
   it('turning off leaves a docked robot alone', async () => {
     use(new FakeRobot('none', 'charge'));
     await driver.setPower('10.0.0.9', false, config);

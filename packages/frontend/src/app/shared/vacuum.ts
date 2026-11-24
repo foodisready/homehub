@@ -11,6 +11,8 @@ export interface VacuumStatus {
   jobOpen?: boolean;
   /** Sitting on its dock. */
   onDock?: boolean;
+  /** The job it holds: the whole house, or these rooms in order (null for one not named yet). */
+  job?: { whole: boolean; rooms: (string | null)[] } | null;
   battery: number | null;
   binFull: boolean;
   /** A problem it reports, in words. */
@@ -50,6 +52,17 @@ export function vacuumDetail(v: VacuumStatus | null | undefined, on: boolean): s
     v.binFull ? 'Bin full' : '',
     v.error && v.activity !== 'stuck' && v.error !== 'Bin full' ? v.error : '',
   ].filter(Boolean).join(' · ');
+}
+
+/** "This job: Master Bedroom, Master Closet and Master Bath.", or the whole house; '' with no job. */
+export function vacuumJobText(v: VacuumStatus | null | undefined): string {
+  const job = v?.jobOpen ? v.job : null;
+  if (!job) return '';
+  if (job.whole) return 'This job: the whole house.';
+  const names = job.rooms.map((r) => r ?? 'a room not named yet');
+  if (!names.length) return '';
+  const list = names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+  return `This job: ${list}.`;
 }
 
 /** Busy with a job it would have to drop for a new one. Paused, at home or not, it isn't. */

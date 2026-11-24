@@ -167,6 +167,8 @@ export interface RobotStatus {
   jobOpen:  boolean;
   /** Sitting on its dock. */
   onDock:   boolean;
+  /** The rooms of the job it holds, by room id, in order; 'all' for the whole house; null with no job or not known. */
+  jobRooms: string[] | 'all' | null;
   battery:  number | null;
   binFull:  boolean;
   /** In words, when the robot reports a problem. */
@@ -187,6 +189,10 @@ export interface Reported {
   };
   /** The last job it was given, from any app: a room clean names its map and rooms. */
   lastCommand?: { command?: string; pmap_id?: string; user_pmapv_id?: string; regions?: { region_id?: unknown; type?: unknown }[] };
+  /** HomeHub's own notes, kept with what it reported (see roomba/link.ts). The last start, kept through pauses. */
+  jobStart?: Reported['lastCommand'];
+  /** How it last went home: to recharge part way (it carries on), or sent home (it doesn't). */
+  homeFor?: 'recharge' | 'sent';
 }
 
 /** A room on the robot's map: its id there, and "rid" for a room ("zid" is a zone drawn in the app). */
@@ -274,11 +280,15 @@ export function mergeReported(into: Record<string, unknown>, update: Record<stri
   return into;
 }
 
-/** Charging part way through a job, it'll set off again: it counts the minutes until then. */
-function willCarryOn(mission: NonNullable<Reported['cleanMissionStatus']>, battery: number | undefined): boolean {
-  if (typeof mission.rechrgM === 'number') return mission.rechrgM > 0;
-  // A robot that doesn't say: full and still sitting there, it isn't waiting to charge.
-  return typeof battery !== 'number' || battery < 100;
+/**
+ * Charging part way through a job, it'll set off again. Some robots count the minutes until then;
+ * an i-series leaves that at 0, but says it's heading home to recharge, which differs from being
+ * sent home. Not seen either (HomeHub connected while it sat there): full, it isn't waiting to charge.
+ */
+function willCarryOn(mission: NonNullable<Reported['cleanMissionStatus']>, r: Reported): boolean {
+  if (typeof mission.rechrgM === 'number' && mission.rechrgM > 0) return true;
+  if (r.homeFor) return r.homeFor === 'recharge';
+  return typeof r.batPct !== 'number' || r.batPct < 100;
 }
 
 /** What the robot is doing, from what it reported; null until it has said. */
@@ -298,7 +308,7 @@ export function statusOf(r: Reported): RobotStatus | null {
   else if (phase === 'evac') activity = 'emptying';
   // On its dock with a job unfinished: recharging to carry on only if it says when it will. A job
   // sent home part way is paused there, as the iRobot app shows it: it won't set off by itself.
-  else if (phase === 'charge') activity = !job ? 'docked' : willCarryOn(mission, r.batPct) ? 'recharging' : 'paused';
+  else if (phase === 'charge') activity = !job ? 'docked' : willCarryOn(mission, r) ? 'recharging' : 'paused';
   else if (phase === 'stop' || phase === 'pause') activity = job ? 'paused' : 'idle';
   else activity = 'idle';
 
@@ -310,9 +320,13 @@ export function statusOf(r: Reported): RobotStatus | null {
     cleaning,
     jobOpen: job,
     onDock,
+    jobRooms: !job || !r.jobStart ? null
+      : Array.isArray(r.jobStart.regions) && r.jobStart.regions.length ? r.jobStart.regions.map((x) => String(x.region_id)) : 'all',
     battery: typeof r.batPct === 'number' ? r.batPct : null,
     binFull: r.bin?.full === true,
-    error: code ? errorText(code) : null,
+    // A code iRobot doesn't list, on a robot with no job: what's left of a job someone ended
+    // (236 after "End now"), not a fault. Known codes, and any during a job, are shown.
+    error: code && (ERRORS[code] || job || phase === 'stuck') ? errorText(code) : null,
     name: typeof r.name === 'string' && r.name.trim() ? r.name.trim() : null,
   };
 }

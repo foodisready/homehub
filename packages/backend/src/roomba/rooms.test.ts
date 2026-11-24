@@ -145,6 +145,8 @@ describe('Roomba rooms', () => {
     rooms.nameRoom(deviceId, k.key, 'Kitchen');
     rooms.nameRoom(deviceId, l.key, 'Living Room');
     robot.cycle = 'none'; robot.phase = 'charge'; robot.report(); await tick();
+    // HomeHub has known it off a while: a start it sees on its own counts as done outside HomeHub.
+    (await import('../kasa/device.cache')).noteState(deviceId, false, Date.now() - 60_000);
     const done = await service.cleanRooms(deviceId, [l.key, k.key]);
     assert.deepEqual(done.names, ['Living Room', 'Kitchen']);
     const sent = robot.sent.at(-1)!;
@@ -153,8 +155,13 @@ describe('Roomba rooms', () => {
     assert.equal(sent.user_pmapv_id, 'V1');
     assert.equal(sent.ordered, 1);
     assert.deepEqual(sent.regions, [{ region_id: '9', type: 'rid' }, { region_id: '7', type: 'rid' }]);
-    // Recorded as switching it on.
-    assert.equal((db.prepare("SELECT state FROM device_events WHERE device_id = ? AND kind = 'power' ORDER BY id DESC").get(deviceId) as { state: number }).state, 1);
+    await tick();
+    // Recorded once, as HomeHub switching it on, not as something done outside HomeHub.
+    const events = db.prepare("SELECT state, source FROM device_events WHERE device_id = ? AND kind = 'power' AND at >= datetime('now', '-1 minute')").all(deviceId) as { state: number; source: string }[];
+    assert.deepEqual(events.filter((e) => e.state === 1).map((e) => e.source).filter((s) => s === 'outside'), []);
+    assert.equal(events.filter((e) => e.state === 1).length, 1);
+    // The dashboard names the job's rooms, in order.
+    assert.deepEqual(service.vacuumViewOf(deviceId, JSON.stringify({ blid: 'BLID' }))?.job, { whole: false, rooms: ['Living Room', 'Kitchen'] });
   });
 
   it('won’t start rooms while it’s out on a job, which would quietly replace that job', async () => {

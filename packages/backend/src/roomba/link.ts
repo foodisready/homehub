@@ -150,7 +150,13 @@ class Link {
         for (const listener of jobListeners) listener(this.login.blid, job);
       }
     }
-    const mission = (this.reported as Reported).cleanMissionStatus;
+    const rep = this.reported as Reported;
+    if (rep.lastCommand?.command === 'start') rep.jobStart = rep.lastCommand;
+    const phase = rep.cleanMissionStatus?.phase;
+    if (phase === 'hmMidMsn') rep.homeFor = 'recharge';
+    else if (phase === 'hmUsrDock') rep.homeFor = 'sent';
+    else if (phase === 'run') delete rep.homeFor;
+    const mission = rep.cleanMissionStatus;
     const said = mission && `${mission.cycle}/${mission.phase}/${mission.rechrgM ?? '-'}`;
     if (said && said !== this.lastMission) {
       this.lastMission = said;
@@ -159,7 +165,7 @@ class Link {
     }
     const next = statusOf(this.reported as Reported);
     if (!next) return;
-    const changed = !this.status || (Object.keys(next) as (keyof RobotStatus)[]).some((k) => next[k] !== this.status![k]);
+    const changed = !this.status || JSON.stringify(next) !== JSON.stringify(this.status);
     this.status = next;
     this.wake();
     if (changed) for (const listener of listeners) listener(this.login.blid, next);

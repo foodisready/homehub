@@ -82,7 +82,7 @@ describe('Roomba status', () => {
   });
 
   it('is paused at home, and off, when a job was sent home part way: it won’t set off again by itself', () => {
-    const parked = at('clean', 'charge', { cleanMissionStatus: { cycle: 'clean', phase: 'charge', error: 0, rechrgM: 0 } });
+    const parked = at('clean', 'charge', { cleanMissionStatus: { cycle: 'clean', phase: 'charge', error: 0, rechrgM: 0 }, homeFor: 'sent' });
     assert.deepEqual([parked.activity, parked.cleaning, parked.jobOpen, parked.onDock], ['paused', false, true, true]);
     // A robot that doesn't count the minutes: full and still on the dock.
     const full = at('clean', 'charge', { batPct: 100 });
@@ -90,6 +90,23 @@ describe('Roomba status', () => {
     // Paused out on the floor is still out.
     assert.deepEqual([at('clean', 'stop').onDock, at('clean', 'stop').cleaning], [false, true]);
     assert.equal(at('none', 'charge').jobOpen, false);
+  });
+
+  it('is recharging when it went home to recharge, though an i-series counts 0 minutes', () => {
+    const s = at('clean', 'charge', { cleanMissionStatus: { cycle: 'clean', phase: 'charge', error: 0, rechrgM: 0 }, homeFor: 'recharge', batPct: 93 });
+    assert.deepEqual([s.activity, s.cleaning], ['recharging', true]);
+  });
+
+  it('names the job’s rooms in order, or the whole house, only while it holds a job', () => {
+    const rooms = { lastCommand: { command: 'pause' }, jobStart: { command: 'start', regions: [{ region_id: 30 }, { region_id: '2' }] } };
+    assert.deepEqual(at('clean', 'run', rooms).jobRooms, ['30', '2']);
+    assert.equal(at('clean', 'run', { jobStart: { command: 'start' } }).jobRooms, 'all');
+    assert.equal(at('none', 'charge', rooms).jobRooms, null);
+  });
+
+  it('leaves out a code iRobot doesn’t list when there’s no job: what’s left of one someone ended', () => {
+    assert.equal(statusOf({ cleanMissionStatus: { cycle: 'none', phase: 'charge', error: 236 } })!.error, null);
+    assert.equal(statusOf({ cleanMissionStatus: { cycle: 'clean', phase: 'run', error: 236 } })!.error, 'Error 236');
   });
 
   it('is off once heading home for good, whether sent or finished', () => {

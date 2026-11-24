@@ -40,6 +40,8 @@ export class RoombaDriver implements DeviceDriver {
       return;
     }
     if (!status.cleaning && status.activity !== 'returning') return;   // already home, or on its way
+    // Home already, charging to carry on: "off" is not carrying on, so the job ends there.
+    if (status.onDock) { await sendCommand(ip, login, 'stop'); return; }
     // A robot out cleaning ignores "dock": it has to pause first, as iRobot's app does.
     if (status.activity === 'cleaning') {
       await sendCommand(ip, login, 'pause');
