@@ -112,7 +112,7 @@ const kindOf = (d: DeviceRow): string | undefined => {
 
 /** A lamp Away mode may switch: not protected (doors, cameras, valves), not a thermostat. */
 export function mayLight(d: DeviceRow): boolean {
-  return kindOf(d) !== 'thermostat' && !isProtectedDevice(d);
+  return kindOf(d) !== 'thermostat' && d.driver_type !== 'roomba' && !isProtectedDevice(d);
 }
 
 /** The away targets for a thermostat: saved, else the edges of its allowed range. */

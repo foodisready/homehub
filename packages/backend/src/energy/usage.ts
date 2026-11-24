@@ -245,8 +245,10 @@ const ENDINGS: [RegExp, string][] = [
 ];
 
 /** Why a device isn't a plug load, or null if it is. */
-export function excludedReason(d: Pick<DeviceRow, 'id' | 'alias' | 'driver_type' | 'driver_config'>): 'camera' | 'garage door' | 'valve' | 'thermostat' | null {
+export function excludedReason(d: Pick<DeviceRow, 'id' | 'alias' | 'driver_type' | 'driver_config'>): 'camera' | 'garage door' | 'vacuum' | 'valve' | 'thermostat' | null {
   if (d.driver_type === 'wyze') return 'camera';
+  // Charges on its dock whether or not it's out cleaning, so "on" says nothing about what it uses.
+  if (d.driver_type === 'roomba') return 'vacuum';
   if (d.driver_type === 'meross') return 'garage door';
   try { if (d.driver_config && JSON.parse(d.driver_config)?.kind === 'thermostat') return 'thermostat'; } catch { /* not JSON */ }
   if (/\bvalve\b/i.test(d.alias)) return 'valve';

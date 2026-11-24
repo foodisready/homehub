@@ -14,6 +14,7 @@ import { AwayComponent } from './away.component';
 import { RoomsViewComponent } from './rooms-view.component';
 import { WallFrameComponent } from './wall-frame.component';
 import { Device } from '../../shared/models/device.model';
+import { isVacuum } from '../../shared/vacuum';
 
 const COLLAPSED_KEY = 'homehub.dashboard.collapsed';
 const VIEW_KEY = 'homehub.dashboard.view';
@@ -248,7 +249,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
         devices,
         count: `${on} of ${devices.length} on`,
         // "All off" is for lights and plugs: it leaves thermostats alone, so it never cuts the heat.
-        canTurnOff: devices.some((d) => d.state && !d.isProtected && !isThermostat(d)),
+        canTurnOff: devices.some((d) => d.state && !d.isProtected && !isThermostat(d) && !isVacuum(d)),
         anyOn: on > 0,
       };
     });
@@ -267,6 +268,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
   private unsubState?:  () => void;
   private unsubOnline?: () => void;
   private unsubNoPower?: () => void;
+  private unsubVacuum?: () => void;
   private unsubOverride?: () => void;
   private unsubMotion?: () => void;
   private unsubReconnect?: () => void;
@@ -317,6 +319,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.unsubState?.();
     this.unsubOnline?.();
     this.unsubNoPower?.();
+    this.unsubVacuum?.();
     this.unsubOverride?.();
     this.unsubMotion?.();
     this.unsubReconnect?.();
@@ -356,6 +359,10 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
     this.unsubMotion = this.socket.onMotion(() => this.refreshAutoOff());
 
+    this.unsubVacuum = this.socket.onVacuumStatus((ev) => {
+      this._devices.update((list) => list.map((d) => d.id === ev.id ? { ...d, vacuum: ev.vacuum } : d));
+    });
+
     this.unsubNoPower = this.socket.onDeviceNoPower((ev) => {
       this._devices.update((list) => list.map((d) => d.id === ev.id ? { ...d, noPower: ev.noPower } : d));
     });
@@ -392,7 +399,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
   }
 
   allOff(devices: Device[]): void {
-    devices.filter((d) => d.state && !d.isProtected && !isThermostat(d)).forEach((d) => this.toggle(d));
+    // Lights and plugs: a robot vacuum out cleaning isn't sent home by turning a room's lights off.
+    devices.filter((d) => d.state && !d.isProtected && !isThermostat(d) && !isVacuum(d)).forEach((d) => this.toggle(d));
   }
 
   toggle(device: Device): void {
@@ -400,16 +408,17 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
     // Optimistic update
     this._devices.update((list) =>
-      list.map((d) => d.id === device.id ? { ...d, state: !d.state } : d)
+      list.map((d) => d.id === device.id ? { ...d, state: action === 'on' } : d)
     );
     this._busyIds.update((s) => new Set(s).add(device.id));
 
     this.http.post(`/api/devices/${device.id}/${action}`, {}).subscribe({
       error: () => {
-        // Revert on failure
+        // Revert on failure. An error ends the request without "complete", so the switch is freed here too.
         this._devices.update((list) =>
           list.map((d) => d.id === device.id ? { ...d, state: device.state } : d)
         );
+        this._busyIds.update((s) => { const next = new Set(s); next.delete(device.id); return next; });
       },
       complete: () => {
         this._busyIds.update((s) => { const next = new Set(s); next.delete(device.id); return next; });

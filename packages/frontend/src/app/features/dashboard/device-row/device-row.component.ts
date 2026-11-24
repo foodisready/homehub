@@ -6,6 +6,7 @@ import type { Device } from '../../../shared/models/device.model';
 import { type ActivityEvent, actionWord, causeText, clock, when } from '../../../shared/activity/activity-text';
 import { ThermostatControlComponent } from '../../../shared/thermostat/thermostat-control.component';
 import { ThermostatService, offQuestion, summary } from '../../../shared/thermostat/thermostat.service';
+import { isVacuum, vacuumDetail, vacuumNeedsHelp } from '../../../shared/vacuum';
 
 export interface OverrideRequest { device: Device; durationMinutes: number; }
 
@@ -27,6 +28,12 @@ export interface OverrideRequest { device: Device; durationMinutes: number; }
     .dot.on.no-power { background: #f59e0b; box-shadow: 0 0 6px #f59e0b; }
     .detail.no-power { color: #fbbf24; }
     .no-power-help { font-size: 0.8rem; color: #fbbf24; line-height: 1.4; margin: 0; }
+    .dot.help { background: #f59e0b; box-shadow: 0 0 6px #f59e0b; }
+    .detail.help { color: #fbbf24; }
+    .small.go { background: var(--green); border-color: var(--green); color: #04140c; font-weight: 600; }
+    .small:disabled { opacity: 0.5; }
+    .vac-msg { font-size: 0.78rem; margin: 0; color: var(--text-muted); }
+    .vac-msg.err { color: #fbbf24; }
 
     .name {
       flex: 1; min-width: 0; padding: 0.3rem 0; background: transparent; color: var(--text);
@@ -70,10 +77,10 @@ export interface OverrideRequest { device: Device; durationMinutes: number; }
   `],
   template: `
     <div class="row" [class.offline]="!device().online">
-      <span class="dot" [class.on]="device().online && device().state" [class.door]="isDoor()" [class.no-power]="noPower()" [class.offline]="!device().online"></span>
+      <span class="dot" [class.on]="device().online && device().state" [class.door]="isDoor()" [class.no-power]="noPower()" [class.help]="vacuumHelp()" [class.offline]="!device().online"></span>
       <button class="name" type="button" [attr.aria-expanded]="open()" (click)="togglePanel()">
         <span class="alias">{{ device().alias }}</span>
-        @if (detail(); as text) { <span class="detail" [class.timer]="device().overrideUntil || autoOffText()" [class.door-open]="isDoor() && device().online && device().state && !device().overrideUntil && !autoOffText()" [class.no-power]="noPower()">{{ text }}</span> }
+        @if (detail(); as text) { <span class="detail" [class.timer]="device().overrideUntil || autoOffText()" [class.door-open]="isDoor() && device().online && device().state && !device().overrideUntil && !autoOffText()" [class.no-power]="noPower()" [class.help]="vacuumHelp()">{{ text }}</span> }
       </button>
       <button class="timer-btn" type="button" [class.active]="device().overrideUntil || device().autoOff"
               [attr.aria-label]="'Timer for ' + device().alias" (click)="togglePanel()">⏱</button>
@@ -100,12 +107,28 @@ export interface OverrideRequest { device: Device; durationMinutes: number; }
             into the light's power instead of to HomeHub's switch, and needs rewiring.</p>
         }
         @if (isThermostat()) { <app-thermostat-control [deviceId]="device().id" /> }
+        @if (isVac()) {
+          <div class="buttons">
+            @if (vacuumCanStart()) {
+              <button class="small go" type="button" [disabled]="busy() || vacBusy() || !device().online" (click)="vacuumStart()">{{ device().vacuum?.activity === 'paused' ? 'Resume' : 'Start cleaning' }}</button>
+            }
+            @if (device().vacuum?.activity === 'cleaning') {
+              <button class="small" type="button" [disabled]="busy() || vacBusy() || !device().online" (click)="vacuumPause()">Pause</button>
+            }
+            @if (vacuumCanSendHome()) {
+              <button class="small" type="button" [disabled]="busy() || vacBusy() || !device().online" (click)="vacuumHome()">Send home</button>
+            }
+          </div>
+          @if (vacError()) { <p class="vac-msg err">{{ vacError() }}</p> }
+          @else if (device().vacuum?.binFull) { <p class="vac-msg err">Its bin is full. Empty it so it can clean properly.</p> }
+          @else if (device().vacuum?.activity === 'stuck') { <p class="vac-msg err">It needs a hand where it stopped. The iRobot app shows where that is.</p> }
+        }
         <span class="panel-label">
-          {{ device().model ?? device().driverType }}
+          {{ isVac() ? 'iRobot Roomba' + (device().model ? ' · ' + device().model : '') : (device().model ?? device().driverType) }}
           @if (device().hasEmeter && device().wattage != null) { · {{ device().wattage | number:'1.1-1' }} W }
         </span>
         @if (timerChoices().length || device().overrideUntil) {
-          <span class="panel-label">{{ isDoor() ? 'Close after' : isCamera() ? (device().state ? 'Pause after' : 'Keep paused for') : (device().state ? 'Turn off after' : 'Keep off for') }}</span>
+          <span class="panel-label">{{ isDoor() ? 'Close after' : isCamera() ? (device().state ? 'Pause after' : 'Keep paused for') : isVac() ? 'Send home after' : (device().state ? 'Turn off after' : 'Keep off for') }}</span>
           <div class="buttons">
             @for (minutes of timerChoices(); track minutes) {
               <button class="small" type="button" (click)="setTimer(minutes)">{{ minutes < 60 ? minutes + ' min' : minutes / 60 + 'h' }}</button>
@@ -152,6 +175,21 @@ export class DeviceRowComponent implements OnDestroy {
   readonly isCamera = computed(() => this.device().driverType === 'wyze');
   /** Matter thermostats: "on" means heating, cooling or auto; the row also shows the temperatures. */
   readonly isThermostat = computed(() => this.device().driverConfig?.['kind'] === 'thermostat');
+  /** Robot vacuums: "on" means out cleaning, "off" home on its dock. */
+  readonly isVac = computed(() => isVacuum(this.device()));
+  readonly vacuumHelp = computed(() => this.isVac() && this.device().online && vacuumNeedsHelp(this.device().vacuum));
+  /** Docked, stopped, or paused: it can set off. Its status unknown, the switch's state decides. */
+  readonly vacuumCanStart = computed(() => {
+    const v = this.device().vacuum;
+    return v ? ['docked', 'idle', 'paused', 'returning'].includes(v.activity) : !this.device().state;
+  });
+  /** Out on a job, or stopped away from its dock. */
+  readonly vacuumCanSendHome = computed(() => {
+    const v = this.device().vacuum;
+    return v ? v.cleaning || v.activity === 'idle' : this.device().state;
+  });
+  readonly vacBusy = signal(false);
+  readonly vacError = signal('');
   private readonly thermostats = inject(ThermostatService);
   private readonly watchThermostat = effect(() => { if (this.isThermostat()) untracked(() => this.thermostats.watch(this.device().id)); });
 
@@ -192,11 +230,11 @@ export class DeviceRowComponent implements OnDestroy {
     const d = this.device(), a = d.autoOff;
     if (!a || !d.online || !d.state) return '';
     const cause = a.cause === 'motion' ? 'no motion' : a.cause;
-    const verb = this.isDoor() ? 'Closes' : this.isCamera() ? 'Pauses' : 'Off';
+    const verb = this.isDoor() ? 'Closes' : this.isCamera() ? 'Pauses' : this.isVac() ? 'Home at' : 'Off';
     if (a.at === null) return `On · off ${a.afterMinutes ?? ''} min after motion stops`.replace('  ', ' ');
     const left = Date.parse(a.at) - this.now();
-    if (left <= 0) return this.isDoor() ? 'Closing…' : this.isCamera() ? 'Pausing…' : 'Turning off…';
-    const at = `${verb} at ${clock(a.at)}`;
+    if (left <= 0) return this.isDoor() ? 'Closing…' : this.isCamera() ? 'Pausing…' : this.isVac() ? 'Going home…' : 'Turning off…';
+    const at = this.isVac() ? `${verb} ${clock(a.at)}` : `${verb} at ${clock(a.at)}`;
     if (left < 60_000) return `${at} · in ${Math.ceil(left / 1000)} s · ${cause}`;
     if (left <= 60 * 60_000) return `${at} · in ${Math.ceil(left / 60_000)} min · ${cause}`;
     return `${at} · ${cause}`;
@@ -214,12 +252,14 @@ export class DeviceRowComponent implements OnDestroy {
     if (device.overrideUntil) {
       const time = new Date(device.overrideUntil).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
       if (this.isDoor()) return `${device.overrideState ? 'Closes at' : 'Closed until'} ${time}`;
+      if (this.isVac()) return `${vacuumDetail(device.vacuum, device.state)} · home at ${time}`;
       return `${device.overrideState ? 'Off at' : 'Off until'} ${time}`;
     }
     if (this.isThermostat()) {
       const t = this.thermostats.views().get(device.id);
       return t ? summary(t) : '';
     }
+    if (this.isVac()) return vacuumDetail(device.vacuum, device.state);
     const since = this.since();
     if (this.isDoor()) return (device.state ? 'Open' : 'Closed') + (device.state && since ? ` since ${since}` : '');
     if (this.isCamera()) return (device.state ? 'Watching' : 'Paused') + (!device.state && since ? ` since ${since}` : '');
@@ -256,6 +296,8 @@ export class DeviceRowComponent implements OnDestroy {
    */
   readonly timerChoices = computed(() => {
     if (this.isDoor()) return this.device().state ? [15, 30, 60] : [];
+    // Sends it home part way through: a job runs an hour or two at most.
+    if (this.isVac()) return this.device().state ? [30, 60, 120] : [];
     // A thermostat has a schedule and Away mode instead: turning the heat off after an hour isn't a timer people want.
     if (this.isThermostat()) return [];
     return [60, 120, 240];
@@ -297,6 +339,27 @@ export class DeviceRowComponent implements OnDestroy {
     const thermostatOff = this.isThermostat() && this.device().state;
     if ((this.device().isProtected && !resumingCamera) || thermostatOff) this.confirming.set(true);
     else this.toggled.emit(this.device());
+  }
+
+  /** Start, or carry on with a paused job: the device's "on". */
+  vacuumStart(): void {
+    this.vacError.set('');
+    this.toggled.emit({ ...this.device(), state: false });
+  }
+
+  /** Back to its dock: the device's "off". */
+  vacuumHome(): void {
+    this.vacError.set('');
+    this.toggled.emit({ ...this.device(), state: true });
+  }
+
+  vacuumPause(): void {
+    this.vacError.set('');
+    this.vacBusy.set(true);
+    this.http.post(`/api/roomba/${this.device().id}/pause`, {}).subscribe({
+      next: () => this.vacBusy.set(false),
+      error: (e) => { this.vacBusy.set(false); this.vacError.set(e?.error?.error ?? 'Couldn’t pause it.'); },
+    });
   }
 
   confirm(): void {

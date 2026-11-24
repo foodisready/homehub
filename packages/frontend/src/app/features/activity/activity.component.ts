@@ -211,7 +211,7 @@ export class ActivityComponent implements OnInit, OnDestroy {
   time = clock;
 
   onFor(e: ActivityEvent): string {
-    const word = e.driverType === 'meross' ? 'was open' : e.driverType === 'wyze' ? 'had been watching' : 'was on';
+    const word = e.driverType === 'meross' ? 'was open' : e.driverType === 'wyze' ? 'had been watching' : e.driverType === 'roomba' ? 'was out cleaning' : 'was on';
     return `${word} for ${duration(e.onForSeconds ?? 0)}`;
   }
 

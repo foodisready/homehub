@@ -26,6 +26,7 @@ export interface ActivityEvent extends LastChange {
 export function actionWord(driverType: string | null, state: boolean): string {
   if (driverType === 'meross') return state ? 'opened' : 'closed';
   if (driverType === 'wyze') return state ? 'resumed watching' : 'paused';
+  if (driverType === 'roomba') return state ? 'started cleaning' : 'went home';
   return state ? 'turned on' : 'turned off';
 }
 

@@ -156,6 +156,8 @@ async function readDevice(
   // all: each check takes the plug's only connection, and the active HomeHub's Chat, voice and
   // schedules then find it busy. Switching one by hand on the backup still reads it back.
   if (driverType === 'tuya' && !isActiveServer()) return;
+  // A robot vacuum takes one connection too: a backup connecting would take it from the active HomeHub.
+  if (driverType === 'roomba' && !isActiveServer()) return;
   if (driverType === 'tuya') {
     const last = tuyaLastPolled.get(id) ?? 0;
     if (Date.now() - last < TUYA_POLL_INTERVAL_MS) return;

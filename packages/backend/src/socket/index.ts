@@ -117,3 +117,8 @@ export function emitSensorAlert(
 ): void {
   _io?.emit('sensor:flow:alert', { id: sensorRowId, sensorId: sensorKey, eventId, alertLevel, rateM3h });
 }
+
+/** A robot vacuum's status changed: what it's doing, its battery, bin or a problem. */
+export function emitVacuumStatus(deviceId: number, vacuum: object): void {
+  _io?.emit('vacuum:status', { id: deviceId, vacuum });
+}

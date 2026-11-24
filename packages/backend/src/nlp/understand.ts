@@ -25,7 +25,7 @@ export interface Understanding {
 
 export interface HomeNames {
   /** light: whether "<room> lights" includes it (not a camera, door, valve or protected device). */
-  devices: { alias: string; nicknames: string[]; room: string | null; light?: boolean; on?: boolean }[];
+  devices: { alias: string; nicknames: string[]; room: string | null; light?: boolean; on?: boolean; vacuum?: boolean }[];
   scenes:  { name: string; nicknames: string[] }[];
 }
 
@@ -40,8 +40,8 @@ export function targets(home: HomeNames): Target[] {
   const list: Target[] = home.devices.map((d) => ({
     label:   d.alias,
     devices: [d.alias],
-    about:   [d.room ? `room: ${d.room}` : '', d.nicknames.length ? `also called: ${d.nicknames.join(', ')}` : '',
-      d.on === undefined ? '' : d.on ? 'now on' : 'now off'].filter(Boolean).join('; '),
+    about:   [d.vacuum ? 'robot vacuum' : '', d.room ? `room: ${d.room}` : '', d.nicknames.length ? `also called: ${d.nicknames.join(', ')}` : '',
+      d.on === undefined ? '' : d.vacuum ? (d.on ? 'now cleaning' : 'now docked') : d.on ? 'now on' : 'now off'].filter(Boolean).join('; '),
   }));
   const taken = new Set(list.map((t) => t.label.toLowerCase()));
   const rooms = [...new Set(home.devices.map((d) => d.room).filter((r): r is string => !!r))];
@@ -94,6 +94,7 @@ export function understandPrompt(home: HomeNames): string {
 action:
 - on / off: switch something on or off (開, 着, 打开, bật, mở = on; 關, 熄, 关, 閂, tắt = off)
 - open / close: a garage door (開車房門, mở cửa ga-ra = open; 關/鎖車房門, đóng cửa ga-ra = close)
+  A robot vacuum is on or off: on starts it cleaning (start, clean, vacuum, 開始, 掃地, 吸塵, quét nhà, hút bụi), off sends it back to its dock (stop, send home, go home, 停, 返去, 回去, dừng, về sạc).
 - scene: run one of the scenes
 - question: a question, such as the time or what's on
 - unclear: anything else, or you can't tell what is meant

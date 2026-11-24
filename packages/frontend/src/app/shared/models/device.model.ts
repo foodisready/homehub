@@ -1,4 +1,5 @@
 import type { LastChange } from '../activity/activity-text';
+import type { VacuumStatus } from '../vacuum';
 
 export interface AutoOff {
   /** null while a motion rule waits for the room to empty */
@@ -34,9 +35,11 @@ export interface Device {
   nicknames:    string[];
   room:         string | null;
   isProtected:  boolean;
+  /** A robot vacuum's status; null while HomeHub isn't connected to it. */
+  vacuum?: VacuumStatus | null;
   /** What it draws when on, for energy estimates. `excluded` says why it isn't counted at all. */
   power?: {
-    excluded: 'camera' | 'garage door' | 'valve' | 'thermostat' | null;
+    excluded: 'camera' | 'garage door' | 'vacuum' | 'valve' | 'thermostat' | null;
     watts: number | null;
     method: 'set' | 'measured' | 'typical' | 'none';
     label: string | null;

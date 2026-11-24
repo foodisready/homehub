@@ -31,6 +31,8 @@ import { scenesRouter } from './routes/scenes';
 import { tuyaRouter }   from './routes/tuya';
 import { kasaRouter }   from './routes/kasa';
 import { merossRouter } from './routes/meross';
+import { roombaRouter } from './routes/roomba';
+import { startRoombaUpdates } from './roomba/service';
 import { honeywellRouter } from './routes/honeywell';
 import { startHoneywell } from './honeywell/honeywell';
 import { motionEventsRouter, motionRouter } from './routes/motion';
@@ -141,6 +143,7 @@ app.use('/api/devices',   energyRouter);   // history sub-routes: /api/devices/:
 app.use('/api/tuya',      tuyaRouter);
 app.use('/api/kasa',      requireAdmin, kasaRouter);
 app.use('/api/meross',    requireAdmin, merossRouter);
+app.use('/api/roomba',    roombaRouter);
 app.use('/api/honeywell', requireAdmin, honeywellRouter);
 app.use('/api/motion',    requireAdmin, motionRouter);
 app.use('/api/sensors',   sensorsRouter);
@@ -178,6 +181,7 @@ httpServer.listen(PORT, async () => {
   applyHomeTimezone();       // the time zone chosen in Settings, if any
   await seedAdminIfEmpty();  // admin from ADMIN_PASSWORD, or wait for setup in the browser
   startPolling();            // begin device state polling
+  startRoombaUpdates();      // robot vacuums report what they're doing as it changes
   startPowerTimers();        // turn devices off when their timers end
   startMotionRules();        // turn lights off when a room has been empty long enough
   startCameraWatch();        // save snapshots when Wyze cameras see motion

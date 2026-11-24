@@ -112,7 +112,7 @@ const roomKeys = (room: string) => {
 };
 
 /** Names that say a device isn't a light, so "<room> lights" leaves it alone. */
-export const NOT_A_LIGHT = /\b(?:fans?|heaters?|tvs?|television|valves?|doors?|garage|pumps?|cameras?|cams?|speakers?|chargers?|ac|air|humidifiers?|dehumidifiers?|purifiers?|kettles?|coffee|printers?|routers?|plugs?)\b/i;
+export const NOT_A_LIGHT = /\b(?:fans?|heaters?|tvs?|television|valves?|doors?|garage|pumps?|cameras?|cams?|speakers?|chargers?|ac|air|humidifiers?|dehumidifiers?|purifiers?|kettles?|coffee|printers?|routers?|plugs?|vacuums?|roombas?)\b/i;
 
 /**
  * "Brenden's lights", "kitchen lamps": the lights in a room, meaning every
@@ -128,7 +128,8 @@ function roomLights(wanted: string, spoken: string, devices: NamedDevice[]): Nam
   const inRoom = devices.filter((d) => typeof d.room === 'string' && roomKeys(d.room).includes(place));
   if (!inRoom.length) return [];
   if ('device' in findDeviceByName(spoken)) return [];
-  return inRoom.filter((d) => !NOT_A_LIGHT.test(d.alias) && !isProtectedDevice(d as unknown as PowerDevice));
+  return inRoom.filter((d) => !NOT_A_LIGHT.test(d.alias) && (d as { driver_type?: string }).driver_type !== 'roomba'
+    && !isProtectedDevice(d as unknown as PowerDevice));
 }
 
 /**

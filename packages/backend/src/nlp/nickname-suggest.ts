@@ -71,6 +71,7 @@ const WORDS: Word[] = [
   { en: ['downstairs'], kind: 'place', vi: ['dưới lầu'], yue: '樓下', zh: '楼下' },
   // Things
   { en: ['garage door', 'garage doors'], kind: 'thing', vi: ['cửa ga-ra', 'cửa nhà xe'], yue: '車房門', zh: '车库门' },
+  { en: ['robot vacuum', 'vacuum', 'roomba'], kind: 'thing', vi: ['robot hút bụi', 'máy hút bụi'], yue: '掃地機', zh: '扫地机' },
   { en: ['front door'], kind: 'thing', vi: ['cửa trước'], yue: '前門', zh: '前门' },
   { en: ['back door'], kind: 'thing', vi: ['cửa sau'], yue: '後門', zh: '后门' },
   { en: ['door', 'doors'], kind: 'thing', vi: ['cửa'], yue: '門', zh: '门' },
@@ -129,11 +130,12 @@ export function readName(name: string): Reading | null {
 }
 
 const GARAGE = WORDS.find((w) => w.en[0] === 'garage door')!;
+const VACUUM = WORDS.find((w) => w.en[0] === 'robot vacuum')!;
 
 // The simplified characters in the Mandarin words above, in traditional: to tell 客厅灯 is 客廳燈.
 // 台 is taken as 枱, which sounds the same: 台灯 is 枱燈.
 const TRADITIONAL: Record<string, string> = Object.fromEntries([...
-  '厨廚厅廳卧臥书書阁閣楼樓关關阳陽门門后後园園车車库庫台枱岛島区區头頭灯燈圣聖诞誕气氣净淨湿濕机機风風电電视視壶壺边邊长長间間顶頂',
+  '扫掃厨廚厅廳卧臥书書阁閣楼樓关關阳陽门門后後园園车車库庫台枱岛島区區头頭灯燈圣聖诞誕气氣净淨湿濕机機风風电電视視壶壺边邊长長间間顶頂',
 ].reduce<string[][]>((pairs, c, i, all) => (i % 2 ? pairs : [...pairs, [c, all[i + 1]]]), []));
 const traditional = (s: string) => [...s].map((c) => TRADITIONAL[c] ?? c).join('');
 
@@ -176,12 +178,15 @@ export function suggestNicknames(device: SuggestDevice, languages: SuggestLangua
   };
 
   for (const name of english) {
-    const r = readName(name);
+    // A robot vacuum is one whatever it's called ("Roomba i8", "Rosie"), and it cleans the whole house, not its room.
+    const vacuum = device.driverType === 'roomba';
+    const r = readName(name) ?? (vacuum ? { ownerRoom: false } : null);
     if (!r) continue;
+    if (vacuum) { r.thing = VACUUM; r.place = undefined; r.owner = undefined; r.pos = undefined; r.mod = undefined; }
     // "Garage Left", on a garage door opener: a door.
     if (!r.thing && device.driverType === 'meross') r.thing = GARAGE;
     // From the room when the name has none: "Desk lamp" in the Office.
-    if (r.thing && !r.place && !r.owner && device.room) {
+    if (r.thing && !r.place && !r.owner && device.room && !vacuum) {
       const room = readName(device.room);
       if (room && !room.thing && !room.pos && !room.mod) { r.place = room.place; r.owner = room.owner; r.ownerRoom = room.ownerRoom; }
     }

@@ -97,6 +97,7 @@ const DRIVER_LABEL: Record<string, string> = {
   wyze:   'Wyze',
   matter: 'Matter',
   honeywell: 'Honeywell',
+  roomba: 'Roomba',
 };
 
 @Component({
@@ -176,6 +177,7 @@ const DRIVER_LABEL: Record<string, string> = {
     .driver-badge.honeywell { border-color:#dc2626; color:#fca5a5; }
     .driver-badge.wyze   { border-color:#0e7490; color:#67e8f9; }
     .driver-badge.matter { border-color:#be185d; color:#f9a8d4; }
+    .driver-badge.roomba { border-color:#4d7c0f; color:#bef264; }
     .matter-panel { margin-top:0.75rem; padding:0.9rem; border:1px solid var(--border); border-radius:var(--radius); }
 
     .btn-sm {
@@ -530,7 +532,7 @@ const DRIVER_LABEL: Record<string, string> = {
                   @for (d of discoveredDevices(); track d.ip) {
                     <div class="discover-row">
                       <input type="checkbox" [checked]="isSelected(d.ip)" (change)="toggleSelect(d.ip)"
-                             [disabled]="(d.driverType === 'meross' && d.needsLogin) || (d.driverType === 'tuya' && (!d.pendingKey?.trim() || (!d.driverConfig?.['deviceId'] && !d.pendingDeviceId?.trim())))" />
+                             [disabled]="d.driverType === 'roomba' || (d.driverType === 'meross' && d.needsLogin) || (d.driverType === 'tuya' && (!d.pendingKey?.trim() || (!d.driverConfig?.['deviceId'] && !d.pendingDeviceId?.trim())))" />
                       <div class="discover-alias">
                         <input type="text" [(ngModel)]="d.pendingAlias" placeholder="Alias" />
                       </div>
@@ -539,6 +541,17 @@ const DRIVER_LABEL: Record<string, string> = {
                       <span class="driver-badge" [class]="'driver-badge ' + d.driverType">{{ driverLabel(d.driverType) }}</span>
                       @if (d.needsLogin && d.driverType === 'meross') {
                         <span class="discover-key-label">Sign in under Integrations → Meross, then Discover again</span>
+                      } @else if (d.driverType === 'roomba') {
+                        <p class="discover-login-note">
+                          @if (pairingIp() === d.ip) {
+                            Now hold the robot's <strong>Home</strong> button for about 2 seconds, until it plays a tone. HomeHub is listening for a minute or less.
+                          } @else {
+                            With the robot on its dock, tap Pair, then hold its <strong>Home</strong> button for about 2 seconds until it plays a tone. HomeHub then controls it over your Wi-Fi; no iRobot password is needed.
+                          }
+                        </p>
+                        <button class="btn-sm btn-primary" type="button" (click)="pairRoomba(d)" [disabled]="pairingIp() !== null">
+                          {{ pairingIp() === d.ip ? 'Waiting for the Home button…' : 'Pair' }}
+                        </button>
                       } @else if (d.needsLogin) {
                         @if (d.driverType === 'kasa') {
                           <p class="discover-login-note">
@@ -1277,7 +1290,7 @@ export class SettingsComponent implements OnInit, OnDestroy {
     out.push({
       key: 'devices', name: 'Devices', group: 'Your home', icon: 'devices', hue: '#4f8cff',
       status: !devices.length ? 'None yet: add your first' : offline ? `${devices.length} devices · ${offline} offline` : `${devices.length} devices · all online`,
-      look: offline > 0, words: 'add discover find scan probe rename room nickname matter kasa tuya shelly meross wyze honeywell thermostat plug light',
+      look: offline > 0, words: 'add discover find scan probe rename room nickname matter kasa tuya shelly meross wyze honeywell roomba irobot vacuum thermostat plug light',
     });
     if (full) {
       const h = sum.home;
@@ -1414,6 +1427,31 @@ export class SettingsComponent implements OnInit, OnDestroy {
   editKasaUser  = '';
   editKasaPass  = '';
   kasaLoginSaving = signal(false);
+  /** The robot vacuum being paired, while HomeHub waits for its Home button. */
+  readonly pairingIp = signal<string | null>(null);
+
+  /**
+   * Pairs a Roomba: HomeHub asks it for its password while someone holds its
+   * Home button, then adds it. The password stays on HomeHub.
+   */
+  pairRoomba(d: DiscoveredDevice): void {
+    this.pairingIp.set(d.ip);
+    this.discoverMsg.set('');
+    this.http.post<{ id: number; alias: string; updated: boolean }>('/api/roomba/pair', { ip: d.ip, alias: d.pendingAlias?.trim() || d.alias }).subscribe({
+      next: (r) => {
+        this.pairingIp.set(null);
+        this._discoveredDevices.update((list) => list.filter((x) => x !== d));
+        this.discoverMsg.set(r.updated ? `${r.alias} paired again.` : `${r.alias} added. It's on the dashboard.`);
+        this.discoverErr.set(false);
+        this.reloadDevices();
+      },
+      error: (err: HttpErrorResponse) => {
+        this.pairingIp.set(null);
+        this.discoverMsg.set(err.error?.error ?? 'Pairing failed. Try again.');
+        this.discoverErr.set(true);
+      },
+    });
+  }
   kasaLoginMsg    = signal('');
   kasaLoginErr    = signal(false);
   editTuyaDeviceId = '';
@@ -2030,7 +2068,7 @@ export class SettingsComponent implements OnInit, OnDestroy {
           return;
         }
         // Pre-select devices that are ready: Tuya needs a key, and Meross a sign-in, first
-        newDevices.filter((d) => d.driverType !== 'tuya' && !(d.driverType === 'meross' && d.needsLogin))
+        newDevices.filter((d) => d.driverType !== 'tuya' && d.driverType !== 'roomba' && !(d.driverType === 'meross' && d.needsLogin))
           .forEach((d) => this.selectedIps.add(d.ip));
         this._discoveredDevices.set(newDevices);
         this.discoverMsg.set([

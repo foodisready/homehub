@@ -60,6 +60,14 @@ Plugs sold with Tasmota or ESPHome already installed, such as Athom's, are also 
 
 Garage doors are always protected: HomeHub asks you to confirm, and Chat and voice can't open them.
 
+## Robot vacuums
+
+| Device | Status | Local or cloud | How it's added |
+|---|---|---|---|
+| iRobot Roomba i8+ | 🟡 Should work | Local | Discover, then **Pair** and hold the robot's Home button. Found on a real network; pairing not yet tried on one. |
+| Other Wi-Fi Roombas (i, s, j, Combo, 900 series) | 🟡 Should work | Local | The same |
+| Neato Botvac | ❌ Not supported | Neato's cloud shut down in 2025 | |
+
 ## Cameras
 
 | Device | Status | Local or cloud | How it's added |

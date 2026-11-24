@@ -4,9 +4,10 @@ import {
 import type { Device } from '../../shared/models/device.model';
 import { ThermostatService, offQuestion, shown } from '../../shared/thermostat/thermostat.service';
 import { DeviceRowComponent, OverrideRequest } from './device-row/device-row.component';
+import { isVacuum, vacuumWord } from '../../shared/vacuum';
 
 /** What a device is, for its bubble: lights glow warm, plugs show watts, the rest have their own look. */
-type Kind = 'light' | 'plug' | 'thermostat' | 'camera' | 'door';
+type Kind = 'light' | 'plug' | 'thermostat' | 'camera' | 'door' | 'vacuum';
 
 const LIGHT_WORDS = /\b(lamps?|lights?|lighting|bulbs?|chandelier|pendants?|sconces?|lanterns?|led|strip)\b|燈|灯|đèn/i;
 
@@ -14,6 +15,7 @@ export function kindOf(d: Device): Kind {
   if (d.driverConfig?.['kind'] === 'thermostat') return 'thermostat';
   if (d.driverType === 'wyze') return 'camera';
   if (d.driverType === 'meross') return 'door';
+  if (isVacuum(d)) return 'vacuum';
   if (LIGHT_WORDS.test(d.alias) || LIGHT_WORDS.test(d.power?.label ?? '') || d.nicknames.some((n) => LIGHT_WORDS.test(n))) return 'light';
   return 'plug';
 }
@@ -49,6 +51,7 @@ const PATHS: Record<string, string> = {
   light: 'M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0 0 12 3Z',
   plug: 'M9 2v5M15 2v5M6 7h12v4a6 6 0 0 1-12 0V7ZM12 17v5',
   camera: 'M3 7h12v10H3zM15 10l6-3v10l-6-3',
+  vacuum: 'M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18ZM5 9h14M12 13.5h.01',
   door_: 'M3 21V9l9-5 9 5v12M6 21v-9h12v9M6 15h12M6 18h12',
   back: 'M15 5l-7 7 7 7',
 };
@@ -432,6 +435,7 @@ export class RoomsViewComponent implements AfterViewChecked, OnDestroy {
       }
       case 'camera': return d.state ? 'Watching' : 'Paused';
       case 'door': return d.state ? 'Open' : 'Closed';
+      case 'vacuum': return vacuumWord(d.vacuum, d.state);
       default: return d.state ? 'On' : 'Off';
     }
   }
@@ -461,7 +465,7 @@ export class RoomsViewComponent implements AfterViewChecked, OnDestroy {
   }
   /** "All off" here, as on the list: lights and plugs, never a thermostat or anything protected. */
   canTurnOff(r: RoomTile): boolean {
-    return r.devices.some((d) => d.online && d.state && !d.isProtected && kindOf(d) !== 'thermostat');
+    return r.devices.some((d) => d.online && d.state && !d.isProtected && kindOf(d) !== 'thermostat' && kindOf(d) !== 'vacuum');
   }
 
   // ── Tap to switch, press and hold for controls ──

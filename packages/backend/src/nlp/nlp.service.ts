@@ -680,7 +680,8 @@ export function homeNames(): HomeNames {
     devices: devices.map((d) => ({
       alias: d.alias, nicknames: list(d.nicknames), room: d.room,
       // As "<room> lights" reads elsewhere: not a camera, a door, a valve or a protected device.
-      light: !isCamera(d) && !isGarageDoor(d) && !isProtectedDevice(d) && !NOT_A_LIGHT.test(d.alias),
+      light: !isCamera(d) && !isGarageDoor(d) && d.driver_type !== 'roomba' && !isProtectedDevice(d) && !NOT_A_LIGHT.test(d.alias),
+      ...(d.driver_type === 'roomba' ? { vacuum: true } : {}),
       // On or off now, so a misheard verb can be read as the likely change (understandPrompt). Not for a
       // camera or a garage door, and not when it's offline or not yet known.
       ...(() => {

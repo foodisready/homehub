@@ -1,6 +1,7 @@
 import { Injectable, OnDestroy } from '@angular/core';
 import { io, Socket } from 'socket.io-client';
 import { AuthService } from '../auth/auth.service';
+import type { VacuumStatus } from '../../shared/vacuum';
 
 export interface DeviceStateEvent {
   id: number;
@@ -121,6 +122,12 @@ export class SocketService implements OnDestroy {
   onDeviceNoPower(callback: (event: { id: number; noPower: boolean }) => void): () => void {
     this.socket?.on('device:no-power', callback);
     return () => this.socket?.off('device:no-power', callback);
+  }
+
+  /** A robot vacuum's status changed: what it's doing, its battery, bin or a problem. */
+  onVacuumStatus(callback: (event: { id: number; vacuum: VacuumStatus }) => void): () => void {
+    this.socket?.on('vacuum:status', callback);
+    return () => this.socket?.off('vacuum:status', callback);
   }
 
   onDeviceOverride(callback: (event: DeviceOverrideEvent) => void): () => void {

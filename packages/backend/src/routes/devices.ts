@@ -17,6 +17,7 @@ import { learnOwners, suggestNicknames, type NicknameSuggestion, type SuggestLan
 import { keepSecrets, withoutSecrets } from '../devices/secrets';
 import { lastChanges, recordPower, type LastChange } from '../activity/activity';
 import { pendingAutoOff, type AutoOff } from '../devices/auto-off';
+import { vacuumViewOf } from '../roomba/service';
 import {
   MAX_EXTRA_NETWORKS, displayNetwork, extraNetworks, ownNetworks, saveExtraNetworks, suggestedNetworks,
 } from '../discovery/networks';
@@ -126,6 +127,8 @@ function mergeWithCache(
     autoOff:      autoOff.get(device.id) ?? null,
     /** What it draws when on, for energy estimates; null `excluded` if it isn't a plug load. */
     power:        powerOf(device),
+    /** A robot vacuum's status: null while HomeHub isn't connected to it. */
+    ...(device.driver_type === 'roomba' ? { vacuum: vacuumViewOf(device.driver_config) } : {}),
   };
 }
 

@@ -23,6 +23,7 @@ HomeHub controls devices directly over your home network. All of them are switch
 | **Any Matter brand** | Plugs, lights, switches and power strips (on and off), and thermostats | Shared from Google Home, Apple Home, Alexa or SmartThings. See [Matter devices](#matter-devices) |
 | **Honeywell** | RedLINK thermostats, such as Prestige, through a RedLINK Internet Gateway | Through your Total Connect Comfort account. See [Honeywell thermostats](#honeywell-thermostats-redlink) |
 | **Alarm.com** | Alarm systems with the Alarm.com app: arm state, door, window and motion sensors, arming and disarming | Through your Alarm.com login. See [Alarm system](#alarm-system-alarmcom) |
+| **iRobot Roomba** | Wi-Fi Roombas (i, s, j, Combo and 900 series): start, pause, send home, battery, bin and problems | Local, no cloud. Paired once at the robot's Home button. See [Robot vacuums](#robot-vacuums-roomba) |
 
 Zigbee devices aren't supported. "Works with Google or Alexa" on a box doesn't mean it works with HomeHub, but the **Matter** logo does.
 
@@ -103,6 +104,22 @@ If Discover doesn't find it, HomeHub tells you which openers on your Meross acco
 HomeHub keeps only the key that Meross returns, not your password, plus a sign-in token it uses to read device names. The opener is then controlled over your home network, without the internet. The key works for every Meross device on that account.
 
 Garage doors are always protected. The dashboard shows **Open** or **Closed** and asks you to confirm. Chat and voice can close one ("close the garage door", "đóng cửa ga-ra") but never open it, since opening one by mistake leaves the house open. While the door is closing, it still shows **Open** until it's all the way down, which takes about 25 seconds to update.
+
+### Robot vacuums (Roomba)
+
+1. Set up the Roomba in the iRobot app, and reserve its address on your router.
+2. Select **Discover on network**. The robot appears with the name it has in the iRobot app.
+3. With the robot on its dock, select **Pair**, then hold the robot's **Home** button for about 2 seconds, until it plays a tone. HomeHub listens for about 40 seconds.
+
+HomeHub asks the robot for its own password while you hold the button, and keeps it. You don't type an iRobot password, and the robot is then controlled over your home network, without the internet. It gets the nickname "vacuum", so "start the vacuum" works by voice and Chat straight away.
+
+On the dashboard, the robot's switch is on while it's out cleaning, and turning it off sends it home to its dock. Its row says what it's doing, such as **Cleaning · 64%**, **Going home** or **Charging · 88% · Bin full**, and turns amber when it's stuck or its bin is full. Open the row for **Start cleaning**, **Pause**, **Resume** and **Send home**, or to send it home after 30 minutes, 1 hour or 2 hours. Schedules and scenes can start it or send it home, and Activity shows when it started and went home, including jobs started by the iRobot app or the robot's own schedule.
+
+A room's **All off** doesn't send the robot home, and it isn't one of a room's lights by voice. Its energy isn't estimated: it charges on its dock whether or not it's cleaning.
+
+The robot takes one local connection at a time. HomeHub keeps it, and the iRobot app then works through iRobot's cloud as usual. A backup HomeHub doesn't connect to the robot.
+
+Older Neato robots aren't supported: Neato's servers have shut down, and most Neato models can't be controlled on the home network.
 
 ### Matter devices
 

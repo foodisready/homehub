@@ -208,6 +208,7 @@ export async function runGroupCommand(
     const device = joinNames(switched);
     const plain = allowed.some((d) => isProtectedDevice(d));
     if (state && !minutes && allowed.every(isCamera)) return { response: `Resumed ${device}.`, actions };
+    if (!minutes && allowed.every(isVacuum)) return { response: state ? `Starting ${device}.` : `Sending ${device} home.`, actions };
     const response = minutes
       ? reply('timer', { device, minutes: formatDuration(minutes) }, { plain })
       : reply(state ? 'on' : 'off', { device }, { plain });
@@ -244,6 +245,9 @@ export const DOOR_OPEN_REFUSED = "For safety, I won't open a garage door from he
 type SceneAction = PowerDevice & { scene_state: number };
 
 export const isCamera = (device: { driver_type?: string | null }) => device.driver_type === 'wyze';
+
+/** A robot vacuum: on is out cleaning, off is home on its dock. */
+export const isVacuum = (device: { driver_type?: string | null }) => device.driver_type === 'roomba';
 
 /** Said when voice or Chat is asked to pause a camera. It doesn't mention scenes, so it gives nothing away. */
 export const CAMERA_PAUSE_REFUSED = "For safety, I can't pause cameras that way.";

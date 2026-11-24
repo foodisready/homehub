@@ -105,7 +105,8 @@ export function runHistoryTool(args: Record<string, unknown>, now = Date.now()):
       at: clock.format(Date.parse(e.at)),
       device: e.deviceName,
       // A garage door opens and closes; a camera watches or is paused.
-      state: e.driverType === 'meross' ? (e.state ? 'opened' : 'closed') : e.driverType === 'wyze' ? (e.state ? 'watching' : 'paused') : e.state ? 'on' : 'off',
+      state: e.driverType === 'meross' ? (e.state ? 'opened' : 'closed') : e.driverType === 'wyze' ? (e.state ? 'watching' : 'paused')
+        : e.driverType === 'roomba' ? (e.state ? 'started cleaning' : 'went home') : e.state ? 'on' : 'off',
       by: byWords(e),
       ...(e.onForSeconds !== null ? { wasOnFor: `${Math.round(e.onForSeconds / 60)} min` } : {}),
     })),

@@ -172,8 +172,8 @@ const SCENE_ICONS = ['💡','🌙','🌅','🎬','🏠','🎉','😴','🔒','�
               <div class="device-action-row">
                 <span class="device-name">{{ d.alias }}</span>
                 <div class="state-toggle">
-                  <button class="state-btn" [class.active-on]="actionState(d.id) === true" (click)="setAction(d.id, true)">{{ d.driverType === 'wyze' ? 'Resume' : 'On' }}</button>
-                  <button class="state-btn" [class.active-off]="actionState(d.id) === false" (click)="setAction(d.id, false)">{{ d.driverType === 'wyze' ? 'Pause' : 'Off' }}</button>
+                  <button class="state-btn" [class.active-on]="actionState(d.id) === true" (click)="setAction(d.id, true)">{{ d.driverType === 'wyze' ? 'Resume' : d.driverType === 'roomba' ? 'Clean' : 'On' }}</button>
+                  <button class="state-btn" [class.active-off]="actionState(d.id) === false" (click)="setAction(d.id, false)">{{ d.driverType === 'wyze' ? 'Pause' : d.driverType === 'roomba' ? 'Send home' : 'Off' }}</button>
                   <button class="state-btn skip" [class.active-off]="actionState(d.id) === null" (click)="setAction(d.id, null)">Skip</button>
                 </div>
               </div>
