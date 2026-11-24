@@ -12,6 +12,8 @@ export const roombaRouter = Router();
 
 /** How long pairing listens for the robot's Home button. */
 export const PAIR_WAIT_MS = 40_000;
+/** Right after giving its password, a robot refuses connections for a while: seen on an i8. */
+export const CONNECT_WAIT_MS = 60_000;
 const RETRY_MS = 2_000;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -61,13 +63,22 @@ roombaRouter.post('/pair', requireAdmin, async (req: Request, res: Response) => 
   }
 
   const login = { blid: robot.blid, password };
-  closeLink(robot.blid);
-  try {
-    await readStatus(address, login);
-  } catch (err) {
+  let reason = '';
+  const connectUntil = Date.now() + CONNECT_WAIT_MS;
+  for (let connected = false; !connected;) {
     closeLink(robot.blid);
-    logger.warn({ ip: address, reason: (err as Error).message }, 'Roomba paired but would not connect');
-    return res.status(502).json({ error: 'The robot paired, but HomeHub couldn’t connect to it. Try again in a minute.', code: 'DEVICE_UNREACHABLE' });
+    try {
+      await readStatus(address, login);
+      connected = true;
+    } catch (err) {
+      reason = (err as Error).message;
+      if (Date.now() >= connectUntil) {
+        closeLink(robot.blid);
+        logger.warn({ ip: address, reason }, 'Roomba paired but would not connect');
+        return res.status(502).json({ error: 'The robot paired, but HomeHub couldn’t connect to it. Try again in a minute.', code: 'DEVICE_UNREACHABLE' });
+      }
+      await sleep(RETRY_MS);
+    }
   }
 
   const db = getDb();

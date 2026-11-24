@@ -552,7 +552,7 @@ const DRIVER_LABEL: Record<string, string> = {
                       } @else if (d.driverType === 'roomba') {
                         <p class="discover-login-note">
                           @if (pairingIp() === d.ip) {
-                            Now hold the robot's <strong>Home</strong> button for about 2 seconds, until it plays a tone. HomeHub is listening for a minute or less.
+                            Now hold the robot's <strong>Home</strong> button for about 2 seconds, until it plays a tone. After the tone, HomeHub can take up to a minute to connect.
                           } @else {
                             With the robot on its dock, tap Pair, then hold its <strong>Home</strong> button for about 2 seconds until it plays a tone. HomeHub then controls it over your Wi-Fi; no iRobot password is needed.
                           }

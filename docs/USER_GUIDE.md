@@ -109,7 +109,7 @@ Garage doors are always protected. The dashboard shows **Open** or **Closed** an
 
 1. Set up the Roomba in the iRobot app, and reserve its address on your router.
 2. Select **Discover on network**. The robot appears with the name it has in the iRobot app.
-3. With the robot on its dock, select **Pair**, then hold the robot's **Home** button for about 2 seconds, until it plays a tone. HomeHub listens for about 40 seconds.
+3. With the robot on its dock, select **Pair**, then hold the robot's **Home** button for about 2 seconds, until it plays a tone. HomeHub listens for about 40 seconds, and after the tone can take up to a minute to connect.
 
 HomeHub asks the robot for its own password while you hold the button, and keeps it. You don't type an iRobot password, and the robot is then controlled over your home network, without the internet. It gets the nickname "vacuum", so "start the vacuum" works by voice and Chat straight away.
 
