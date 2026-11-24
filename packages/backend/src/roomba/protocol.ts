@@ -190,7 +190,7 @@ export interface Reported {
     rechrgM?: number;
   };
   /** The last job it was given, from any app: a room clean names its map and rooms. */
-  lastCommand?: { command?: string; pmap_id?: string; user_pmapv_id?: string; regions?: { region_id?: unknown; type?: unknown }[] };
+  lastCommand?: { command?: string; time?: number; initiator?: string; pmap_id?: string; user_pmapv_id?: string; regions?: { region_id?: unknown; type?: unknown }[] };
   /** HomeHub's own notes, kept with what it reported (see roomba/link.ts). The last start, kept through pauses. */
   jobStart?: Reported['lastCommand'];
   /** How it last went home: to recharge part way (it carries on), or sent home (it doesn't). */

@@ -151,7 +151,20 @@ class Link {
       }
     }
     const rep = this.reported as Reported;
-    if (rep.lastCommand?.command === 'start') rep.jobStart = rep.lastCommand;
+    const start = rep.lastCommand;
+    if (start?.command === 'start' && start !== rep.jobStart) {
+      // The robot can report its last start again without the rooms: that's still the room job. Only a
+      // start with rooms, or a newer one, is a new job.
+      const prev = rep.jobStart;
+      const rooms = Array.isArray(start.regions) && start.regions.length > 0;
+      const newer = !prev || typeof start.time !== 'number' || typeof prev.time !== 'number' || start.time > prev.time;
+      if (rooms || newer) {
+        rep.jobStart = start;
+        logger.info({ ip: this.ip, time: start.time, initiator: start.initiator, rooms: rooms ? start.regions!.map((r) => String(r.region_id)) : 'all' }, 'Roomba job start seen');
+      } else {
+        logger.info({ ip: this.ip, time: start.time, initiator: start.initiator }, 'Roomba repeated its start without rooms; keeping the job’s rooms');
+      }
+    }
     const phase = rep.cleanMissionStatus?.phase;
     // The same "home part way" for both: a full bin says which. Once on its way, it stays that trip.
     if (phase === 'hmMidMsn' && rep.homeFor !== 'empty') rep.homeFor = rep.bin?.full ? 'empty' : 'recharge';

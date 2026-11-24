@@ -36,11 +36,13 @@ class FakeRobot extends EventEmitter {
     if (command === 'dock' && this.phase !== 'run') this.set('dock', 'hmUsrDock');
   }
   binFull = false;
+  /** More of the robot's state to report, such as its last command. */
+  extra: Record<string, unknown> = {};
   battery = 77;
   set(cycle: string, phase: string) { this.cycle = cycle; this.phase = phase; this.report(); }
   report() {
     this.emit('message', '$aws/things/x/shadow/update', Buffer.from(JSON.stringify({
-      state: { reported: { batPct: this.battery, bin: { present: true, full: this.binFull }, cleanMissionStatus: { cycle: this.cycle, phase: this.phase, error: 0 } } },
+      state: { reported: { batPct: this.battery, bin: { present: true, full: this.binFull }, ...this.extra, cleanMissionStatus: { cycle: this.cycle, phase: this.phase, error: 0 } } },
     })));
   }
   end() { this.connected = false; }
@@ -128,6 +130,22 @@ describe('Roomba driver', () => {
     assert.deepEqual([after.activity, after.stoppedAfterEmptying], ['paused', true]);
     robot.set('clean', 'run');
     assert.equal((await readStatus('10.0.0.9', login)).stoppedAfterEmptying, false);
+  });
+
+  it('keeps a job’s rooms when the robot reports the same start again without them', async () => {
+    use(new FakeRobot('clean', 'run'));
+    robot.extra = { lastCommand: { command: 'start', time: 100, regions: [{ region_id: '2', type: 'rid' }, { region_id: '30', type: 'rid' }] } };
+    robot.report();
+    const { readStatus } = await import('../roomba/link');
+    const login = { blid: 'ROBOTID', password: 'pw' };
+    assert.deepEqual((await readStatus('10.0.0.9', login)).jobRooms, ['2', '30']);
+    robot.extra = { lastCommand: { command: 'start', time: 100 } };
+    robot.set('clean', 'charge');
+    assert.deepEqual((await readStatus('10.0.0.9', login)).jobRooms, ['2', '30']);
+    // A newer start with no rooms is a new, whole-house job.
+    robot.extra = { lastCommand: { command: 'start', time: 200 } };
+    robot.set('clean', 'run');
+    assert.equal((await readStatus('10.0.0.9', login)).jobRooms, 'all');
   });
 
   it('turning off leaves a docked robot alone', async () => {
