@@ -144,6 +144,7 @@ export interface OverrideRequest { device: Device; durationMinutes: number; }
             <p class="vac-msg">It's on a job now. To clean particular rooms, send it home first and they'll show here.</p>
           }
           @if (vacError()) { <p class="vac-msg err">{{ vacError() }}</p> }
+          @else if (device().vacuum?.stoppedAfterEmptying) { <p class="vac-msg err">It went home to empty its bin and stopped instead of carrying on. The Clean Base’s bag may be full, or something is stuck where the bin empties into the base.</p> }
           @else if (device().vacuum?.binFull) { <p class="vac-msg err">Its bin is full. Empty it so it can clean properly.</p> }
           @else if (device().vacuum?.activity === 'stuck') { <p class="vac-msg err">It needs a hand where it stopped. The iRobot app shows where that is.</p> }
           @if (isAdmin()) {

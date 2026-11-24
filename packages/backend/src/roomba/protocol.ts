@@ -167,6 +167,8 @@ export interface RobotStatus {
   jobOpen:  boolean;
   /** Sitting on its dock. */
   onDock:   boolean;
+  /** Went home part way to empty its bin, and stopped there instead of carrying on: the Clean Base may need a look. */
+  stoppedAfterEmptying: boolean;
   /** The rooms of the job it holds, by room id, in order; 'all' for the whole house; null with no job or not known. */
   jobRooms: string[] | 'all' | null;
   battery:  number | null;
@@ -192,7 +194,7 @@ export interface Reported {
   /** HomeHub's own notes, kept with what it reported (see roomba/link.ts). The last start, kept through pauses. */
   jobStart?: Reported['lastCommand'];
   /** How it last went home: to recharge part way (it carries on), or sent home (it doesn't). */
-  homeFor?: 'recharge' | 'sent';
+  homeFor?: 'recharge' | 'empty' | 'sent';
 }
 
 /** A room on the robot's map: its id there, and "rid" for a room ("zid" is a zone drawn in the app). */
@@ -287,6 +289,8 @@ export function mergeReported(into: Record<string, unknown>, update: Record<stri
  */
 function willCarryOn(mission: NonNullable<Reported['cleanMissionStatus']>, r: Reported): boolean {
   if (typeof mission.rechrgM === 'number' && mission.rechrgM > 0) return true;
+  // After emptying, a robot low on charge charges before carrying on; a full one should be off again.
+  if (r.homeFor === 'empty') return typeof r.batPct === 'number' && r.batPct < 90;
   if (r.homeFor) return r.homeFor === 'recharge';
   return typeof r.batPct !== 'number' || r.batPct < 100;
 }
@@ -303,7 +307,8 @@ export function statusOf(r: Reported): RobotStatus | null {
   let activity: Activity;
   if (phase === 'stuck') activity = 'stuck';
   else if (phase === 'run') activity = 'cleaning';
-  else if (phase === 'hmMidMsn') activity = 'recharging';
+  // Heading home part way: to empty a full bin into the Clean Base, or to recharge.
+  else if (phase === 'hmMidMsn') activity = r.homeFor === 'empty' ? 'emptying' : 'recharging';
   else if (phase === 'hmUsrDock' || phase === 'hmPostMsn') activity = 'returning';
   else if (phase === 'evac') activity = 'emptying';
   // On its dock with a job unfinished: recharging to carry on only if it says when it will. A job
@@ -320,6 +325,7 @@ export function statusOf(r: Reported): RobotStatus | null {
     cleaning,
     jobOpen: job,
     onDock,
+    stoppedAfterEmptying: job && phase === 'charge' && r.homeFor === 'empty' && activity === 'paused',
     jobRooms: !job || !r.jobStart ? null
       : Array.isArray(r.jobStart.regions) && r.jobStart.regions.length ? r.jobStart.regions.map((x) => String(x.region_id)) : 'all',
     battery: typeof r.batPct === 'number' ? r.batPct : null,

@@ -35,10 +35,12 @@ class FakeRobot extends EventEmitter {
     // Like a real one, it ignores "dock" while it's running.
     if (command === 'dock' && this.phase !== 'run') this.set('dock', 'hmUsrDock');
   }
+  binFull = false;
+  battery = 77;
   set(cycle: string, phase: string) { this.cycle = cycle; this.phase = phase; this.report(); }
   report() {
     this.emit('message', '$aws/things/x/shadow/update', Buffer.from(JSON.stringify({
-      state: { reported: { batPct: 77, cleanMissionStatus: { cycle: this.cycle, phase: this.phase, error: 0 } } },
+      state: { reported: { batPct: this.battery, bin: { present: true, full: this.binFull }, cleanMissionStatus: { cycle: this.cycle, phase: this.phase, error: 0 } } },
     })));
   }
   end() { this.connected = false; }
@@ -109,6 +111,23 @@ describe('Roomba driver', () => {
     assert.equal(await driver.getPower('10.0.0.9', config), true);   // it will carry on
     await driver.setPower('10.0.0.9', false, config);
     assert.deepEqual(robot.commands, ['stop']);
+  });
+
+  it('heading home part way with a full bin is a trip to empty it, and stopping after it is noticed', async () => {
+    use(new FakeRobot('clean', 'run'));
+    await driver.getPower('10.0.0.9', config);
+    robot.battery = 100; robot.binFull = true;
+    robot.set('clean', 'hmMidMsn');
+    const { readStatus } = await import('../roomba/link');
+    const login = { blid: 'ROBOTID', password: 'pw' };
+    assert.equal((await readStatus('10.0.0.9', login)).activity, 'emptying');
+    robot.set('clean', 'evac');
+    robot.binFull = false;
+    robot.set('clean', 'charge');
+    const after = await readStatus('10.0.0.9', login);
+    assert.deepEqual([after.activity, after.stoppedAfterEmptying], ['paused', true]);
+    robot.set('clean', 'run');
+    assert.equal((await readStatus('10.0.0.9', login)).stoppedAfterEmptying, false);
   });
 
   it('turning off leaves a docked robot alone', async () => {

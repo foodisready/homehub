@@ -97,6 +97,17 @@ describe('Roomba status', () => {
     assert.deepEqual([s.activity, s.cleaning], ['recharging', true]);
   });
 
+  it('heading home part way with a full bin is going to empty it, not to recharge', () => {
+    const going = at('clean', 'hmMidMsn', { homeFor: 'empty', bin: { present: true, full: true }, batPct: 100 });
+    assert.deepEqual([going.activity, going.cleaning, going.onDock], ['emptying', true, false]);
+    // Emptied and stopped on the dock, full of charge: it isn't carrying on.
+    const stopped = at('clean', 'charge', { homeFor: 'empty', batPct: 100 });
+    assert.deepEqual([stopped.activity, stopped.stoppedAfterEmptying], ['paused', true]);
+    // Low on charge too: it charges, then carries on.
+    const charging = at('clean', 'charge', { homeFor: 'empty', batPct: 40 });
+    assert.deepEqual([charging.activity, charging.stoppedAfterEmptying], ['recharging', false]);
+  });
+
   it('names the job’s rooms in order, or the whole house, only while it holds a job', () => {
     const rooms = { lastCommand: { command: 'pause' }, jobStart: { command: 'start', regions: [{ region_id: 30 }, { region_id: '2' }] } };
     assert.deepEqual(at('clean', 'run', rooms).jobRooms, ['30', '2']);

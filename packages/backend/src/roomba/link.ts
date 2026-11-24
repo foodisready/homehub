@@ -153,7 +153,9 @@ class Link {
     const rep = this.reported as Reported;
     if (rep.lastCommand?.command === 'start') rep.jobStart = rep.lastCommand;
     const phase = rep.cleanMissionStatus?.phase;
-    if (phase === 'hmMidMsn') rep.homeFor = 'recharge';
+    // The same "home part way" for both: a full bin says which. Once on its way, it stays that trip.
+    if (phase === 'hmMidMsn' && rep.homeFor !== 'empty') rep.homeFor = rep.bin?.full ? 'empty' : 'recharge';
+    else if (phase === 'evac' && rep.cleanMissionStatus?.cycle !== 'evac') rep.homeFor = 'empty';
     else if (phase === 'hmUsrDock') rep.homeFor = 'sent';
     else if (phase === 'run') delete rep.homeFor;
     const mission = rep.cleanMissionStatus;
