@@ -1,4 +1,4 @@
-import { Injectable, inject } from '@angular/core';
+import { Injectable, inject, signal } from '@angular/core';
 import { NavigationError, NavigationStart, Router } from '@angular/router';
 
 /** Errors browsers give when a lazily loaded page's file is gone. */
@@ -27,6 +27,8 @@ export class AppUpdateService {
   private readonly router = inject(Router);
   private readonly loaded = AppUpdateService.mainFile(document.documentElement.outerHTML);
   private stale = false;
+  /** This page is an older version than the server's: it reloads once nobody's using it. */
+  readonly outdated = signal(false);
   private checking = false;
   private lastTouch = Date.now();
   private idleTimer: ReturnType<typeof setInterval> | null = null;
@@ -67,6 +69,7 @@ export class AppUpdateService {
         const now = AppUpdateService.mainFile(html);
         if (now && now !== this.loaded) {
           this.stale = true;
+          this.outdated.set(true);
           if (returning) this.reloadIfIdle();
           this.reloadWhenUntouched();
         }

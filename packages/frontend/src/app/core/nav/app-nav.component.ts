@@ -5,6 +5,7 @@ import { filter, map } from 'rxjs';
 import { CamerasStateService } from '../services/cameras-state.service';
 import { AuthService } from '../auth/auth.service';
 import { SocketService } from '../socket/socket.service';
+import { isWallHome } from '../wall-home';
 import { PhoneQrComponent } from '../../features/dashboard/phone-qr.component';
 
 interface NavItem {
@@ -159,7 +160,7 @@ const MORE: NavItem[] = [
       <!-- Wide screens -->
       <header class="top">
         <div class="top-inner">
-          <a class="brand" routerLink="/dashboard">HomeHub</a>
+          <a class="brand" [routerLink]="main[0].path">HomeHub</a>
           <nav class="links" aria-label="Main">
             @for (item of allItems(); track item.path) {
               <a [routerLink]="item.path" routerLinkActive="active" ariaCurrentWhenActive="page">{{ item.label }}</a>
@@ -239,7 +240,8 @@ export class AppNavComponent {
   private readonly socket = inject(SocketService);
 
   readonly icons = ICONS;
-  readonly main = MAIN;
+  /** On a wall display, Home is the wall display: the nav shows only once it has left it. */
+  readonly main = isWallHome() ? MAIN.map((i) => (i.path === '/dashboard' ? { ...i, path: '/wall' } : i)) : MAIN;
 
   readonly moreOpen = signal(false);
   readonly accountOpen = signal(false);
@@ -260,7 +262,7 @@ export class AppNavComponent {
   private readonly isAdmin = computed(() => this.auth.user()?.role === 'admin');
   readonly moreItems = computed(() =>
     MORE.filter((i) => (!i.adminOnly || this.isAdmin()) && (i.path !== '/cameras' || this.cams.visible())));
-  readonly allItems = computed(() => [...MAIN, ...this.moreItems()]);
+  readonly allItems = computed(() => [...this.main, ...this.moreItems()]);
   readonly roleLabel = computed(() => (this.isAdmin() ? ' · administrator' : ''));
 
   constructor() {

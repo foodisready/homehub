@@ -1,3 +1,4 @@
+import { WallReturnService } from './core/wall-return.service';
 import { Component, computed, inject, signal } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { filter, map } from 'rxjs';
@@ -141,6 +142,7 @@ export class AppComponent {
 
   constructor() {
     inject(AppUpdateService).start();
+    inject(WallReturnService).start();
   }
 
   resume(): void {

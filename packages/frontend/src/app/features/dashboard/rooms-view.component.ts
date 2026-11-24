@@ -4,6 +4,7 @@ import {
 import { NgTemplateOutlet } from '@angular/common';
 import type { Device } from '../../shared/models/device.model';
 import { ThermostatService, offQuestion, shown } from '../../shared/thermostat/thermostat.service';
+import { wallGoHome } from '../../core/wall-home';
 import { DeviceRowComponent, OverrideRequest } from './device-row/device-row.component';
 import { isVacuum, vacuumWord } from '../../shared/vacuum';
 
@@ -385,6 +386,18 @@ export class RoomsViewComponent implements AfterViewChecked, OnDestroy {
   readonly asking = signal<{ device: Device; question: string; detail: string; action: string } | null>(null);
   readonly controls = signal<number | null>(null);
   readonly wires = signal<{ id: number; d: string; cls: string }[]>([]);
+
+  /** The wall display's home button, or its return after a while untouched: back to the rooms. */
+  private readonly homeSeen = wallGoHome();
+  private readonly goHome = effect(() => {
+    if (wallGoHome() === this.homeSeen) return;
+    untracked(() => {
+      this.controls.set(null);
+      this.asking.set(null);
+      this.cameFromAll.set(false);
+      if (this.openName() !== null) this.transition(() => this.openName.set(null));
+    });
+  });
 
   private readonly watchThermostats = effect(() => {
     for (const d of this.devices()) if (kindOf(d) === 'thermostat') untracked(() => this.thermostats.watch(d.id));

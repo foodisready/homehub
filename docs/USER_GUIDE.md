@@ -777,7 +777,8 @@ A tablet that's always on, on a wall or the kitchen counter, can be HomeHub's sc
 - **Scenes,** as large buttons. A tick shows it ran.
 - **Your rooms,** as on the Home page. Tap one to switch its devices.
 - **At night** (10 PM to 6:30 AM at first), the screen turns black with a dim clock and the next thing coming up. The clock moves a little each minute so nothing burns into the screen. Tap it to see everything for 2 minutes.
-- **⋯** in the corner sets the night hours or turns night dimming off, goes **Full screen**, and leaves the wall display. These choices are kept on that tablet only.
+- **⋯** in the corner sets the night hours or turns night dimming off, goes **Full screen**, and leaves the wall display. These choices are kept on that tablet only. Its foot shows the version HomeHub is running, and says so when the tablet still has an older one waiting to reload.
+- **Getting back:** the **home** button next to **⋯** closes any room that's open and scrolls back to the top. Left on another page, such as Cameras, **Home** in the menu goes back to the wall display. And after 2 minutes without a touch, the tablet goes back by itself, except while a camera is playing.
 
 **Keeping the screen on:** on a secure address (`https://`, such as the Tailscale one), HomeHub keeps the screen on while the wall display is open. On the home address (`http://`), the browser doesn't allow that, and **⋯** says so: on the tablet, set **Settings → Display → Screen timeout** to the longest, or turn on **Developer options → Stay awake** to keep it on while charging.
 

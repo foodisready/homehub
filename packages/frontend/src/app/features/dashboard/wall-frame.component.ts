@@ -3,8 +3,10 @@ import { HttpClient } from '@angular/common/http';
 import { Router } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { LockService } from '../../core/lock/lock.service';
+import { AppUpdateService } from '../../core/services/app-update.service';
+import { SystemService } from '../../core/services/system.service';
 import { AuthService } from '../../core/auth/auth.service';
-import { setWallHome } from '../../core/wall-home';
+import { setWallHome, wallGoHome } from '../../core/wall-home';
 
 interface Weather { unit: 'C' | 'F'; temperature: number; summary: string; today: { high: number; low: number; rain: number } }
 interface Scene { id: number; name: string; icon: string | null }
@@ -63,9 +65,11 @@ const joinNames = (n: string[]) => (n.length <= 1 ? n.join('') : n.length > 3
     .scene.done { border-color: var(--green); color: #4ade80; }
     .scene:active { transform: scale(0.97); }
     .menu-btn { position: fixed; right: 1rem; bottom: 1rem; z-index: 20; width: 3rem; height: 3rem; border-radius: 50%; border: 1px solid var(--border); background: var(--surface); color: var(--text-muted); font-size: 1.3rem; padding: 0; opacity: 0.7; }
-    .lock-btn { right: 4.6rem; display: grid; place-items: center; }
-    .lock-btn svg { width: 1.2rem; height: 1.2rem; }
+    .lock-btn, .home-btn { right: 4.6rem; display: grid; place-items: center; }
+    .home-btn.with-lock { right: 8.2rem; }
+    .lock-btn svg, .home-btn svg { width: 1.2rem; height: 1.2rem; }
     .sheet-h { margin: 1.1rem 0 0.4rem; font-size: 0.95rem; }
+    .ver { margin-top: 0.9rem; text-align: center; }
     .pin-row { display: flex; gap: 0.6rem; align-items: flex-end; flex-wrap: wrap; margin-bottom: 0.6rem; }
     .pin-row label { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.8rem; color: var(--text-muted); }
     .pin-row input { width: 7.5rem; letter-spacing: 0.3em; }
@@ -117,6 +121,9 @@ const joinNames = (n: string[]) => (n.length <= 1 ? n.join('') : n.length > 3
     }
 
     <div class="rooms"><ng-content /></div>
+    <button type="button" class="menu-btn home-btn" [class.with-lock]="lock.pinSet()" (click)="goHome()" aria-label="Back to the top of the wall display">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-7 9 7M5 9.5V20h14V9.5" /></svg>
+    </button>
     @if (lock.pinSet()) {
       <button type="button" class="menu-btn lock-btn" (click)="lock.lockNow()" aria-label="Lock now">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 11h12v10H6zM8 11V7a4 4 0 0 1 8 0v4" /></svg>
@@ -184,6 +191,9 @@ const joinNames = (n: string[]) => (n.length <= 1 ? n.join('') : n.length > 3
             <button type="button" data-no-auto-full (click)="fullscreen()">{{ isFull() ? 'Leave full screen' : 'Full screen' }}</button>
             <button type="button" data-no-auto-full (click)="leave()">Leave wall display</button>
           </div>
+          @if (version(); as v) {
+            <p class="tip ver">HomeHub {{ v }}{{ updates.outdated() ? ' · this screen has an older version and loads the new one once nobody’s using it' : '' }}</p>
+          }
         </div>
       </div>
     }
@@ -193,6 +203,10 @@ export class WallFrameComponent implements OnInit, OnDestroy {
   private readonly http = inject(HttpClient);
   private readonly router = inject(Router);
   readonly lock = inject(LockService);
+  readonly updates = inject(AppUpdateService);
+  private readonly system = inject(SystemService);
+  /** The version HomeHub is running, for the menu: "v0.3.2". */
+  readonly version = signal('');
   private readonly auth = inject(AuthService);
   readonly userName = computed(() => this.auth.user()?.name ?? 'this login');
   readonly idleChoices = [1, 2, 5, 10, 15, 30];
@@ -367,8 +381,15 @@ export class WallFrameComponent implements OnInit, OnDestroy {
     this.now.set(Date.now());
   }
 
+  /** Back to the top: any room open closes, and the clock and scenes are in view. */
+  goHome(): void {
+    wallGoHome.update((n) => n + 1);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
   openMenu(): void {
     this.lock.refresh();
+    this.system.version().subscribe({ next: (v) => this.version.set(v.running), error: () => undefined });
     this.pinMode.set(''); this.pinErr.set(''); this.pinMsg.set('');
     this.pinCurrent = this.pinNew = this.pinAgain = '';
     this.menu.set(true);
