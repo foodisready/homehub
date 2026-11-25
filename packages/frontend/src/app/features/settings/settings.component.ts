@@ -100,6 +100,8 @@ const DRIVER_LABEL: Record<string, string> = {
   matter: 'Matter',
   honeywell: 'Honeywell',
   roomba: 'Roomba',
+  lgtv:   'LG TV',
+  sonos:  'Sonos',
 };
 
 @Component({
@@ -180,6 +182,7 @@ const DRIVER_LABEL: Record<string, string> = {
     .driver-badge.wyze   { border-color:#0e7490; color:#67e8f9; }
     .driver-badge.matter { border-color:#be185d; color:#f9a8d4; }
     .driver-badge.roomba { border-color:#4d7c0f; color:#bef264; }
+    .driver-badge.lgtv{border-color:#913;color:#fab}
     .matter-panel { margin-top:0.75rem; padding:0.9rem; border:1px solid var(--border); border-radius:var(--radius); }
 
     .btn-sm {
@@ -535,7 +538,7 @@ const DRIVER_LABEL: Record<string, string> = {
                   @for (d of discoveredDevices(); track d.ip) {
                     <div class="discover-row">
                       <input type="checkbox" [checked]="isSelected(d.ip)" (change)="toggleSelect(d.ip)"
-                             [disabled]="d.driverType === 'roomba' || !!d.staleOwner || (d.driverType === 'meross' && d.needsLogin) || (d.driverType === 'tuya' && (!d.pendingKey?.trim() || (!d.driverConfig?.['deviceId'] && !d.pendingDeviceId?.trim())))" />
+                             [disabled]="d.driverType === 'roomba' || d.driverType === 'lgtv' || !!d.staleOwner || (d.driverType === 'meross' && d.needsLogin) || (d.driverType === 'tuya' && (!d.pendingKey?.trim() || (!d.driverConfig?.['deviceId'] && !d.pendingDeviceId?.trim())))" />
                       <div class="discover-alias">
                         <input type="text" [(ngModel)]="d.pendingAlias" placeholder="Alias" />
                       </div>
@@ -559,6 +562,17 @@ const DRIVER_LABEL: Record<string, string> = {
                         </p>
                         <button class="btn-sm btn-primary" type="button" (click)="pairRoomba(d)" [disabled]="pairingIp() !== null">
                           {{ pairingIp() === d.ip ? 'Waiting for the Home button…' : 'Pair' }}
+                        </button>
+                      } @else if (d.driverType === 'lgtv') {
+                        <p class="discover-login-note">
+                          @if (pairingIp() === d.ip) {
+                            Look at the TV: it asks whether to allow HomeHub. Choose <strong>OK</strong> (or <strong>Allow</strong>) with its remote.
+                          } @else {
+                            With the TV on, tap Pair, then choose <strong>OK</strong> on the TV with its remote. To turn it on from HomeHub, also turn on <strong>Turn on via Wi-Fi</strong> (or <strong>Mobile TV On</strong>) in the TV's settings.
+                          }
+                        </p>
+                        <button class="btn-sm btn-primary" type="button" (click)="pairTv(d)" [disabled]="pairingIp() !== null">
+                          {{ pairingIp() === d.ip ? 'Waiting for OK on the TV…' : 'Pair' }}
                         </button>
                       } @else if (d.needsLogin) {
                         @if (d.driverType === 'kasa') {
@@ -1298,7 +1312,7 @@ export class SettingsComponent implements OnInit, OnDestroy {
     out.push({
       key: 'devices', name: 'Devices', group: 'Your home', icon: 'devices', hue: '#4f8cff',
       status: !devices.length ? 'None yet: add your first' : offline ? `${devices.length} devices · ${offline} offline` : `${devices.length} devices · all online`,
-      look: offline > 0, words: 'add discover find scan probe rename room nickname matter kasa tuya shelly meross wyze honeywell roomba irobot vacuum thermostat plug light',
+      look: offline > 0, words: 'add discover find scan probe rename room nickname matter kasa tuya shelly meross wyze honeywell roomba irobot vacuum lg tv television webos sonos speaker music thermostat plug light',
     });
     if (full) {
       const h = sum.home;
@@ -1450,6 +1464,29 @@ export class SettingsComponent implements OnInit, OnDestroy {
         this.pairingIp.set(null);
         this._discoveredDevices.update((list) => list.filter((x) => x !== d));
         this.discoverMsg.set(r.updated ? `${r.alias} paired again.` : `${r.alias} added. It's on the dashboard.`);
+        this.discoverErr.set(false);
+        this.reloadDevices();
+      },
+      error: (err: HttpErrorResponse) => {
+        this.pairingIp.set(null);
+        this.discoverMsg.set(err.error?.error ?? 'Pairing failed. Try again.');
+        this.discoverErr.set(true);
+      },
+    });
+  }
+  /**
+   * Pairs an LG TV: the TV asks on its screen whether to let HomeHub in, someone chooses OK with
+   * its remote, and HomeHub adds it. The TV's key stays on HomeHub.
+   */
+  pairTv(d: DiscoveredDevice): void {
+    this.pairingIp.set(d.ip);
+    this.discoverMsg.set('');
+    this.http.post<{ id: number; alias: string; updated: boolean; canWake: boolean }>('/api/lgtv/pair', { ip: d.ip, alias: d.pendingAlias?.trim() || d.alias }).subscribe({
+      next: (r) => {
+        this.pairingIp.set(null);
+        this._discoveredDevices.update((list) => list.filter((x) => x !== d));
+        const wake = r.canWake ? '' : ' It didn’t say how to wake it, so HomeHub can turn it off but not on.';
+        this.discoverMsg.set((r.updated ? `${r.alias} paired again.` : `${r.alias} added. It's on the dashboard.`) + wake);
         this.discoverErr.set(false);
         this.reloadDevices();
       },
@@ -2000,6 +2037,13 @@ export class SettingsComponent implements OnInit, OnDestroy {
           this.merossOpenRequest.update((n) => n + 1);
           return;
         }
+        // A TV is paired, not added: it goes in the list below with its Pair button.
+        if (result.driverType === 'lgtv') {
+          const found = { ...result, pendingAlias: this.newDeviceAlias.trim() || result.alias } as DiscoveredDevice;
+          this._discoveredDevices.update((list) => [found, ...list.filter((x) => x.ip !== found.ip)]);
+          this.probeMsg.set('Found an LG TV. Pair it below.');
+          return;
+        }
         this.probeMsg.set(`Detected: ${result.model ?? result.driverType} (${this.driverLabel(result.driverType)})`);
       },
       error: () => {
@@ -2083,7 +2127,7 @@ export class SettingsComponent implements OnInit, OnDestroy {
           return;
         }
         // Pre-select devices that are ready: Tuya needs a key, and Meross a sign-in, first
-        newDevices.filter((d) => d.driverType !== 'tuya' && d.driverType !== 'roomba' && !(d.driverType === 'meross' && d.needsLogin))
+        newDevices.filter((d) => d.driverType !== 'tuya' && d.driverType !== 'roomba' && d.driverType !== 'lgtv' && !(d.driverType === 'meross' && d.needsLogin))
           .forEach((d) => this.selectedIps.add(d.ip));
         this._discoveredDevices.set(newDevices);
         this.discoverMsg.set([

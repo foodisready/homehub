@@ -24,6 +24,8 @@ HomeHub controls devices directly over your home network. All of them are switch
 | **Honeywell** | RedLINK thermostats, such as Prestige, through a RedLINK Internet Gateway | Through your Total Connect Comfort account. See [Honeywell thermostats](#honeywell-thermostats-redlink) |
 | **Alarm.com** | Alarm systems with the Alarm.com app: arm state, door, window and motion sensors, arming and disarming | Through your Alarm.com login. See [Alarm system](#alarm-system-alarmcom) |
 | **iRobot Roomba** | Wi-Fi Roombas (i, s, j, Combo and 900 series): start, pause, send home, battery, bin and problems | Local, no cloud. Paired once at the robot's Home button. See [Robot vacuums](#robot-vacuums-roomba) |
+| **LG** | webOS smart TVs (about 2014 on): on, off, volume, mute, inputs, apps and messages on the screen | Local, no cloud. Paired once with OK on the TV. See [LG TVs](#lg-tvs) |
+| **Sonos** | Speakers and amps: play, pause, skip, volume, mute and what's playing | Local, no cloud, no login. See [Sonos speakers](#sonos-speakers) |
 
 Zigbee devices aren't supported. "Works with Google or Alexa" on a box doesn't mean it works with HomeHub, but the **Matter** logo does.
 
@@ -128,6 +130,32 @@ A room's **All off** doesn't send the robot home, and it isn't one of a room's l
 The robot takes one local connection at a time. HomeHub keeps it, and the iRobot app then works through iRobot's cloud as usual. A backup HomeHub doesn't connect to the robot.
 
 Older Neato robots aren't supported: Neato's servers have shut down, and most Neato models can't be controlled on the home network.
+
+### LG TVs
+
+1. Turn the TV on. To turn it on from HomeHub too, open the TV's settings and turn on **Turn on via Wi-Fi** (on some models **Mobile TV On**, and on 2025 models **Support → IP control settings → Wake on LAN**). Reserve the TV's address on your router.
+2. Select **Discover on network**. The TV appears with its model, such as **LG OLED65C2PUA**. A TV on another network, such as an upstream router's, doesn't show up there: type its address next to **Probe** instead.
+3. Give it a name, such as **Living room TV**, select **Pair**, then choose **OK** (or **Allow**) on the TV with its remote. HomeHub waits a minute for it.
+
+The TV gives HomeHub a key, which HomeHub keeps; you don't type an LG password. Pairing again later (for example after a factory reset) keeps the TV's name, schedules and scenes.
+
+On the dashboard, the TV's switch turns it on and off. Open its row for the remote: volume **−** and **+**, **Mute**, the **Input** (such as HDMI 1) and the **App** (such as Netflix or YouTube), and **Show a message on the screen**, which pops up on the TV for a few seconds. With the sound going to a soundbar or receiver, the TV can't say its volume, but **−** and **+** still work. By voice and in Chat, "turn off the living room TV" works as for any device (give it a nickname such as 客廳電視 for other languages; see [Names and groups](#names-and-groups)), and schedules and scenes can turn it on or off. "Turn off the lights" leaves TVs alone.
+
+Turning it on takes up to 20 seconds. If it doesn't come on, HomeHub says to turn on **Turn on via Wi-Fi**. HomeHub can only wake a TV on its own network: routers don't pass the wake-up on, so a TV on another network can be turned off from HomeHub but not on. If the TV forgets HomeHub, for example after a factory reset, turning it on or off says to pair it again from Discover.
+
+Its energy is estimated from the time it's on, once you give its watts (it says on the label on the back).
+
+### Sonos speakers
+
+Set up the speakers in the Sonos app first. Then select **Discover on network**: each speaker appears named after its room in the Sonos app, such as **Kitchen Sonos**, ready to add. There's nothing to sign in to. A speaker on another network can be added by typing its address next to **Probe**.
+
+A Sonos is never really off, so in HomeHub its switch is **playing**: on plays and off pauses. Its row says **Playing since** a time. Open the row for its remote: what's playing (song, artist and album, or a radio station and what it's playing), **Previous**, **Play** or **Pause**, **Next**, volume **−** and **+**, and **Mute**. **Pause after** 1, 2 or 4 hours works as a sleep timer.
+
+Play carries on with whatever the speaker last played. HomeHub can't choose music, so with nothing played yet, it says to start something in the Sonos app first. A radio station can't pause, so it stops instead, and can't skip.
+
+Speakers grouped in the Sonos app play together: play, pause and skip on any of them act on the whole group, as in the Sonos app, and the remote says which rooms it's playing with. The volume is each speaker's own.
+
+By voice and in Chat, "turn off the kitchen Sonos" pauses it, and schedules and scenes can play or pause it, labelled **Play** and **Pause**. "Turn off the lights" leaves speakers alone, and Activity says "started playing" and "paused". Its energy isn't estimated: a speaker uses much the same paused as playing.
 
 ### Matter devices
 

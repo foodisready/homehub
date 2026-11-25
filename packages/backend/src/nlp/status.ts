@@ -7,7 +7,7 @@ import { getDb } from '../db';
 import { getCachedState } from '../kasa/device.cache';
 import { isProtectedDevice, type PowerDevice } from '../devices/power';
 import { cleanUp, isCamera } from './commands';
-import { NOT_A_LIGHT, findDeviceByName, findDeviceGroup, type NamedDevice } from './find-device';
+import { notALight, findDeviceByName, findDeviceGroup, type NamedDevice } from './find-device';
 import type { ActionTaken } from './nlp.service';
 
 const TIME = String.raw`(?:\s+(?:right\s+now|now|currently|at\s+the\s+moment))?`;
@@ -30,7 +30,7 @@ function stateOf(d: Row): 'on' | 'off' | 'offline' {
   return c.state ? 'on' : 'off';
 }
 
-const isLight = (d: Row) => !NOT_A_LIGHT.test(d.alias) && !isProtectedDevice(d as unknown as PowerDevice);
+const isLight = (d: Row) => !notALight(d) && !isProtectedDevice(d as unknown as PowerDevice);
 
 const listed = (devices: Row[]): ActionTaken => ({
   tool: 'list_devices', args: {},

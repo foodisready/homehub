@@ -19,6 +19,9 @@ import { lastChanges, recordPower, type LastChange } from '../activity/activity'
 import { pendingAutoOff, type AutoOff } from '../devices/auto-off';
 import { vacuumViewOf } from '../roomba/service';
 import { roomsView } from '../roomba/rooms';
+import { TvError } from '../lgtv/protocol';
+import { SonosError } from '../sonos/protocol';
+import { closeLink as closeTvLink } from '../lgtv/link';
 import {
   MAX_EXTRA_NETWORKS, displayNetwork, extraNetworks, ownNetworks, saveExtraNetworks, suggestedNetworks,
 } from '../discovery/networks';
@@ -211,6 +214,12 @@ devicesRouter.post('/:id/on', async (req: Request, res: Response) => {
     if (err instanceof WyzeCloudError) {
       return res.status(err.status >= 400 && err.status < 600 ? err.status : 502).json({ error: err.message, code: 'CAMERA_ERROR' });
     }
+    // A speaker with nothing queued says to start something in the Sonos app.
+    if (err instanceof SonosError && err.code === 'NOTHING_TO_PLAY') return res.status(409).json({ error: err.message, code: 'NOTHING_TO_PLAY' });
+    // A TV says what to do: turn on waking in its settings, or pair it again.
+    if (err instanceof TvError) {
+      return res.status(err.code === 'NOT_PAIRED' ? 409 : 503).json({ error: err.message, code: err.code === 'NOT_PAIRED' ? 'NOT_PAIRED' : 'DEVICE_UNREACHABLE' });
+    }
     logger.error(err, 'Failed to turn on device');
     res.status(503).json({ error: 'Device unreachable', code: 'DEVICE_UNREACHABLE' });
   }
@@ -236,6 +245,12 @@ devicesRouter.post('/:id/off', async (req: Request, res: Response) => {
   } catch (err) {
     if (err instanceof WyzeCloudError) {
       return res.status(err.status >= 400 && err.status < 600 ? err.status : 502).json({ error: err.message, code: 'CAMERA_ERROR' });
+    }
+    // A speaker with nothing queued says to start something in the Sonos app.
+    if (err instanceof SonosError && err.code === 'NOTHING_TO_PLAY') return res.status(409).json({ error: err.message, code: 'NOTHING_TO_PLAY' });
+    // A TV says what to do: turn on waking in its settings, or pair it again.
+    if (err instanceof TvError) {
+      return res.status(err.code === 'NOT_PAIRED' ? 409 : 503).json({ error: err.message, code: err.code === 'NOT_PAIRED' ? 'NOT_PAIRED' : 'DEVICE_UNREACHABLE' });
     }
     logger.error(err, 'Failed to turn off device');
     res.status(503).json({ error: 'Device unreachable', code: 'DEVICE_UNREACHABLE' });
@@ -486,5 +501,7 @@ devicesRouter.delete('/:id', requireAdmin, (req: Request, res: Response) => {
       if (typeof nodeId === 'string') forgetIfUnused(nodeId);
     } catch { /* not a valid config: nothing to unpair */ }
   }
+  // A TV's connection stays open while it's on: let it go.
+  if (device.driver_type === 'lgtv') closeTvLink(device.ip);
   res.status(204).send();
 });

@@ -41,7 +41,7 @@ export interface Device {
   vacuumRooms?: VacuumRoom[];
   /** What it draws when on, for energy estimates. `excluded` says why it isn't counted at all. */
   power?: {
-    excluded: 'camera' | 'garage door' | 'vacuum' | 'valve' | 'thermostat' | null;
+    excluded: 'camera' | 'garage door' | 'vacuum' | 'valve' | 'thermostat' | 'speaker' | null;
     watts: number | null;
     method: 'set' | 'measured' | 'typical' | 'none';
     label: string | null;

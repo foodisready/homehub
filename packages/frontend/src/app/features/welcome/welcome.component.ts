@@ -34,7 +34,7 @@ const STEPS: { id: Step; label: string }[] = [
   { id: 'family', label: 'Family' },
 ];
 
-const BRAND: Record<string, string> = { kasa: 'TP-Link Kasa', shelly: 'Shelly', tuya: 'Tuya / Smart Life', meross: 'Meross', wyze: 'Wyze', roomba: 'iRobot Roomba' };
+const BRAND: Record<string, string> = { kasa: 'TP-Link Kasa', shelly: 'Shelly', tuya: 'Tuya / Smart Life', meross: 'Meross', wyze: 'Wyze', roomba: 'iRobot Roomba', lgtv: 'LG TV', sonos: 'Sonos' };
 
 /**
  * First-run setup. After creating the admin account, a new HomeHub walks

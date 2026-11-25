@@ -5,6 +5,8 @@ import { RouterLink } from '@angular/router';
 import type { Device } from '../../../shared/models/device.model';
 import { type ActivityEvent, actionWord, causeText, clock, when } from '../../../shared/activity/activity-text';
 import { ThermostatControlComponent } from '../../../shared/thermostat/thermostat-control.component';
+import { TvRemoteComponent } from '../../../shared/tv/tv-remote.component';
+import { SonosRemoteComponent } from '../../../shared/sonos/sonos-remote.component';
 import { ThermostatService, offQuestion, summary } from '../../../shared/thermostat/thermostat.service';
 import { isVacuum, vacuumBusy, vacuumDetail, vacuumJobText, vacuumNeedsHelp } from '../../../shared/vacuum';
 import { AuthService } from '../../../core/auth/auth.service';
@@ -14,7 +16,7 @@ export interface OverrideRequest { device: Device; durationMinutes: number; }
 @Component({
   selector: 'app-device-row',
   standalone: true,
-  imports: [DecimalPipe, RouterLink, ThermostatControlComponent],
+  imports: [DecimalPipe, RouterLink, ThermostatControlComponent, TvRemoteComponent, SonosRemoteComponent],
   styles: [`
     .vac-auto { display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; color: var(--text-muted); margin: 0.6rem 0 0.2rem; }
     .vac-auto input { width: 1.1rem; height: 1.1rem; flex: none; margin: 0; padding: 0; }
@@ -113,6 +115,8 @@ export interface OverrideRequest { device: Device; durationMinutes: number; }
             into the light's power instead of to HomeHub's switch, and needs rewiring.</p>
         }
         @if (isThermostat()) { <app-thermostat-control [deviceId]="device().id" /> }
+        @if (isTv()) { <app-tv-remote [deviceId]="device().id" [on]="device().online && device().state" /> }
+        @if (isSpeaker() && device().online) { <app-sonos-remote [deviceId]="device().id" [playing]="device().state" /> }
         @if (isVac()) {
           @if (jobText()) { <p class="vac-msg">{{ jobText() }}</p> }
           @if (namedRooms().length && !vacOnJob()) {
@@ -191,7 +195,7 @@ export interface OverrideRequest { device: Device; durationMinutes: number; }
           @if (device().hasEmeter && device().wattage != null) { · {{ device().wattage | number:'1.1-1' }} W }
         </span>
         @if (timerChoices().length || device().overrideUntil) {
-          <span class="panel-label">{{ isDoor() ? 'Close after' : isCamera() ? (device().state ? 'Pause after' : 'Keep paused for') : isVac() ? 'Send home after' : (device().state ? 'Turn off after' : 'Keep off for') }}</span>
+          <span class="panel-label">{{ isDoor() ? 'Close after' : isCamera() ? (device().state ? 'Pause after' : 'Keep paused for') : isVac() ? 'Send home after' : isSpeaker() ? (device().state ? 'Pause after' : 'Keep paused for') : (device().state ? 'Turn off after' : 'Keep off for') }}</span>
           <div class="buttons">
             @for (minutes of timerChoices(); track minutes) {
               <button class="small" type="button" (click)="setTimer(minutes)">{{ minutes < 60 ? minutes + ' min' : minutes / 60 + 'h' }}</button>
@@ -240,6 +244,10 @@ export class DeviceRowComponent implements OnDestroy {
   readonly isThermostat = computed(() => this.device().driverConfig?.['kind'] === 'thermostat');
   /** Robot vacuums: "on" means out cleaning, "off" home on its dock. */
   readonly isVac = computed(() => isVacuum(this.device()));
+  /** An LG TV: its remote shows in the panel. */
+  readonly isTv = computed(() => this.device().driverType === 'lgtv');
+  /** A Sonos: on is playing; its remote shows in the panel. */
+  readonly isSpeaker = computed(() => this.device().driverType === 'sonos');
   readonly vacuumHelp = computed(() => this.isVac() && this.device().online && vacuumNeedsHelp(this.device().vacuum));
   /** Docked, stopped, or paused: it can set off. Its status unknown, the switch's state decides. */
   readonly vacuumCanStart = computed(() => {
@@ -350,6 +358,7 @@ export class DeviceRowComponent implements OnDestroy {
     const since = this.since();
     if (this.isDoor()) return (device.state ? 'Open' : 'Closed') + (device.state && since ? ` since ${since}` : '');
     if (this.isCamera()) return (device.state ? 'Watching' : 'Paused') + (!device.state && since ? ` since ${since}` : '');
+    if (this.isSpeaker()) return device.state ? (since ? `Playing since ${since}` : 'Playing') : '';
     const watts = device.hasEmeter && device.state && device.wattage != null ? `${device.wattage.toFixed(1)} W` : '';
     if (device.state && since) return watts ? `${watts} · since ${since}` : `On since ${since}`;
     if (watts) return watts;

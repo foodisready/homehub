@@ -5,7 +5,7 @@ import type { Device } from '../models/device.model';
 export type DeviceFilter = 'all' | 'on' | 'offline';
 
 const BRAND_NAMES: Record<string, string> = {
-  kasa: 'Kasa', tuya: 'Tuya', shelly: 'Shelly', matter: 'Matter', meross: 'Meross', wyze: 'Wyze', roomba: 'Roomba',
+  kasa: 'Kasa', tuya: 'Tuya', shelly: 'Shelly', matter: 'Matter', meross: 'Meross', wyze: 'Wyze', roomba: 'Roomba', lgtv: 'LG TV', sonos: 'Sonos',
 };
 
 /** The brand a device's driver stands for, as people know it: kasa → Kasa. */

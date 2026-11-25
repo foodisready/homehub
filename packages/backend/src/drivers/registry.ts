@@ -7,6 +7,8 @@ import { WyzeDriver }   from './WyzeDriver';
 import { MatterDriver } from './MatterDriver';
 import { HoneywellDriver } from './HoneywellDriver';
 import { RoombaDriver } from './RoombaDriver';
+import { LgTvDriver } from './LgTvDriver';
+import { SonosDriver } from './SonosDriver';
 
 const drivers = new Map<string, DeviceDriver>([
   ['kasa',   new KasaDriver()],
@@ -17,6 +19,8 @@ const drivers = new Map<string, DeviceDriver>([
   ['matter', new MatterDriver()],
   ['honeywell', new HoneywellDriver()],
   ['roomba', new RoombaDriver()],
+  ['lgtv',   new LgTvDriver()],
+  ['sonos',  new SonosDriver()],
 ]);
 
 export function getDriver(driverType: string): DeviceDriver {

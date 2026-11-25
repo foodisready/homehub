@@ -245,11 +245,13 @@ const ENDINGS: [RegExp, string][] = [
 ];
 
 /** Why a device isn't a plug load, or null if it is. */
-export function excludedReason(d: Pick<DeviceRow, 'id' | 'alias' | 'driver_type' | 'driver_config'>): 'camera' | 'garage door' | 'vacuum' | 'valve' | 'thermostat' | null {
+export function excludedReason(d: Pick<DeviceRow, 'id' | 'alias' | 'driver_type' | 'driver_config'>): 'camera' | 'garage door' | 'vacuum' | 'valve' | 'thermostat' | 'speaker' | null {
   if (d.driver_type === 'wyze') return 'camera';
   // Charges on its dock whether or not it's out cleaning, so "on" says nothing about what it uses.
   if (d.driver_type === 'roomba') return 'vacuum';
   if (d.driver_type === 'meross') return 'garage door';
+  // On is playing: a speaker draws much the same paused, so its time on says little.
+  if (d.driver_type === 'sonos') return 'speaker';
   try { if (d.driver_config && JSON.parse(d.driver_config)?.kind === 'thermostat') return 'thermostat'; } catch { /* not JSON */ }
   if (/\bvalve\b/i.test(d.alias)) return 'valve';
   const sensors = getDb().prepare('SELECT config FROM sensors WHERE config IS NOT NULL').all() as { config: string }[];

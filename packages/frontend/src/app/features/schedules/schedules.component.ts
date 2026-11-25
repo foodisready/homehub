@@ -317,8 +317,8 @@ const WEEK = [1, 2, 3, 4, 5, 6, 0].map((n) => ({ n, short: ['Sun', 'Mon', 'Tue',
               <div class="field">
                 <label>Action</label>
                 <select [(ngModel)]="form.state">
-                  <option [ngValue]="true">{{ formVacuum() ? 'Clean' : 'Turn ON' }}</option>
-                  <option [ngValue]="false">{{ formVacuum() ? 'Send home' : 'Turn OFF' }}</option>
+                  <option [ngValue]="true">{{ formVacuum() ? 'Clean' : formSpeaker() ? 'Play' : 'Turn ON' }}</option>
+                  <option [ngValue]="false">{{ formVacuum() ? 'Send home' : formSpeaker() ? 'Pause' : 'Turn OFF' }}</option>
                 </select>
               </div>
             }
@@ -376,7 +376,7 @@ const WEEK = [1, 2, 3, 4, 5, 6, 0].map((n) => ({ n, short: ['Sun', 'Mon', 'Tue',
 
           @if (form.triggerType !== 'auto_off' && form.state && !formVacuum()) {
             <div class="field">
-              <label for="stay-on">Turn off after (optional)</label>
+              <label for="stay-on">{{ formSpeaker() ? 'Pause after' : 'Turn off after' }} (optional)</label>
               <div class="stay-row">
                 <input id="stay-on" type="number" min="1" [max]="form.stayOnUnit === 'h' ? 24 : 1440" step="any"
                        [(ngModel)]="form.stayOnValue" placeholder="Stays on" aria-describedby="stay-on-help" />
@@ -647,6 +647,14 @@ export class SchedulesComponent implements OnInit, OnDestroy {
         return { key: String(g.deviceId), name: g.deviceAlias, group: 'Robot vacuum', status, look, icon: 'vacuum', hue: on.length ? '#7aa2ff' : '#8e9ab4',
           words: `vacuum robot clean ${d.room ?? ''} ${d.nicknames?.join(' ') ?? ''} ${g.schedules.map((s) => `${s.label} ${this.timing(s)} ${this.roomsText(s) ?? ''}`).join(' ')}` } satisfies SettingsTile;
       }
+      if (d?.driverType === 'sonos') {
+        return { key: String(g.deviceId), name: g.deviceAlias, group: 'Entertainment', status, look, icon: 'speaker', hue: on.length ? '#c084fc' : '#8e9ab4',
+          words: `sonos speaker music ${d.room ?? ''} ${d.nicknames?.join(' ') ?? ''} ${g.schedules.map((s) => `${s.label} ${this.timing(s)}`).join(' ')}` } satisfies SettingsTile;
+      }
+      if (d?.driverType === 'lgtv') {
+        return { key: String(g.deviceId), name: g.deviceAlias, group: 'Entertainment', status, look, icon: 'tv', hue: on.length ? '#c084fc' : '#8e9ab4',
+          words: `tv television ${d.room ?? ''} ${d.nicknames?.join(' ') ?? ''} ${g.schedules.map((s) => `${s.label} ${this.timing(s)}`).join(' ')}` } satisfies SettingsTile;
+      }
       return {
         key: String(g.deviceId), name: g.deviceAlias, group: kind === 'garage door' || kind === 'valve' ? 'Doors and water' : 'Lights and plugs', status, look,
         icon: kind === 'garage door' ? 'house' : kind === 'valve' ? 'drop' : 'devices',
@@ -733,6 +741,15 @@ export class SchedulesComponent implements OnInit, OnDestroy {
     return !!d && isVacuum(d);
   }
 
+  /** The device the form is for, when it's a Sonos: Play and Pause rather than on and off. */
+  formSpeaker(): boolean {
+    return this._devices().find((x) => x.id === Number(this.form.deviceId))?.driverType === 'sonos';
+  }
+
+  private isSpeakerId(id: number): boolean {
+    return this._devices().find((x) => x.id === id)?.driverType === 'sonos';
+  }
+
   /** The robot's named rooms, to pick from; a room picked before and forgotten since isn't offered. */
   formRooms(): { key: string; name: string }[] {
     const d = this._devices().find((x) => x.id === Number(this.form.deviceId));
@@ -759,12 +776,14 @@ export class SchedulesComponent implements OnInit, OnDestroy {
     return !!d && isVacuum(d);
   }
 
-  /** "On" and "Off", or for a robot vacuum "Clean" and "Home". */
+  /** "On" and "Off", or for a robot vacuum "Clean" and "Home", and for a Sonos "Play" and "Pause". */
   actionWord(s: Schedule): string {
+    if (this.isSpeakerId(s.deviceId)) return s.state ? 'Play' : 'Pause';
     return this.isVacuumId(s.deviceId) ? (s.state ? 'Clean' : 'Home') : (s.state ? 'On' : 'Off');
   }
 
   private comingVerb(s: Schedule): string {
+    if (this.isSpeakerId(s.deviceId)) return s.state ? 'plays' : 'pauses';
     return this.isVacuumId(s.deviceId) ? (s.state ? 'cleans' : 'goes home') : (s.state ? 'on' : 'off');
   }
 
