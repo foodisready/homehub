@@ -65,6 +65,11 @@ export const routes: Routes = [
     canActivate: [authGuard],
   },
   {
+    path: 'spotify-callback',
+    loadComponent: () => import('./features/spotify/spotify-callback.component').then((m) => m.SpotifyCallbackComponent),
+    canActivate: [authGuard],
+  },
+  {
     path: 'music',
     loadComponent: () => import('./features/music/music.component').then((m) => m.MusicComponent),
     canActivate: [authGuard],

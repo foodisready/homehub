@@ -4,6 +4,7 @@ import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
 import { type SonosChoice, type SonosLibrary, loadSonosLibrary } from './sonos-library';
 import { SonosArtComponent } from './sonos-art.component';
+import { SpotifyBrowseComponent } from './spotify-browse.component';
 
 /** Something that played recently, to play again. */
 export interface RecentItem { key: string; kind: string; title: string; note: string | null; art: string | null }
@@ -15,7 +16,7 @@ export interface RecentItem { key: string; kind: string; title: string; note: st
 @Component({
   selector: 'app-sonos-picker',
   standalone: true,
-  imports: [FormsModule, NgTemplateOutlet, SonosArtComponent],
+  imports: [FormsModule, NgTemplateOutlet, SonosArtComponent, SpotifyBrowseComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [`
     :host { display: flex; flex-direction: column; gap: 0.5rem; min-width: 0; }
@@ -28,6 +29,7 @@ export interface RecentItem { key: string; kind: string; title: string; note: st
     .tile b { font-size: 0.8rem; font-weight: 500; line-height: 1.25; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
     .tile small { font-size: 0.7rem; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .tile:disabled { opacity: 0.5; }
+    .paste { margin: 0.4rem 0 0; font-size: 0.75rem; font-weight: 600; color: var(--text-muted); }
     .spotify { display: flex; gap: 0.4rem; margin-top: 0.1rem; }
     .spotify input { flex: 1; min-width: 0; font-size: 0.85rem; }
     .spotify button { font-size: 0.85rem; padding: 0.45rem 0.9rem; }
@@ -72,7 +74,8 @@ export interface RecentItem { key: string; kind: string; title: string; note: st
           <p class="note">Reading your Sonos Favorites…</p>
         }
         @if (libraryError()) { <p class="note err">{{ libraryError() }}</p> }
-        <h4>Spotify</h4>
+        <app-spotify-browse [deviceId]="deviceId()" [busy]="busy()" (play)="playSpotifyUri($event)" />
+        <h5 class="paste">Or paste a Spotify link</h5>
         <form class="spotify" (submit)="playSpotify($event)">
           <input type="url" inputmode="url" name="spotify" [(ngModel)]="spotifyLink" placeholder="Paste a Spotify link" aria-label="Spotify link" autocomplete="off" />
           <button type="submit" [disabled]="busy() || !spotifyLink.trim()">Play</button>
@@ -125,6 +128,11 @@ export class SonosPickerComponent {
   choose(c: SonosChoice): void {
     this.starting.set(c.id);
     this.send({ choose: { id: c.id, title: c.title } }, () => undefined);
+  }
+
+  /** A Spotify address chosen from search or the library. */
+  playSpotifyUri(uri: string): void {
+    this.send({ spotify: uri }, () => undefined);
   }
 
   playSpotify(e: Event): void {

@@ -155,7 +155,8 @@ Play carries on with whatever the speaker last played. To choose something else,
 
 - **Recently played**: what HomeHub started (a favorite, a playlist, a Spotify link), and radio stations it saw playing, however they were started; tap one to play it again. The Sonos app's own Recently played is kept in your Sonos account online, which HomeHub can't read.
 - **Sonos Favorites** and **Sonos playlists**: your favorites from the Sonos app (**My Sonos**), and playlists saved there, with their covers. Tap one to play it. To add something here, add it to My Sonos in the Sonos app, from any music service. A favorite that only opens a list in the Sonos app, such as a service's "My Stations", can't be played from HomeHub, so it isn't listed.
-- **Spotify**: in the Spotify app, tap **Share**, then **Copy link**, on a song, album or playlist, paste the link, and select **Play**. It plays with the Spotify account already set up in the Sonos app; HomeHub never signs in to Spotify. If HomeHub says it can't find the account, play any Spotify song on a Sonos once from the Sonos or Spotify app, and try again.
+- **Spotify search**: once you've connected Spotify (below), **Search Spotify** finds songs, albums and playlists, and **Your playlists**, **Liked songs** and **Saved albums** show your library. Tap one to play it.
+- **Spotify links**: in the Spotify app, tap **Share**, then **Copy link**, on a song, album or playlist, paste the link, and select **Play**. It plays with the Spotify account already set up in the Sonos app; HomeHub never signs in to Spotify. If HomeHub says it can't find the account, play any Spotify song on a Sonos once from the Sonos or Spotify app, and try again.
 
 A station starts straight away. A song, album or playlist replaces what's queued on the speaker and plays from the start, like **Replace queue** in the Sonos app.
 
@@ -163,7 +164,18 @@ Sonos can refuse a favorite: one from a music service that has closed, such as G
 
 On Home, the **Music** card is a small player: the cover, the rooms, what's playing, play or pause, and the volume (of all the rooms playing together, or the one room). Tap the words for the Music page.
 
-Browsing or searching inside a music service (Apple Music, Spotify, Pandora and others), as the Sonos app does, isn't possible from HomeHub: since Sonos's newer system, that goes through your Sonos account online. Use Sonos Favorites, Recently played or a Spotify link instead.
+Browsing or searching inside other music services (Apple Music, Pandora and others), as the Sonos app does, isn't possible from HomeHub: since Sonos's newer system, that goes through your Sonos account online. Use Sonos Favorites or Recently played for those.
+
+#### Connect Spotify
+
+Spotify search works through a small personal Spotify app that your household makes once, on Spotify's developer site. **Settings → Spotify** shows the steps:
+
+1. An administrator signs in at developer.spotify.com/dashboard with the household's Spotify account (it needs Spotify Premium), selects **Create app**, ticks **Web API**, and adds the **Redirect URI** that Settings shows, exactly. Accepting Spotify's developer terms is up to you.
+2. In the app's **User Management**, add each person who will connect, by their Spotify account's email. Spotify allows up to 5.
+3. Copy the app's **Client ID** into **Settings → Spotify** and save.
+4. Each person opens **Settings → Spotify** and selects **Connect Spotify**, then signs in to Spotify and agrees. This has to be done on HomeHub's address that starts with **https://** (the Tailscale one), because Spotify only signs in on a secure address.
+
+HomeHub keeps each person's Spotify sign-in on the HomeHub itself, never in backups, and only reads: search, playlists, liked songs and saved albums. What you choose plays through Sonos with the Spotify account already set up there. **Disconnect Spotify** in Settings removes the sign-in. Spotify limits these personal apps: 10 search results at a time, at most 5 people, and the app stops working if its owner's Premium ends.
 
 **Music**, under **More** (or the **Music** card on Home), shows the whole sound system: each group of rooms playing together, what it's playing, play, pause and skip, **Choose music**, and the volume of each room and of **All rooms** together. **Play on** chooses the rooms the music plays in: tap a room to add it, tap it again to take it out (it stops), or **Everywhere** for every room. Taking out the room leading the group hands the music to another room, so it keeps playing. **Queue** under the buttons lists the group's songs, as in the Sonos app: each song's cover, title and artist, with the one playing marked. Tap a song to play it, and use **Earlier songs** and **Later songs** in a long queue. **Shuffle** turns shuffle on and off, and **Repeat** goes from off to all songs to one song. A radio station has no queue: tapping a song switches the group back to its queue. The music needs at least one room; to stop it, pause it. A Sonos amp's rooms are the rooms in the Sonos app: speakers wired to the same amp play together as one room.
 

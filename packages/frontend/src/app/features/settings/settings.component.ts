@@ -33,6 +33,7 @@ import { SecretInputDirective } from '../../shared/secret-input/secret-input.dir
 import { NicknameChipsComponent, type NicknameSuggestion } from '../../shared/nickname-chips/nickname-chips.component';
 import { ThermostatRangesComponent } from '../../shared/thermostat/thermostat-ranges.component';
 import { DeviceLockComponent } from '../../shared/lock/device-lock.component';
+import { SpotifyConnectComponent } from '../../shared/spotify/spotify-connect.component';
 import { LockService } from '../../core/lock/lock.service';
 
 interface ChatStats {
@@ -109,7 +110,7 @@ const DRIVER_LABEL: Record<string, string> = {
 @Component({
   selector: 'app-settings',
   standalone: true,
-  imports: [SecretInputDirective, NicknameChipsComponent, ThermostatRangesComponent, FormsModule, RouterLink, InviteQrComponent, MatterPairComponent, DeviceFilterComponent, BackupsComponent, BackupSyncComponent, ServerRoleComponent, MerossLoginComponent, HoneywellLoginComponent, AlarmcomLoginComponent, OtherNetworksComponent, HomeSettingsComponent, AiConnectionComponent, AiChoiceComponent, CamerasToggleComponent, TeachCommandsComponent, VoiceRepliesComponent, VoiceControlComponent, SettingsTilesComponent, DeviceLockComponent],
+  imports: [SecretInputDirective, NicknameChipsComponent, ThermostatRangesComponent, FormsModule, RouterLink, InviteQrComponent, MatterPairComponent, DeviceFilterComponent, BackupsComponent, BackupSyncComponent, ServerRoleComponent, MerossLoginComponent, HoneywellLoginComponent, AlarmcomLoginComponent, OtherNetworksComponent, HomeSettingsComponent, AiConnectionComponent, AiChoiceComponent, CamerasToggleComponent, TeachCommandsComponent, VoiceRepliesComponent, VoiceControlComponent, SettingsTilesComponent, DeviceLockComponent, SpotifyConnectComponent],
   styles: [`
     .topbar { display:flex; align-items:center; justify-content:space-between; margin-bottom:1.5rem; }
     .topbar h1 { font-size:1.4rem; font-weight:700; }
@@ -1060,6 +1061,13 @@ const DRIVER_LABEL: Record<string, string> = {
       }
 
       <div class="section">
+        <button type="button" id="section-spotify" class="section-title section-toggle" (click)="toggleSection('spotify')" [attr.aria-expanded]="isSectionOpen('spotify')">
+          <span class="chev">{{ isSectionOpen('spotify') ? '▾' : '▸' }}</span> Spotify
+        </button>
+        @if (isSectionOpen('spotify')) { <div class="card"><app-spotify-connect /></div> }
+      </div>
+
+      <div class="section">
         <button type="button" id="section-lock" class="section-title section-toggle" (click)="toggleSection('lock')" [attr.aria-expanded]="isSectionOpen('lock')">
           <span class="chev">{{ isSectionOpen('lock') ? '▾' : '▸' }}</span> Lock HomeHub
         </button>
@@ -1412,6 +1420,12 @@ export class SettingsComponent implements OnInit, OnDestroy {
       key: 'notifications', name: 'Notifications', group: 'Connections', icon: 'bell', hue: '#f25f5c',
       status: push === 'on' ? 'On for this device' : push === 'blocked' ? 'Blocked on this device' : push === 'off' || push === 'home-screen' ? 'Off on this device' : 'Alerts on this device',
       words: 'notifications push alerts phone',
+    });
+
+    out.push({
+      key: 'spotify', name: 'Spotify', group: 'Connections', icon: 'music', hue: '#1ed760',
+      status: 'Search and play from your Spotify on the speakers',
+      words: 'spotify music search playlists liked songs albums sonos connect client id developer',
     });
 
     // More

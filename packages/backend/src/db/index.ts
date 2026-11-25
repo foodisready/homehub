@@ -170,6 +170,16 @@ function migrate(db: Database.Database): void {
   try { db.exec('ALTER TABLE scene_actions ADD COLUMN play TEXT'); } catch {}
   // A scene's Sonos Play action: the volume it sets on that speaker first. Null: left as it is.
   try { db.exec('ALTER TABLE scene_actions ADD COLUMN volume INTEGER'); } catch {}
+  // Each person's Spotify sign-in (spotify/spotify.ts). Not in backups: the tokens stay on this HomeHub.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS spotify_accounts (
+      user_id       INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      refresh_token TEXT NOT NULL,
+      access_token  TEXT,
+      expires_at    INTEGER,
+      name          TEXT
+    );
+  `);
   // What the Sonos speakers played recently, to play again: what HomeHub started, and stations seen playing.
   db.exec(`
     CREATE TABLE IF NOT EXISTS sonos_recent (
