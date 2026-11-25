@@ -783,7 +783,7 @@ A tablet that's always on, on a wall or the kitchen counter, can be HomeHub's sc
 - **Your rooms,** as on the Home page. Tap one to switch its devices.
 - **At night** (10 PM to 6:30 AM at first), the screen turns black with a dim clock and the next thing coming up. The clock moves a little each minute so nothing burns into the screen. Tap it to see everything for 2 minutes.
 - **⋯** in the corner sets the night hours or turns night dimming off, goes **Full screen**, and leaves the wall display. **Leave wall display** opens the rest of HomeHub for a while: the Dashboard shows **Back to wall display**, **Home** goes back too, and the tablet goes back by itself after 2 minutes without a touch. **Stop using this tablet as a wall display**, under it, makes it an ordinary screen again. With a PIN set, both ask for it first. These choices are kept on that tablet only. Its foot shows the version HomeHub is running, and says so when the tablet still has an older one waiting to reload.
-- **Getting back:** the **home** button next to **⋯** closes any room that's open and scrolls back to the top. Left on another page, such as Cameras, **Home** in the menu goes back to the wall display. And after 2 minutes without a touch, the tablet goes back by itself, except while a camera is playing.
+- **Getting back:** the **home** button next to **⋯** closes any room that's open and scrolls back to the top. Left on another page, such as Cameras, **Home** in the menu goes back to the wall display. And after 2 minutes without a touch, the tablet goes back by itself, except while a camera is playing. If its screen turned off before then, it goes back as soon as the screen wakes.
 
 **Keeping the screen on:** on a secure address (`https://`, such as the Tailscale one), HomeHub keeps the screen on while the wall display is open. On the home address (`http://`), the browser doesn't allow that, and **⋯** says so: on the tablet, set **Settings → Display → Screen timeout** to the longest, or turn on **Developer options → Stay awake** to keep it on while charging.
 
@@ -794,7 +794,7 @@ A tablet that's always on, on a wall or the kitchen counter, can be HomeHub's sc
 - The **lock** button next to **⋯**, or **Lock now** in the menu, locks it straight away.
 - It locks by itself after 5 minutes without a touch. Change that to 1, 2, 10, 15 or 30 minutes, or turn it off, in the same menu.
 - Locked, the screen shows a dim clock that moves a little each minute. Tap anywhere for the number pad and enter the PIN. After 5 wrong tries it waits a minute before the next, and longer after each further miss, up to 15 minutes.
-- It stays locked if the page is reloaded, and covers every page, not only the wall display.
+- It stays locked if the page is reloaded, and covers every page, not only the wall display. A wall tablet that locks while showing another page goes back to the wall display underneath, so the PIN opens the wall display, at the top.
 - **Forgot the PIN?** on the lock screen signs out. Sign in again with the account's password, then **Change PIN** or **Remove PIN**: either asks for the current PIN.
 
 The PIN belongs to the login, and HomeHub keeps it hashed, like a password, so the same PIN opens any screen signed in as that login. Whether a screen locks by itself, and when, is set on each screen. The lock keeps people from using the screen. Someone who clears the tablet's browser data gets the sign-in page, which still needs the password.
