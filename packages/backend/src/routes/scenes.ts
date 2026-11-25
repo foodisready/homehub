@@ -6,17 +6,18 @@ import { getCachedState, noteState } from '../kasa/device.cache';
 import { logger } from '../logger';
 import { withActivity } from '../activity/activity';
 import { requireAdmin } from '../middleware/auth';
+import { configWithPlay, isPlayChoice, playChoiceOf } from '../drivers/SonosDriver';
 
 export const scenesRouter = Router();
 
 interface SceneRow     { id: number; name: string; icon: string | null; created_at: string; voice_may_pause?: number; nicknames?: string | null }
-interface ActionRow    { id: number; scene_id: number; device_id: number; state: number }
+interface ActionRow    { id: number; scene_id: number; device_id: number; state: number; play?: string | null }
 interface DeviceRow    { id: number; alias: string; ip: string; driver_type: string; driver_config: string | null }
 
 function withActions(scene: SceneRow) {
   const db      = getDb();
   const actions = db.prepare(`
-    SELECT sa.id, sa.scene_id, sa.device_id, sa.state, d.alias, d.driver_type
+    SELECT sa.id, sa.scene_id, sa.device_id, sa.state, sa.play, d.alias, d.driver_type
     FROM scene_actions sa JOIN devices d ON d.id = sa.device_id
     WHERE sa.scene_id = ?
   `).all(scene.id) as (ActionRow & { alias: string; driver_type: string })[];
@@ -25,9 +26,19 @@ function withActions(scene: SceneRow) {
     ...rest,
     // Whether voice and Chat may pause this scene's cameras. Only an admin can change it.
     voiceMayPause: voice_may_pause === 1,
-    actions: actions.map((a) => ({ id: a.id, deviceId: a.device_id, alias: a.alias, state: a.state === 1, camera: a.driver_type === 'wyze' })),
+    actions: actions.map((a) => {
+      const play = a.driver_type === 'sonos' && a.state === 1 ? playChoiceOf(a.play) : null;
+      return { id: a.id, deviceId: a.device_id, alias: a.alias, state: a.state === 1, camera: a.driver_type === 'wyze', ...(play ? { play } : {}) };
+    }),
   };
 }
+
+/** A scene action's Sonos favorite, as JSON for its play column: only on a Play (on) action. Undefined when it's not a valid choice. */
+function actionPlay(a: { state: boolean; play?: unknown }): string | null | undefined {
+  if (a.play === undefined || a.play === null || !a.state) return null;
+  return isPlayChoice(a.play) ? JSON.stringify({ id: a.play.id, title: a.play.title.trim() }) : undefined;
+}
+const PLAY_ERROR = 'A Sonos action’s play must be a favorite or Sonos playlist from the list ({ id, title }), or left out';
 
 // GET /api/scenes
 scenesRouter.get('/', (_req, res) => {
@@ -40,12 +51,13 @@ scenesRouter.post('/', requireAdmin, (req: Request, res: Response) => {
   const { name, icon, actions, voiceMayPause } = req.body as {
     name: string;
     icon?: string;
-    actions: { deviceId: number; state: boolean }[];
+    actions: { deviceId: number; state: boolean; play?: unknown }[];
     voiceMayPause?: unknown;
   };
   if (!name?.trim() || !actions?.length) {
     return res.status(400).json({ error: 'name and actions are required', code: 'VALIDATION_ERROR' });
   }
+  if (actions.some((a) => actionPlay(a) === undefined)) return res.status(400).json({ error: PLAY_ERROR, code: 'VALIDATION_ERROR' });
   if (voiceMayPause !== undefined && typeof voiceMayPause !== 'boolean') {
     return res.status(400).json({ error: '`voiceMayPause` must be true or false', code: 'VALIDATION_ERROR' });
   }
@@ -54,8 +66,8 @@ scenesRouter.post('/', requireAdmin, (req: Request, res: Response) => {
   try {
     const result = db.prepare('INSERT INTO scenes (name, icon, voice_may_pause) VALUES (?, ?, ?)').run(name.trim(), icon ?? null, voiceMayPause ? 1 : 0);
     const sceneId = result.lastInsertRowid;
-    const insert  = db.prepare('INSERT INTO scene_actions (scene_id, device_id, state) VALUES (?, ?, ?)');
-    for (const a of actions) insert.run(sceneId, a.deviceId, a.state ? 1 : 0);
+    const insert  = db.prepare('INSERT INTO scene_actions (scene_id, device_id, state, play) VALUES (?, ?, ?, ?)');
+    for (const a of actions) insert.run(sceneId, a.deviceId, a.state ? 1 : 0, actionPlay(a) ?? null);
     const created = db.prepare('SELECT * FROM scenes WHERE id = ?').get(sceneId) as SceneRow;
     res.status(201).json(withActions(created));
   } catch (err: any) {
@@ -85,12 +97,13 @@ scenesRouter.patch('/:id', requireAdmin, (req: Request, res: Response) => {
     return res.status(400).json({ error: '`icon` must be a short text', code: 'VALIDATION_ERROR' });
   }
   const db = getDb();
-  let list: { deviceId: number; state: boolean }[] | undefined;
+  let list: { deviceId: number; state: boolean; play?: unknown }[] | undefined;
   if (actions !== undefined) {
     const ok = Array.isArray(actions) && actions.length > 0 && actions.every((a) =>
       a && Number.isInteger(a.deviceId) && typeof a.state === 'boolean');
     if (!ok) return res.status(400).json({ error: 'A scene needs at least one device', code: 'VALIDATION_ERROR' });
-    list = [...new Map((actions as { deviceId: number; state: boolean }[]).map((a) => [a.deviceId, a])).values()];
+    list = [...new Map((actions as { deviceId: number; state: boolean; play?: unknown }[]).map((a) => [a.deviceId, a])).values()];
+    if (list.some((a) => actionPlay(a) === undefined)) return res.status(400).json({ error: PLAY_ERROR, code: 'VALIDATION_ERROR' });
     const known = db.prepare('SELECT id FROM devices WHERE id = ?');
     if (list.some((a) => !known.get(a.deviceId))) {
       return res.status(400).json({ error: 'A device in this scene no longer exists', code: 'VALIDATION_ERROR' });
@@ -106,8 +119,8 @@ scenesRouter.patch('/:id', requireAdmin, (req: Request, res: Response) => {
       if (icon !== undefined) db.prepare('UPDATE scenes SET icon = ? WHERE id = ?').run(icon, scene.id);
       if (list) {
         db.prepare('DELETE FROM scene_actions WHERE scene_id = ?').run(scene.id);
-        const insert = db.prepare('INSERT INTO scene_actions (scene_id, device_id, state) VALUES (?, ?, ?)');
-        for (const a of list) insert.run(scene.id, a.deviceId, a.state ? 1 : 0);
+        const insert = db.prepare('INSERT INTO scene_actions (scene_id, device_id, state, play) VALUES (?, ?, ?, ?)');
+        for (const a of list) insert.run(scene.id, a.deviceId, a.state ? 1 : 0, actionPlay(a) ?? null);
       }
       if (voiceMayPause !== undefined) db.prepare('UPDATE scenes SET voice_may_pause = ? WHERE id = ?').run(voiceMayPause ? 1 : 0, scene.id);
       // A scene that no longer pauses a camera has nothing for voice to pause. Clearing it means
@@ -147,14 +160,16 @@ scenesRouter.post('/:id/run', async (req: Request, res: Response) => {
   if (!scene) return res.status(404).json({ error: 'Scene not found', code: 'NOT_FOUND' });
 
   const actions = db.prepare(`
-    SELECT sa.state, d.id, d.ip, d.alias, d.driver_type, d.driver_config
+    SELECT sa.state, sa.play, d.id, d.ip, d.alias, d.driver_type, d.driver_config
     FROM scene_actions sa JOIN devices d ON d.id = sa.device_id
     WHERE sa.scene_id = ?
   `).all(scene.id) as (ActionRow & DeviceRow & { alias: string })[];
 
   const results = await Promise.allSettled(
     actions.map(async (a) => {
-      const config = a.driver_config ? JSON.parse(a.driver_config) : undefined;
+      // A Sonos Play action may start its chosen favorite.
+      const configJson = configWithPlay(a.driver_config, a.driver_type === 'sonos' && a.state === 1 ? playChoiceOf(a.play) : null);
+      const config = configJson ? JSON.parse(configJson) : undefined;
       await getDriver(a.driver_type ?? 'kasa').setPower(a.ip, a.state === 1, config);
       withActivity({ source: 'scene', detail: scene.name }, () => noteState(a.id, a.state === 1));
       emitDeviceState(a.id, a.alias, a.state === 1, getCachedState(a.id)?.wattage ?? null);

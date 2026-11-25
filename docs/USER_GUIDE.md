@@ -151,11 +151,18 @@ Set up the speakers in the Sonos app first. Then select **Discover on network**:
 
 A Sonos is never really off, so in HomeHub its switch is **playing**: on plays and off pauses. Its row says **Playing since** a time. Open the row for its remote: what's playing (song, artist and album, or a radio station and what it's playing), **Previous**, **Play** or **Pause**, **Next**, volume **−** and **+**, and **Mute**. **Pause after** 1, 2 or 4 hours works as a sleep timer.
 
-Play carries on with whatever the speaker last played. HomeHub can't choose music, so with nothing played yet, it says to start something in the Sonos app first. A radio station can't pause, so it stops instead, and can't skip.
+Play carries on with whatever the speaker last played. To choose something else, select **Choose music** in the remote:
+
+- **Sonos Favorites** and **Sonos playlists**: your favorites from the Sonos app (**My Sonos**), and playlists saved there. Tap one to play it. To add something here, add it to My Sonos in the Sonos app, from any music service. A favorite that only opens a list in the Sonos app, such as a service's "My Stations", can't be played from HomeHub, so it isn't listed.
+- **Spotify**: in the Spotify app, tap **Share**, then **Copy link**, on a song, album or playlist, paste the link, and select **Play**. It plays with the Spotify account already set up in the Sonos app; HomeHub never signs in to Spotify. If HomeHub says it can't find the account, play any Spotify song on a Sonos once from the Sonos or Spotify app, and try again.
+
+A station starts straight away. A song, album or playlist replaces what's queued on the speaker and plays from the start, like **Replace queue** in the Sonos app.
+
+Sonos can refuse a favorite: one from a music service that has closed, such as Google Play Music, or one whose service needs signing in again, and some radio stations can only be started from the Sonos app. HomeHub then says it couldn't play it and leaves what was playing as it was. With nothing played yet and nothing chosen, Play says to choose something first. A radio station can't pause, so it stops instead, and can't skip.
 
 Speakers grouped in the Sonos app play together: play, pause and skip on any of them act on the whole group, as in the Sonos app, and the remote says which rooms it's playing with. The volume is each speaker's own.
 
-By voice and in Chat, "turn off the kitchen Sonos" pauses it, and schedules and scenes can play or pause it, labelled **Play** and **Pause**. "Turn off the lights" leaves speakers alone, and Activity says "started playing" and "paused". Its energy isn't estimated: a speaker uses much the same paused as playing.
+By voice and in Chat, "turn off the kitchen Sonos" pauses it, and schedules and scenes can play or pause it, labelled **Play** and **Pause**. A **Play** schedule or scene action can also start one of your favorites or Sonos playlists: choose it under **What to play**, for example a radio station at 7 AM. Left as **Carry on with what was playing**, it resumes. If the favorite is later removed from the Sonos app, the schedule or scene can't start it, and its form says so. "Turn off the lights" leaves speakers alone, and Activity says "started playing" and "paused". Its energy isn't estimated: a speaker uses much the same paused as playing.
 
 ### Matter devices
 

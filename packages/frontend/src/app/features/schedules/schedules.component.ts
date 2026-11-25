@@ -10,6 +10,7 @@ import { AuthService } from '../../core/auth/auth.service';
 import { Device } from '../../shared/models/device.model';
 import { SOLAR_EVENTS, cronProblem, daysTimeCron, describeCron, describeDuration, describeTiming, readDaysTime, timingOrder } from './schedule-text';
 import { isVacuum } from '../../shared/vacuum';
+import { type PlayChoice, type SonosChoice, loadSonosLibrary } from '../../shared/sonos/sonos-library';
 
 interface Schedule {
   id: number;
@@ -26,6 +27,8 @@ interface Schedule {
   /** A robot vacuum's Clean schedule: its rooms' keys, and their names now (null: forgotten). Null: the whole house. */
   rooms?: string[] | null;
   roomNames?: (string | null)[] | null;
+  /** A Sonos Play schedule: the favorite or Sonos playlist it starts. Null: it carries on with what was playing. */
+  play?: PlayChoice | null;
   state: boolean;
   enabled: boolean;
   /** Set when the scheduler can't read it, so it never runs. */
@@ -216,6 +219,7 @@ const WEEK = [1, 2, 3, 4, 5, 6, 0].map((n) => ({ n, short: ['Sun', 'Mon', 'Tue',
                   </div>
                   @if (s.label !== timing(s)) { <div class="schedule-meta">{{ s.label }}</div> }
                   @if (roomsText(s); as r) { <div class="schedule-meta">{{ r }}</div> }
+                  @if (s.state && s.play) { <div class="schedule-meta">Plays {{ s.play.title }}</div> }
                   @if (s.problem) { <div class="schedule-problem">Never runs: {{ s.problem }} Edit it to fix the time.</div> }
                   @else { <div class="schedule-meta">{{ !s.enabled ? 'Paused' : s.next ? 'Next: ' + when(s.next) : s.triggerType === 'auto_off' ? 'Whenever it’s switched on' : 'Not in the next two days' }}</div> }
                 </div>
@@ -374,19 +378,45 @@ const WEEK = [1, 2, 3, 4, 5, 6, 0].map((n) => ({ n, short: ['Sun', 'Mon', 'Tue',
             </div>
           }
 
+          @if (formSpeaker() && form.state && form.triggerType !== 'auto_off') {
+            <div class="field">
+              <label for="play-what">What to play</label>
+              <select id="play-what" [(ngModel)]="form.playId" aria-describedby="play-help">
+                <option value="">Carry on with what was playing</option>
+                @if (savedPlayMissing(); as p) { <option [value]="p.id">{{ p.title }} (not in Sonos Favorites now)</option> }
+                @if (speakerChoices().favorites.length) {
+                  <optgroup label="Sonos Favorites">
+                    @for (c of speakerChoices().favorites; track c.id) { <option [value]="c.id">{{ c.title }}</option> }
+                  </optgroup>
+                }
+                @if (speakerChoices().playlists.length) {
+                  <optgroup label="Sonos playlists">
+                    @for (c of speakerChoices().playlists; track c.id) { <option [value]="c.id">{{ c.title }}</option> }
+                  </optgroup>
+                }
+              </select>
+              <p id="play-help" class="field-help">
+                @if (choicesState() === 'loading') { Reading your Sonos Favorites… }
+                @else if (choicesState() === 'error') { Couldn’t read your Sonos Favorites just now. Try again in a moment. }
+                @else { Your Sonos Favorites and playlists. To add one here, add it to My Sonos in the Sonos app. A song, album or playlist replaces what’s queued. }
+              </p>
+            </div>
+          }
+
           @if (form.triggerType !== 'auto_off' && form.state && !formVacuum()) {
             <div class="field">
               <label for="stay-on">{{ formSpeaker() ? 'Pause after' : 'Turn off after' }} (optional)</label>
               <div class="stay-row">
                 <input id="stay-on" type="number" min="1" [max]="form.stayOnUnit === 'h' ? 24 : 1440" step="any"
-                       [(ngModel)]="form.stayOnValue" placeholder="Stays on" aria-describedby="stay-on-help" />
+                       [(ngModel)]="form.stayOnValue" [placeholder]="formSpeaker() ? 'Keeps playing' : 'Stays on'" aria-describedby="stay-on-help" />
                 <select [(ngModel)]="form.stayOnUnit" aria-label="Unit">
                   <option value="min">minutes</option>
                   <option value="h">hours</option>
                 </select>
               </div>
               <p id="stay-on-help" class="field-help">
-                @if (stayOnPreview(); as p) { Turns off {{ p }} after this schedule turns it on. }
+                @if (stayOnPreview(); as p) { {{ formSpeaker() ? 'Pauses' : 'Turns off' }} {{ p }} after this schedule {{ formSpeaker() ? 'starts it' : 'turns it on' }}. }
+                @else if (formSpeaker()) { Leave empty and it keeps playing until something pauses it. }
                 @else { Leave empty and it stays on until something turns it off. }
                 Switching it yourself in the meantime cancels this.
               </p>
@@ -604,7 +634,8 @@ export class SchedulesComponent implements OnInit, OnDestroy {
       if (!s.enabled || !s.next || s.problem) continue;
       const at = Date.parse(s.next);
       const rooms = this.roomsText(s);
-      if (at <= until) runs.push({ at, name: s.deviceAlias, state: s.state, verb: this.comingVerb(s), why: this.timing(s) + (rooms ? ` · ${rooms}` : '') });
+      const plays = s.state && s.play ? s.play.title : null;
+      if (at <= until) runs.push({ at, name: s.deviceAlias, state: s.state, verb: this.comingVerb(s), why: this.timing(s) + (rooms ? ` · ${rooms}` : '') + (plays ? ` · ${plays}` : '') });
       if (s.state && s.stayOnMinutes) {
         const off = at + s.stayOnMinutes * 60_000;
         if (off <= until) runs.push({ at: off, name: s.deviceAlias, state: false, verb: 'off', why: `${describeDuration(s.stayOnMinutes)} after it came on` });
@@ -690,6 +721,8 @@ export class SchedulesComponent implements OnInit, OnDestroy {
       time:               '09:00',
       /** A robot vacuum's Clean: its rooms' keys in the order picked; none for the whole house. */
       rooms:              [] as string[],
+      /** A Sonos Play: the favorite or playlist it starts, by id; empty carries on. */
+      playId:             '',
     };
   }
 
@@ -701,6 +734,8 @@ export class SchedulesComponent implements OnInit, OnDestroy {
   openCreate(deviceId?: number): void {
     this.form = { ...this.blankForm(), deviceId: deviceId ?? '' };
     if (this.formVacuum()) this.form.triggerType = 'days';
+    this.savedPlay.set(null);
+    this.loadChoices();
     this.showForm.set(true);
   }
 
@@ -727,9 +762,12 @@ export class SchedulesComponent implements OnInit, OnDestroy {
       days:               simple?.days ?? this.blankForm().days,
       time:               simple?.time ?? '09:00',
       rooms:              [...(s.rooms ?? [])],
+      playId:             s.state ? s.play?.id ?? '' : '',
     };
+    this.savedPlay.set(s.state ? s.play ?? null : null);
     // A room forgotten since can't be picked, so it isn't kept.
     this.form.rooms = this.form.rooms.filter((k) => this.formRooms().some((r) => r.key === k));
+    this.loadChoices();
     this.showForm.set(true);
   }
 
@@ -769,6 +807,49 @@ export class SchedulesComponent implements OnInit, OnDestroy {
     } else {
       this.form.rooms = [];
     }
+    this.form.playId = '';
+    this.loadChoices();
+  }
+
+  // ── Sonos: what a Play schedule starts ───────────────────────────
+
+  readonly speakerChoices = signal<{ favorites: SonosChoice[]; playlists: SonosChoice[] }>({ favorites: [], playlists: [] });
+  readonly choicesState = signal<'idle' | 'loading' | 'error'>('idle');
+  /** The edited schedule's favorite as saved, kept even if it's left Sonos Favorites since. */
+  private readonly savedPlay = signal<PlayChoice | null>(null);
+
+  private loadChoices(): void {
+    this.speakerChoices.set({ favorites: [], playlists: [] });
+    if (!this.formSpeaker()) { this.choicesState.set('idle'); return; }
+    const id = Number(this.form.deviceId);
+    this.choicesState.set('loading');
+    loadSonosLibrary(this.http, id).subscribe({
+      next: (lib) => {
+        if (Number(this.form.deviceId) !== id) return;
+        this.speakerChoices.set({ favorites: lib.favorites, playlists: lib.playlists });
+        this.choicesState.set('idle');
+      },
+      error: () => { if (Number(this.form.deviceId) === id) this.choicesState.set('error'); },
+    });
+  }
+
+  /** The saved favorite when it isn't among what Sonos lists now. */
+  savedPlayMissing(): PlayChoice | null {
+    const p = this.savedPlay();
+    if (!p || this.choicesState() === 'loading') return null;
+    const { favorites, playlists } = this.speakerChoices();
+    return [...favorites, ...playlists].some((c) => c.id === p.id) ? null : p;
+  }
+
+  /** What the form's Play starts, by id and name; null to carry on. */
+  private formPlay(): PlayChoice | null {
+    const id = this.form.playId;
+    if (!id) return null;
+    const { favorites, playlists } = this.speakerChoices();
+    const c = [...favorites, ...playlists].find((x) => x.id === id);
+    if (c) return { id: c.id, title: c.title };
+    const saved = this.savedPlay();
+    return saved?.id === id ? saved : null;
   }
 
   private isVacuumId(id: number): boolean {
@@ -880,6 +961,7 @@ export class SchedulesComponent implements OnInit, OnDestroy {
       ...(triggerType === 'auto_off' ? { durationMinutes: Number(durationMinutes) } : {}),
       stayOnMinutes: stayOn,
       ...(vacuum && state && triggerType !== 'auto_off' ? { rooms: this.form.rooms } : {}),
+      ...(this.formSpeaker() && state && triggerType !== 'auto_off' ? { play: this.formPlay() } : {}),
     };
 
     const id = this.editingId();

@@ -21,9 +21,26 @@ let db: Database.Database;
 let protocol: typeof import('./protocol');
 let driverMod: typeof import('../drivers/SonosDriver');
 let routes: typeof import('../routes/sonos');
+let music: typeof import('./music');
 
 const enc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const DIDL = (inner: string) => enc(`<DIDL-Lite xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/" xmlns:r="urn:schemas-rinconnetworks-com:metadata-1-0/"><item>${inner}</item></DIDL-Lite>`);
+
+const META_NS = 'xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/" xmlns:r="urn:schemas-rinconnetworks-com:metadata-1-0/" xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/"';
+/** A Sonos Favorite, as the speaker lists it: its address, and the metadata to play it with (escaped inside). */
+const favorite = (id: string, title: string, res: string, type: string, innerClass: string, extra = '') =>
+  `<item id="${id}" parentID="FV:2" restricted="false"><dc:title>${enc(title)}</dc:title><upnp:class>object.itemobject.item.sonos-favorite</upnp:class>`
+  + `<res protocolInfo="x:*:*:*">${enc(res)}</res>${extra}<r:type>${type}</r:type><r:description>Service</r:description>`
+  + `<r:resMD>${enc(`<DIDL-Lite ${META_NS}><item id="X" parentID="" restricted="true"><dc:title>${enc(title)}</dc:title><upnp:class>${innerClass}</upnp:class><desc id="cdudn" nameSpace="urn:schemas-rinconnetworks-com:metadata-1-0/">SA_RINCON3079_X_#Svc3079-0-Token</desc></item></DIDL-Lite>`)}</r:resMD></item>`;
+const FAVORITES = [
+  favorite('FV:2/3', 'Morning Song', 'x-sonos-http:abc.mp3?sid=151&flags=32&sn=2', 'instantPlay', 'object.item.audioItem.musicTrack',
+    '<upnp:albumArtURI>http://lh6.ggpht.com/art.jpg</upnp:albumArtURI>'),
+  favorite('FV:2/5', 'My Stations', '', 'shortcut', 'object.container'),
+  favorite('FV:2/2', 'Q100 & Friends', 'x-sonosapi-stream:s21507?sid=333&flags=8224&sn=4', 'instantPlay', 'object.item.audioItem.audioBroadcast'),
+  favorite('FV:2/6', 'Snow Song', 'x-sonos-spotify:spotify%3atrack%3a4uLU6hMCjMI75M1A2tKUQC?sid=12&flags=8224&sn=7', 'instantPlay', 'object.item.audioItem.musicTrack',
+    '<upnp:albumArtURI>https://i.scdn.co/image/ab67</upnp:albumArtURI>'),
+];
+const PLAYLIST = '<container id="SQ:0" parentID="SQ:" restricted="true"><dc:title>Dinner</dc:title><res protocolInfo="file:*:audio/mpegurl:*">file:///jffs/settings/savedqueues.rsq#0</res><upnp:class>object.container.playlistContainer</upnp:class><upnp:albumArtURI>/getaa?s=1&amp;u=x</upnp:albumArtURI></container>';
 
 /**
  * Two speakers behind one port, told apart by the address asked for: "127.0.0.1" is the Kitchen
@@ -38,6 +55,10 @@ class FakeSonos {
   radio = false;
   volume: Record<string, number> = { '127.0.0.1': 30, localhost: 20 };
   sent: { host: string; action: string; body: string }[] = [];
+  favorites = FAVORITES;
+  queueLength = 5;
+  /** What GetPositionInfo says the current track's address is. */
+  trackUri = 'x-file-cifs://nas/music/blue.flac';
 
   async start(): Promise<void> {
     this.server = http.createServer((req, res) => {
@@ -83,9 +104,24 @@ class FakeSonos {
       case 'GetPositionInfo':
         ok(this.radio
           ? `<TrackMetaData>${DIDL('<dc:title>x-sonosapi-stream:s1234</dc:title><r:streamContent>Nina Simone - Feeling Good</r:streamContent>')}</TrackMetaData>`
-          : `<TrackMetaData>${DIDL('<dc:title>Blue in Green</dc:title><dc:creator>Miles Davis</dc:creator><upnp:album>Kind of Blue</upnp:album>')}</TrackMetaData>`);
+          : `<TrackURI>${enc(this.trackUri)}</TrackURI><TrackMetaData>${DIDL('<dc:title>Blue in Green</dc:title><dc:creator>Miles Davis</dc:creator><upnp:album>Kind of Blue</upnp:album>')}</TrackMetaData>`);
         return;
       case 'GetMediaInfo': ok(`<CurrentURIMetaData>${DIDL('<dc:title>Jazz FM</dc:title>')}</CurrentURIMetaData>`); return;
+      case 'Browse': {
+        const objectId = /<ObjectID>([^<]*)/.exec(body)?.[1] ?? '';
+        const entries = objectId === 'FV:2' ? this.favorites : objectId === 'SQ:' ? [PLAYLIST] : [];
+        const didl = `<DIDL-Lite xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/" xmlns:r="urn:schemas-rinconnetworks-com:metadata-1-0/" xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/">${entries.join('')}</DIDL-Lite>`;
+        ok(`<Result>${enc(didl)}</Result><NumberReturned>${entries.length}</NumberReturned><TotalMatches>${entries.length}</TotalMatches><UpdateID>1</UpdateID>`);
+        return;
+      }
+      case 'AddURIToQueue': {
+        if (/spotify%3aalbum%3aBADBADBADBADBADBADBADB|dead\.mp3/.test(body)) { fault(800); return; }
+        const first = this.queueLength + 1;
+        this.queueLength += 12;
+        ok(`<FirstTrackNumberEnqueued>${first}</FirstTrackNumberEnqueued><NumTracksAdded>12</NumTracksAdded><NewQueueLength>${this.queueLength}</NewQueueLength>`); return;
+      }
+      case 'RemoveTrackRangeFromQueue': this.queueLength -= Number(/<NumberOfTracks>(\d+)/.exec(body)?.[1]); ok('<NewUpdateID>2</NewUpdateID>'); return;
+      case 'SetAVTransportURI': this.queued = true; ok(); return;
       case 'GetVolume': ok(`<CurrentVolume>${this.volume[host]}</CurrentVolume>`); return;
       case 'GetMute': ok('<CurrentMute>0</CurrentMute>'); return;
       case 'SetRelativeVolume': this.volume[host] += Number(/<Adjustment>(-?\d+)/.exec(body)?.[1]); ok(); return;
@@ -100,10 +136,14 @@ const sonos = new FakeSonos();
 describe('Sonos speakers', () => {
   before(async () => {
     process.env.DB_PATH = path.join(TMP, 'db.sqlite');
+    process.env.SCHEDULER_URL = 'http://127.0.0.1:9';
+    process.env.INTERNAL_API_KEY = 'test-internal-key';
     db = (await import('../db')).getDb();
     protocol = await import('./protocol');
     driverMod = await import('../drivers/SonosDriver');
     routes = await import('../routes/sonos');
+    music = await import('./music');
+    routes.setRouteWaitForTests(0);
     await sonos.start();
     protocol.setPortForTests(sonos.port);
   });
@@ -116,6 +156,7 @@ describe('Sonos speakers', () => {
 
   beforeEach(() => {
     sonos.grouped = false; sonos.queued = true; sonos.radio = false; sonos.sent = [];
+    sonos.favorites = FAVORITES; sonos.trackUri = 'x-file-cifs://nas/music/blue.flac'; sonos.queueLength = 5;
     sonos.state = { '127.0.0.1': 'PAUSED_PLAYBACK', localhost: 'PAUSED_PLAYBACK' };
   });
 
@@ -231,6 +272,203 @@ describe('Sonos speakers', () => {
       const skip = await post({ action: 'next' });
       assert.equal(skip.status, 409);
       assert.match(((await skip.json()) as { error: string }).error, /can’t skip/);
+    });
+    it('lists what to play without the speaker’s addresses', async () => {
+      const r = await (await fetch(`${base}/api/sonos/${id}/library`)).json() as { favorites: Record<string, unknown>[]; playlists: unknown[]; shortcuts: number };
+      assert.deepEqual(r.favorites[0], { id: 'FV:2/3', title: 'Morning Song', note: 'Service', kind: 'favorite', art: 'https://lh6.ggpht.com/art.jpg' });
+      assert.equal(r.favorites.length, 3);
+      assert.equal(r.playlists.length, 1);
+      assert.equal(r.shortcuts, 1);
+    });
+
+    it('starts a favorite and a Spotify link, and the switch shows playing', async () => {
+      const chose = await post({ choose: { id: 'FV:2/2', title: 'Q100 & Friends' } });
+      assert.equal(chose.status, 200);
+      assert.equal(((await chose.json()) as { playing: boolean }).playing, true);
+      sonos.sent = [];
+      const spotify = await post({ spotify: 'https://open.spotify.com/album/4uLU6hMCjMI75M1A2tKUQC?si=x' });
+      assert.equal(spotify.status, 200);
+      assert.match(sonos.sent.find((x) => x.action === 'AddURIToQueue')!.body, /1004206cspotify%3aalbum%3a4uLU6hMCjMI75M1A2tKUQC/);
+    });
+
+    it('says why it can’t: a bad link, a favorite that’s gone, no Spotify on the Sonos, Sonos refusing', async () => {
+      assert.equal((await post({ spotify: 'https://open.spotify.com/artist/4uLU6hMCjMI75M1A2tKUQC' })).status, 400);
+      assert.equal((await post({ choose: { id: 'Q:0' } })).status, 400);
+      const gone = await post({ choose: { id: 'FV:2/40', title: 'Old Song' } });
+      assert.equal(gone.status, 409);
+      assert.match(((await gone.json()) as { error: string }).error, /Old Song.*isn’t in Sonos Favorites/);
+      const refused = await post({ spotify: 'spotify:album:BADBADBADBADBADBADBADB' });
+      assert.equal(refused.status, 502);
+      assert.match(((await refused.json()) as { error: string }).error, /couldn’t play that Spotify album \(code 800\)/);
+      sonos.favorites = FAVORITES.slice(0, 3);
+      const none = await post({ spotify: 'spotify:track:4uLU6hMCjMI75M1A2tKUQC' });
+      assert.equal(none.status, 409);
+      assert.match(((await none.json()) as { error: string }).error, /Play any Spotify song/);
+    });
+  });
+
+  describe('what to play', () => {
+    const queueOps = () => sonos.sent.filter((x) => /Queue|SetAVTransportURI|Seek|^Play$/.test(x.action));
+
+    it('lists favorites and Sonos playlists, leaving out shortcuts, with web art only', async () => {
+      const lib = await music.libraryOf('127.0.0.1');
+      assert.deepEqual(lib.favorites.map((f) => [f.id, f.title, f.station, f.art]), [
+        ['FV:2/3', 'Morning Song', false, 'https://lh6.ggpht.com/art.jpg'],
+        ['FV:2/2', 'Q100 & Friends', true, null],
+        ['FV:2/6', 'Snow Song', false, 'https://i.scdn.co/image/ab67'],
+      ]);
+      assert.equal(lib.shortcuts, 1);
+      assert.deepEqual(lib.playlists.map((p) => [p.id, p.title, p.uri, p.art]), [['SQ:0', 'Dinner', 'file:///jffs/settings/savedqueues.rsq#0', null]]);
+      assert.match(lib.favorites[1].meta, /<dc:title>Q100 &amp; Friends<\/dc:title>/, 'the metadata stays XML, as Sonos gave it');
+    });
+
+    it('finds a saved choice by id, or by its name when the id moved, and not a different one', () => {
+      const lib = { favorites: [{ id: 'FV:2/9', title: 'Morning Song' }], playlists: [{ id: 'SQ:0', title: 'Dinner' }], shortcuts: 0 } as never;
+      assert.equal(music.findChoice(lib, { id: 'FV:2/9', title: 'Morning Song' })?.id, 'FV:2/9');
+      assert.equal(music.findChoice(lib, { id: 'FV:2/3', title: 'Morning Song' })?.id, 'FV:2/9', 're-made favorite');
+      assert.equal(music.findChoice(lib, { id: 'FV:2/9', title: 'Evening Song' }), null, 'same id, different favorite now');
+      assert.equal(music.findChoice(lib, { id: 'FV:2/1', title: 'Dinner' }), null, 'a playlist isn’t a favorite');
+    });
+
+    it('a station becomes the source; a song replaces the queue and plays from the top, on the group’s leader', async () => {
+      const driver = new driverMod.SonosDriver();
+      await driver.setPower('127.0.0.1', true, { uuid: KITCHEN, play: { id: 'FV:2/2', title: 'Q100 & Friends' } });
+      assert.deepEqual(queueOps().map((x) => x.action), ['SetAVTransportURI', 'Play']);
+      const set = queueOps()[0].body;
+      assert.match(set, /<CurrentURI>x-sonosapi-stream:s21507\?sid=333&amp;flags=8224&amp;sn=4<\/CurrentURI>/);
+      assert.match(set, /<CurrentURIMetaData>&lt;DIDL-Lite/, 'metadata sent escaped once');
+
+      sonos.grouped = true; sonos.sent = [];
+      sonos.state.localhost = 'PLAYING';
+      await driver.setPower('127.0.0.1', true, { uuid: KITCHEN, play: { id: 'FV:2/3', title: 'Morning Song' } });
+      assert.deepEqual(queueOps().map((x) => `${x.host} ${x.action}`), [
+        'localhost AddURIToQueue', 'localhost RemoveTrackRangeFromQueue', 'localhost SetAVTransportURI', 'localhost Seek', 'localhost Play',
+      ], 'started even though the group was already playing');
+      assert.match(queueOps()[1].body, /<StartingIndex>1<\/StartingIndex><NumberOfTracks>5<\/NumberOfTracks>/, 'the 5 old tracks go, after the new ones are in');
+      assert.equal(sonos.queueLength, 12);
+      assert.match(queueOps()[2].body, new RegExp(`<CurrentURI>x-rincon-queue:${LIVING}#0</CurrentURI>`), 'the leader’s queue');
+    });
+
+    it('plays a Sonos playlist through the queue', async () => {
+      await music.playOn('127.0.0.1', KITCHEN, (await music.libraryOf('127.0.0.1')).playlists[0]);
+      const add = queueOps().find((x) => x.action === 'AddURIToQueue')!.body;
+      assert.match(add, /<EnqueuedURI>file:\/\/\/jffs\/settings\/savedqueues.rsq#0<\/EnqueuedURI>/);
+      assert.match(add, /SQ:0.*playlistContainer/);
+    });
+
+    it('a favorite Sonos refuses leaves the queue and what’s playing alone', async () => {
+      sonos.favorites = [...FAVORITES, favorite('FV:2/9', 'Closed Service Song', 'x-sonos-http:dead.mp3?sid=151&flags=32&sn=2', 'instantPlay', 'object.item.audioItem.musicTrack')];
+      sonos.state['127.0.0.1'] = 'PLAYING';
+      await assert.rejects(new driverMod.SonosDriver().setPower('127.0.0.1', true, { uuid: KITCHEN, play: { id: 'FV:2/9', title: 'Closed Service Song' } }),
+        (err: Error & { upnpCode?: number }) => err.upnpCode === 800);
+      assert.deepEqual(queueOps().map((x) => x.action), ['AddURIToQueue'], 'nothing removed, nothing restarted');
+      assert.equal(sonos.queueLength, 5);
+      assert.equal(sonos.state['127.0.0.1'], 'PLAYING');
+    });
+
+    it('a favorite that’s gone says so, and plays nothing', async () => {
+      await assert.rejects(new driverMod.SonosDriver().setPower('127.0.0.1', true, { uuid: KITCHEN, play: { id: 'FV:2/40', title: 'Old Song' } }),
+        (err: Error & { code?: string }) => err.code === 'GONE' && /Old Song/.test(err.message));
+      assert.deepEqual(queueOps(), []);
+    });
+
+    it('a saved choice is checked; Turn OFF ignores it and pauses', async () => {
+      assert.equal(driverMod.playChoiceOf('{"id":"FV:2/3","title":"Morning Song"}')?.title, 'Morning Song');
+      for (const bad of ['', 'nope', '{"id":"Q:0","title":"x"}', '{"id":"FV:2/3"}', '{"id":"FV:2/3","title":"  "}']) assert.equal(driverMod.playChoiceOf(bad), null, bad);
+      assert.equal(driverMod.configWithPlay('{"uuid":"U"}', null), '{"uuid":"U"}');
+      assert.deepEqual(JSON.parse(driverMod.configWithPlay('{"uuid":"U"}', { id: 'SQ:0', title: 'Dinner' })!), { uuid: 'U', play: { id: 'SQ:0', title: 'Dinner' } });
+      sonos.state['127.0.0.1'] = 'PLAYING';
+      await new driverMod.SonosDriver().setPower('127.0.0.1', false, { uuid: KITCHEN, play: { id: 'FV:2/3', title: 'Morning Song' } });
+      assert.deepEqual(sonos.sent.filter((x) => /Pause|Queue|Play$/.test(x.action)).map((x) => x.action), ['Pause']);
+    });
+  });
+
+  describe('Spotify links', () => {
+    it('reads the links Spotify’s Share gives, and nothing else', () => {
+      const id = '4uLU6hMCjMI75M1A2tKUQC';
+      for (const [text, kind] of [
+        [`https://open.spotify.com/track/${id}?si=a1b2c3`, 'track'],
+        [`open.spotify.com/album/${id}`, 'album'],
+        [`https://open.spotify.com/intl-de/playlist/${id}`, 'playlist'],
+        [`  spotify:playlist:${id} `, 'playlist'],
+      ] as const) assert.deepEqual(music.parseSpotifyLink(text), { kind, id }, text);
+      for (const bad of [`https://open.spotify.com/artist/${id}`, `https://evil.example/track/${id}`, `spotify:track:${id}x`, 'https://spotify.link/abc', `https://open.spotify.com/track/${id} and more`]) {
+        assert.equal(music.parseSpotifyLink(bad), null, bad);
+      }
+    });
+
+    it('learns the Spotify account from what’s playing first, then the favorites', async () => {
+      assert.deepEqual(await music.spotifyAccountOf('127.0.0.1'), { sid: 12, sn: 7 }, 'from the favorite');
+      sonos.trackUri = 'x-sonos-spotify:spotify%3atrack%3aAAAAAAAAAAAAAAAAAAAAAA?sid=12&flags=8224&sn=9';
+      assert.deepEqual(await music.spotifyAccountOf('127.0.0.1'), { sid: 12, sn: 9 }, 'what’s playing is freshest');
+      sonos.trackUri = ''; sonos.favorites = FAVORITES.slice(0, 3);
+      assert.equal(await music.spotifyAccountOf('127.0.0.1'), null);
+    });
+
+    it('builds what the Sonos app sends: a song’s address with the account, an album as a container', () => {
+      const account = { sid: 12, sn: 7 };
+      const song = music.spotifyPlayable({ kind: 'track', id: '4uLU6hMCjMI75M1A2tKUQC' }, account);
+      assert.equal(song.uri, 'x-sonos-spotify:spotify%3atrack%3a4uLU6hMCjMI75M1A2tKUQC?sid=12&flags=8224&sn=7');
+      assert.match(song.meta, /SA_RINCON3079_X_#Svc3079-0-Token/);
+      const album = music.spotifyPlayable({ kind: 'album', id: '4uLU6hMCjMI75M1A2tKUQC' }, account);
+      assert.equal(album.uri, 'x-rincon-cpcontainer:1004206cspotify%3aalbum%3a4uLU6hMCjMI75M1A2tKUQC');
+      assert.match(album.meta, /object\.container\.album\.musicAlbum/);
+      assert.match(music.spotifyPlayable({ kind: 'playlist', id: '4uLU6hMCjMI75M1A2tKUQC' }, account).uri, /^x-rincon-cpcontainer:1006206cspotify%3aplaylist%3a/);
+      assert.equal(song.station, false);
+    });
+  });
+  describe('schedules and scenes', () => {
+    let server: http.Server;
+    let base = '';
+    let speaker = 0;
+    let plug = 0;
+    before(async () => {
+      const express = (await import('express')).default;
+      const app = express();
+      app.use(express.json());
+      app.use((req, _res, next) => { req.user = { sub: 1, name: 'admin', role: 'admin' } as never; next(); });
+      app.use('/api/schedules', (await import('../routes/schedules')).schedulesRouter);
+      app.use('/api/scenes', (await import('../routes/scenes')).scenesRouter);
+      app.use('/internal', (await import('../routes/internal')).internalRouter);
+      await new Promise<void>((ok) => { server = app.listen(0, '127.0.0.1', () => ok()); });
+      base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+      // The Kitchen speaker the remote's tests added (addresses are unique), or a new one.
+      db.prepare("INSERT OR IGNORE INTO devices (alias, ip, driver_type, driver_config) VALUES ('Kitchen Sonos', '127.0.0.1', 'sonos', ?)").run(JSON.stringify({ uuid: KITCHEN }));
+      speaker = (db.prepare("SELECT id FROM devices WHERE ip = '127.0.0.1'").get() as { id: number }).id;
+      plug = Number(db.prepare("INSERT INTO devices (alias, ip, driver_type) VALUES ('Lamp', '127.0.0.5', 'kasa')").run().lastInsertRowid);
+    });
+    after(() => new Promise<void>((ok) => server.close(() => ok())));
+    const send = (method: string, url: string, body?: unknown) =>
+      fetch(`${base}${url}`, { method, headers: { 'content-type': 'application/json', 'x-internal-key': 'test-internal-key' }, body: body === undefined ? undefined : JSON.stringify(body) });
+    const morning = { id: 'FV:2/3', title: 'Morning Song' };
+
+    it('a Play schedule keeps its favorite; other schedules don’t take one', async () => {
+      const made = await (await send('POST', '/api/schedules', { deviceId: speaker, label: 'Wake up', triggerType: 'cron', cronExpression: '0 7 * * *', state: true, play: morning })).json() as { id: number; play: unknown };
+      assert.deepEqual(made.play, morning);
+      const pause = await (await send('POST', '/api/schedules', { deviceId: speaker, label: 'Quiet', triggerType: 'cron', cronExpression: '0 22 * * *', state: false, play: morning })).json() as { play: unknown };
+      assert.equal(pause.play, null, 'a Pause schedule plays nothing');
+      const lamp = await (await send('POST', '/api/schedules', { deviceId: plug, label: 'Lamp', triggerType: 'cron', cronExpression: '0 7 * * *', state: true, play: morning })).json() as { play: unknown };
+      assert.equal(lamp.play, null);
+      assert.equal((await send('POST', '/api/schedules', { deviceId: speaker, label: 'Bad', triggerType: 'cron', cronExpression: '0 7 * * *', state: true, play: { id: 'http://x' } })).status, 400);
+      const edited = await (await send('PUT', `/api/schedules/${made.id}`, { deviceId: speaker, label: 'Wake up', triggerType: 'cron', cronExpression: '0 7 * * *', state: true })).json() as { play: unknown };
+      assert.equal(edited.play, null, 'saving without one goes back to carrying on');
+    });
+
+    it('a schedule firing with its favorite starts it', async () => {
+      const r = await send('POST', `/internal/devices/${speaker}/execute`, { state: true, label: 'Wake up', play: JSON.stringify(morning) });
+      assert.equal(r.status, 200, await r.clone().text());
+      assert.ok(sonos.sent.some((x) => x.action === 'AddURIToQueue' && /abc\.mp3/.test(x.body)));
+    });
+
+    it('a scene’s Play action keeps its favorite, and running the scene starts it', async () => {
+      const made = await (await send('POST', '/api/scenes', { name: 'Morning', actions: [{ deviceId: speaker, state: true, play: { id: 'FV:2/2', title: 'Q100 & Friends' } }, { deviceId: plug, state: true }] })).json() as { id: number; actions: { play?: unknown }[] };
+      assert.deepEqual(made.actions.map((a) => a.play ?? null), [{ id: 'FV:2/2', title: 'Q100 & Friends' }, null]);
+      assert.equal((await send('PATCH', `/api/scenes/${made.id}`, { actions: [{ deviceId: speaker, state: true, play: 'Q100' }] })).status, 400);
+      // Just the speaker, so the run doesn't wait on a lamp that isn't there.
+      assert.equal((await send('PATCH', `/api/scenes/${made.id}`, { actions: [{ deviceId: speaker, state: true, play: { id: 'FV:2/2', title: 'Q100 & Friends' } }] })).status, 200);
+      sonos.sent = [];
+      await send('POST', `/api/scenes/${made.id}/run`);
+      assert.match(sonos.sent.find((x) => x.action === 'SetAVTransportURI')?.body ?? '', /x-sonosapi-stream:s21507/);
     });
   });
 });

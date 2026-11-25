@@ -6,6 +6,7 @@ import { cronProblem } from './cron-check';
 import { nextRuns } from './next-run';
 import { getHomeSettings, solarLocation } from '../home/home-settings';
 import { RoomError, jobFor, roomsView } from '../roomba/rooms';
+import { isPlayChoice, playChoiceOf } from '../drivers/SonosDriver';
 
 export const schedulesRouter = Router();
 
@@ -25,6 +26,8 @@ export interface ScheduleRow {
   stay_on_minutes: number | null;
   /** A robot vacuum's Clean schedule: its rooms' keys as JSON; null for the whole house. */
   rooms?: string | null;
+  /** A Sonos Play schedule: the favorite or Sonos playlist it starts, as JSON { id, title }; null carries on. */
+  play?: string | null;
   state: number;
   enabled: number;
   created_at: string;
@@ -60,6 +63,8 @@ function toPublic(row: Listed) {
     /** A robot vacuum's Clean schedule: its rooms, by key and name; null for the whole house. */
     rooms:              rooms?.keys ?? null,
     roomNames:          rooms?.names ?? null,
+    /** A Sonos Play schedule: the favorite or Sonos playlist it starts; null carries on with what was playing. */
+    play:               row.driver_type === 'sonos' && row.state === 1 ? playChoiceOf(row.play) : null,
     state:              row.state === 1,
     enabled:            row.enabled === 1,
     createdAt:          row.created_at,
@@ -112,6 +117,18 @@ function scheduleRooms(body: { rooms?: unknown; state?: unknown; triggerType?: u
   return JSON.stringify(keys);
 }
 
+/**
+ * A Sonos Play schedule's favorite or Sonos playlist, as JSON for the play column. Null to carry on
+ * with what was playing, and for anything but a speaker's Play schedule.
+ */
+function schedulePlay(body: { play?: unknown; state?: unknown; triggerType?: unknown }, device: { driver_type: string | null }): string | null | { error: string } {
+  const v = body.play;
+  if (device.driver_type !== 'sonos' || body.state !== true || body.triggerType === 'auto_off') return null;
+  if (v === undefined || v === null) return null;
+  if (!isPlayChoice(v)) return { error: 'play must be a favorite or Sonos playlist from the list ({ id, title }), or left out' };
+  return JSON.stringify({ id: v.id, title: v.title.trim() });
+}
+
 // GET /api/schedules
 schedulesRouter.get('/', (_req: Request, res: Response) => {
   const rows = getDb().prepare(LIST_SQL).all() as Listed[];
@@ -162,12 +179,14 @@ schedulesRouter.post('/', requireAdmin, (req: Request, res: Response) => {
   if (stayOn !== null && typeof stayOn === 'object') return res.status(400).json({ error: stayOn.error, code: 'VALIDATION_ERROR' });
   const rooms = scheduleRooms(req.body, device);
   if (rooms !== null && typeof rooms === 'object') return res.status(400).json({ error: rooms.error, code: 'INVALID_ROOMS' });
+  const play = schedulePlay(req.body, device);
+  if (play !== null && typeof play === 'object') return res.status(400).json({ error: play.error, code: 'VALIDATION_ERROR' });
 
   try {
     const result = db.prepare(`
-      INSERT INTO schedules (device_id, label, trigger_type, cron_expression, solar_event, solar_offset_minutes, duration_minutes, stay_on_minutes, rooms, state)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(deviceId, label, triggerType, cronExpression ?? null, solarEvent ?? null, solarOffsetMinutes, durationMinutes ?? null, stayOn, rooms, state ? 1 : 0);
+      INSERT INTO schedules (device_id, label, trigger_type, cron_expression, solar_event, solar_offset_minutes, duration_minutes, stay_on_minutes, rooms, play, state)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(deviceId, label, triggerType, cronExpression ?? null, solarEvent ?? null, solarOffsetMinutes, durationMinutes ?? null, stayOn, rooms, play, state ? 1 : 0);
 
     const created = db.prepare(ONE_SQL).get(result.lastInsertRowid) as Listed;
 
@@ -212,13 +231,15 @@ schedulesRouter.put('/:id', requireAdmin, (req: Request, res: Response) => {
   if (stayOn !== null && typeof stayOn === 'object') return res.status(400).json({ error: stayOn.error, code: 'VALIDATION_ERROR' });
   const rooms = scheduleRooms(req.body, device);
   if (rooms !== null && typeof rooms === 'object') return res.status(400).json({ error: rooms.error, code: 'INVALID_ROOMS' });
+  const play = schedulePlay(req.body, device);
+  if (play !== null && typeof play === 'object') return res.status(400).json({ error: play.error, code: 'VALIDATION_ERROR' });
 
   const result = db.prepare(`
     UPDATE schedules
     SET device_id = ?, label = ?, trigger_type = ?, cron_expression = ?,
-        solar_event = ?, solar_offset_minutes = ?, duration_minutes = ?, stay_on_minutes = ?, rooms = ?, state = ?
+        solar_event = ?, solar_offset_minutes = ?, duration_minutes = ?, stay_on_minutes = ?, rooms = ?, play = ?, state = ?
     WHERE id = ?
-  `).run(deviceId, label, triggerType, cronExpression ?? null, solarEvent ?? null, solarOffsetMinutes, durationMinutes ?? null, stayOn, rooms, state ? 1 : 0, req.params.id);
+  `).run(deviceId, label, triggerType, cronExpression ?? null, solarEvent ?? null, solarOffsetMinutes, durationMinutes ?? null, stayOn, rooms, play, state ? 1 : 0, req.params.id);
 
   if (result.changes === 0) return res.status(404).json({ error: 'Schedule not found', code: 'NOT_FOUND' });
 

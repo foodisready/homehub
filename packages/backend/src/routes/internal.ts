@@ -34,6 +34,7 @@ import { cancelPowerTimer, setScheduleTimer } from '../devices/power';
 import { MAX_STAY_ON_MINUTES } from './schedules';
 import { scheduledClean } from '../roomba/service';
 import { RoomError } from '../roomba/rooms';
+import { configWithPlay, playChoiceOf } from '../drivers/SonosDriver';
 import { sendPushToUsers } from '../push/push.service';
 
 export const internalRouter = Router();
@@ -219,10 +220,11 @@ internalRouter.post(['/voice/sos', '/voice/family/sos'], async (req: Request, re
   res.status(400).json({ error: '`action` must be raise or cancel', code: 'VALIDATION_ERROR' });
 });
 
-// POST /internal/devices/:id/execute  { state: boolean, label?, stayOnMinutes?, rooms? }
+// POST /internal/devices/:id/execute  { state: boolean, label?, stayOnMinutes?, rooms?, play? }
 // Called by the scheduler when a scheduled action fires. stayOnMinutes, on a
 // Turn ON schedule, sets the device's timer to turn it off again. A robot vacuum's
-// Turn ON is a clean: of `rooms` (room keys), or with none the whole house.
+// Turn ON is a clean: of `rooms` (room keys), or with none the whole house. A Sonos's
+// Turn ON (Play) with `play` starts that favorite or Sonos playlist.
 internalRouter.post('/devices/:id/execute', async (req: Request, res: Response) => {
   const db = getDb();
   const device = db.prepare('SELECT id, alias, ip, driver_type, driver_config FROM devices WHERE id = ?')
@@ -232,7 +234,7 @@ internalRouter.post('/devices/:id/execute', async (req: Request, res: Response) 
     return res.status(404).json({ error: 'Device not found', code: 'DEVICE_NOT_FOUND' });
   }
 
-  const { state, label, stayOnMinutes, rooms } = req.body as { state: boolean; label?: unknown; stayOnMinutes?: unknown; rooms?: unknown };
+  const { state, label, stayOnMinutes, rooms, play } = req.body as { state: boolean; label?: unknown; stayOnMinutes?: unknown; rooms?: unknown; play?: unknown };
   if (typeof state !== 'boolean') {
     return res.status(400).json({ error: '`state` must be a boolean', code: 'VALIDATION_ERROR' });
   }
@@ -255,7 +257,10 @@ internalRouter.post('/devices/:id/execute', async (req: Request, res: Response) 
   if (device.driver_type === 'roomba' && state) return runScheduledClean(device, label, rooms, res);
 
   try {
-    const config = device.driver_config ? JSON.parse(device.driver_config) : undefined;
+    // A Sonos Play schedule may start a chosen favorite instead of carrying on.
+    const chosen = device.driver_type === 'sonos' && state ? playChoiceOf(typeof play === 'string' ? play : play ? JSON.stringify(play) : null) : null;
+    const configJson = configWithPlay(device.driver_config, chosen);
+    const config = configJson ? JSON.parse(configJson) : undefined;
     await getDriver(device.driver_type ?? 'kasa').setPower(device.ip, state, config);
     withActivity({ source: 'schedule', detail: typeof label === 'string' ? label : null }, () => noteState(device.id, state));
     const name = typeof label === 'string' && label ? label : 'Schedule';

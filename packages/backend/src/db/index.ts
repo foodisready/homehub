@@ -166,6 +166,8 @@ function migrate(db: Database.Database): void {
   try { db.exec('ALTER TABLE scenes ADD COLUMN nicknames TEXT'); } catch {}
   // An admin's choice: this scene may pause cameras when run by voice or Chat.
   try { db.exec('ALTER TABLE scenes ADD COLUMN voice_may_pause INTEGER NOT NULL DEFAULT 0'); } catch {}
+  // A scene's Sonos action: the favorite or Sonos playlist it starts, as JSON { id, title }. Null: Play carries on.
+  try { db.exec('ALTER TABLE scene_actions ADD COLUMN play TEXT'); } catch {}
   // Set when someone teaches HomeHub what a missed command meant, or dismisses it.
   try { db.exec('ALTER TABLE chat_commands ADD COLUMN resolved INTEGER NOT NULL DEFAULT 0'); } catch {}
   try { db.exec('ALTER TABLE voice_commands ADD COLUMN resolved INTEGER NOT NULL DEFAULT 0'); } catch {}
@@ -211,6 +213,8 @@ function migrate(db: Database.Database): void {
   try { db.exec('ALTER TABLE schedules ADD COLUMN stay_on_minutes INTEGER'); } catch {}
   // A robot vacuum's Clean schedule: the rooms it cleans, as a JSON list of room keys. Null: the whole house.
   try { db.exec('ALTER TABLE schedules ADD COLUMN rooms TEXT'); } catch {}
+  // A Sonos Play schedule: the favorite or Sonos playlist it starts, as JSON { id, title }. Null: carry on with what was playing.
+  try { db.exec('ALTER TABLE schedules ADD COLUMN play TEXT'); } catch {}
 
   // ── AuraFlow / sensor subsystem ────────────────────────────────
   db.exec(`

@@ -14,17 +14,18 @@ let port = SONOS_PORT;
 export function setPortForTests(p: number): void { port = p; }
 
 export class SonosError extends Error {
-  constructor(message: string, readonly code: 'UNREACHABLE' | 'NOTHING_TO_PLAY' | 'FAILED', readonly upnpCode?: number) { super(message); }
+  constructor(message: string, readonly code: 'UNREACHABLE' | 'NOTHING_TO_PLAY' | 'FAILED' | 'GONE' | 'NO_SPOTIFY', readonly upnpCode?: number) { super(message); }
 }
 
 const SERVICES = {
   AVTransport: { path: '/MediaRenderer/AVTransport/Control', urn: 'urn:schemas-upnp-org:service:AVTransport:1' },
   RenderingControl: { path: '/MediaRenderer/RenderingControl/Control', urn: 'urn:schemas-upnp-org:service:RenderingControl:1' },
   ZoneGroupTopology: { path: '/ZoneGroupTopology/Control', urn: 'urn:schemas-upnp-org:service:ZoneGroupTopology:1' },
+  ContentDirectory: { path: '/MediaServer/ContentDirectory/Control', urn: 'urn:schemas-upnp-org:service:ContentDirectory:1' },
 } as const;
 type Service = keyof typeof SERVICES;
 
-const escapeXml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+export const escapeXml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 export const decodeXml = (s: string) => s
   .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&');
 

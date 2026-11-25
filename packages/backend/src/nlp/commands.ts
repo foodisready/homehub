@@ -6,6 +6,7 @@ import type { ActionTaken } from './nlp.service';
 import { currentActivity, withActivity } from '../activity/activity';
 import { sendPushToAll } from '../push/push.service';
 import { logger } from '../logger';
+import { configWithPlay, playChoiceOf } from '../drivers/SonosDriver';
 
 export interface PowerCommand {
   name:     string;
@@ -242,7 +243,11 @@ async function runDoorCommand(command: PowerCommand): Promise<{ response: string
 /** Why a garage door wasn't opened: closing is fine by voice or Chat, opening only from the dashboard. */
 export const DOOR_OPEN_REFUSED = "For safety, I won't open a garage door from here. Use its tile on the dashboard. I can close it.";
 
-type SceneAction = PowerDevice & { scene_state: number };
+type SceneAction = PowerDevice & { scene_state: number; scene_play?: string | null };
+
+/** A scene's Sonos Play action with its chosen favorite, so the speaker starts that. */
+const withScenePlay = (d: SceneAction): PowerDevice => (d.driver_type === 'sonos' && d.scene_state === 1
+  ? { ...d, driver_config: configWithPlay(d.driver_config, playChoiceOf(d.scene_play)) } : d);
 
 export const isCamera = (device: { driver_type?: string | null }) => device.driver_type === 'wyze';
 
@@ -279,7 +284,7 @@ function notifyCamerasPaused(sceneName: string, cameras: string[]): void {
 /** Runs a scene for Chat or voice, which must leave protected devices alone. */
 async function runScene(scene: NamedScene): Promise<{ response: string; actions: ActionTaken[] }> {
   const devices = getDb().prepare(`
-    SELECT d.*, sa.state AS scene_state
+    SELECT d.*, sa.state AS scene_state, sa.play AS scene_play
     FROM scene_actions sa JOIN devices d ON d.id = sa.device_id
     WHERE sa.scene_id = ?
   `).all(scene.id) as SceneAction[];
@@ -291,7 +296,7 @@ async function runScene(scene: NamedScene): Promise<{ response: string; actions:
   const protectedNames = devices.filter((d) => !sceneMaySwitch(d, mayPause)).map((d) => d.alias);
 
   const results = await withActivity({ source: 'scene', detail: scene.name }, () =>
-    Promise.allSettled(allowed.map((d) => applyPower(d, d.scene_state === 1))));
+    Promise.allSettled(allowed.map((d) => applyPower(withScenePlay(d), d.scene_state === 1))));
   const actions: ActionTaken[] = results.map((result, i) => {
     const args = { alias: allowed[i].alias, state: allowed[i].scene_state === 1 ? 'on' : 'off' };
     return result.status === 'fulfilled'

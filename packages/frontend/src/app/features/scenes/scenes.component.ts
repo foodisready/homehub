@@ -4,8 +4,9 @@ import { HttpClient } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
 import { AuthService } from '../../core/auth/auth.service';
 import { Device } from '../../shared/models/device.model';
+import { type PlayChoice, type SonosChoice, allChoices, loadSonosLibrary } from '../../shared/sonos/sonos-library';
 
-interface SceneAction { deviceId: number; alias: string; state: boolean; camera?: boolean }
+interface SceneAction { deviceId: number; alias: string; state: boolean; camera?: boolean; play?: PlayChoice }
 interface Scene { id: number; name: string; icon: string | null; actions: SceneAction[]; voiceMayPause?: boolean }
 
 const SCENE_ICONS = ['💡','🌙','🌅','🎬','🏠','🎉','😴','🔒','🌿','⚡'];
@@ -77,6 +78,8 @@ const SCENE_ICONS = ['💡','🌙','🌅','🎬','🏠','🎉','😴','🔒','�
     .state-btn.active-on  { background:#14532d; border-color:var(--green); color:var(--green); }
     .state-btn.active-off { background:#1c1917; border-color:var(--border); color:var(--text-muted); }
     .state-btn.skip { opacity:0.5; }
+    .play-pick { padding:0 0 0.5rem; border-bottom:1px solid var(--border); }
+    .play-pick select { font-size:0.82rem; }
     .form-actions { display:flex; gap:0.75rem; margin-top:1.25rem; }
     .btn-cancel { flex:1; background:transparent; border:1px solid var(--border); color:var(--text-muted); }
     .btn-save { flex:2; }
@@ -177,6 +180,16 @@ const SCENE_ICONS = ['💡','🌙','🌅','🎬','🏠','🎉','😴','🔒','�
                   <button class="state-btn skip" [class.active-off]="actionState(d.id) === null" (click)="setAction(d.id, null)">Skip</button>
                 </div>
               </div>
+              @if (d.driverType === 'sonos' && actionState(d.id) === true) {
+                <div class="play-pick">
+                  <select [attr.aria-label]="'What ' + d.alias + ' plays'" [ngModel]="playMap.get(d.id) ?? ''" (ngModelChange)="setPlay(d.id, $event)">
+                    <option value="">Carry on with what was playing</option>
+                    @if (savedMissing(d.id); as p) { <option [value]="p.id">{{ p.title }} (not in Sonos Favorites now)</option> }
+                    @for (c of choices(); track c.id) { <option [value]="c.id">{{ c.title }}{{ c.kind === 'playlist' ? ' (playlist)' : '' }}</option> }
+                  </select>
+                  @if (choicesError()) { <p class="check-help" style="margin-left:0">Couldn’t read your Sonos Favorites just now.</p> }
+                </div>
+              }
             }
           </div>
 
@@ -237,6 +250,13 @@ export class ScenesComponent implements OnInit {
   form = this.blankForm();
   // Map deviceId → true/false/null(skip)
   private actionMap = new Map<number, boolean | null>();
+  /** A Sonos Play action's favorite or playlist, by id; none carries on with what was playing. */
+  readonly playMap = new Map<number, string>();
+  /** What each Sonos action had when the form opened, kept even if it's left Sonos Favorites since. */
+  private savedPlays = new Map<number, PlayChoice>();
+  /** The household's Sonos Favorites and playlists, for Play actions. */
+  readonly choices = signal<SonosChoice[]>([]);
+  readonly choicesError = signal(false);
 
   private readonly automations = inject(AutomationsService);
   /** Admins edit, except on a backup HomeHub, which is copied from the active one. */
@@ -286,9 +306,39 @@ export class ScenesComponent implements OnInit {
     this.actionsChanged.update((n) => n + 1);
   }
 
+  setPlay(deviceId: number, id: string): void {
+    if (id) this.playMap.set(deviceId, id); else this.playMap.delete(deviceId);
+  }
+
+  savedMissing(deviceId: number): PlayChoice | null {
+    const p = this.savedPlays.get(deviceId);
+    return p && !this.choices().some((c) => c.id === p.id) ? p : null;
+  }
+
+  /** Reads the favorites through any Sonos, once per form. */
+  private loadChoices(): void {
+    this.choicesError.set(false);
+    const speaker = this.devices().find((d) => d.driverType === 'sonos');
+    if (!speaker) return;
+    loadSonosLibrary(this.http, speaker.id).subscribe({
+      next: (lib) => this.choices.set(allChoices(lib)),
+      error: () => this.choicesError.set(true),
+    });
+  }
+
+  private playFor(deviceId: number): PlayChoice | null {
+    const id = this.playMap.get(deviceId);
+    if (!id) return null;
+    const c = this.choices().find((x) => x.id === id);
+    if (c) return { id: c.id, title: c.title };
+    const saved = this.savedPlays.get(deviceId);
+    return saved?.id === id ? saved : null;
+  }
+
   openNew(): void {
     this.closeForm();
     this.formDevices.set(this.devices());
+    this.loadChoices();
     this.showForm.set(true);
   }
 
@@ -296,7 +346,11 @@ export class ScenesComponent implements OnInit {
     this.closeForm();
     this.editingId.set(scene.id);
     this.form = { name: scene.name, icon: scene.icon ?? '💡', voiceMayPause: !!scene.voiceMayPause };
-    for (const a of scene.actions) this.actionMap.set(a.deviceId, a.state);
+    for (const a of scene.actions) {
+      this.actionMap.set(a.deviceId, a.state);
+      if (a.play) { this.playMap.set(a.deviceId, a.play.id); this.savedPlays.set(a.deviceId, a.play); }
+    }
+    this.loadChoices();
     this.actionsChanged.update((n) => n + 1);
     const inScene = new Set(scene.actions.map((a) => a.deviceId));
     const all = this.devices();
@@ -309,6 +363,8 @@ export class ScenesComponent implements OnInit {
     this.editingId.set(null);
     this.form = this.blankForm();
     this.actionMap.clear();
+    this.playMap.clear();
+    this.savedPlays.clear();
     this.actionsChanged.update((n) => n + 1);
     this.formError.set('');
   }
@@ -317,7 +373,10 @@ export class ScenesComponent implements OnInit {
     if (!this.form.name.trim()) { this.formError.set('Name is required.'); return; }
     const actions = Array.from(this.actionMap.entries())
       .filter(([, s]) => s !== null)
-      .map(([deviceId, state]) => ({ deviceId, state: state as boolean }));
+      .map(([deviceId, state]) => {
+        const play = state ? this.playFor(deviceId) : null;
+        return { deviceId, state: state as boolean, ...(play ? { play } : {}) };
+      });
     if (!actions.length) { this.formError.set('Add at least one device action.'); return; }
 
     this.saving.set(true);

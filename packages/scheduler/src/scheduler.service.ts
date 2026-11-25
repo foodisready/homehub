@@ -27,6 +27,8 @@ interface ScheduleRow {
   stay_on_minutes?: number | null;
   /** A robot vacuum's Clean schedule: its rooms' keys, as JSON. Older databases lack it. */
   rooms?: string | null;
+  /** A Sonos Play schedule: the favorite it starts, as JSON { id, title }. Older databases lack it. */
+  play?: string | null;
   state: number;
   enabled: number;
 }
@@ -288,6 +290,8 @@ export class SchedulerService {
         label: row.label,
         ...(row.state === 1 && row.stay_on_minutes ? { stayOnMinutes: row.stay_on_minutes } : {}),
         ...(row.state === 1 && roomsOf(row) ? { rooms: roomsOf(row) } : {}),
+        // The backend checks it; passed on as stored.
+        ...(row.state === 1 && row.play ? { play: row.play } : {}),
       }),
     });
 
