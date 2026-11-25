@@ -10,7 +10,8 @@ import { noteState } from '../kasa/device.cache';
 import { emitDeviceState } from '../socket';
 import { logger } from '../logger';
 import { PlayOnError, setPlayOn, soundSystem, speakers, type SoundSystem } from '../sonos/system';
-import { stepGroupVolume } from '../sonos/protocol';
+import { coverOf, sonosPort, stepGroupVolume } from '../sonos/protocol';
+import { noteRecent, recentFor, recentList } from '../sonos/recent';
 import { getCachedState } from '../kasa/device.cache';
 
 export const sonosRouter = Router();
@@ -60,11 +61,15 @@ async function remoteOf(s: SpeakerRow): Promise<SonosRemote> {
 
 type SonosAction =
   | { kind: 'play' | 'pause' | 'next' | 'previous' } | { kind: 'volume'; level: number } | { kind: 'step'; by: number } | { kind: 'mute'; on: boolean }
-  | { kind: 'choose'; id: string; title: string | null } | { kind: 'spotify'; link: SpotifyLink };
+  | { kind: 'choose'; id: string; title: string | null } | { kind: 'spotify'; link: SpotifyLink } | { kind: 'recent'; key: string };
 
 /** Reads a remote button from a request body; a message for a bad one. */
 export function sonosActionOf(body: Record<string, unknown>): SonosAction | string {
-  const { action, volume, step, mute, choose, spotify } = body;
+  const { action, volume, step, mute, choose, spotify, recent } = body;
+  if (recent !== undefined) {
+    if (typeof recent !== 'string' || !recent || recent.length > 300) return 'recent must be an item from Recently played';
+    return { kind: 'recent', key: recent };
+  }
   if (choose !== undefined) {
     const c = choose as { id?: unknown; title?: unknown } | null;
     if (!c || typeof c !== 'object' || typeof c.id !== 'string' || !/^(FV:2\/\d+|SQ:\d+)$/.test(c.id)) return 'choose must be a favorite or playlist from the list';
@@ -175,6 +180,31 @@ sonosRouter.post('/:id/group-volume', async (req: Request, res: Response) => {
   }
 });
 
+/** Biggest cover passed on. */
+const MAX_ART_BYTES = 3 * 1024 * 1024;
+
+/**
+ * GET /api/sonos/:id/art?u=/getaa?… — a cover kept on the speaker. The phone can't fetch it itself
+ * (the speaker isn't on https, and may not be reachable), so HomeHub passes it on. Only the
+ * speaker's own picture paths, from that speaker.
+ */
+sonosRouter.get('/:id/art', async (req: Request, res: Response) => {
+  const s = speakerFor(req);
+  if (!s) return res.status(404).json({ error: 'Speaker not found', code: 'DEVICE_NOT_FOUND' });
+  const u = typeof req.query.u === 'string' ? req.query.u : '';
+  if (!coverOf(u) || !u.startsWith('/')) return res.status(400).json({ error: 'u must be a picture path on the speaker', code: 'VALIDATION_ERROR' });
+  try {
+    const r = await fetch(`http://${s.ip}:${sonosPort()}${u}`, { signal: AbortSignal.timeout(6000), redirect: 'error' });
+    const type = r.headers.get('content-type') ?? '';
+    if (!r.ok || !/^image\//i.test(type)) return res.status(404).json({ error: 'No picture', code: 'NOT_FOUND' });
+    const body = Buffer.from(await r.arrayBuffer());
+    if (body.length > MAX_ART_BYTES) return res.status(404).json({ error: 'Picture too big', code: 'NOT_FOUND' });
+    res.set({ 'content-type': type, 'cache-control': 'private, max-age=86400' }).send(body);
+  } catch {
+    res.status(404).json({ error: 'No picture', code: 'NOT_FOUND' });
+  }
+});
+
 /** GET /api/sonos/:id/remote — playing or not, what's on, the volume, and the group it's in. */
 sonosRouter.get('/:id/remote', async (req: Request, res: Response) => {
   const s = speakerFor(req);
@@ -194,6 +224,11 @@ export interface SonosLibrary {
 }
 
 const toChoice = ({ id, title, note, kind, art }: Choice): Choice => ({ id, title, note, kind, art });
+
+/** GET /api/sonos/recent — what played recently, newest first, to play again. */
+sonosRouter.get('/recent', (_req: Request, res: Response) => {
+  res.json(recentList());
+});
 
 /** GET /api/sonos/:id/library — the household's Sonos Favorites and Sonos playlists, to choose from. */
 sonosRouter.get('/:id/library', async (req: Request, res: Response) => {
@@ -256,17 +291,52 @@ sonosRouter.post('/:id/remote', async (req: Request, res: Response) => {
         await playSpotify(s, config, action.link);
         logger.info({ id: s.id, spotify: action.link.kind, by: req.user?.sub }, 'Sonos started a Spotify link');
         break;
+      case 'recent': {
+        const item = recentFor(action.key);
+        if (!item) return res.status(404).json({ error: 'That isn’t in Recently played any more.', code: 'NOT_FOUND' });
+        if ('id' in item.payload) await playChoice(s.ip, config, item.payload);
+        else if ('link' in item.payload) {
+          const link = parseSpotifyLink(item.payload.link);
+          if (!link) return res.status(404).json({ error: 'That isn’t in Recently played any more.', code: 'NOT_FOUND' });
+          await playSpotify(s, config, link);
+        } else {
+          const { leaderIp, coordinator } = await groupLeadOf(s.ip, config);
+          try {
+            await playOn(leaderIp, coordinator, { uri: item.payload.uri, meta: item.payload.meta, station: true });
+          } catch (err) {
+            if (err instanceof SonosError && err.code === 'FAILED') {
+              throw new SonosError(`Sonos couldn’t play “${item.title}”${err.upnpCode ? ` (code ${err.upnpCode})` : ''}. Try it in the Sonos app.`, 'FAILED', err.upnpCode);
+            }
+            throw err;
+          }
+          noteRecent({ key: action.key, kind: 'station', title: item.title, note: 'Radio station', payload: item.payload });
+        }
+        logger.info({ id: s.id, recent: item.kind, by: req.user?.sub }, 'Sonos played a recent item');
+        break;
+      }
     }
     logger.info({ id: s.id, action: action.kind, by: req.user?.sub }, 'Sonos remote');
     // Give a skip, or something newly started, a moment to show its track.
-    if (action.kind === 'next' || action.kind === 'previous' || action.kind === 'choose' || action.kind === 'spotify') {
+    const started = action.kind === 'choose' || action.kind === 'spotify' || action.kind === 'recent';
+    if (action.kind === 'next' || action.kind === 'previous' || started) {
       await new Promise((r) => setTimeout(r, routeWaitMs));
     }
     const remote = await remoteOf(s);
+    // A Spotify link, for Recently played: named from what it's playing now.
+    if (action.kind === 'spotify') {
+      const { kind, id } = action.link;
+      const np = remote.nowPlaying;
+      noteRecent({
+        key: `spotify:${kind}:${id}`, kind: 'spotify',
+        title: kind === 'track' ? np.title ?? 'Spotify song' : kind === 'album' ? np.album ?? 'Spotify album' : 'Spotify playlist',
+        note: kind === 'playlist' ? (np.title ? `Spotify · started with ${np.title}` : 'Spotify') : np.artist ? `Spotify · ${np.artist}` : 'Spotify',
+        art: np.art ?? null, payload: { link: `spotify:${kind}:${id}` },
+      });
+    }
     // Play and pause are the row's on and off: keep its switch in step.
     // Something just started is playing, even while it's still loading its first track.
-    if (action.kind === 'choose' || action.kind === 'spotify') remote.playing = true;
-    if (action.kind === 'play' || action.kind === 'pause' || action.kind === 'choose' || action.kind === 'spotify') {
+    if (started) remote.playing = true;
+    if (action.kind === 'play' || action.kind === 'pause' || started) {
       noteState(s.id, remote.playing);
       emitDeviceState(s.id, s.alias, remote.playing, null);
     }

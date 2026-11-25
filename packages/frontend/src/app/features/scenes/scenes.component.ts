@@ -6,7 +6,7 @@ import { AuthService } from '../../core/auth/auth.service';
 import { Device } from '../../shared/models/device.model';
 import { type PlayChoice, type SonosChoice, allChoices, loadSonosLibrary } from '../../shared/sonos/sonos-library';
 
-interface SceneAction { deviceId: number; alias: string; state: boolean; camera?: boolean; play?: PlayChoice }
+interface SceneAction { deviceId: number; alias: string; state: boolean; camera?: boolean; play?: PlayChoice; volume?: number }
 interface Scene { id: number; name: string; icon: string | null; actions: SceneAction[]; voiceMayPause?: boolean }
 
 const SCENE_ICONS = ['💡','🌙','🌅','🎬','🏠','🎉','😴','🔒','🌿','⚡'];
@@ -79,7 +79,9 @@ const SCENE_ICONS = ['💡','🌙','🌅','🎬','🏠','🎉','😴','🔒','�
     .state-btn.active-off { background:#1c1917; border-color:var(--border); color:var(--text-muted); }
     .state-btn.skip { opacity:0.5; }
     .play-pick { padding:0 0 0.5rem; border-bottom:1px solid var(--border); }
-    .play-pick select { font-size:0.82rem; }
+    .play-pick { display:flex; gap:0.4rem; flex-wrap:wrap; }
+    .play-pick select { font-size:0.82rem; flex:1 1 12rem; width:auto; }
+    .play-pick select.vol { flex:0 1 9rem; }
     .form-actions { display:flex; gap:0.75rem; margin-top:1.25rem; }
     .btn-cancel { flex:1; background:transparent; border:1px solid var(--border); color:var(--text-muted); }
     .btn-save { flex:2; }
@@ -187,6 +189,10 @@ const SCENE_ICONS = ['💡','🌙','🌅','🎬','🏠','🎉','😴','🔒','�
                     @if (savedMissing(d.id); as p) { <option [value]="p.id">{{ p.title }} (not in Sonos Favorites now)</option> }
                     @for (c of choices(); track c.id) { <option [value]="c.id">{{ c.title }}{{ c.kind === 'playlist' ? ' (playlist)' : '' }}</option> }
                   </select>
+                  <select class="vol" [attr.aria-label]="d.alias + ' volume'" [ngModel]="volumeMap.get(d.id) ?? null" (ngModelChange)="setVolume(d.id, $event)">
+                    <option [ngValue]="null">Volume as it is</option>
+                    @for (v of volumes; track v) { <option [ngValue]="v">Volume {{ v }}</option> }
+                  </select>
                   @if (choicesError()) { <p class="check-help" style="margin-left:0">Couldn’t read your Sonos Favorites just now.</p> }
                 </div>
               }
@@ -254,6 +260,9 @@ export class ScenesComponent implements OnInit {
   readonly playMap = new Map<number, string>();
   /** What each Sonos action had when the form opened, kept even if it's left Sonos Favorites since. */
   private savedPlays = new Map<number, PlayChoice>();
+  /** A Sonos Play action's volume, set before it plays; none leaves it. */
+  readonly volumeMap = new Map<number, number>();
+  readonly volumes = [10, 20, 25, 30, 35, 40, 50, 60, 70, 80, 100];
   /** The household's Sonos Favorites and playlists, for Play actions. */
   readonly choices = signal<SonosChoice[]>([]);
   readonly choicesError = signal(false);
@@ -306,6 +315,10 @@ export class ScenesComponent implements OnInit {
     this.actionsChanged.update((n) => n + 1);
   }
 
+  setVolume(deviceId: number, v: number | null): void {
+    if (v === null) this.volumeMap.delete(deviceId); else this.volumeMap.set(deviceId, v);
+  }
+
   setPlay(deviceId: number, id: string): void {
     if (id) this.playMap.set(deviceId, id); else this.playMap.delete(deviceId);
   }
@@ -349,6 +362,7 @@ export class ScenesComponent implements OnInit {
     for (const a of scene.actions) {
       this.actionMap.set(a.deviceId, a.state);
       if (a.play) { this.playMap.set(a.deviceId, a.play.id); this.savedPlays.set(a.deviceId, a.play); }
+      if (typeof a.volume === 'number') this.volumeMap.set(a.deviceId, a.volume);
     }
     this.loadChoices();
     this.actionsChanged.update((n) => n + 1);
@@ -364,6 +378,7 @@ export class ScenesComponent implements OnInit {
     this.form = this.blankForm();
     this.actionMap.clear();
     this.playMap.clear();
+    this.volumeMap.clear();
     this.savedPlays.clear();
     this.actionsChanged.update((n) => n + 1);
     this.formError.set('');
@@ -375,7 +390,8 @@ export class ScenesComponent implements OnInit {
       .filter(([, s]) => s !== null)
       .map(([deviceId, state]) => {
         const play = state ? this.playFor(deviceId) : null;
-        return { deviceId, state: state as boolean, ...(play ? { play } : {}) };
+        const volume = state ? this.volumeMap.get(deviceId) : undefined;
+        return { deviceId, state: state as boolean, ...(play ? { play } : {}), ...(volume !== undefined ? { volume } : {}) };
       });
     if (!actions.length) { this.formError.set('Add at least one device action.'); return; }
 

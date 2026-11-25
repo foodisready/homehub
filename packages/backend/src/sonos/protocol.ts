@@ -12,6 +12,8 @@ const TIMEOUT_MS = 4000;
 /** For tests: the port speakers answer on. */
 let port = SONOS_PORT;
 export function setPortForTests(p: number): void { port = p; }
+/** The port speakers answer on (1400; another in tests). */
+export const sonosPort = (): number => port;
 
 export class SonosError extends Error {
   constructor(message: string, readonly code: 'UNREACHABLE' | 'NOTHING_TO_PLAY' | 'FAILED' | 'GONE' | 'NO_SPOTIFY', readonly upnpCode?: number) { super(message); }
@@ -138,7 +140,19 @@ export async function transportState(ip: string): Promise<string> {
 
 export const isPlaying = (state: string) => state === 'PLAYING' || state === 'TRANSITIONING';
 
-export interface NowPlaying { title: string | null; artist: string | null; album: string | null }
+export interface NowPlaying {
+  title: string | null; artist: string | null; album: string | null;
+  /** Its cover: a web image (https), or a picture on the speaker ("/getaa?…", shown through HomeHub). */
+  art?: string | null;
+}
+
+/** A cover the app can show: a web image upgraded to https, or a path on the speaker. Null otherwise. */
+export function coverOf(raw: string | null | undefined): string | null {
+  const art = (raw ?? '').trim();
+  if (/^https?:\/\/[^\s"'<>]+$/i.test(art)) return art.replace(/^http:/i, 'https:');
+  if (/^\/(getaa|img)\b[^\s"'<>]*$/.test(art) && art.length <= 2000) return art;
+  return null;
+}
 
 /** What's playing, from the track's metadata: a song's title and artist, or a station's name and what it's on now. */
 export function parseNowPlaying(positionInfo: string, mediaInfo?: string): NowPlaying {
@@ -147,6 +161,7 @@ export function parseNowPlaying(positionInfo: string, mediaInfo?: string): NowPl
   let title = clean(tagOf(meta, 'dc:title'));
   let artist = clean(tagOf(meta, 'dc:creator'));
   const album = clean(tagOf(meta, 'upnp:album'));
+  const art = coverOf(tagOf(meta, 'upnp:albumArtURI'));
   // A radio station: the song is in streamContent ("Artist - Title"), the station in the media's title.
   const stream = clean(tagOf(meta, 'r:streamContent'));
   if (stream) {
@@ -155,7 +170,7 @@ export function parseNowPlaying(positionInfo: string, mediaInfo?: string): NowPl
     if (parts.length >= 2) { artist = parts[0]; title = parts.slice(1).join(' - '); } else { title = stream; artist = station; }
     if (!artist && station) artist = station;
   }
-  return { title, artist, album };
+  return { title, artist, album, art };
 }
 
 export async function nowPlaying(ip: string): Promise<NowPlaying> {

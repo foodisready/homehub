@@ -72,6 +72,7 @@ class FakeSonos {
   }
 
   private answer(host: string, url: string, soapAction: string, body: string, res: http.ServerResponse) {
+    if (url.startsWith('/getaa')) { res.setHeader('content-type', url.includes('notimage') ? 'text/html' : 'image/jpeg'); res.end(url.includes('notimage') ? '<html>' : 'JPEGDATA'); return; }
     if (url === '/xml/device_description.xml') {
       const kitchen = host === '127.0.0.1';
       res.end(`<root><device><manufacturer>Sonos, Inc.</manufacturer><modelName>Sonos ${kitchen ? 'Connect:Amp' : 'One'}</modelName><MACAddress>b8:e9:37:a4:35:ee</MACAddress><UDN>uuid:${kitchen ? KITCHEN : LIVING}</UDN><roomName>${kitchen ? 'Kitchen' : 'Living room'}</roomName></device></root>`);
@@ -104,9 +105,13 @@ class FakeSonos {
       case 'GetPositionInfo':
         ok(this.radio
           ? `<TrackMetaData>${DIDL('<dc:title>x-sonosapi-stream:s1234</dc:title><r:streamContent>Nina Simone - Feeling Good</r:streamContent>')}</TrackMetaData>`
-          : `<TrackURI>${enc(this.trackUri)}</TrackURI><TrackMetaData>${DIDL('<dc:title>Blue in Green</dc:title><dc:creator>Miles Davis</dc:creator><upnp:album>Kind of Blue</upnp:album>')}</TrackMetaData>`);
+          : `<TrackURI>${enc(this.trackUri)}</TrackURI><TrackMetaData>${DIDL('<dc:title>Blue in Green</dc:title><dc:creator>Miles Davis</dc:creator><upnp:album>Kind of Blue</upnp:album><upnp:albumArtURI>/getaa?s=1&amp;u=blue</upnp:albumArtURI>')}</TrackMetaData>`);
         return;
-      case 'GetMediaInfo': ok(`<CurrentURIMetaData>${DIDL('<dc:title>Jazz FM</dc:title>')}</CurrentURIMetaData>`); return;
+      case 'GetMediaInfo':
+        ok(this.radio
+          ? `<CurrentURI>x-sonosapi-stream:s999?sid=254&amp;flags=8224&amp;sn=0</CurrentURI><CurrentURIMetaData>${DIDL('<dc:title>Jazz FM</dc:title><upnp:class>object.item.audioItem.audioBroadcast</upnp:class>')}</CurrentURIMetaData>`
+          : `<CurrentURI>x-rincon-queue:${KITCHEN}#0</CurrentURI><CurrentURIMetaData>${DIDL('<dc:title>Jazz FM</dc:title>')}</CurrentURIMetaData>`);
+        return;
       case 'Browse': {
         const objectId = /<ObjectID>([^<]*)/.exec(body)?.[1] ?? '';
         const entries = objectId === 'FV:2' ? this.favorites : objectId === 'SQ:' ? [PLAYLIST] : [];
@@ -227,12 +232,15 @@ describe('Sonos speakers', () => {
   });
 
   it('says what’s playing: a song’s title and artist, or what a station is playing', async () => {
-    assert.deepEqual(await protocol.nowPlaying('127.0.0.1'), { title: 'Blue in Green', artist: 'Miles Davis', album: 'Kind of Blue' });
+    assert.deepEqual(await protocol.nowPlaying('127.0.0.1'), { title: 'Blue in Green', artist: 'Miles Davis', album: 'Kind of Blue', art: '/getaa?s=1&u=blue' });
     sonos.radio = true;
-    assert.deepEqual(await protocol.nowPlaying('127.0.0.1'), { title: 'Feeling Good', artist: 'Nina Simone', album: null });
+    assert.deepEqual(await protocol.nowPlaying('127.0.0.1'), { title: 'Feeling Good', artist: 'Nina Simone', album: null, art: null });
     assert.deepEqual(protocol.parseNowPlaying(`<TrackMetaData>${DIDL('<r:streamContent>Talk show</r:streamContent>')}</TrackMetaData>`,
-      `<CurrentURIMetaData>${DIDL('<dc:title>BBC Radio 4</dc:title>')}</CurrentURIMetaData>`), { title: 'Talk show', artist: 'BBC Radio 4', album: null });
-    assert.deepEqual(protocol.parseNowPlaying('<TrackMetaData>NOT_IMPLEMENTED</TrackMetaData>'), { title: null, artist: null, album: null });
+      `<CurrentURIMetaData>${DIDL('<dc:title>BBC Radio 4</dc:title>')}</CurrentURIMetaData>`), { title: 'Talk show', artist: 'BBC Radio 4', album: null, art: null });
+    assert.deepEqual(protocol.parseNowPlaying('<TrackMetaData>NOT_IMPLEMENTED</TrackMetaData>'), { title: null, artist: null, album: null, art: null });
+    for (const [raw, want] of [['http://lh6.ggpht.com/a.jpg', 'https://lh6.ggpht.com/a.jpg'], ['/getaa?s=1&u=x', '/getaa?s=1&u=x'], ['/etc/passwd', null], ['javascript:alert(1)', null], ['', null]] as const) {
+      assert.equal(protocol.coverOf(raw), want, raw);
+    }
   });
 
   describe('the remote', () => {
@@ -255,7 +263,7 @@ describe('Sonos speakers', () => {
     it('shows what’s playing, the volume, and the rooms it’s grouped with', async () => {
       sonos.grouped = true;
       const r = await (await fetch(`${base}/api/sonos/${id}/remote`)).json();
-      assert.deepEqual(r, { playing: false, nowPlaying: { title: 'Blue in Green', artist: 'Miles Davis', album: 'Kind of Blue' }, volume: 30, muted: false, groupedWith: ['Living room'] });
+      assert.deepEqual(r, { playing: false, nowPlaying: { title: 'Blue in Green', artist: 'Miles Davis', album: 'Kind of Blue', art: '/getaa?s=1&u=blue' }, volume: 30, muted: false, groupedWith: ['Living room'] });
     });
 
     it('steps this speaker’s volume by 2, plays, and skips on the group’s leader', async () => {
@@ -296,6 +304,36 @@ describe('Sonos speakers', () => {
       assert.match(sonos.sent.find((x) => x.action === 'AddURIToQueue')!.body, /1004206cspotify%3aalbum%3a4uLU6hMCjMI75M1A2tKUQC/);
     });
 
+    it('passes on a cover kept on the speaker, and nothing else', async () => {
+      const ok = await fetch(`${base}/api/sonos/${id}/art?u=${encodeURIComponent('/getaa?s=1&u=blue')}`);
+      assert.equal(ok.status, 200);
+      assert.equal(ok.headers.get('content-type'), 'image/jpeg');
+      assert.equal(await ok.text(), 'JPEGDATA');
+      for (const bad of ['http://evil.example/x.jpg', '/xml/device_description.xml', '//evil.example/getaa', '']) {
+        assert.equal((await fetch(`${base}/api/sonos/${id}/art?u=${encodeURIComponent(bad)}`)).status, 400, bad);
+      }
+      assert.equal((await fetch(`${base}/api/sonos/${id}/art?u=${encodeURIComponent('/getaa?notimage')}`)).status, 404, 'only pictures');
+    });
+
+    it('remembers what it started and stations seen, and plays them again', async () => {
+      db.prepare('DELETE FROM sonos_recent').run();
+      await post({ choose: { id: 'FV:2/3', title: 'Morning Song' } });
+      await post({ spotify: 'https://open.spotify.com/album/4uLU6hMCjMI75M1A2tKUQC' });
+      sonos.radio = true; sonos.state['127.0.0.1'] = 'PLAYING';
+      await fetch(`${base}/api/sonos/system`);
+      await new Promise((r) => setTimeout(r, 50));
+      const recent = await (await fetch(`${base}/api/sonos/recent`)).json() as { key: string; kind: string; title: string }[];
+      assert.deepEqual(recent.map((r) => [r.kind, r.title]).sort(), [['favorite', 'Morning Song'], ['spotify', 'Kind of Blue'], ['station', 'Jazz FM']]);
+      sonos.sent = [];
+      const station = recent.find((r) => r.kind === 'station')!;
+      assert.equal((await post({ recent: station.key })).status, 200);
+      assert.match(sonos.sent.find((x) => x.action === 'SetAVTransportURI')!.body, /x-sonosapi-stream:s999\?sid=254/, 'the address it was seen playing');
+      sonos.sent = [];
+      assert.equal((await post({ recent: recent.find((r) => r.kind === 'spotify')!.key })).status, 200);
+      assert.match(sonos.sent.find((x) => x.action === 'AddURIToQueue')!.body, /1004206cspotify%3aalbum%3a4uLU6hMCjMI75M1A2tKUQC/);
+      assert.equal((await post({ recent: 'nope' })).status, 404);
+    });
+
     it('says why it can’t: a bad link, a favorite that’s gone, no Spotify on the Sonos, Sonos refusing', async () => {
       assert.equal((await post({ spotify: 'https://open.spotify.com/artist/4uLU6hMCjMI75M1A2tKUQC' })).status, 400);
       assert.equal((await post({ choose: { id: 'Q:0' } })).status, 400);
@@ -315,7 +353,7 @@ describe('Sonos speakers', () => {
   describe('what to play', () => {
     const queueOps = () => sonos.sent.filter((x) => /Queue|SetAVTransportURI|Seek|^Play$/.test(x.action));
 
-    it('lists favorites and Sonos playlists, leaving out shortcuts, with web art only', async () => {
+    it('lists favorites and Sonos playlists, leaving out shortcuts, with their covers', async () => {
       const lib = await music.libraryOf('127.0.0.1');
       assert.deepEqual(lib.favorites.map((f) => [f.id, f.title, f.station, f.art]), [
         ['FV:2/3', 'Morning Song', false, 'https://lh6.ggpht.com/art.jpg'],
@@ -323,7 +361,7 @@ describe('Sonos speakers', () => {
         ['FV:2/6', 'Snow Song', false, 'https://i.scdn.co/image/ab67'],
       ]);
       assert.equal(lib.shortcuts, 1);
-      assert.deepEqual(lib.playlists.map((p) => [p.id, p.title, p.uri, p.art]), [['SQ:0', 'Dinner', 'file:///jffs/settings/savedqueues.rsq#0', null]]);
+      assert.deepEqual(lib.playlists.map((p) => [p.id, p.title, p.uri, p.art]), [['SQ:0', 'Dinner', 'file:///jffs/settings/savedqueues.rsq#0', '/getaa?s=1&u=x']], 'a cover on the speaker is kept, shown through HomeHub');
       assert.match(lib.favorites[1].meta, /<dc:title>Q100 &amp; Friends<\/dc:title>/, 'the metadata stays XML, as Sonos gave it');
     });
 
@@ -470,10 +508,15 @@ describe('Sonos speakers', () => {
       assert.deepEqual(made.actions.map((a) => a.play ?? null), [{ id: 'FV:2/2', title: 'Q100 & Friends' }, null]);
       assert.equal((await send('PATCH', `/api/scenes/${made.id}`, { actions: [{ deviceId: speaker, state: true, play: 'Q100' }] })).status, 400);
       // Just the speaker, so the run doesn't wait on a lamp that isn't there.
-      assert.equal((await send('PATCH', `/api/scenes/${made.id}`, { actions: [{ deviceId: speaker, state: true, play: { id: 'FV:2/2', title: 'Q100 & Friends' } }] })).status, 200);
+      assert.equal((await send('PATCH', `/api/scenes/${made.id}`, { actions: [{ deviceId: speaker, state: true, play: { id: 'FV:2/2', title: 'Q100 & Friends' }, volume: 101 }] })).status, 400);
+      const withVolume = await (await send('PATCH', `/api/scenes/${made.id}`, { actions: [{ deviceId: speaker, state: true, play: { id: 'FV:2/2', title: 'Q100 & Friends' }, volume: 35 }] })).json() as { actions: { volume?: number }[] };
+      assert.equal(withVolume.actions[0].volume, 35);
       sonos.sent = [];
       await send('POST', `/api/scenes/${made.id}/run`);
       assert.match(sonos.sent.find((x) => x.action === 'SetAVTransportURI')?.body ?? '', /x-sonosapi-stream:s21507/);
+      const order = sonos.sent.map((x) => x.action);
+      assert.ok(order.indexOf('SetVolume') >= 0 && order.indexOf('SetVolume') < order.indexOf('Play'), 'the volume is set before it plays');
+      assert.match(sonos.sent.find((x) => x.action === 'SetVolume')!.body, /<DesiredVolume>35<\/DesiredVolume>/);
     });
   });
   describe('the whole sound system', () => {

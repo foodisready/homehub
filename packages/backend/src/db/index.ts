@@ -168,6 +168,20 @@ function migrate(db: Database.Database): void {
   try { db.exec('ALTER TABLE scenes ADD COLUMN voice_may_pause INTEGER NOT NULL DEFAULT 0'); } catch {}
   // A scene's Sonos action: the favorite or Sonos playlist it starts, as JSON { id, title }. Null: Play carries on.
   try { db.exec('ALTER TABLE scene_actions ADD COLUMN play TEXT'); } catch {}
+  // A scene's Sonos Play action: the volume it sets on that speaker first. Null: left as it is.
+  try { db.exec('ALTER TABLE scene_actions ADD COLUMN volume INTEGER'); } catch {}
+  // What the Sonos speakers played recently, to play again: what HomeHub started, and stations seen playing.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS sonos_recent (
+      key       TEXT PRIMARY KEY,
+      kind      TEXT NOT NULL,
+      title     TEXT NOT NULL,
+      note      TEXT,
+      art       TEXT,
+      payload   TEXT NOT NULL,
+      played_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
   // Set when someone teaches HomeHub what a missed command meant, or dismisses it.
   try { db.exec('ALTER TABLE chat_commands ADD COLUMN resolved INTEGER NOT NULL DEFAULT 0'); } catch {}
   try { db.exec('ALTER TABLE voice_commands ADD COLUMN resolved INTEGER NOT NULL DEFAULT 0'); } catch {}

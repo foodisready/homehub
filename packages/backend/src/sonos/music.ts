@@ -10,7 +10,8 @@
  *    something Sonos refuses leaves the music as it was.
  * Both go to the group's coordinator, which owns the queue.
  */
-import { SonosError, decodeXml, escapeXml, soap, tagOf } from './protocol';
+import { SonosError, coverOf, decodeXml, escapeXml, isPlaying, soap, tagOf, transportState } from './protocol';
+import { noteStationSeen } from './recent';
 
 export interface Choice {
   /** The Sonos object id: "FV:2/3" for a favorite, "SQ:0" for a Sonos playlist. */
@@ -19,7 +20,7 @@ export interface Choice {
   /** What the Sonos app shows under it: the service, or an artist. */
   note: string | null;
   kind: 'favorite' | 'playlist';
-  /** An image the browser can load itself (https), or null. */
+  /** Its cover: a web image (https), or a path on the speaker ("/getaa?…") for /api/sonos/:id/art. */
   art: string | null;
 }
 
@@ -63,12 +64,8 @@ export function isStation(uri: string, meta: string): boolean {
   return STATION_SCHEMES.has(uri.split(':')[0]) || /<upnp:class>object\.item\.audioItem\.audioBroadcast/.test(meta);
 }
 
-/** Album art the browser can show: a web image, asked for over https. Speaker-local art (/getaa) needs the speaker, so none. */
-function artOf(entry: string): string | null {
-  const art = tagOf(entry, 'upnp:albumArtURI')?.trim() ?? '';
-  if (!/^https?:\/\/[^\s"'<>]+$/i.test(art)) return null;
-  return art.replace(/^http:/i, 'https:');
-}
+/** Its cover: a web image (https), or a picture on the speaker, shown through HomeHub. */
+const artOf = (entry: string): string | null => coverOf(tagOf(entry, 'upnp:albumArtURI'));
 
 export interface Favorites { items: Playable[]; /** Favorites that open a list in the Sonos app, with nothing to play themselves. */ shortcuts: number }
 
@@ -126,6 +123,21 @@ export function findChoice(library: Library, wanted: { id: string; title?: strin
     if (sameKind.length) return sameKind[0];
   }
   return wanted.title ? null : byId ?? null;
+}
+
+/** Radio stations, not a line-in or a TV, which are sources too but nothing to play again. */
+const NOT_RADIO = new Set(['x-rincon-stream', 'x-sonos-htastream']);
+
+/** Notes a radio station a group is playing, however it was started, for Recently played. */
+export async function noteStation(leaderIp: string): Promise<void> {
+  const media = await soap(leaderIp, 'AVTransport', 'GetMediaInfo', { InstanceID: 0 });
+  const uri = (tagOf(media, 'CurrentURI') ?? '').trim();
+  const meta = tagOf(media, 'CurrentURIMetaData') ?? '';
+  if (!uri || NOT_RADIO.has(uri.split(':')[0]) || !isStation(uri, meta)) return;
+  if (!isPlaying(await transportState(leaderIp))) return;
+  const title = tagOf(meta, 'dc:title')?.trim();
+  if (!title || /^x-(sonos|rincon)/.test(title)) return;
+  noteStationSeen(uri, meta, title, coverOf(tagOf(meta, 'upnp:albumArtURI')));
 }
 
 // ── Playing ────────────────────────────────────────────────────

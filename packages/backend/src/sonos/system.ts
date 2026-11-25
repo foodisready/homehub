@@ -9,6 +9,7 @@ import {
   type Group, type NowPlaying,
 } from './protocol';
 import { logger } from '../logger';
+import { noteStation } from './music';
 
 interface SpeakerRow { id: number; alias: string; ip: string; online?: number; driver_config: string | null }
 
@@ -72,6 +73,7 @@ export async function soundSystem(): Promise<SoundSystem> {
     for (const x of known) seen.add(x.row!.id);
     const leader = members.find((x) => x.m.uuid === g.coordinator);
     const leaderIp = leader?.m.ip ?? known[0].row!.ip;
+    noteStation(leaderIp).catch(() => undefined);
     const [state, track, groupVolume, volumes] = await Promise.all([
       transportState(leaderIp).catch(() => 'STOPPED'),
       nowPlaying(leaderIp).catch(() => ({ title: null, artist: null, album: null })),

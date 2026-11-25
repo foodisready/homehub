@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, DestroyRef, OnInit, computed, injec
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { RouterLink } from '@angular/router';
 import { SonosPickerComponent } from '../../shared/sonos/sonos-picker.component';
+import { SonosArtComponent } from '../../shared/sonos/sonos-art.component';
 
 interface Room { deviceId: number | null; name: string; volume: number | null; muted: boolean }
 interface Group {
@@ -9,7 +10,7 @@ interface Group {
   deviceId: number;
   rooms: Room[];
   playing: boolean;
-  nowPlaying: { title: string | null; artist: string | null; album: string | null };
+  nowPlaying: { title: string | null; artist: string | null; album: string | null; art?: string | null };
   groupVolume: number | null;
 }
 interface SoundSystem { groups: Group[]; unreachable: { deviceId: number; name: string }[] }
@@ -25,7 +26,7 @@ const STEP = 2;
 @Component({
   selector: 'app-music',
   standalone: true,
-  imports: [SonosPickerComponent, RouterLink],
+  imports: [SonosPickerComponent, RouterLink, SonosArtComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [`
     .topbar { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; }
@@ -36,6 +37,8 @@ const STEP = 2;
     .head h2 { font-size: 1rem; font-weight: 650; margin: 0; }
     .state { font-size: 0.75rem; color: var(--text-muted); white-space: nowrap; }
     .state.on { color: #d8b4fe; }
+    .now { display: flex; align-items: center; gap: 0.85rem; min-width: 0; }
+    .now app-sonos-art { width: 4.5rem; height: 4.5rem; border-radius: 8px; }
     .track { min-width: 0; }
     .track b, .track span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .track b { font-size: 1.05rem; font-weight: 600; }
@@ -78,11 +81,14 @@ const STEP = 2;
                 <h2>{{ roomNames(g) }}</h2>
                 <span class="state" [class.on]="g.playing">{{ g.playing ? 'Playing' : 'Paused' }}</span>
               </div>
-              <div class="track">
-                @if (g.nowPlaying.title) {
-                  <b>{{ g.nowPlaying.title }}</b>
-                  @if (subtitle(g); as sub) { <span>{{ sub }}</span> }
-                } @else { <span>{{ g.playing ? 'Playing' : 'Nothing playing' }}</span> }
+              <div class="now">
+                <app-sonos-art [deviceId]="g.deviceId" [art]="g.nowPlaying.art" />
+                <div class="track">
+                  @if (g.nowPlaying.title) {
+                    <b>{{ g.nowPlaying.title }}</b>
+                    @if (subtitle(g); as sub) { <span>{{ sub }}</span> }
+                  } @else { <span>{{ g.playing ? 'Playing' : 'Nothing playing' }}</span> }
+                </div>
               </div>
               <div class="row">
                 <button class="round" type="button" [disabled]="busy()" (click)="remote(g, { action: 'previous' })" aria-label="Previous">

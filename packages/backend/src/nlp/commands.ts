@@ -6,7 +6,7 @@ import type { ActionTaken } from './nlp.service';
 import { currentActivity, withActivity } from '../activity/activity';
 import { sendPushToAll } from '../push/push.service';
 import { logger } from '../logger';
-import { configWithPlay, playChoiceOf } from '../drivers/SonosDriver';
+import { configWithPlay, playChoiceOf, sceneVolumeOf } from '../drivers/SonosDriver';
 
 export interface PowerCommand {
   name:     string;
@@ -243,11 +243,11 @@ async function runDoorCommand(command: PowerCommand): Promise<{ response: string
 /** Why a garage door wasn't opened: closing is fine by voice or Chat, opening only from the dashboard. */
 export const DOOR_OPEN_REFUSED = "For safety, I won't open a garage door from here. Use its tile on the dashboard. I can close it.";
 
-type SceneAction = PowerDevice & { scene_state: number; scene_play?: string | null };
+type SceneAction = PowerDevice & { scene_state: number; scene_play?: string | null; scene_volume?: number | null };
 
-/** A scene's Sonos Play action with its chosen favorite, so the speaker starts that. */
+/** A scene's Sonos Play action with its chosen favorite and volume, so the speaker starts that. */
 const withScenePlay = (d: SceneAction): PowerDevice => (d.driver_type === 'sonos' && d.scene_state === 1
-  ? { ...d, driver_config: configWithPlay(d.driver_config, playChoiceOf(d.scene_play)) } : d);
+  ? { ...d, driver_config: configWithPlay(d.driver_config, playChoiceOf(d.scene_play), sceneVolumeOf(d.scene_volume)) } : d);
 
 export const isCamera = (device: { driver_type?: string | null }) => device.driver_type === 'wyze';
 
@@ -284,7 +284,7 @@ function notifyCamerasPaused(sceneName: string, cameras: string[]): void {
 /** Runs a scene for Chat or voice, which must leave protected devices alone. */
 async function runScene(scene: NamedScene): Promise<{ response: string; actions: ActionTaken[] }> {
   const devices = getDb().prepare(`
-    SELECT d.*, sa.state AS scene_state, sa.play AS scene_play
+    SELECT d.*, sa.state AS scene_state, sa.play AS scene_play, sa.volume AS scene_volume
     FROM scene_actions sa JOIN devices d ON d.id = sa.device_id
     WHERE sa.scene_id = ?
   `).all(scene.id) as SceneAction[];

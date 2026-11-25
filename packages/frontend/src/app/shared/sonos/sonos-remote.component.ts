@@ -2,10 +2,11 @@ import { ChangeDetectionStrategy, Component, effect, inject, input, signal, untr
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { RouterLink } from '@angular/router';
 import { SonosPickerComponent } from './sonos-picker.component';
+import { SonosArtComponent } from './sonos-art.component';
 
 export interface SonosRemote {
   playing: boolean;
-  nowPlaying: { title: string | null; artist: string | null; album: string | null };
+  nowPlaying: { title: string | null; artist: string | null; album: string | null; art?: string | null };
   volume: number;
   muted: boolean;
   groupedWith: string[];
@@ -22,10 +23,12 @@ const STEP = 2;
 @Component({
   selector: 'app-sonos-remote',
   standalone: true,
-  imports: [SonosPickerComponent, RouterLink],
+  imports: [SonosPickerComponent, RouterLink, SonosArtComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [`
     .r { display: flex; flex-direction: column; gap: 0.7rem; }
+    .now { display: flex; align-items: center; gap: 0.75rem; min-width: 0; }
+    .now app-sonos-art { width: 3.4rem; height: 3.4rem; }
     .track { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; }
     .track b { font-size: 0.95rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .track span { font-size: 0.8rem; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -47,6 +50,8 @@ const STEP = 2;
   template: `
     <div class="r">
       @if (remote(); as s) {
+        <div class="now">
+        <app-sonos-art [deviceId]="deviceId()" [art]="s.nowPlaying.art" />
         <div class="track" aria-live="polite">
           @if (s.nowPlaying.title) {
             <b>{{ s.nowPlaying.title }}</b>
@@ -54,6 +59,7 @@ const STEP = 2;
           } @else {
             <span>{{ s.playing ? 'Playing' : 'Nothing playing' }}</span>
           }
+        </div>
         </div>
         <div class="transport">
           <button class="round" type="button" [disabled]="busy()" (click)="press({ action: 'previous' })" aria-label="Previous">

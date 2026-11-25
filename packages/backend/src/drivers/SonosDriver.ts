@@ -1,5 +1,6 @@
 import type { DeviceDriver, DiscoveredDevice, EnergyMetrics } from './DeviceDriver';
-import { SonosError, describe, groupOf, isPlaying, leaderOf, pause, play, searchSpeakers, transportState, type SpeakerInfo } from '../sonos/protocol';
+import { SonosError, describe, groupOf, isPlaying, leaderOf, pause, play, searchSpeakers, setVolume, transportState, type SpeakerInfo } from '../sonos/protocol';
+import { noteRecent } from '../sonos/recent';
 import { findChoice, libraryOf, playOn, type Playable } from '../sonos/music';
 import { logger } from '../logger';
 
@@ -52,11 +53,16 @@ export function playChoiceOf(json: string | null | undefined): PlayChoice | null
  * A device's driver config with what to play added, for a Turn ON that should start a favorite
  * (a scene's or schedule's) instead of carrying on with what was playing.
  */
-export function configWithPlay(configJson: string | null, play: PlayChoice | null): string | null {
-  if (!play) return configJson;
+export function configWithPlay(configJson: string | null, play: PlayChoice | null, volume: number | null = null): string | null {
+  if (!play && volume === null) return configJson;
   let config: Record<string, unknown> = {};
   try { config = configJson ? JSON.parse(configJson) : {}; } catch { /* a bad config plays anyway */ }
-  return JSON.stringify({ ...config, play });
+  return JSON.stringify({ ...config, ...(play ? { play } : {}), ...(volume !== null ? { volume } : {}) });
+}
+
+/** A scene's volume for its speaker: a whole number from 0 to 100, or null to leave it. */
+export function sceneVolumeOf(v: unknown): number | null {
+  return typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= 100 ? v : null;
 }
 
 /** Starts a favorite or Sonos playlist on the speaker's group. Answers with what it started. */
@@ -67,19 +73,25 @@ export async function playChoice(ip: string, config: Record<string, unknown> | u
   }
   const { leaderIp, coordinator } = await groupLeadOf(ip, config);
   await playOn(leaderIp, coordinator, found);
+  // Kept by name, as ids change when favorites are re-made.
+  noteRecent({ key: `${found.kind}:${found.title}`, kind: found.kind, title: found.title, note: found.note, art: found.art, payload: { id: found.id, title: found.title } });
   return found;
 }
 
 /**
  * Sonos speakers (see sonos/protocol.ts). On is playing and off is paused: a Sonos is never
  * really off. In a group, play and pause act on the whole group, as in the Sonos app.
- * A Turn ON with a chosen favorite (config.play) starts that instead.
+ * A Turn ON with a chosen favorite (config.play) starts that instead, and a scene's volume
+ * (config.volume) is set on the speaker first.
  */
 export class SonosDriver implements DeviceDriver {
   readonly type = 'sonos';
   readonly confirmAfterMs = 1_500;
 
   async setPower(ip: string, on: boolean, config?: Record<string, unknown>): Promise<void> {
+    // A scene's volume for this speaker, set before it plays.
+    const volume = on ? sceneVolumeOf(config?.volume) : null;
+    if (volume !== null) await setVolume(ip, volume);
     const chosen = on && config && isPlayChoice(config.play) ? config.play : null;
     if (chosen) {
       const started = await playChoice(ip, config, chosen);
