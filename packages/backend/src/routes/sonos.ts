@@ -5,7 +5,7 @@ import {
   type NowPlaying,
 } from '../sonos/protocol';
 import { groupLeadOf, leaderFor, playChoice, speakerUuidOf } from '../drivers/SonosDriver';
-import { libraryOf, parseSpotifyLink, playOn, spotifyAccountOf, spotifyPlayable, type Choice, type SpotifyLink } from '../sonos/music';
+import { libraryOf, parseSpotifyLink, playOn, playQueueSong, queuePage, setPlayMode, spotifyAccountOf, spotifyPlayable, type Choice, type SpotifyLink } from '../sonos/music';
 import { noteState } from '../kasa/device.cache';
 import { emitDeviceState } from '../socket';
 import { logger } from '../logger';
@@ -61,11 +61,21 @@ async function remoteOf(s: SpeakerRow): Promise<SonosRemote> {
 
 type SonosAction =
   | { kind: 'play' | 'pause' | 'next' | 'previous' } | { kind: 'volume'; level: number } | { kind: 'step'; by: number } | { kind: 'mute'; on: boolean }
-  | { kind: 'choose'; id: string; title: string | null } | { kind: 'spotify'; link: SpotifyLink } | { kind: 'recent'; key: string };
+  | { kind: 'choose'; id: string; title: string | null } | { kind: 'spotify'; link: SpotifyLink } | { kind: 'recent'; key: string }
+  | { kind: 'track'; n: number } | { kind: 'mode'; shuffle?: boolean; repeat?: 'off' | 'all' | 'one' };
 
 /** Reads a remote button from a request body; a message for a bad one. */
 export function sonosActionOf(body: Record<string, unknown>): SonosAction | string {
-  const { action, volume, step, mute, choose, spotify, recent } = body;
+  const { action, volume, step, mute, choose, spotify, recent, track, shuffle, repeat } = body;
+  if (track !== undefined) {
+    if (typeof track !== 'number' || !Number.isInteger(track) || track < 1 || track > 100_000) return 'track must be a song number in the queue';
+    return { kind: 'track', n: track };
+  }
+  if (shuffle !== undefined || repeat !== undefined) {
+    if (shuffle !== undefined && typeof shuffle !== 'boolean') return 'shuffle must be true or false';
+    if (repeat !== undefined && repeat !== 'off' && repeat !== 'all' && repeat !== 'one') return 'repeat must be "off", "all" or "one"';
+    return { kind: 'mode', ...(shuffle !== undefined ? { shuffle: shuffle as boolean } : {}), ...(repeat !== undefined ? { repeat: repeat as 'off' | 'all' | 'one' } : {}) };
+  }
   if (recent !== undefined) {
     if (typeof recent !== 'string' || !recent || recent.length > 300) return 'recent must be an item from Recently played';
     return { kind: 'recent', key: recent };
@@ -225,6 +235,19 @@ export interface SonosLibrary {
 
 const toChoice = ({ id, title, note, kind, art }: Choice): Choice => ({ id, title, note, kind, art });
 
+/** GET /api/sonos/:id/queue?start= — a page of the group's queue (the page playing by default), and shuffle and repeat. */
+sonosRouter.get('/:id/queue', async (req: Request, res: Response) => {
+  const s = speakerFor(req);
+  if (!s) return res.status(404).json({ error: 'Speaker not found', code: 'DEVICE_NOT_FOUND' });
+  const raw = req.query.start;
+  const start = typeof raw === 'string' && /^\d{1,6}$/.test(raw) ? Number(raw) : undefined;
+  try {
+    res.json(await queuePage(await leaderFor(s.ip, configOf(s)), start));
+  } catch (err) {
+    failure(res, s, err);
+  }
+});
+
 /** GET /api/sonos/recent — what played recently, newest first, to play again. */
 sonosRouter.get('/recent', (_req: Request, res: Response) => {
   res.json(recentList());
@@ -291,6 +314,17 @@ sonosRouter.post('/:id/remote', async (req: Request, res: Response) => {
         await playSpotify(s, config, action.link);
         logger.info({ id: s.id, spotify: action.link.kind, by: req.user?.sub }, 'Sonos started a Spotify link');
         break;
+      case 'track': {
+        const { leaderIp, coordinator } = await groupLeadOf(s.ip, config);
+        await playQueueSong(leaderIp, coordinator, action.n);
+        break;
+      }
+      case 'mode': {
+        const leaderIp = await leaderFor(s.ip, config);
+        const now = await queuePage(leaderIp, 0);
+        await setPlayMode(leaderIp, action.shuffle ?? now.shuffle, action.repeat ?? now.repeat);
+        break;
+      }
       case 'recent': {
         const item = recentFor(action.key);
         if (!item) return res.status(404).json({ error: 'That isn’t in Recently played any more.', code: 'NOT_FOUND' });
@@ -317,7 +351,7 @@ sonosRouter.post('/:id/remote', async (req: Request, res: Response) => {
     }
     logger.info({ id: s.id, action: action.kind, by: req.user?.sub }, 'Sonos remote');
     // Give a skip, or something newly started, a moment to show its track.
-    const started = action.kind === 'choose' || action.kind === 'spotify' || action.kind === 'recent';
+    const started = action.kind === 'choose' || action.kind === 'spotify' || action.kind === 'recent' || action.kind === 'track';
     if (action.kind === 'next' || action.kind === 'previous' || started) {
       await new Promise((r) => setTimeout(r, routeWaitMs));
     }

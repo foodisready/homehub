@@ -57,6 +57,9 @@ class FakeSonos {
   sent: { host: string; action: string; body: string }[] = [];
   favorites = FAVORITES;
   queueLength = 5;
+  /** Songs in the queue, for reading it. */
+  queueSongs = 120;
+  playMode = 'NORMAL';
   /** What GetPositionInfo says the current track's address is. */
   trackUri = 'x-file-cifs://nas/music/blue.flac';
 
@@ -105,7 +108,7 @@ class FakeSonos {
       case 'GetPositionInfo':
         ok(this.radio
           ? `<TrackMetaData>${DIDL('<dc:title>x-sonosapi-stream:s1234</dc:title><r:streamContent>Nina Simone - Feeling Good</r:streamContent>')}</TrackMetaData>`
-          : `<TrackURI>${enc(this.trackUri)}</TrackURI><TrackMetaData>${DIDL('<dc:title>Blue in Green</dc:title><dc:creator>Miles Davis</dc:creator><upnp:album>Kind of Blue</upnp:album><upnp:albumArtURI>/getaa?s=1&amp;u=blue</upnp:albumArtURI>')}</TrackMetaData>`);
+          : `<Track>73</Track><TrackURI>${enc(this.trackUri)}</TrackURI><TrackMetaData>${DIDL('<dc:title>Blue in Green</dc:title><dc:creator>Miles Davis</dc:creator><upnp:album>Kind of Blue</upnp:album><upnp:albumArtURI>/getaa?s=1&amp;u=blue</upnp:albumArtURI>')}</TrackMetaData>`);
         return;
       case 'GetMediaInfo':
         ok(this.radio
@@ -114,6 +117,14 @@ class FakeSonos {
         return;
       case 'Browse': {
         const objectId = /<ObjectID>([^<]*)/.exec(body)?.[1] ?? '';
+        if (objectId === 'Q:0') {
+          const start = Number(/<StartingIndex>(\d+)/.exec(body)?.[1] ?? 0);
+          const count = Number(/<RequestedCount>(\d+)/.exec(body)?.[1] ?? 100);
+          const n = Math.max(0, Math.min(count, this.queueSongs - start));
+          const items = Array.from({ length: n }, (_, i) => `<item id="Q:0/${start + i + 1}" parentID="Q:0"><dc:title>Song ${start + i + 1}</dc:title><dc:creator>Band ${start + i + 1}</dc:creator><upnp:albumArtURI>/getaa?s=1&amp;u=song${start + i + 1}</upnp:albumArtURI></item>`);
+          ok(`<Result>${enc(`<DIDL-Lite>${items.join('')}</DIDL-Lite>`)}</Result><NumberReturned>${n}</NumberReturned><TotalMatches>${this.queueSongs}</TotalMatches>`);
+          return;
+        }
         const entries = objectId === 'FV:2' ? this.favorites : objectId === 'SQ:' ? [PLAYLIST] : [];
         const didl = `<DIDL-Lite xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/" xmlns:r="urn:schemas-rinconnetworks-com:metadata-1-0/" xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/">${entries.join('')}</DIDL-Lite>`;
         ok(`<Result>${enc(didl)}</Result><NumberReturned>${entries.length}</NumberReturned><TotalMatches>${entries.length}</TotalMatches><UpdateID>1</UpdateID>`);
@@ -131,6 +142,8 @@ class FakeSonos {
         this.queued = true; ok(); return;
       case 'BecomeCoordinatorOfStandaloneGroup': this.grouped = false; ok(); return;
       case 'DelegateGroupCoordinationTo': this.grouped = false; ok(); return;
+      case 'GetTransportSettings': ok(`<PlayMode>${this.playMode}</PlayMode>`); return;
+      case 'SetPlayMode': this.playMode = /<NewPlayMode>(\w+)/.exec(body)?.[1] ?? 'NORMAL'; ok(); return;
       case 'GetGroupVolume': ok('<CurrentVolume>25</CurrentVolume>'); return;
       case 'GetVolume': ok(`<CurrentVolume>${this.volume[host]}</CurrentVolume>`); return;
       case 'GetMute': ok('<CurrentMute>0</CurrentMute>'); return;
@@ -166,7 +179,7 @@ describe('Sonos speakers', () => {
 
   beforeEach(() => {
     sonos.grouped = false; sonos.queued = true; sonos.radio = false; sonos.sent = [];
-    sonos.favorites = FAVORITES; sonos.trackUri = 'x-file-cifs://nas/music/blue.flac'; sonos.queueLength = 5;
+    sonos.favorites = FAVORITES; sonos.trackUri = 'x-file-cifs://nas/music/blue.flac'; sonos.queueLength = 5; sonos.playMode = 'NORMAL';
     sonos.state = { '127.0.0.1': 'PAUSED_PLAYBACK', localhost: 'PAUSED_PLAYBACK' };
   });
 
@@ -332,6 +345,33 @@ describe('Sonos speakers', () => {
       assert.equal((await post({ recent: recent.find((r) => r.kind === 'spotify')!.key })).status, 200);
       assert.match(sonos.sent.find((x) => x.action === 'AddURIToQueue')!.body, /1004206cspotify%3aalbum%3a4uLU6hMCjMI75M1A2tKUQC/);
       assert.equal((await post({ recent: 'nope' })).status, 404);
+    });
+
+    it('shows the queue from the page playing, other pages on asking, and plays a song from it', async () => {
+      const page = await (await fetch(`${base}/api/sonos/${id}/queue`)).json() as { total: number; start: number; songs: { n: number; title: string; art: string }[]; current: number; shuffle: boolean; repeat: string };
+      assert.deepEqual([page.total, page.start, page.songs.length, page.current, page.shuffle, page.repeat], [120, 51, 50, 73, false, 'off'], 'song 73 is on the second page');
+      assert.deepEqual(page.songs[22], { n: 73, title: 'Song 73', artist: 'Band 73', album: null, art: '/getaa?s=1&u=song73' });
+      const last = await (await fetch(`${base}/api/sonos/${id}/queue?start=100`)).json() as { start: number; songs: unknown[] };
+      assert.deepEqual([last.start, last.songs.length], [101, 20]);
+      sonos.sent = [];
+      assert.equal((await post({ track: 5 })).status, 200);
+      assert.deepEqual(sonos.sent.filter((x) => /Seek|^Play$|SetAVTransportURI/.test(x.action)).map((x) => x.action), ['Seek', 'Play'], 'already on its queue');
+      assert.match(sonos.sent.find((x) => x.action === 'Seek')!.body, /<Unit>TRACK_NR<\/Unit><Target>5<\/Target>/);
+      sonos.radio = true; sonos.sent = [];
+      await post({ track: 2 });
+      assert.deepEqual(sonos.sent.filter((x) => /Seek|^Play$|SetAVTransportURI/.test(x.action)).map((x) => x.action), ['SetAVTransportURI', 'Seek', 'Play'], 'from a station, back to the queue first');
+      for (const bad of [{ track: 0 }, { track: 'two' }, { shuffle: 'yes' }, { repeat: 'twice' }]) assert.equal((await post(bad)).status, 400, JSON.stringify(bad));
+    });
+
+    it('turns shuffle and repeat on and off, keeping the other as it was', async () => {
+      await post({ shuffle: true });
+      assert.equal(sonos.playMode, 'SHUFFLE_NOREPEAT');
+      await post({ repeat: 'all' });
+      assert.equal(sonos.playMode, 'SHUFFLE');
+      await post({ shuffle: false });
+      assert.equal(sonos.playMode, 'REPEAT_ALL');
+      await post({ repeat: 'one' });
+      assert.equal(sonos.playMode, 'REPEAT_ONE');
     });
 
     it('says why it can’t: a bad link, a favorite that’s gone, no Spotify on the Sonos, Sonos refusing', async () => {

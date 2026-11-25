@@ -3,6 +3,7 @@ import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { RouterLink } from '@angular/router';
 import { SonosPickerComponent } from '../../shared/sonos/sonos-picker.component';
 import { SonosArtComponent } from '../../shared/sonos/sonos-art.component';
+import { SonosQueueComponent } from '../../shared/sonos/sonos-queue.component';
 
 interface Room { deviceId: number | null; name: string; volume: number | null; muted: boolean }
 interface Group {
@@ -26,7 +27,7 @@ const STEP = 2;
 @Component({
   selector: 'app-music',
   standalone: true,
-  imports: [SonosPickerComponent, RouterLink, SonosArtComponent],
+  imports: [SonosPickerComponent, RouterLink, SonosArtComponent, SonosQueueComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [`
     .topbar { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; }
@@ -102,6 +103,8 @@ const STEP = 2;
                   <svg viewBox="0 0 24 24" fill="currentColor"><path d="M16 5h2v14h-2zM4 5v14l11-7z" /></svg>
                 </button>
               </div>
+
+              <app-sonos-queue [deviceId]="g.deviceId" [trackKey]="g.nowPlaying.title" (changed)="refresh()" />
 
               <div>
                 <p class="label">Volume</p>
