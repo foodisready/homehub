@@ -5,7 +5,7 @@
  */
 import { getDb } from '../db';
 import {
-  SonosError, groupVolumeOf, handOver, isPlaying, joinGroup, leaveGroup, nowPlaying, parseGroups, soap, transportState, volumeOf,
+  SonosError, groupVolumeOf, handOver, isPlaying, joinGroup, leaveGroup, nowPlaying, parseGroups, pause, soap, transportState, volumeOf,
   type Group, type NowPlaying,
 } from './protocol';
 import { logger } from '../logger';
@@ -100,6 +100,10 @@ export async function soundSystem(): Promise<SoundSystem> {
 
 export class PlayOnError extends Error {}
 
+/** How long Sonos is given to split the old leader off before it's paused. */
+let handOverWaitMs = 700;
+export function setHandOverWaitForTests(ms: number): void { handOverWaitMs = ms; }
+
 /**
  * Makes the group that `deviceId` is in play in exactly these rooms (HomeHub speakers). Rooms are
  * joined first, so the music never stops in a room that stays; when the group's leader isn't
@@ -134,6 +138,13 @@ export async function setPlayOn(deviceId: number, roomIds: number[]): Promise<vo
     await handOver(coordinator.ip, uuidOf(heir));
     leaderUuid = uuidOf(heir);
     logger.info({ to: heir.alias }, 'Sonos group handed over');
+    // The old leader leaves with its own copy of the music still playing: taken out, it stops.
+    await new Promise((r) => setTimeout(r, handOverWaitMs));
+    try {
+      if (isPlaying(await transportState(coordinator.ip))) await pause(coordinator.ip);
+    } catch (err) {
+      logger.warn({ room: coordinator.room, reason: (err as Error).message }, 'Could not stop the room taken out');
+    }
   }
   // 3. The rest of the old group that isn't wanted leaves.
   for (const m of group.members) {
@@ -141,5 +152,12 @@ export async function setPlayOn(deviceId: number, roomIds: number[]): Promise<vo
     if (!rowFor(rows, m)) continue; // A room not in HomeHub is left as it is.
     await leaveGroup(m.ip);
     logger.info({ room: m.room }, 'Sonos room left a group');
+    // Taken out, it stops, whatever Sonos does with a room leaving.
+    await new Promise((r) => setTimeout(r, handOverWaitMs));
+    try {
+      if (isPlaying(await transportState(m.ip))) await pause(m.ip);
+    } catch (err) {
+      logger.warn({ room: m.room, reason: (err as Error).message }, 'Could not stop the room taken out');
+    }
   }
 }

@@ -141,7 +141,8 @@ class FakeSonos {
         if (/<CurrentURI>x-rincon:/.test(body)) { if (host === '127.0.0.1' && body.includes(LIVING)) this.grouped = true; ok(); return; }
         this.queued = true; ok(); return;
       case 'BecomeCoordinatorOfStandaloneGroup': this.grouped = false; ok(); return;
-      case 'DelegateGroupCoordinationTo': this.grouped = false; ok(); return;
+      // As the real ones do: the old leader leaves the group still playing its own copy.
+      case 'DelegateGroupCoordinationTo': this.grouped = false; this.state.localhost = 'PLAYING'; this.state['127.0.0.1'] = 'PLAYING'; ok(); return;
       case 'GetTransportSettings': ok(`<PlayMode>${this.playMode}</PlayMode>`); return;
       case 'SetPlayMode': this.playMode = /<NewPlayMode>(\w+)/.exec(body)?.[1] ?? 'NORMAL'; ok(); return;
       case 'GetGroupVolume': ok('<CurrentVolume>25</CurrentVolume>'); return;
@@ -167,6 +168,7 @@ describe('Sonos speakers', () => {
     routes = await import('../routes/sonos');
     music = await import('./music');
     routes.setRouteWaitForTests(0);
+    (await import('./system')).setHandOverWaitForTests(0);
     await sonos.start();
     protocol.setPortForTests(sonos.port);
   });
@@ -610,6 +612,9 @@ describe('Sonos speakers', () => {
       assert.deepEqual(sent('DelegateGroupCoordinationTo'), ['localhost']);
       assert.match(sonos.sent.find((x) => x.action === 'DelegateGroupCoordinationTo')!.body, new RegExp(`<NewCoordinator>${KITCHEN}</NewCoordinator><RejoinGroup>0`));
       assert.deepEqual(sent('BecomeCoordinatorOfStandaloneGroup'), [], 'the old leader already left');
+      assert.deepEqual(sent('Pause'), ['localhost'], 'and is paused, so the music stops there');
+      assert.equal(sonos.state.localhost, 'PAUSED_PLAYBACK');
+      assert.equal(sonos.state['127.0.0.1'], 'PLAYING', 'the room kept keeps playing');
     });
 
     it('everywhere adds every speaker; a bad list is refused', async () => {
