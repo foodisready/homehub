@@ -10,6 +10,7 @@ import { DeviceFilterComponent, matchesDevice, type DeviceFilter } from '../../s
 import { SystemStatusComponent } from './system-status.component';
 import { HomeSetupNoticeComponent } from './home-setup-notice.component';
 import { CamerasCardComponent } from './cameras-card.component';
+import { MusicCardComponent } from './music-card.component';
 import { AlarmCardComponent } from './alarm-card.component';
 import { AwayComponent } from './away.component';
 import { RoomsViewComponent } from './rooms-view.component';
@@ -54,11 +55,13 @@ function changed(d: Device, state: boolean): Device['lastChange'] {
 
 /** A thermostat: "All off" leaves it alone. */
 const isThermostat = (d: Device) => d.driverConfig?.['kind'] === 'thermostat';
+/** A Sonos: "All off" leaves the music playing. */
+const isSpeaker = (d: Device) => d.driverType === 'sonos';
 
 @Component({
   selector: 'app-dashboard',
   standalone: true,
-  imports: [DeviceRowComponent, RoomsViewComponent, DeviceFilterComponent, SystemStatusComponent, HomeSetupNoticeComponent, CamerasCardComponent, AlarmCardComponent, AwayComponent, DecimalPipe, WallFrameComponent, RouterLink],
+  imports: [DeviceRowComponent, RoomsViewComponent, DeviceFilterComponent, SystemStatusComponent, HomeSetupNoticeComponent, CamerasCardComponent, MusicCardComponent, AlarmCardComponent, AwayComponent, DecimalPipe, WallFrameComponent, RouterLink],
   styles: [`
     .back-to-wall { display: flex; align-items: center; justify-content: center; min-height: 3rem; margin: 0 0 0.75rem; border-radius: 14px;
       background: var(--accent); color: #fff; font-weight: 650; text-decoration: none; }
@@ -150,6 +153,8 @@ const isThermostat = (d: Device) => d.driverConfig?.['kind'] === 'thermostat';
       <app-alarm-card />
       <!-- Every camera, Ring and IP included, which aren't device rows -->
       <app-cameras-card />
+      <!-- The speakers: what's playing where, and the Music page -->
+      <app-music-card [devices]="devices()" />
 
       @if (loading()) {
         <div class="loading">Loading devices…</div>
@@ -257,7 +262,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
         devices,
         count: `${on} of ${devices.length} on`,
         // "All off" is for lights and plugs: it leaves thermostats alone, so it never cuts the heat.
-        canTurnOff: devices.some((d) => d.state && !d.isProtected && !isThermostat(d) && !isVacuum(d)),
+        canTurnOff: devices.some((d) => d.state && !d.isProtected && !isThermostat(d) && !isVacuum(d) && !isSpeaker(d)),
         anyOn: on > 0,
       };
     });
@@ -413,7 +418,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
   allOff(devices: Device[]): void {
     // Lights and plugs: a robot vacuum out cleaning isn't sent home by turning a room's lights off.
-    devices.filter((d) => d.state && !d.isProtected && !isThermostat(d) && !isVacuum(d)).forEach((d) => this.toggle(d));
+    // Nor is the music paused: a speaker is left playing.
+    devices.filter((d) => d.state && !d.isProtected && !isThermostat(d) && !isVacuum(d) && !isSpeaker(d)).forEach((d) => this.toggle(d));
   }
 
   toggle(device: Device): void {

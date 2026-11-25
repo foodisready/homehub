@@ -425,8 +425,9 @@ export class WallFrameComponent implements OnInit, OnDestroy {
     });
   }
 
-  setAuto(on: boolean): void { this.lock.saveSettings({ ...this.lock.settings(), auto: on }); }
-  setIdle(m: number): void { this.lock.saveSettings({ ...this.lock.settings(), idleMinutes: Number(m) }); }
+  // A wall tablet locks without a touch, not after being away.
+  setAuto(on: boolean): void { this.lock.saveSettings({ ...this.lock.settings(), auto: on, away: false }); }
+  setIdle(m: number): void { this.lock.saveSettings({ ...this.lock.settings(), idleMinutes: Number(m), away: false }); }
 
   saveNight(): void {
     const v = { on: this.nightOn, from: this.nightFrom || '22:00', to: this.nightTo || '06:30' };

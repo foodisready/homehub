@@ -22,6 +22,7 @@ const SERVICES = {
   RenderingControl: { path: '/MediaRenderer/RenderingControl/Control', urn: 'urn:schemas-upnp-org:service:RenderingControl:1' },
   ZoneGroupTopology: { path: '/ZoneGroupTopology/Control', urn: 'urn:schemas-upnp-org:service:ZoneGroupTopology:1' },
   ContentDirectory: { path: '/MediaServer/ContentDirectory/Control', urn: 'urn:schemas-upnp-org:service:ContentDirectory:1' },
+  GroupRenderingControl: { path: '/MediaRenderer/GroupRenderingControl/Control', urn: 'urn:schemas-upnp-org:service:GroupRenderingControl:1' },
 } as const;
 type Service = keyof typeof SERVICES;
 
@@ -201,6 +202,34 @@ export async function stepVolume(ip: string, by: number): Promise<void> {
 
 export async function setMute(ip: string, on: boolean): Promise<void> {
   await soap(ip, 'RenderingControl', 'SetMute', { InstanceID: 0, Channel: 'Master', DesiredMute: on ? 1 : 0 });
+}
+
+// ── Rooms playing together ─────────────────────────────────────
+
+/** Joins a speaker to a group, which it then plays with (leaving any group it was in). */
+export async function joinGroup(memberIp: string, coordinatorUuid: string): Promise<void> {
+  await soap(memberIp, 'AVTransport', 'SetAVTransportURI', { InstanceID: 0, CurrentURI: `x-rincon:${coordinatorUuid}`, CurrentURIMetaData: '' });
+}
+
+/** Takes a speaker out of its group, to play on its own (it stops). */
+export async function leaveGroup(memberIp: string): Promise<void> {
+  await soap(memberIp, 'AVTransport', 'BecomeCoordinatorOfStandaloneGroup', { InstanceID: 0 });
+}
+
+/** Hands a group's music to another of its speakers, and the old leader leaves the group. */
+export async function handOver(coordinatorIp: string, newCoordinatorUuid: string): Promise<void> {
+  await soap(coordinatorIp, 'AVTransport', 'DelegateGroupCoordinationTo', { InstanceID: 0, NewCoordinator: newCoordinatorUuid, RejoinGroup: 0 });
+}
+
+/** The group's volume (its speakers' average), from its coordinator. */
+export async function groupVolumeOf(coordinatorIp: string): Promise<number> {
+  return Number(tagOf(await soap(coordinatorIp, 'GroupRenderingControl', 'GetGroupVolume', { InstanceID: 0 }), 'CurrentVolume') ?? 0);
+}
+
+/** Moves the whole group's volume, each speaker keeping its share, as the Sonos app's group slider does. */
+export async function stepGroupVolume(coordinatorIp: string, by: number): Promise<void> {
+  await soap(coordinatorIp, 'GroupRenderingControl', 'SnapshotGroupVolume', { InstanceID: 0 });
+  await soap(coordinatorIp, 'GroupRenderingControl', 'SetRelativeGroupVolume', { InstanceID: 0, Adjustment: by });
 }
 
 // ── Finding speakers ───────────────────────────────────────────

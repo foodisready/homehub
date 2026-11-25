@@ -9,6 +9,9 @@ import { libraryOf, parseSpotifyLink, playOn, spotifyAccountOf, spotifyPlayable,
 import { noteState } from '../kasa/device.cache';
 import { emitDeviceState } from '../socket';
 import { logger } from '../logger';
+import { PlayOnError, setPlayOn, soundSystem, speakers, type SoundSystem } from '../sonos/system';
+import { stepGroupVolume } from '../sonos/protocol';
+import { getCachedState } from '../kasa/device.cache';
 
 export const sonosRouter = Router();
 
@@ -109,6 +112,68 @@ function failure(res: Response, s: SpeakerRow, err: unknown) {
   if (err instanceof SonosError && /^Sonos couldn’t play/.test(err.message)) return res.status(502).json({ error: err.message, code: 'DEVICE_REFUSED' });
   return res.status(502).json({ error: `${s.alias} didn’t do that. What’s playing may not allow it.`, code: 'DEVICE_REFUSED' });
 }
+
+/** Each room's switch follows its group: a room taken out of the music stops, one added plays. */
+function syncSwitches(system: SoundSystem): void {
+  for (const g of system.groups) {
+    for (const r of g.rooms) {
+      if (r.deviceId === null || getCachedState(r.deviceId)?.state === g.playing) continue;
+      noteState(r.deviceId, g.playing);
+      emitDeviceState(r.deviceId, r.name, g.playing, null);
+    }
+  }
+}
+
+/** GET /api/sonos/system — every group of rooms: what it's playing, its rooms and their volumes. */
+sonosRouter.get('/system', async (_req: Request, res: Response) => {
+  try {
+    res.json(await soundSystem());
+  } catch (err) {
+    if (err instanceof SonosError && err.code === 'UNREACHABLE') return res.status(503).json({ error: 'Couldn’t reach any Sonos speaker.', code: 'DEVICE_UNREACHABLE' });
+    logger.warn({ reason: (err as Error).message }, 'Could not read the Sonos system');
+    res.status(502).json({ error: 'Couldn’t read the Sonos system. Try again.', code: 'DEVICE_REFUSED' });
+  }
+});
+
+/**
+ * POST /api/sonos/:id/play-on { rooms: deviceId[] } | { everywhere: true } — the rooms the music of
+ * this speaker's group plays in. Answers with the whole system afterwards.
+ */
+sonosRouter.post('/:id/play-on', async (req: Request, res: Response) => {
+  const s = speakerFor(req);
+  if (!s) return res.status(404).json({ error: 'Speaker not found', code: 'DEVICE_NOT_FOUND' });
+  const { rooms, everywhere } = (req.body ?? {}) as { rooms?: unknown; everywhere?: unknown };
+  let ids: number[];
+  if (everywhere === true) ids = [s.id, ...speakers().map((r) => r.id).filter((id) => id !== s.id)];
+  else if (Array.isArray(rooms) && rooms.length && rooms.length <= 32 && rooms.every((r) => Number.isInteger(r))) ids = rooms as number[];
+  else return res.status(400).json({ error: 'rooms must list at least one speaker, or set everywhere', code: 'VALIDATION_ERROR' });
+  try {
+    await setPlayOn(s.id, ids);
+    logger.info({ id: s.id, rooms: ids, by: req.user?.sub }, 'Sonos rooms chosen');
+    // Sonos takes a moment to show the new groups.
+    await new Promise((r) => setTimeout(r, routeWaitMs));
+    const system = await soundSystem();
+    syncSwitches(system);
+    res.json(system);
+  } catch (err) {
+    if (err instanceof PlayOnError) return res.status(400).json({ error: err.message, code: 'VALIDATION_ERROR' });
+    failure(res, s, err);
+  }
+});
+
+/** POST /api/sonos/:id/group-volume { step: "up" | "down" } — the whole group's volume. Answers with the system. */
+sonosRouter.post('/:id/group-volume', async (req: Request, res: Response) => {
+  const s = speakerFor(req);
+  if (!s) return res.status(404).json({ error: 'Speaker not found', code: 'DEVICE_NOT_FOUND' });
+  const step = (req.body ?? {}).step;
+  if (step !== 'up' && step !== 'down') return res.status(400).json({ error: 'step must be "up" or "down"', code: 'VALIDATION_ERROR' });
+  try {
+    await stepGroupVolume(await leaderFor(s.ip, configOf(s)), step === 'up' ? VOLUME_STEP : -VOLUME_STEP);
+    res.json(await soundSystem());
+  } catch (err) {
+    failure(res, s, err);
+  }
+});
 
 /** GET /api/sonos/:id/remote — playing or not, what's on, the volume, and the group it's in. */
 sonosRouter.get('/:id/remote', async (req: Request, res: Response) => {

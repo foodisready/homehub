@@ -160,6 +160,8 @@ A station starts straight away. A song, album or playlist replaces what's queued
 
 Sonos can refuse a favorite: one from a music service that has closed, such as Google Play Music, or one whose service needs signing in again, and some radio stations can only be started from the Sonos app. HomeHub then says it couldn't play it and leaves what was playing as it was. With nothing played yet and nothing chosen, Play says to choose something first. A radio station can't pause, so it stops instead, and can't skip.
 
+**Music**, under **More** (or the **Music** card on Home), shows the whole sound system: each group of rooms playing together, what it's playing, play, pause and skip, **Choose music**, and the volume of each room and of **All rooms** together. **Play on** chooses the rooms the music plays in: tap a room to add it, tap it again to take it out (it stops), or **Everywhere** for every room. Taking out the room leading the group hands the music to another room, so it keeps playing. The music needs at least one room; to stop it, pause it. A Sonos amp's rooms are the rooms in the Sonos app: speakers wired to the same amp play together as one room.
+
 Speakers grouped in the Sonos app play together: play, pause and skip on any of them act on the whole group, as in the Sonos app, and the remote says which rooms it's playing with. The volume is each speaker's own.
 
 By voice and in Chat, "turn off the kitchen Sonos" pauses it, and schedules and scenes can play or pause it, labelled **Play** and **Pause**. A **Play** schedule or scene action can also start one of your favorites or Sonos playlists: choose it under **What to play**, for example a radio station at 7 AM. Left as **Carry on with what was playing**, it resumes. If the favorite is later removed from the Sonos app, the schedule or scene can't start it, and its form says so. "Turn off the lights" leaves speakers alone, and Activity says "started playing" and "paused". Its energy isn't estimated: a speaker uses much the same paused as playing.
@@ -472,7 +474,9 @@ Home shows your devices as **Rooms** at first, or as a **List**: switch at the t
 - **All rooms:** **All rooms at a glance** above the tiles, or the grid button at the top of every room, shows every room at once with its devices small, lit as in the room. On a tablet or computer, tap a device to switch it; on a phone, tapping opens its room. Tap a room's name to go in, and the arrow takes you back to all of them. On a touch screen, pinch in on a room to see all rooms, and pinch out on one to go into it. HomeHub remembers the choice on each screen, so a wall tablet left on all rooms opens there.
 - **List:** each room folds open and shut. Offline devices move to their own group at the bottom.
 
-**All off** turns off a room's lights and plugs, leaving protected devices and thermostats alone.
+**All off** turns off a room's lights and plugs, leaving protected devices, thermostats and the music alone.
+
+Speakers and TVs have their own bubbles: a speaker glows purple and says **Playing** or **Paused** (tap it to play or pause), and the room says **music playing**. They aren't counted as lights or plugs.
 
 Search by device name, nickname or room, or use the **On** and **Offline** filters. The same search is in **Settings → Devices**. On a computer, press `/` to jump to search.
 
@@ -835,6 +839,17 @@ A tablet that's always on, on a wall or the kitchen counter, can be HomeHub's sc
 The PIN belongs to the login, and HomeHub keeps it hashed, like a password, so the same PIN opens any screen signed in as that login. Whether a screen locks by itself, and when, is set on each screen. The lock keeps people from using the screen. Someone who clears the tablet's browser data gets the sign-in page, which still needs the password.
 
 The menus and banners are hidden on the wall display. Use a family login for a shared tablet: it can switch devices and run scenes, but not change settings.
+
+### Lock HomeHub on a phone
+
+Each person's phone or tablet can lock HomeHub too, so someone who picks up the phone unlocked can't use it. Open **Settings → Lock HomeHub**:
+
+1. Choose a PIN of 4 to 8 digits, if you haven't one yet. It's the same PIN as for the wall display: it belongs to your login.
+2. Tick **Lock HomeHub on this device**, and choose when it asks for the PIN: **right away** every time HomeHub is opened, or after 1, 5, 15 or 60 minutes away.
+
+Away means HomeHub was closed, or another app or the phone's lock screen was in front of it. Moving around inside HomeHub doesn't count. **Lock now** locks it straight away. Each phone has its own setting, so turning it on for yours doesn't lock anyone else's. If the PIN is forgotten, **Forgot the PIN?** on the lock screen signs out; sign in again with your password.
+
+The phone's own screen lock still matters most: HomeHub's lock keeps people out of HomeHub, while the phone's lock protects everything on it.
 
 ## Remote access
 

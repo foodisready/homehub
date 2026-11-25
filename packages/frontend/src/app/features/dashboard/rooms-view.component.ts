@@ -9,7 +9,7 @@ import { DeviceRowComponent, OverrideRequest } from './device-row/device-row.com
 import { isVacuum, vacuumWord } from '../../shared/vacuum';
 
 /** What a device is, for its bubble: lights glow warm, plugs show watts, the rest have their own look. */
-type Kind = 'light' | 'plug' | 'thermostat' | 'camera' | 'door' | 'vacuum';
+type Kind = 'light' | 'plug' | 'thermostat' | 'camera' | 'door' | 'vacuum' | 'speaker' | 'tv';
 
 const LIGHT_WORDS = /\b(lamps?|lights?|lighting|bulbs?|chandelier|pendants?|sconces?|lanterns?|led|strip)\b|燈|灯|đèn/i;
 
@@ -18,6 +18,8 @@ export function kindOf(d: Device): Kind {
   if (d.driverType === 'wyze') return 'camera';
   if (d.driverType === 'meross') return 'door';
   if (isVacuum(d)) return 'vacuum';
+  if (d.driverType === 'sonos') return 'speaker';
+  if (d.driverType === 'lgtv') return 'tv';
   if (LIGHT_WORDS.test(d.alias) || LIGHT_WORDS.test(d.power?.label ?? '') || d.nicknames.some((n) => LIGHT_WORDS.test(n))) return 'light';
   return 'plug';
 }
@@ -52,6 +54,8 @@ const PATHS: Record<string, string> = {
   house: 'M3 11l9-7 9 7M5 9.5V20h14V9.5',
   light: 'M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0 0 12 3Z',
   plug: 'M9 2v5M15 2v5M6 7h12v4a6 6 0 0 1-12 0V7ZM12 17v5',
+  speaker: 'M7 3h10a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1ZM12 11a3 3 0 1 0 0 6a3 3 0 1 0 0-6ZM12 7h.01',
+  tv: 'M3 6h18v11H3zM8 21h8M12 17v4',
   camera: 'M3 7h12v10H3zM15 10l6-3v10l-6-3',
   vacuum: 'M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18ZM5 9h14M12 13.5h.01',
   door_: 'M3 21V9l9-5 9 5v12M6 21v-9h12v9M6 15h12M6 18h12',
@@ -70,6 +74,8 @@ interface RoomTile {
   lit: number;
   thermostats: Device[];
   camera: boolean;
+  /** A speaker in it is playing. */
+  music: boolean;
   openDoor: boolean;
   door: boolean;
   offline: number;
@@ -152,13 +158,15 @@ function saveAll(on: boolean): void {
     .bubble.on .orb { border-color: var(--green); color: #4ade80; background: color-mix(in srgb, var(--green) 12%, var(--surface)); box-shadow: 0 0 22px color-mix(in srgb, var(--green) 28%, transparent); }
     .bubble.light.on .orb { border-color: var(--warm); color: var(--warm); background: color-mix(in srgb, var(--warm) 15%, var(--surface)); box-shadow: 0 0 26px color-mix(in srgb, var(--warm) 42%, transparent); }
     .bubble.offline .orb { opacity: .45; border-style: dashed; }
-    .bubble.door.on .orb { border-color: #f59e0b; color: #fbbf24; background: color-mix(in srgb, #f59e0b 14%, var(--surface)); box-shadow: 0 0 22px color-mix(in srgb, #f59e0b 30%, transparent); }
+    .speaker.on .orb { border-color: #c084fc; background: #2a2340; box-shadow: 0 0 22px #c084fc4d; }
+    .door.on .orb { border-color: #f59e0b; background: #33291a; box-shadow: 0 0 22px #f59e0b4d; }
     .bubble.busy .orb { opacity: .7; }
     .lbl { font-size: 0.8rem; text-align: center; line-height: 1.2; max-width: 7rem; text-wrap: balance; overflow-wrap: anywhere; }
     .st { font-size: 0.72rem; color: var(--text-muted); margin-top: -0.25rem; font-variant-numeric: tabular-nums; text-align: center; }
     .bubble.on .st { color: #4ade80; }
     .bubble.light.on .st { color: var(--warm); }
-    .bubble.door.on .st { color: #fbbf24; }
+    .speaker.on :is(.orb, .st) { color: #dbf; }
+    .door.on :is(.orb, .st) { color: #fbbf24; }
     .orb .ring { position: absolute; inset: -2px; width: calc(100% + 4px); height: calc(100% + 4px); transform: rotate(135deg); }
     .ring circle { fill: none; stroke-width: 4; stroke-linecap: round; }
     .deg { font-size: 1.15rem; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
@@ -423,6 +431,7 @@ export class RoomsViewComponent implements AfterViewChecked, OnDestroy {
           lit: lights.length ? Math.round((lights.filter((d) => d.online && d.state).length / lights.length) * 100) / 100 : 0,
           thermostats: devices.filter((d) => kindOf(d) === 'thermostat'),
           camera: devices.some((d) => kindOf(d) === 'camera' && d.online && d.state),
+          music: devices.some((d) => kindOf(d) === 'speaker' && d.online && d.state),
           door: doors.length > 0,
           openDoor: doors.some((d) => d.online && d.state),
           offline: devices.filter((d) => !d.online).length,
@@ -601,6 +610,8 @@ export class RoomsViewComponent implements AfterViewChecked, OnDestroy {
       case 'camera': return d.state ? 'Watching' : 'Paused';
       case 'door': return d.state ? 'Open' : 'Closed';
       case 'vacuum': return vacuumWord(d.vacuum, d.state);
+      // A speaker is never off: on is playing. Its "Pause after" counts down as a pause.
+      case 'speaker': return d.state ? (this.offIn(d)?.replace(/^Off\b/, 'Pauses') ?? 'Playing') : 'Paused';
       default: return (d.state && this.offIn(d)) || (d.state ? 'On' : 'Off');
     }
   }
@@ -661,18 +672,19 @@ export class RoomsViewComponent implements AfterViewChecked, OnDestroy {
   }
 
   tileSummary(r: RoomTile): string {
-    return [r.of ? `${r.on} of ${r.of} on` : '', r.camera ? 'camera watching' : '', r.openDoor ? 'door open' : '', r.offline ? `${r.offline} offline` : ''].filter(Boolean).join(', ');
+    return [r.of ? `${r.on} of ${r.of} on` : '', r.music ? 'music playing' : '', r.camera ? 'camera watching' : '', r.openDoor ? 'door open' : '', r.offline ? `${r.offline} offline` : ''].filter(Boolean).join(', ');
   }
   subtitle(r: RoomTile): string {
     const parts = [r.of ? `${r.on} of ${r.of} lights and plugs on` : 'No lights or plugs'];
     for (const d of r.thermostats) { const t = this.therm(d); if (t?.temperature != null) parts.push(`${shown(t.temperature, t.unit)}° inside`); }
+    if (r.music) parts.push('music playing');
     if (r.camera) parts.push('camera watching');
     if (r.offline) parts.push(`${r.offline} offline`);
     return parts.join(' · ');
   }
-  /** "All off" here, as on the list: lights and plugs, never a thermostat or anything protected. */
+  /** "All off" here, as on the list: lights and plugs, never a thermostat, the music, or anything protected. */
   canTurnOff(r: RoomTile): boolean {
-    return r.devices.some((d) => d.online && d.state && !d.isProtected && kindOf(d) !== 'thermostat' && kindOf(d) !== 'vacuum');
+    return r.devices.some((d) => d.online && d.state && !d.isProtected && !['thermostat', 'vacuum', 'speaker'].includes(kindOf(d)));
   }
 
   // ── Tap to switch, press and hold for controls ──

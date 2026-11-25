@@ -32,6 +32,8 @@ import { AutomationsService } from '../../core/services/automations.service';
 import { SecretInputDirective } from '../../shared/secret-input/secret-input.directive';
 import { NicknameChipsComponent, type NicknameSuggestion } from '../../shared/nickname-chips/nickname-chips.component';
 import { ThermostatRangesComponent } from '../../shared/thermostat/thermostat-ranges.component';
+import { DeviceLockComponent } from '../../shared/lock/device-lock.component';
+import { LockService } from '../../core/lock/lock.service';
 
 interface ChatStats {
   total: number;
@@ -107,7 +109,7 @@ const DRIVER_LABEL: Record<string, string> = {
 @Component({
   selector: 'app-settings',
   standalone: true,
-  imports: [SecretInputDirective, NicknameChipsComponent, ThermostatRangesComponent, FormsModule, RouterLink, InviteQrComponent, MatterPairComponent, DeviceFilterComponent, BackupsComponent, BackupSyncComponent, ServerRoleComponent, MerossLoginComponent, HoneywellLoginComponent, AlarmcomLoginComponent, OtherNetworksComponent, HomeSettingsComponent, AiConnectionComponent, AiChoiceComponent, CamerasToggleComponent, TeachCommandsComponent, VoiceRepliesComponent, VoiceControlComponent, SettingsTilesComponent],
+  imports: [SecretInputDirective, NicknameChipsComponent, ThermostatRangesComponent, FormsModule, RouterLink, InviteQrComponent, MatterPairComponent, DeviceFilterComponent, BackupsComponent, BackupSyncComponent, ServerRoleComponent, MerossLoginComponent, HoneywellLoginComponent, AlarmcomLoginComponent, OtherNetworksComponent, HomeSettingsComponent, AiConnectionComponent, AiChoiceComponent, CamerasToggleComponent, TeachCommandsComponent, VoiceRepliesComponent, VoiceControlComponent, SettingsTilesComponent, DeviceLockComponent],
   styles: [`
     .topbar { display:flex; align-items:center; justify-content:space-between; margin-bottom:1.5rem; }
     .topbar h1 { font-size:1.4rem; font-weight:700; }
@@ -1058,6 +1060,13 @@ const DRIVER_LABEL: Record<string, string> = {
       }
 
       <div class="section">
+        <button type="button" id="section-lock" class="section-title section-toggle" (click)="toggleSection('lock')" [attr.aria-expanded]="isSectionOpen('lock')">
+          <span class="chev">{{ isSectionOpen('lock') ? '▾' : '▸' }}</span> Lock HomeHub
+        </button>
+        @if (isSectionOpen('lock')) { <div class="card"><app-device-lock /></div> }
+      </div>
+
+      <div class="section">
         <button type="button" id="section-preferences" class="section-title section-toggle" (click)="toggleSection('preferences')" [attr.aria-expanded]="isSectionOpen('preferences')">
           <span class="chev">{{ isSectionOpen('preferences') ? '▾' : '▸' }}</span> Preferences
         </button>
@@ -1135,6 +1144,7 @@ export class SettingsComponent implements OnInit, OnDestroy {
   readonly users   = this._users.asReadonly();
   readonly isAdmin = computed(() => this.auth.user()?.role === 'admin');
   readonly automations = inject(AutomationsService);
+  readonly lockService = inject(LockService);
   readonly pauseMsg = signal('');
 
   setPaused(box: HTMLInputElement): void {
@@ -1405,6 +1415,12 @@ export class SettingsComponent implements OnInit, OnDestroy {
     });
 
     // More
+    const lock = this.lockService.settings();
+    out.push({
+      key: 'lock', name: 'Lock HomeHub', group: 'More', icon: 'lock', hue: '#f5b84d',
+      status: this.lockService.pinSet() === false ? 'No PIN yet' : lock.auto && lock.away ? (lock.idleMinutes ? `This device: after ${lock.idleMinutes} min away` : 'This device: every time') : 'Off on this device',
+      words: 'lock pin passcode privacy phone tablet away security',
+    });
     out.push({
       key: 'preferences', name: 'Preferences', group: 'More', icon: 'sliders', hue: '#8e9ab4',
       status: [this.kwhRateDraft ? `$${this.kwhRateDraft}/kWh` : '', this.appVersion()].filter(Boolean).join(' · ') || 'Energy rate and version',

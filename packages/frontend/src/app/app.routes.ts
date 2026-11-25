@@ -65,6 +65,11 @@ export const routes: Routes = [
     canActivate: [authGuard],
   },
   {
+    path: 'music',
+    loadComponent: () => import('./features/music/music.component').then((m) => m.MusicComponent),
+    canActivate: [authGuard],
+  },
+  {
     path: 'activity',
     loadComponent: () => import('./features/activity/activity.component').then((m) => m.ActivityComponent),
     canActivate: [authGuard],

@@ -31,6 +31,7 @@ const ICONS = {
   camera:   'M3 8a2 2 0 0 1 2-2h2l1.5-2h7L17 6h2a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM12 17a4 4 0 1 0 0-8 4 4 0 0 0 0 8z',
   health:   'M3 12h4l2-5 4 10 2-5h6',
   family:   'M12 20s-7-4.4-9.2-8.6A5 5 0 0 1 12 6.3a5 5 0 0 1 9.2 5.1C19 15.6 12 20 12 20z',
+  music:    'M9 18V5l11-2v13M9 18a3 3 0 1 1-6 0 3 3 0 0 1 6 0zM20 16a3 3 0 1 1-6 0 3 3 0 0 1 6 0zM9 9l11-2',
   tablet:   'M6 3h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zM11 18h2',
   signOut:  'M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3',
 };
@@ -48,6 +49,7 @@ const MORE: NavItem[] = [
   { path: '/family',        label: 'Family',   icon: ICONS.family },
   { path: '/activity',      label: 'Activity', icon: ICONS.activity },
   { path: '/cameras',       label: 'Cameras',  icon: ICONS.camera },
+  { path: '/music',         label: 'Music',    icon: ICONS.music },
   { path: '/sensors',       label: 'Sensors',  icon: ICONS.sensors },
   { path: '/energy',        label: 'Energy',   icon: ICONS.energy },
   { path: '/notifications', label: 'Alerts',   icon: ICONS.alerts },

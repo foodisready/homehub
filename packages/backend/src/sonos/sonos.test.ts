@@ -121,7 +121,12 @@ class FakeSonos {
         ok(`<FirstTrackNumberEnqueued>${first}</FirstTrackNumberEnqueued><NumTracksAdded>12</NumTracksAdded><NewQueueLength>${this.queueLength}</NewQueueLength>`); return;
       }
       case 'RemoveTrackRangeFromQueue': this.queueLength -= Number(/<NumberOfTracks>(\d+)/.exec(body)?.[1]); ok('<NewUpdateID>2</NewUpdateID>'); return;
-      case 'SetAVTransportURI': this.queued = true; ok(); return;
+      case 'SetAVTransportURI':
+        if (/<CurrentURI>x-rincon:/.test(body)) { if (host === '127.0.0.1' && body.includes(LIVING)) this.grouped = true; ok(); return; }
+        this.queued = true; ok(); return;
+      case 'BecomeCoordinatorOfStandaloneGroup': this.grouped = false; ok(); return;
+      case 'DelegateGroupCoordinationTo': this.grouped = false; ok(); return;
+      case 'GetGroupVolume': ok('<CurrentVolume>25</CurrentVolume>'); return;
       case 'GetVolume': ok(`<CurrentVolume>${this.volume[host]}</CurrentVolume>`); return;
       case 'GetMute': ok('<CurrentMute>0</CurrentMute>'); return;
       case 'SetRelativeVolume': this.volume[host] += Number(/<Adjustment>(-?\d+)/.exec(body)?.[1]); ok(); return;
@@ -469,6 +474,74 @@ describe('Sonos speakers', () => {
       sonos.sent = [];
       await send('POST', `/api/scenes/${made.id}/run`);
       assert.match(sonos.sent.find((x) => x.action === 'SetAVTransportURI')?.body ?? '', /x-sonosapi-stream:s21507/);
+    });
+  });
+  describe('the whole sound system', () => {
+    let server: http.Server;
+    let base = '';
+    let kitchen = 0;
+    let living = 0;
+    before(async () => {
+      const express = (await import('express')).default;
+      const app = express();
+      app.use(express.json());
+      app.use((req, _res, next) => { req.user = { sub: 1, name: 't', role: 'member' } as never; next(); });
+      app.use('/api/sonos', routes.sonosRouter);
+      await new Promise<void>((ok) => { server = app.listen(0, '127.0.0.1', () => ok()); });
+      base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+      db.prepare("INSERT OR IGNORE INTO devices (alias, ip, driver_type, driver_config) VALUES ('Kitchen Sonos', '127.0.0.1', 'sonos', ?)").run(JSON.stringify({ uuid: KITCHEN }));
+      db.prepare("INSERT OR IGNORE INTO devices (alias, ip, driver_type, driver_config) VALUES ('Living room Sonos', 'localhost', 'sonos', ?)").run(JSON.stringify({ uuid: LIVING }));
+      kitchen = (db.prepare("SELECT id FROM devices WHERE ip = '127.0.0.1'").get() as { id: number }).id;
+      living = (db.prepare("SELECT id FROM devices WHERE ip = 'localhost'").get() as { id: number }).id;
+    });
+    after(() => new Promise<void>((ok) => server.close(() => ok())));
+    const post = (id: number, url: string, body: unknown) => fetch(`${base}/api/sonos/${id}/${url}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    const sent = (action: string) => sonos.sent.filter((x) => x.action === action).map((x) => x.host);
+
+    it('shows each group, its rooms and volumes, playing first', async () => {
+      sonos.state.localhost = 'PLAYING';
+      const sys = await (await fetch(`${base}/api/sonos/system`)).json() as { groups: { deviceId: number; rooms: { name: string; volume: number }[]; playing: boolean; groupVolume: number | null }[] };
+      assert.deepEqual(sys.groups.map((g) => [g.deviceId, g.rooms.map((r) => r.name), g.playing, g.groupVolume]), [
+        [living, ['Living room Sonos'], true, null],
+        [kitchen, ['Kitchen Sonos'], false, null],
+      ]);
+      sonos.grouped = true;
+      const together = await (await fetch(`${base}/api/sonos/system`)).json() as { groups: { deviceId: number; rooms: { name: string }[]; groupVolume: number | null }[] };
+      assert.deepEqual(together.groups.map((g) => [g.deviceId, g.rooms.map((r) => r.name), g.groupVolume]), [[living, ['Living room Sonos', 'Kitchen Sonos'], 25]], 'the leader first, the hidden pair half left out');
+    });
+
+    it('adds a room: it joins the group’s leader, and nothing else changes', async () => {
+      const r = await post(kitchen, 'play-on', { rooms: [kitchen, living] });
+      assert.equal(r.status, 200);
+      assert.deepEqual(sonos.sent.filter((x) => /x-rincon:/.test(x.body)).map((x) => [x.host, x.body.includes(KITCHEN)]), [['localhost', true]], 'the Living room joins the Kitchen');
+      assert.deepEqual([...sent('BecomeCoordinatorOfStandaloneGroup'), ...sent('DelegateGroupCoordinationTo')], []);
+    });
+
+    it('takes a room out: it leaves; taking the leader out hands the music to a room that stays', async () => {
+      sonos.grouped = true;
+      await post(kitchen, 'play-on', { rooms: [living] });
+      assert.deepEqual(sent('BecomeCoordinatorOfStandaloneGroup'), ['127.0.0.1']);
+      assert.deepEqual(sent('DelegateGroupCoordinationTo'), []);
+      sonos.grouped = true; sonos.sent = [];
+      await post(kitchen, 'play-on', { rooms: [kitchen] });
+      assert.deepEqual(sent('DelegateGroupCoordinationTo'), ['localhost']);
+      assert.match(sonos.sent.find((x) => x.action === 'DelegateGroupCoordinationTo')!.body, new RegExp(`<NewCoordinator>${KITCHEN}</NewCoordinator><RejoinGroup>0`));
+      assert.deepEqual(sent('BecomeCoordinatorOfStandaloneGroup'), [], 'the old leader already left');
+    });
+
+    it('everywhere adds every speaker; a bad list is refused', async () => {
+      await post(kitchen, 'play-on', { everywhere: true });
+      assert.deepEqual(sonos.sent.filter((x) => /x-rincon:/.test(x.body)).map((x) => x.host), ['localhost']);
+      for (const bad of [{ rooms: [] }, { rooms: [99999] }, { rooms: 'all' }, {}]) assert.equal((await post(kitchen, 'play-on', bad)).status, 400, JSON.stringify(bad));
+    });
+
+    it('moves the whole group’s volume on its leader', async () => {
+      sonos.grouped = true;
+      assert.equal((await post(kitchen, 'group-volume', { step: 'up' })).status, 200);
+      assert.deepEqual(sonos.sent.filter((x) => /GroupVolume/.test(x.action)).map((x) => `${x.host} ${x.action}`).filter((x) => !x.includes('Get')),
+        ['localhost SnapshotGroupVolume', 'localhost SetRelativeGroupVolume']);
+      assert.match(sonos.sent.find((x) => x.action === 'SetRelativeGroupVolume')!.body, /<Adjustment>2<\/Adjustment>/);
+      assert.equal((await post(kitchen, 'group-volume', { step: 5 })).status, 400);
     });
   });
 });

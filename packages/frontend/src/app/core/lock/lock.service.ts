@@ -5,13 +5,19 @@ import { AuthService } from '../auth/auth.service';
 
 const SETTINGS_KEY = 'homehub.lock';
 const LOCKED_KEY = 'homehub.lock.locked';
+/** When this screen was last in use, for "lock after being away" across closing the app. */
+const SEEN_KEY = 'homehub.lock.seen';
 
-export interface LockSettings { auto: boolean; idleMinutes: number }
+/**
+ * Whether this screen locks itself, and after how many minutes: without a touch (a wall tablet),
+ * or, with `away`, after being closed or in the background that long (a phone; 0 is right away).
+ */
+export interface LockSettings { auto: boolean; idleMinutes: number; away?: boolean }
 
 function loadSettings(): LockSettings {
   try {
     const v = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? 'null');
-    if (v && typeof v.auto === 'boolean' && Number.isFinite(v.idleMinutes)) return { auto: v.auto, idleMinutes: v.idleMinutes };
+    if (v && typeof v.auto === 'boolean' && Number.isFinite(v.idleMinutes)) return { auto: v.auto, idleMinutes: v.idleMinutes, away: v.away === true };
   } catch { /* the default */ }
   return { auto: false, idleMinutes: 5 };
 }
@@ -21,7 +27,7 @@ const store = (key: string, value: string | null) => {
 
 /**
  * Locking a shared screen, such as the wall tablet: by hand, or after some minutes without a
- * touch; a PIN opens it again. The PIN is the login's, checked by HomeHub (/api/lock); whether
+ * touch, or on a phone after being away from it; a PIN opens it again. The PIN is the login's, checked by HomeHub (/api/lock); whether
  * this screen locks itself, and after how long, is this browser's own choice. Locked stays locked
  * through a reload. Signing out (the lock screen's way out for a forgotten PIN) unlocks.
  */
@@ -64,6 +70,8 @@ export class LockService {
         this.pinLength.set(r.length ?? 4);
         // No PIN: a lock left over from before means nothing, and mustn't come back with a new PIN.
         if (!r.set) this.setLocked(false);
+        // Opening the app: away long enough since it was last used locks it.
+        else this.checkAway();
       }, error: () => undefined });
   }
 
@@ -73,11 +81,33 @@ export class LockService {
     this.started = true;
     const touched = () => { this.lastTouch = Date.now(); };
     for (const ev of ['pointerdown', 'keydown', 'wheel', 'touchstart']) document.addEventListener(ev, touched, { passive: true, capture: true });
+    // A phone: leaving notes the time; coming back after long enough locks.
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') this.seen();
+      else this.checkAway();
+    });
+    window.addEventListener('pagehide', () => this.seen());
     setInterval(() => {
       const s = this.settings();
-      if (!s.auto || !this.pinSet() || this._locked() || !this.auth.isLoggedIn()) return;
+      // In use: keep "last seen" fresh, so an app closed without notice is timed from about now.
+      if (document.visibilityState === 'visible' && !this._locked()) this.seen();
+      if (!s.auto || s.away || !this.pinSet() || this._locked() || !this.auth.isLoggedIn()) return;
       if (Date.now() - this.lastTouch >= s.idleMinutes * 60_000) this.lockNow();
     }, 10_000);
+  }
+
+  private seen(): void {
+    if (!this._locked()) store(SEEN_KEY, String(Date.now()));
+  }
+
+  /** Locks a phone that's been away (closed or in the background) for its minutes or more. */
+  private checkAway(): void {
+    const s = this.settings();
+    if (!s.auto || !s.away || !this.pinSet() || this._locked() || !this.auth.isLoggedIn()) return;
+    let last = 0;
+    try { last = Number(localStorage.getItem(SEEN_KEY)) || 0; } catch { /* unknown: treated as away */ }
+    if (!last || Date.now() - last >= s.idleMinutes * 60_000) this.lockNow();
+    else this.seen();
   }
 
   lockNow(): void {
@@ -122,6 +152,7 @@ export class LockService {
     this.settings.set(s);
     store(SETTINGS_KEY, JSON.stringify(s));
     this.lastTouch = Date.now();
+    this.seen();
   }
 
   setPin(pin: string, current?: string): Observable<unknown> {
@@ -131,7 +162,7 @@ export class LockService {
       this.pinLength.set(pin.length);
       this.setLocked(false);
       // A new PIN on this screen: lock itself after 5 minutes, unless already chosen.
-      if (first && !this.settings().auto) this.saveSettings({ auto: true, idleMinutes: this.settings().idleMinutes || 5 });
+      if (first && !this.settings().auto) this.saveSettings({ ...this.settings(), auto: true, idleMinutes: this.settings().idleMinutes || 5 });
     }));
   }
 
