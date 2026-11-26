@@ -35,6 +35,9 @@ class ReplyServer:
         folder = str(self.dir)
 
         class Files(http.server.SimpleHTTPRequestHandler):
+            # The Voice PE reads the type from here and plays nothing it doesn't know ('audio/x-wav' isn't).
+            extensions_map = {**http.server.SimpleHTTPRequestHandler.extensions_map, '.wav': 'audio/wav', '.flac': 'audio/flac'}
+
             def __init__(self, *a, **k):
                 super().__init__(*a, directory=folder, **k)
 
@@ -52,8 +55,8 @@ class ReplyServer:
     def new_file(self) -> tuple[Path, str]:
         """A path to write a reply to, and its name in URLs. Old replies are removed."""
         cutoff = time.time() - KEEP_S
-        for f in self.dir.glob('*.wav'):
-            if f.stat().st_mtime < cutoff:
+        for f in self.dir.iterdir():
+            if f.suffix in ('.wav', '.flac') and f.stat().st_mtime < cutoff:
                 f.unlink(missing_ok=True)
         name = f'{uuid.uuid4().hex}.wav'
         return self.dir / name, name
@@ -156,19 +159,51 @@ def lead_in(path: Path, seconds: float = LEAD_IN_S) -> None:
         log.warning('reply played without its lead-in: %s', e)
 
 
-def speak_with(server: ReplyServer, cache: ReplyCache, voices: dict) -> Callable[[str, str, str], str]:
-    """speak(text, host, lang) -> the URL a speaker plays the reply from, reusing a kept reply when there is one.
-    Kept replies stay as the voice made them; the copy served gets its lead-in."""
-    def speak(text: str, host: str, lang: str = 'en') -> str:
+# The Voice PE's firmware (26.9.0) plays FLAC only, and asks for 48 kHz: given a WAV it fetches it and stays
+# silent ("Could not determine audio file type", 2026-11-26). Phones running Ava play the WAV.
+FLAC_RATE = 48000
+
+
+def to_flac(path: Path) -> Path | None:
+    """`path`, a WAV file, as 48 kHz mono FLAC beside it, or None if it can't be made (the WAV is then played)."""
+    out = path.with_suffix('.flac')
+    try:
+        import av  # comes with faster-whisper
+        with av.open(str(path)) as src, av.open(str(out), 'w', format='flac') as dst:
+            stream = dst.add_stream('flac', rate=FLAC_RATE, layout='mono')
+            resampler = av.AudioResampler(format='s16', layout='mono', rate=FLAC_RATE)
+            for frame in [*src.decode(audio=0), None]:
+                for f in resampler.resample(frame):
+                    for packet in stream.encode(f):
+                        dst.mux(packet)
+            for packet in stream.encode(None):
+                dst.mux(packet)
+    except Exception as e:  # noqa: BLE001 — a reply in the wrong format is better than none
+        log.warning('reply not made into FLAC: %s', e)
+        out.unlink(missing_ok=True)
+        return None
+    path.unlink(missing_ok=True)
+    return out
+
+
+def speak_with(server: ReplyServer, cache: ReplyCache, voices: dict) -> Callable[..., str]:
+    """speak(text, host, lang, flac=False) -> the URL a speaker plays the reply from, reusing a kept reply when
+    there is one. Kept replies stay as the voice made them; the copy served gets its lead-in, and is FLAC for
+    speakers that play only that."""
+    def served(path: Path, name: str, host: str, flac: bool) -> str:
+        lead_in(path)
+        if flac and (made := to_flac(path)):
+            name = made.name
+        return server.url(name, host)
+
+    def speak(text: str, host: str, lang: str = 'en', flac: bool = False) -> str:
         voice = voices.get(lang, voices['en'])
         kept = cache.find(text, lang, voice)
         copied = server.copy_in(kept) if kept else None
         if copied:
-            lead_in(copied[0])
-            return server.url(copied[1], host)
+            return served(*copied, host, flac)
         path, name = server.new_file()
         voice.say(text, path)
         cache.keep_copy(path, text, lang, voice)
-        lead_in(path)
-        return server.url(name, host)
+        return served(path, name, host, flac)
     return speak

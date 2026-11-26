@@ -6,7 +6,7 @@ Lets you control HomeHub by voice, with no cloud and no Home Assistant:
 speaker → wake word → bridge: Whisper (speech to text) → HomeHub → Piper (spoken reply) → speaker
 ```
 
-It works with ESPHome voice speakers: [Ava](https://github.com/brownard/Ava) on an Android tablet, and should work with the Home Assistant Voice Preview Edition (not tested yet; see below). Speakers on your network are found automatically. When two speakers hear the same command, only the one that heard it loudest, usually the nearest, answers and carries it out.
+It works with ESPHome voice speakers: [Ava](https://github.com/brownard/Ava) on an Android tablet, and the Home Assistant Voice Preview Edition (see [Home Assistant Voice](#home-assistant-voice)). Speakers on your network are found automatically. When two speakers hear the same command, only the one that heard it loudest, usually the nearest, answers and carries it out.
 
 Commands go through HomeHub's rules, so a misheard command can't switch a device the rules didn't match. With Claude Haiku chosen in **Settings → AI for Chat and voice**, a command the rules don't understand can come back as a question, such as "Turn on Porch light?": the speaker asks it and listens for a yes or no (`confirm.py`), and nothing is switched without a yes. Protected devices are never switched by voice.
 
@@ -108,9 +108,14 @@ With Mandarin on, each command can be Mandarin as well as English (and the other
 
 With Cantonese and Mandarin both on, SenseVoice's label doesn't decide between them, because it often labels a short Cantonese command as Mandarin. A wake word named in Chinese characters doesn't decide either, since both are written that way. A command that clearly reads as Mandarin, such as 把客厅灯打开, is taken as Mandarin. Anything else is read as Cantonese first, then as Mandarin, heard again set to Mandarin, if Cantonese doesn't understand it, which takes about a second more. A command neither understands is answered in Cantonese.
 
+## Home Assistant Voice
+
+Set it up on Wi-Fi with its own firmware: power it on, open improv-wifi.com in Chrome on a phone, connect over Bluetooth, enter the Wi-Fi, and press the center button when asked. After that the page sends you to Home Assistant, which HomeHub doesn't need: close it. Within a minute the bridge log says `Home Assistant Voice … connected (…), listening; replies as FLAC`, and "Okay Nabu" works.
+
+On its factory firmware it connects without an encryption key. Its firmware plays only FLAC, so the bridge makes its replies into 48 kHz FLAC; phones running Ava get WAV.
+
 ## Not done yet
 
-- **Home Assistant Voice:** its firmware expects Home Assistant to set its encryption key, so whether the bridge can connect to one out of the box hasn't been tested.
 - Languages other than English, Cantonese, Vietnamese and Mandarin.
 
 ## Credits

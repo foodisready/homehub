@@ -215,6 +215,7 @@ class FakeClient:
 
     instances: list['FakeClient'] = []
     voice_flags = 1
+    media_formats: list[str] = []   # what its media player says it plays; none, like Ava
 
     def __init__(self, host, port, password, **kw):
         self.events = []
@@ -234,6 +235,11 @@ class FakeClient:
     async def get_voice_assistant_configuration(self, timeout):
         return None
 
+    async def list_entities_services(self):
+        if not FakeClient.media_formats:
+            return [], []
+        return [mock.Mock(supported_formats=[mock.Mock(format=f) for f in FakeClient.media_formats])], []
+
     def send_voice_assistant_event(self, kind, data):
         self.events.append((kind.name, data))
 
@@ -249,11 +255,13 @@ class SpeakerLinkTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         FakeClient.instances.clear()
         FakeClient.voice_flags = 1
+        FakeClient.media_formats = []
 
-    async def connected_link(self, answer_fn):
+    async def connected_link(self, answer_fn, speak=None):
         from homehub_voice import speakers
 
-        link = speakers.SpeakerLink(cfg.Speaker('10.0.0.5'), answer_fn, lambda text, host, lang='en': f'http://me/{len(text)}.wav', listed=True)
+        speak = speak or (lambda text, host, lang='en': f'http://me/{len(text)}.wav')
+        link = speakers.SpeakerLink(cfg.Speaker('10.0.0.5'), answer_fn, speak, listed=True)
         with mock.patch.object(speakers.api, 'APIClient', FakeClient):
             link.start()
             for _ in range(50):
@@ -292,6 +300,48 @@ class SpeakerLinkTest(unittest.IsolatedAsyncioTestCase):
         self.assertAlmostEqual(heard[0][0] / BYTES_PER_SECOND, 2.3, delta=0.1)
         self.assertNotIn('continue_conversation', dict(c.events)['VOICE_ASSISTANT_INTENT_END'])
         link.task.cancel()
+
+    async def test_a_speaker_that_plays_only_flac_gets_flac(self):
+        # The Voice PE, 2026-11-26: it fetched the WAV reply, logged "Could not determine audio file type"
+        # and said nothing. Its media player lists FLAC only.
+        asked = []
+
+        def speak(text, host, lang='en', **kw):
+            asked.append(kw)
+            return 'http://me/reply.flac' if kw.get('flac') else 'http://me/reply.wav'
+
+        def answer_fn(audio, spoke, asked=None, prefer=None, wake=''):
+            return mock.Mock(heard='turn off office light', reply='Office Lamp is off.', handled=True, stt_s=0, homehub_s=0, lang='en', asked=None)
+
+        FakeClient.media_formats = ['flac', 'flac']
+        FakeClient.voice_flags = 1 | 16   # voice assistant, announce
+        link, c = await self.connected_link(answer_fn, speak)
+        self.assertTrue(link.flac)
+        self.assertEqual((await self.say(c, 1, 'Okay Nabu'))['VOICE_ASSISTANT_TTS_END'], {'url': 'http://me/reply.flac'})
+        self.assertTrue(await link.announce('Time for your pills.', 'en'))
+        self.assertEqual(c.events[-1][1]['url'], 'http://me/reply.flac')
+        self.assertEqual(asked, [{'flac': True}, {'flac': True}])
+        link.task.cancel()
+
+    async def test_a_speaker_that_doesnt_list_formats_gets_wav(self):
+        # Ava lists none and plays the WAV, as before.
+        for formats in ([], ['wav', 'flac']):
+            FakeClient.instances.clear()
+            FakeClient.media_formats = formats
+            asked = []
+
+            def speak(text, host, lang='en', **kw):
+                asked.append(kw)
+                return 'http://me/reply.wav'
+
+            def answer_fn(audio, spoke, asked=None, prefer=None, wake=''):
+                return mock.Mock(heard='turn off office light', reply='Office Lamp is off.', handled=True, stt_s=0, homehub_s=0, lang='en', asked=None)
+
+            link, c = await self.connected_link(answer_fn, speak)
+            self.assertFalse(link.flac)
+            await self.say(c, 1, 'Okay Nabu')
+            self.assertEqual(asked, [{}], formats)
+            link.task.cancel()
 
     async def say(self, c, n, wake=None):
         c.events.clear()
@@ -917,6 +967,32 @@ class ReplyCacheTest(unittest.TestCase):
         kept = next((self.tmp / 'cache').glob('*.wav'))
         with wave.open(str(kept), 'rb') as r:
             self.assertEqual(r.readframes(r.getnframes()), '開咗啊亮燈。'.encode() * 100)
+
+    def fetch(self, url):
+        import urllib.request
+        with urllib.request.urlopen(url, timeout=5) as r:
+            return r.headers['Content-Type'], r.read()
+
+    def test_replies_are_served_with_types_a_voice_pe_knows(self):
+        # It plays nothing labelled 'audio/x-wav', Python's default for .wav.
+        speak = self.speak_fn({'en': CountingVoice()})
+        self.assertEqual(self.fetch(speak('Office lamp is off.', '127.0.0.1'))[0], 'audio/wav')
+        self.assertEqual(self.fetch(speak('Office lamp is off.', '127.0.0.1', flac=True))[0], 'audio/flac')
+
+    def test_flac_replies_are_48_khz_mono_with_their_lead_in(self):
+        import av
+        speak = self.speak_fn({'en': CountingVoice()})
+        for url in (speak('Office lamp is off.', '127.0.0.1', flac=True), speak('Office lamp is off.', '127.0.0.1', flac=True)):
+            self.assertTrue(url.endswith('.flac'), 'made, then reused from the kept WAV')
+            with av.open(str(self.server.dir / url.rsplit('/', 1)[1])) as f:
+                stream = f.streams.audio[0]
+                self.assertEqual((stream.codec_context.name, stream.rate, stream.channels), ('flac', 48000, 1))
+                samples = np.concatenate([fr.to_ndarray().ravel() for fr in f.decode(audio=0)])
+            self.assertTrue(np.all(samples[:20000] == 0), 'starts with the half second of silence')
+            self.assertGreater(np.abs(samples[24000:]).max(), 0, 'then the reply')
+            self.assertAlmostEqual(len(samples) / 48000, 0.5 + len('Office lamp is off.'.encode()) * 100 / 2 / 16000, delta=0.05)
+        self.assertEqual(list(self.server.dir.glob('*.wav')), [], 'the WAV served copies are replaced, not left behind')
+        self.assertEqual(len(list((self.tmp / 'cache').glob('*.wav'))), 1, 'the kept reply stays WAV')
 
     def test_kept_across_restarts_but_not_for_a_new_voice(self):
         model = self.tmp / 'voice.onnx'

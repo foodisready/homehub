@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import logging
 import re
 import socket
@@ -110,6 +111,17 @@ class OneAnswers:
         return max([run, *[r for r in others if not r.dropped]], key=rank) is run
 
 
+async def flac_only(client) -> bool:
+    """Whether the speaker's media player plays FLAC and not WAV, as the Voice PE's does. False when it
+    doesn't say, as Ava doesn't: it plays the WAV."""
+    try:
+        entities, _ = await asyncio.wait_for(client.list_entities_services(), 10)
+    except Exception:  # noqa: BLE001 — not knowing leaves replies as they were
+        return False
+    formats = {str(f.format).lower() for e in entities for f in (getattr(e, 'supported_formats', None) or [])}
+    return 'flac' in formats and 'wav' not in formats
+
+
 class StopTrying(Exception):
     """This device can't be used as a speaker, so don't reconnect."""
 
@@ -131,7 +143,7 @@ class SpeakerLink:
         self.languages = languages  # the ones that are on, so a wake word's language is one of them
         self.one_answers = one_answers or OneAnswers()
         self.answer = answer
-        self.speak = speak  # (text, speaker host, language) -> URL of the spoken reply
+        self.speak = speak  # (text, speaker host, language[, flac=True]) -> URL of the spoken reply
         self.listed = listed  # listed in SPEAKERS rather than found on the network
         self.name = speaker.label
         self.run: Run | None = None
@@ -151,6 +163,8 @@ class SpeakerLink:
         self.can_announce = False
         # Listens straight after an announcement, with no wake word: for a reminder that asks back.
         self.can_start = False
+        # Plays FLAC only, like the Voice PE: its replies are made into FLAC.
+        self.flac = False
 
     @property
     def who(self) -> str:
@@ -216,13 +230,15 @@ class SpeakerLink:
                 raise StopTrying('not a voice speaker, ignoring it')
             self.can_announce = bool(info.voice_assistant_feature_flags & VoiceAssistantFeature.ANNOUNCE)
             self.can_start = bool(info.voice_assistant_feature_flags & VoiceAssistantFeature.START_CONVERSATION)
+            self.flac = await flac_only(c)
             self.client = c
             self._subscribe(c)
             try:
                 await asyncio.wait_for(c.get_voice_assistant_configuration(5), 6)
             except Exception:  # noqa: BLE001 — older firmware doesn't support it
                 pass
-            log.info('%s connected (%s), listening%s', self.name, self.speaker.label, '' if self.can_announce else "; it can't say reminders")
+            log.info('%s connected (%s), listening%s%s', self.name, self.speaker.label, '' if self.can_announce else "; it can't say reminders",
+                     '; replies as FLAC' if self.flac else '')
             self._set_connected(True)
             await gone.wait()
         finally:
@@ -231,6 +247,10 @@ class SpeakerLink:
             if self.run:
                 self.run.ended.set()
             await c.disconnect()
+
+    def _speak(self, text: str, lang: str) -> Callable[[], str]:
+        """Makes the reply, in a format this speaker plays."""
+        return functools.partial(self.speak, text, self.speaker.host, lang, **({'flac': True} if self.flac else {}))
 
     async def announce(self, text: str, lang: str, ask: int | None = None) -> bool:
         """Says something nobody asked for, such as a reminder. A command being answered finishes first.
@@ -243,7 +263,7 @@ class SpeakerLink:
             await asyncio.sleep(0.5)
             waited += 0.5
         loop = asyncio.get_running_loop()
-        url = await loop.run_in_executor(None, self.speak, text, self.speaker.host, lang)
+        url = await loop.run_in_executor(None, self._speak(text, lang))
         self.said = (text, time.monotonic())   # heard back, it isn't a command
         try:
             listen = ask is not None and self.can_start
@@ -333,7 +353,7 @@ class SpeakerLink:
                                                      **({'continue_conversation': '1'} if follow_up or try_again else {})})
                 event(E.VOICE_ASSISTANT_TTS_START, {'text': a.reply})
                 self.said = (a.reply, time.monotonic())
-                url = await loop.run_in_executor(None, self.speak, a.reply, self.speaker.host, a.lang)
+                url = await loop.run_in_executor(None, self._speak(a.reply, a.lang))
                 event(E.VOICE_ASSISTANT_TTS_END, {'url': url})
                 lang = a.lang if isinstance(getattr(a, 'lang', None), str) else 'en'
                 if follow_up:
