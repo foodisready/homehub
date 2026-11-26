@@ -52,6 +52,16 @@ class KindTest(unittest.TestCase):
         self.assertIsNone(confirm.loose_kind('Turn off the desk lamp in the office', 'en'))
         self.assertIsNone(confirm.loose_kind('Tell me what time it is', 'en'))
 
+    def test_a_length_of_time_after_the_answer_keeps_it_an_answer(self):
+        # From the Pi's log, 2026-11-26: 系啦五十分钟 answered 係咪要開早餐燈仔？
+        for text, lang in (('系啦五十分钟。', 'yue'), ('係啦，五十分鐘', 'yue'), ('好呀，個半鐘', 'yue'), ('是的，三十分钟', 'zh'),
+                           ('Yes, for two hours.', 'en'), ('Yes please, 30 minutes', 'en'), ('Sure, half an hour.', 'en'),
+                           ('Yes turn it on for an hour and a half', 'en'), ('Có, ba mươi phút', 'vi'), ('Vâng, một tiếng', 'vi')):
+            self.assertEqual(confirm.loose_kind(text, lang), confirm.YES, text)
+        self.assertEqual(confirm.loose_kind('唔係，五十分鐘', 'yue'), confirm.NO)
+        self.assertEqual(confirm.loose_kind('No, for two hours', 'en'), confirm.NO)
+        self.assertIsNone(confirm.loose_kind('Turn off the desk lamp in the office for ten minutes', 'en'))
+
 
 class Hub:
     """HomeHub with Claude chosen: commands it doesn't know come back as a question."""
@@ -62,7 +72,7 @@ class Hub:
     can_ask = True
 
     def __init__(self, gone=False):
-        self.sent, self.answers, self.gone = [], [], gone
+        self.sent, self.answers, self.heard, self.gone = [], [], [], gone
 
     def command(self, text, retry=False, lang=None, ask=False):
         self.sent.append((text, retry, lang, ask))
@@ -73,8 +83,9 @@ class Hub:
             return CommandResult(False, q, [], None, q, lang or 'en', 'c1')
         return CommandResult(False, "Sorry, I didn't understand.")
 
-    def answer_confirm(self, confirm_id, k):
+    def answer_confirm(self, confirm_id, k, heard=''):
         self.answers.append((confirm_id, k))
+        self.heard.append(heard)
         if self.gone:
             return None
         return {'handled': k == 'yes', 'response': 'Turned on Porch light.' if k == 'yes' else 'OK, I left everything as it was.', 'lang': 'en'}
@@ -122,6 +133,12 @@ class PipelineTest(unittest.TestCase):
         b = answer(AUDIO, True, Whisper('Yes.'), hub, asked=a.asked, prefer=a.lang)
         self.assertEqual(hub.answers, [('c1', 'yes')])
         self.assertEqual((b.reply, b.handled, b.asked), ('Turned on Porch light.', True, None))
+
+    def test_the_words_of_the_yes_go_to_homehub(self):
+        # HomeHub reads how long from them.
+        hub = Hub()
+        answer(AUDIO, True, Whisper('Yes, for two hours.'), hub, asked='confirm:c1', prefer='en')
+        self.assertEqual((hub.answers, hub.heard), ([('c1', 'yes')], ['Yes, for two hours.']))
 
     def test_no(self):
         hub = Hub()

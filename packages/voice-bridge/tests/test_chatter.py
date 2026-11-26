@@ -80,3 +80,29 @@ class OwnWordsTest(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class SaysANameTest(unittest.TestCase):
+    """A few words heard over a noisy room with one of the home's names in them: someone speaking to the speaker."""
+    NAMES = ['Little breakfast lamp', '早餐燈仔', '早餐區細燈', 'Little foyer lamp', 'Kitchen ceiling lights', 'Living room lamp',
+             'đèn phòng khách', 'Porch light']
+
+    def test_part_of_a_name_was_said(self):
+        from homehub_voice.chatter import says_a_name
+        # From the Pi's log, 2026-11-26: eight seconds over a noisy kitchen, so it stayed quiet.
+        self.assertTrue(says_a_name('Have fun for your little lamb for 2 hours.', self.NAMES))
+        self.assertTrue(says_a_name('早餐灯仔分钟。', self.NAMES))
+        self.assertTrue(says_a_name('Tắt đèn phòng khách đi', self.NAMES))
+        self.assertTrue(says_a_name('the porch late please', self.NAMES))
+
+    def test_only_words_every_name_has_is_not(self):
+        from homehub_voice.chatter import says_a_name
+        for talk in ('Turn it on for two hours, the lamp', '開燈仔', "I don't want to pay for your drink.", 'room for the lights', ''):
+            self.assertFalse(says_a_name(talk, self.NAMES), talk)
+        self.assertFalse(says_a_name('Have fun for your little lamb', []), 'no names known')
+
+    def test_long_talk_is_still_the_room(self):
+        from homehub_voice.chatter import says_a_name
+        tv = 'and the little one was out in the garden for hours while we sat on the porch talking about nothing'
+        self.assertFalse(says_a_name(tv, self.NAMES))
+        self.assertFalse(says_a_name('我哋今日去咗街市買咗好多嘢返嚟食早餐好開心', self.NAMES))

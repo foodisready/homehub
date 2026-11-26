@@ -83,14 +83,22 @@ def kind(text: str, lang: str) -> str | None:
     return YES if EN_YES.match(plain) else NO if EN_NO.match(plain) else None
 
 
+# A length of time after the answer ("yes, for two hours", 係啦五十分鐘, "có, ba mươi phút"): HomeHub
+# reads it (it's often what the speaker misheard in the command), so it doesn't make the answer long.
+ZH_HOW_LONG = re.compile(r'[0-9一二兩两三四五六七八九十半個个]+(?:分鐘|分钟|鐘頭?|钟头?|小時|小时)半?$')
+EN_HOW_LONG = re.compile(r"(?:\s+for)?\s+(?:(?:\d+|an?|one|two|three|four|five|six|ten|fifteen|twenty|thirty|forty|forty five|fifty|sixty|ninety)"
+                         r"(?:\s+and\s+a\s+half)?\s+(?:minutes?|mins?|hours?|hrs?)(?:\s+and\s+a\s+half)?|half\s+an?\s+hour)$")
+VI_HOW_LONG = re.compile(r'(?:\s+trong)?(?:\s+(?:\d+|một|hai|ba|bốn|năm|lăm|sáu|bảy|tám|chín|mười|mươi|mốt|nửa)){1,3}\s+(?:phút|tiếng)$')
+
+
 def loose_kind(text: str, lang: str) -> str | None:
     """Straight after the question: a short answer that starts with yes or no ("yes, turn it on",
-    "không, cảm ơn", 好呀唔該). A longer sentence is a new command."""
+    "không, cảm ơn", 好呀唔該), perhaps with how long after it. A longer sentence is a new command."""
     exact = kind(text, lang)
     if exact or not text:
         return exact
     if yue.has_chinese(text):
-        bare = text.strip(' 。，.,!?！？')
+        bare = ZH_HOW_LONG.sub('', re.sub(r'[\s。，、.,!?！？]+', '', text))
         if len(bare) > 6:
             return None
         # 唔 / 不 first: 唔係 and 不是 start with what 係 and 是 would.
@@ -98,13 +106,13 @@ def loose_kind(text: str, lang: str) -> str | None:
             return NO
         return YES if bare.startswith(('係', '系', '好', '啱', '是', '对', '對')) else None
     if vi.has_vietnamese(text) or lang == 'vi':
-        ws = vi.words(text)
+        ws = vi.words(VI_HOW_LONG.sub('', ' '.join(vi.words(text))))
         if not ws or len(ws) > 4:
             return None
         if ws[0] in ('không', 'đừng', 'thôi') or vi.plain(ws[0]) == 'khong':
             return NO
         return YES if ws[0] in ('có', 'vâng', 'dạ', 'ừ', 'đúng', 'được') else None
-    ws = _en(text).split()
+    ws = EN_HOW_LONG.sub('', _en(text)).split()
     if not ws or len(ws) > 5:
         return None
     if ws[0] in ('no', 'nope', 'nah', "don't", 'dont', 'cancel'):
@@ -129,12 +137,14 @@ class ConfirmResult:
     homehub_s: float
 
 
-def run(k: str, confirm_id: str, lang: str, homehub) -> ConfirmResult | None:
-    """Sends the answer. HomeHub says what to say, in the question's language. None if HomeHub can't be reached."""
+def run(k: str, confirm_id: str, lang: str, homehub, heard: str = '') -> ConfirmResult | None:
+    """Sends the answer, and the words it was heard as: a length of time in them ("係啦，五十分鐘") is
+    how long HomeHub leaves the light on. HomeHub says what to say, in the question's language.
+    None if HomeHub can't be reached."""
     from .homehub import HomeHubError
     t = time.monotonic()
     try:
-        res = homehub.answer_confirm(confirm_id, k)
+        res = homehub.answer_confirm(confirm_id, k, heard)
     except HomeHubError:
         return None
     if res is None:

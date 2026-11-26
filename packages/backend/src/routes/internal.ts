@@ -185,12 +185,14 @@ function sayIt(answer: { response: string; actions: unknown[] }, lang: VoiceLang
   return { handled: true, response: say, say, lang, actions: answer.actions };
 }
 
-// POST /internal/voice/confirm/:id  { answer: 'yes' | 'no' }: the answer to "Should I turn on …?" after a
-// voice command. Replies with what to say, in the question's language; 404 once it isn't asking.
+// POST /internal/voice/confirm/:id  { answer: 'yes' | 'no', heard? }: the answer to "Should I turn on …?" after a
+// voice command, and the words it was heard as ("yes, for two hours"). Replies with what to say, in the
+// question's language; 404 once it isn't asking.
 internalRouter.post('/voice/confirm/:id', async (req: Request, res: Response) => {
-  const answer = (req.body ?? {}).answer;
+  const { answer, heard } = (req.body ?? {}) as { answer?: unknown; heard?: unknown };
   if (answer !== 'yes' && answer !== 'no') return res.status(400).json({ error: '`answer` must be yes or no', code: 'VALIDATION_ERROR' });
-  const done = await withActivity({ source: 'voice' }, () => answerVoiceAsk(String(req.params['id']), answer));
+  const said = typeof heard === 'string' ? heard.slice(0, 200) : undefined;
+  const done = await withActivity({ source: 'voice' }, () => answerVoiceAsk(String(req.params['id']), answer, said));
   if (!done) return res.status(404).json({ error: 'Not asking', code: 'NOT_FOUND' });
   const ok = answer === 'no' || done.actions.some((a) => (a.result as { success?: boolean } | undefined)?.success);
   res.json({ handled: ok, response: done.response, lang: done.lang, actions: done.actions });

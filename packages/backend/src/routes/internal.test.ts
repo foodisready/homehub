@@ -22,6 +22,7 @@ process.env.JWT_REFRESH_SECRET = 'test-refresh-secret-test-refresh-secret';
 import { getDb } from '../db';
 import { internalRouter } from './internal';
 import { getDriver } from '../drivers/registry';
+import { setPending, type Proposal } from '../nlp/confirm';
 
 let server: http.Server;
 let baseUrl: string;
@@ -215,6 +216,50 @@ describe('/internal/voice', () => {
       assert.equal(calls.length, 1);
     } finally {
       getDb().prepare("DELETE FROM devices WHERE alias = 'Upstairs Thermostat'").run();
+    }
+  });
+
+  it('a length of time said with the yes is how long the light stays on', async () => {
+    // From the Pi's log: 早餐灯仔分钟 lost its 五十, HomeHub asked 係咪要開早餐燈仔？, and the answer
+    // 系啦五十分钟 turned the lamp on with no timer.
+    const id = (getDb().prepare("SELECT id FROM devices WHERE alias = 'My office lamp'").get() as { id: number }).id;
+    const asked = (over: Partial<Proposal> = {}): string => {
+      const confirmId = `t-${Math.random()}`;
+      setPending(`voice:${confirmId}`, { deviceIds: [id], aliases: ['My office lamp'], state: true, minutes: null, door: false,
+        lang: 'yue', phrase: null, text: '早餐灯仔分钟', ...over });
+      return confirmId;
+    };
+    const answer = async (confirmId: string, body: object) => (await fetch(`${baseUrl}/internal/voice/confirm/${confirmId}`,
+      { method: 'POST', headers: key, body: JSON.stringify(body) })).json() as Promise<any>;
+    const timer = () => (getDb().prepare('SELECT timer_off_at FROM devices WHERE id = ?').get(id) as { timer_off_at: string | null }).timer_off_at;
+    // Kept as SQLite's UTC time, without the Z.
+    const minutesLeft = () => Math.round((new Date(timer()!.replace(' ', 'T') + (/[zZ+]/.test(timer()!) ? '' : 'Z')).getTime() - Date.now()) / 60_000);
+    try {
+      assert.equal((await answer(asked(), { answer: 'yes', heard: '系啦五十分钟。' })).handled, true);
+      assert.deepEqual(calls, [{ ip: '10.9.0.1', state: true }]);
+      assert.equal(minutesLeft(), 50);
+
+      // In English, and over a length of time the question already had.
+      await answer(asked({ lang: 'en', minutes: 30 }), { answer: 'yes', heard: 'Yes, for two hours.' });
+      assert.equal(minutesLeft(), 120);
+
+      // A plain yes keeps the question's own length of time; an old bridge sends no words at all.
+      await answer(asked({ minutes: 45 }), { answer: 'yes', heard: '係' });
+      assert.equal(minutesLeft(), 45);
+      await answer(asked({ minutes: 20 }), { answer: 'yes' });
+      assert.equal(minutesLeft(), 20);
+
+      // Turning off takes no timer, whatever else was said; nor does a no.
+      getDb().prepare('UPDATE devices SET timer_off_at = NULL WHERE id = ?').run(id);
+      calls.length = 0;
+      await answer(asked({ state: false }), { answer: 'yes', heard: 'yes, for two hours' });
+      assert.deepEqual(calls, [{ ip: '10.9.0.1', state: false }]);
+      assert.equal(timer(), null);
+      calls.length = 0;
+      assert.equal((await answer(asked(), { answer: 'no', heard: '唔係，五十分鐘' })).handled, true);
+      assert.deepEqual(calls, []);
+    } finally {
+      getDb().prepare('UPDATE devices SET timer_off_at = NULL WHERE id = ?').run(id);
     }
   });
 

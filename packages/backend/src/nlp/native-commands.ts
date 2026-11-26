@@ -13,7 +13,7 @@
  * The switching itself is the English rules' (runPowerCommand), so protected devices, garage
  * doors (closed, never opened) and cameras behave exactly as when typed in English.
  */
-import { CAMERA_PAUSE_REFUSED, DOOR_OPEN_REFUSED, isGarageDoor, runPowerCommand, type ThermostatAsk } from './commands';
+import { CAMERA_PAUSE_REFUSED, DOOR_OPEN_REFUSED, isGarageDoor, parseDuration, runPowerCommand, type ThermostatAsk } from './commands';
 import { findDeviceByName, findDeviceGroup, listDeviceNames, listSceneNames, normalize } from './find-device';
 import type { ActionTaken } from './nlp.service';
 
@@ -200,6 +200,30 @@ function zhDuration(t: string): { rest: string; minutes: number } | { later: tru
   if (!minutes) return null;
   if (m[6]) return { later: true };
   return { rest: t.slice(0, m.index), minutes };
+}
+
+/**
+ * How long, said at the end of a short answer, in any of the home's languages: "yes, for two hours",
+ * 係啦五十分鐘, "có, ba mươi phút". Null with no length of time, or with one that says when rather than
+ * for how long (十分鐘後, "10 phút nữa").
+ */
+export function durationAtEnd(text: string): number | null {
+  if (hasChinese(text)) {
+    const t = text.replace(/[\s.!?,;:。！？，、～~]+/g, '').replace(/(?:啦|喇|呀|啊|吖|囉|咧|吧|了|嘅)+$/, '');
+    // zhDuration wants something before the time: the answer word, or a stand-in for none.
+    const d = zhDuration(`答${t}`);
+    return d && !('later' in d) ? d.minutes : null;
+  }
+  const words = text.toLowerCase().normalize('NFC').split(/[\s,.!?;:]+/).filter(Boolean);
+  if (/[\u00C0-\u1EF9]/.test(text) || /(?:^|\s)(?:phút|tiếng)(?:\s|$)/.test(words.join(' '))) {
+    const d = viDuration(['', ...words.filter((w) => !['ạ', 'nhé', 'nha', 'đi'].includes(w))]);
+    return d && !('later' in d) ? d.minutes : null;
+  }
+  for (let i = 0; i < words.length; i++) {
+    const minutes = parseDuration(words.slice(i).join(' ').replace(/^for\s+/, ''));
+    if (minutes) return minutes;
+  }
+  return null;
 }
 
 const takeFirst = (text: string, verbs: string[]) => verbs.find((v) => text.startsWith(v));

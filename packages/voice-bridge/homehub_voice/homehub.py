@@ -117,10 +117,12 @@ class HomeHub:
         """A call for help ('raise') or 'cancel', heard by the speaker `where`. Returns HomeHub's answer: its state."""
         return self._call('/sos', {'action': action, 'where': where, 'lang': lang, 'heard': heard})
 
-    def answer_confirm(self, confirm_id: str, answer: str) -> dict | None:
-        """The yes or no to HomeHub's "Turn on …?". Its answer says what to say; None if it isn't asking any more."""
+    def answer_confirm(self, confirm_id: str, answer: str, heard: str = '') -> dict | None:
+        """The yes or no to HomeHub's "Turn on …?", and the words it was heard as. Its answer says what to say;
+        None if it isn't asking any more."""
         try:
-            return self._call(f'/confirm/{urllib.parse.quote(confirm_id, safe="")}', {'answer': answer})
+            return self._call(f'/confirm/{urllib.parse.quote(confirm_id, safe="")}',
+                              {'answer': answer, **({'heard': heard} if heard else {})})
         except HomeHubError as e:
             if 'answered 404' in str(e):
                 return None

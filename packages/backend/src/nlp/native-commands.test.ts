@@ -201,3 +201,14 @@ describe('commands typed in Vietnamese and Chinese', () => {
     });
   });
 });
+
+describe('durationAtEnd: a length of time said with an answer', () => {
+  it('reads it in every language, and only for how long, not when', () => {
+    const cases: [string, number | null][] = [
+      ['系啦五十分钟。', 50], ['係啦，五十分鐘', 50], ['好呀，個半鐘', 90], ['是的，三十分钟', 30], ['係', null], ['係啦十分鐘後', null],
+      ['yes', null], ['yes, for two hours', 120], ['Yes please, 30 minutes.', 30], ['sure, half an hour', 30],
+      ['có, ba mươi phút', 30], ['Có ạ, một tiếng', 60], ['có', null], ['Vâng, 10 phút nữa', null],
+    ];
+    for (const [text, minutes] of cases) assert.equal(native.durationAtEnd(text), minutes, text);
+  });
+});

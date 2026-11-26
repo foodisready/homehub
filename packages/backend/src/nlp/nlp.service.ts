@@ -13,7 +13,7 @@ import { logger } from '../logger';
 import { findDeviceByName, findDeviceGroup, listDeviceNames, notALight } from './find-device';
 import { isCamera, isGarageDoor, runGroupCommand, runPowerCommand, type ThermostatAsk } from './commands';
 import { runVacuumCommand, cleanRoomsByName } from './vacuum-rooms';
-import { hasChinese, MANDARIN, runNativeCommand } from './native-commands';
+import { durationAtEnd, hasChinese, MANDARIN, runNativeCommand } from './native-commands';
 import { recordCommand } from './command-log';
 import { looksLikeToolCall, toolArguments, toolCallInText } from './tool-args';
 import { asksForLater, primeRewrite, rewriteMessage } from './rewrite';
@@ -825,12 +825,15 @@ export async function askForVoice(text: string, lang: Lang | null, wake = ''): P
 
 /**
  * The yes or no heard after the speaker asked. Null when it isn't asking that any more (answered,
- * or more than two minutes ago).
+ * or more than two minutes ago). heard: the answer as said. A length of time in it ("係啦，五十分鐘")
+ * is how long to leave the devices on: it was often the part of the command the speaker misheard.
  */
-export async function answerVoiceAsk(confirmId: string, answer: 'yes' | 'no'): Promise<Handled & { lang: Lang } | null> {
-  const proposal = takePending(`voice:${confirmId}`);
-  if (!proposal) return null;
-  if (answer === 'no') return { response: declined(proposal), actions: [], lang: proposal.lang };
+export async function answerVoiceAsk(confirmId: string, answer: 'yes' | 'no', heard?: string): Promise<Handled & { lang: Lang } | null> {
+  const asked = takePending(`voice:${confirmId}`);
+  if (!asked) return null;
+  if (answer === 'no') return { response: declined(asked), actions: [], lang: asked.lang };
+  const minutes = heard && asked.state && !asked.door ? durationAtEnd(heard) : null;
+  const proposal = minutes ? { ...asked, minutes } : asked;
   const done = await confirm(proposal);
   return { response: done.response, actions: done.actions, lang: proposal.lang };
 }

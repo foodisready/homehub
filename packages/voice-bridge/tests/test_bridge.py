@@ -365,6 +365,35 @@ class SpeakerLinkTest(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(wake_language('老友'))
         self.assertIsNone(wake_language('Xin Chào', ['en', 'yue']), 'Vietnamese is off')
 
+    async def test_a_name_said_over_a_noisy_room_is_answered(self):
+        # From the tablet, 2026-11-26: "Turn on the little lamp for two hours" over a noisy kitchen, heard as
+        # eight seconds of "Have fun for your little lamb for 2 hours." It stayed quiet, as for a TV.
+        named = [True]
+
+        def answer_fn(audio, spoke, asked=None, prefer=None, wake=''):
+            return mock.Mock(heard='Have fun for your little lamb for 2 hours.', reply="Sorry, I didn't understand that.",
+                             handled=False, stt_s=0, homehub_s=0, lang='en', asked=None, named=named[0])
+
+        async def talk(c, n):
+            c.events.clear()
+            await c.handlers['handle_start'](f'kitchen{n}', 0, None, 'Hey Jarvis')
+            for ch in chunks(tone(0.3, False) + tone(9, True)):
+                await c.handlers['handle_audio'](ch, None)
+            for _ in range(300):
+                await asyncio.sleep(0.01)
+                if c.events and c.events[-1][0] == 'VOICE_ASSISTANT_RUN_END':
+                    return dict(c.events)
+
+        link, c = await self.connected_link(answer_fn)
+        said = await talk(c, 1)
+        self.assertIn('VOICE_ASSISTANT_TTS_START', said, 'answered')
+        self.assertEqual(said['VOICE_ASSISTANT_INTENT_END'].get('continue_conversation'), '1', 'and listens once more')
+        # Without one of the home's names in it, the same eight seconds is still the room.
+        named[0] = False
+        link.again = None
+        self.assertNotIn('VOICE_ASSISTANT_TTS_START', await talk(c, 2))
+        link.task.cancel()
+
     def test_background_talk(self):
         from homehub_voice.speakers import background_talk
         self.assertTrue(background_talk(8.0, 7.6))

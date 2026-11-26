@@ -60,6 +60,41 @@ def command_over_noise(heard: str) -> bool:
     return any(w in EN_COMMAND or w in THINGS for w in ws)
 
 
+# Talk that names one of the home's devices is at most this long when it's a command misheard over a
+# noisy room ("Have fun for your little lamb for 2 hours."), not a TV's fifteen words or more.
+NAMED_WORDS = 12
+NAMED_SYLLABLES = 14
+# Words in names that aren't the name itself: things, rooms, on and off, little words.
+NOT_A_NAME = EN_COMMAND | THINGS | {'room', 'rooms', 'the', 'and', 'with', 'your', 'from', 'that', 'this', 'side', 'left', 'right'}
+ZH_NOT_A_NAME = set('係系咪要唔好開开熄關关閂闩燈灯仔個个嘅啦呀咗下埋返分鐘钟半小時时頭头一二兩两三四五六七八九十是不嗎吗吧把打房廳厅')
+
+
+def says_a_name(heard: str, names: list[str]) -> bool:
+    """Whether a few words heard over a noisy room have part of one of the home's names in them:
+    "little" of Little breakfast lamp in "Have fun for your little lamb for 2 hours", 早餐 in
+    早餐灯仔分钟. Then it was someone speaking to the speaker, however badly it was heard, and it
+    answers (asks "Turn on …?", or says it didn't understand and listens once more) rather than
+    staying quiet as it does for a TV."""
+    text = heard.split(' → ')[0].strip()
+    if not text or not names:
+        return False
+    if yue.has_chinese(text):
+        if len(yue.syllables(text)) > NAMED_SYLLABLES:
+            return False
+        han = lambda t: re.sub(r'[^\u3400-\u9fff]', '', yue.traditional(t))  # noqa: E731
+        h = han(text)
+        named = [han(n) for n in names if yue.has_chinese(n)]
+        return any(h[i:i + 2] in n for i in range(len(h) - 1) if not set(h[i:i + 2]) & ZH_NOT_A_NAME for n in named)
+    plain = (lambda t: vi.plain(t)) if vi.has_vietnamese(text) else (lambda t: t)
+    ws = _words(plain(text))
+    if not ws or len(ws) > NAMED_WORDS:
+        return False
+    shortest = 3 if vi.has_vietnamese(text) else 4
+    not_names = NOT_A_NAME | VI_COMMAND | {vi.plain(w) for w in VI_COMMAND}
+    name_words = {w for n in names for w in _words(plain(n)) if len(w) >= shortest and w not in not_names and not w.isdigit()}
+    return any(w in name_words for w in ws)
+
+
 def looks_like_chatter(heard: str, names: list[str]) -> bool:
     """True when a miss has nothing of a command in it: say nothing rather than "didn't understand"."""
     text = heard.split(' → ')[0].strip()

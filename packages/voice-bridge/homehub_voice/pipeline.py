@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from . import cantonese as yue
-from .chatter import looks_like_chatter
+from .chatter import looks_like_chatter, says_a_name
 from . import mandarin as zh
 from . import questions
 from . import ask
@@ -104,6 +104,9 @@ class Answer:
     # Not understood, and nothing in it was a command: talk from a TV or a conversation, so the
     # speaker says nothing (see chatter.py).
     chatter: bool = False
+    # Not understood, but a few words with one of the home's names in them: someone speaking to the
+    # speaker over a noisy room, answered even after eight seconds of sound (chatter.says_a_name).
+    named: bool = False
 
 
 # "On", "off", "turn it on", "switch it off, please": an answer to "on or off?".
@@ -163,8 +166,11 @@ def answer(audio: bytes, spoke: bool, listener: Transcriber, homehub: Commander,
     finally:
         _woken.reset(woken)
         _confirming.reset(token)
-    if not a.handled and a.asked is None and not asked and looks_like_chatter(a.heard, list(getattr(homehub, 'names', []))):
+    names = list(getattr(homehub, 'names', []))
+    if not a.handled and a.asked is None and not asked and looks_like_chatter(a.heard, names):
         a.chatter = True
+    if not a.handled and says_a_name(a.heard, names):
+        a.named = True
     return a
 
 
@@ -510,7 +516,7 @@ def special(text: str, lang: str, homehub: Commander, t0: float, where: str, jus
     confirming = _confirming.get()
     if confirming and (k := confirm.loose_kind(text, lang)):
         t1 = time.monotonic()
-        r = confirm.run(k, confirming, lang, homehub)
+        r = confirm.run(k, confirming, lang, homehub, text)
         if r is None:
             return Answer(f'{text} → {k}', NO_HOMEHUB if lang == 'en' else {'vi': vi.NO_HOMEHUB, 'yue': yue.NO_HOMEHUB, 'zh': zh.NO_HOMEHUB}.get(lang, NO_HOMEHUB),
                           False, t1 - t0, time.monotonic() - t1, lang=lang)

@@ -302,8 +302,10 @@ class SpeakerLink:
                 # or a conversation that sounded like the wake word, not someone speaking to it.
                 # A question HomeHub would ask about it ("Turn on …?") doesn't make TV talk a command.
                 asks_back = bool(follow_up and follow_up.startswith(confirm.PREFIX))
-                # A few command words heard over the noise are still answered (see background_talk).
-                if not a.handled and (not follow_up or asks_back) and background_talk(run.listen.seconds, run.listen.voiced, a.heard):
+                # A few command words heard over the noise are still answered (see background_talk), and so
+                # are a few words with one of the home's names in them, misheard as the rest may be (says_a_name).
+                if (not a.handled and (not follow_up or asks_back) and getattr(a, 'named', False) is not True
+                        and background_talk(run.listen.seconds, run.listen.voiced, a.heard)):
                     log.info('%s #%d (%s) heard %r in %.1fs of talk that didn\'t stop, most likely a TV or a conversation, so it stays quiet',
                              self.who, run.n, run.wake or 'no wake word', a.heard, run.listen.seconds)
                     return
