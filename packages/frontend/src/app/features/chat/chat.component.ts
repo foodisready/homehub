@@ -259,6 +259,7 @@ export class ChatComponent implements AfterViewInit, AfterViewChecked, OnDestroy
   private refocus = false;
   private resizeWatch?: ResizeObserver;
   private readonly onResize = () => this.fit();
+  private readonly onFocusChange = () => requestAnimationFrame(() => this.fit());
   readonly warmup = inject(AiWarmupService);
 
   private readonly _loading      = signal(false);
@@ -308,6 +309,10 @@ export class ChatComponent implements AfterViewInit, AfterViewChecked, OnDestroy
   ngAfterViewInit(): void {
     this.zone.runOutsideAngular(() => {
       window.addEventListener('resize', this.onResize);
+      window.visualViewport?.addEventListener('resize', this.onResize);
+      // The tab bar hides while a box is being typed in (styles.css).
+      document.addEventListener('focusin', this.onFocusChange);
+      document.addEventListener('focusout', this.onFocusChange);
       this.resizeWatch = new ResizeObserver(this.onResize);
       this.resizeWatch.observe(document.body);
     });
@@ -322,8 +327,17 @@ export class ChatComponent implements AfterViewInit, AfterViewChecked, OnDestroy
     // On phones the tab bar is fixed over the bottom of the window: the box to type in goes above it.
     const tabs = document.querySelector('nav.tabs');
     const tabBar = tabs && getComputedStyle(tabs).display !== 'none' ? tabs.getBoundingClientRect().height : 0;
-    const height = Math.max(240, Math.floor(window.innerHeight - top - bottomGap - tabBar));
-    if (el.style.height !== `${height}px`) el.style.height = `${height}px`;
+    // A phone's keyboard takes the bottom of the screen. Android Chrome shrinks the window for it
+    // (interactive-widget in index.html); Safari only shrinks the visible part, so that's measured too.
+    const vv = window.visualViewport;
+    const viewH = vv && Math.abs(vv.scale - 1) < 0.01 ? Math.min(window.innerHeight, vv.height) : window.innerHeight;
+    const height = Math.max(240, Math.floor(viewH - top - bottomGap - tabBar));
+    if (el.style.height === `${height}px`) return;
+    // Keep the latest message in sight when the keyboard makes the chat shorter.
+    const list = this.messageList?.nativeElement;
+    const atEnd = !!list && list.scrollHeight - list.scrollTop - list.clientHeight < 40;
+    el.style.height = `${height}px`;
+    if (atEnd) this.scrollToBottom();
   }
 
   ngAfterViewChecked(): void {
@@ -445,6 +459,9 @@ export class ChatComponent implements AfterViewInit, AfterViewChecked, OnDestroy
   ngOnDestroy(): void {
     clearInterval(this.ticker);
     window.removeEventListener('resize', this.onResize);
+    window.visualViewport?.removeEventListener('resize', this.onResize);
+    document.removeEventListener('focusin', this.onFocusChange);
+    document.removeEventListener('focusout', this.onFocusChange);
     this.resizeWatch?.disconnect();
   }
 

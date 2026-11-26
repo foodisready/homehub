@@ -211,3 +211,11 @@ app-rooms-view .house { touch-action: pan-y; }
 /* Time left before a timer or motion rule turns a light off: the ring round it empties from the top. */
 app-rooms-view .bubble .orb > svg.ring.left { transform: rotate(-90deg); }
 app-rooms-view .orb > svg.ring.left circle { stroke: var(--warm); stroke-width: 3; transition: stroke-dasharray 1s linear; }
+
+/* While typing on a phone, the keyboard is up: the bottom tab bar, and the room kept for it, give way to the page. */
+@media (max-width: 899px) and (pointer: coarse) {
+  body:has(:is(textarea, [contenteditable="true"], input:not([type="checkbox"], [type="radio"], [type="range"], [type="button"], [type="submit"], [type="color"], [type="file"])):focus) {
+    & nav.tabs { display: none; }
+    & .tab-space { padding-bottom: 0; }
+  }
+}
