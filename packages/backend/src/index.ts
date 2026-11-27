@@ -41,6 +41,7 @@ import { startHoneywell } from './honeywell/honeywell';
 import { motionEventsRouter, motionRouter } from './routes/motion';
 import { sensorsRouter } from './routes/sensors';
 import { firmwareApiRouter, firmwarePublicRouter } from './routes/firmware';
+import { floorsRouter } from './routes/floors';
 import { notificationsAckRouter } from './routes/notifications-ack';
 import { notificationSettingsRouter } from './routes/notification-settings';
 import { notificationHistoryRouter } from './routes/notification-history';
@@ -171,6 +172,7 @@ app.use('/api/away',                   awayRouter);
 app.use('/api/ai',                     aiRouter);
 app.use('/api/energy',                 energyUsageRouter);
 app.use('/api/family',                 familyRouter);
+app.use('/api/floors',                 floorsRouter);
 
 // ── Global error handler ───────────────────────────────────────
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {

@@ -483,13 +483,14 @@ HomeHub keeps each device's daily hours and measured energy for as long as it ru
 
 Rooms keep the dashboard short. Open **Settings → Devices**, select **Edit** on a device, and enter a room. Devices with no room appear under **Unassigned**.
 
-Home shows your devices as **Rooms** at first, or as a **List**: switch at the top, and HomeHub remembers your choice on each browser.
+Home shows your devices as **Rooms** at first, as a **List**, or on a **Map** of your home: switch at the top, and HomeHub remembers your choice on each browser.
 
 - **Rooms:** a tile for each room, glowing warmer the more of its lights are on. Its chips show how many lights and plugs are on, the room's temperature if it has a thermostat (orange while heating, blue while cooling), a garage door left open, and anything offline, which also puts a red dot on the tile. **Camera** means a camera there is watching. Lights are recognized by their names, such as "lamp", "light" or "đèn".
 - **A room:** tap a tile and it grows into the room. Its devices hang off the room as round bubbles; a line lights up when a device is on. Tap a bubble to switch it, and press and hold it for its controls: timers, a thermostat's temperature and mode, and recent activity. Thermostats turned off, garage doors, pausing a camera and protected devices ask first, as on the list. A room with more than 8 devices shows them as a grid instead. **‹** and **›** at the bottom move to the next room, and the arrow at the top goes back to the tiles. Searching and filtering work here too.
 - **Lights going off by themselves:** a light or plug on a timer, schedule or motion rule shows when it goes off under its name: **Off in 4:32** in the last ten minutes, **Off in 25 min** or **Off at 9:30 PM** before that. A motion light also has a ring round it that empties as the time runs out, and shows **On · off 10 min after motion stops** while the sensor still sees someone: the time starts once it reports the room empty.
 - **All rooms:** **All rooms at a glance** above the tiles, or the grid button at the top of every room, shows every room at once with its devices small, lit as in the room. On a tablet or computer, tap a device to switch it; on a phone, tapping opens its room. Tap a room's name to go in, and the arrow takes you back to all of them. On a touch screen, pinch in on a room to see all rooms, and pinch out on one to go into it. HomeHub remembers the choice on each screen, so a wall tablet left on all rooms opens there.
 - **List:** each room folds open and shut. Offline devices move to their own group at the bottom.
+- **Map:** a picture of your home with each room marked where it is. A room glows when its lights are on, with a green number for how many things are on; a red **!** means something there is offline. Tap a room to go in, as from its tile, and the arrow takes you back to the map. **+** and **−** zoom, and the picture scrolls. Rooms are easiest to find for anyone who doesn't read the names, and they're shown as named in HomeHub, so a room named 廚房 reads 廚房.
 
 **All off** turns off a room's lights and plugs, leaving protected devices, thermostats and the music alone.
 
@@ -498,6 +499,18 @@ Speakers and TVs have their own bubbles: a speaker glows purple and says **Playi
 Search by device name, nickname or room, or use the **On** and **Offline** filters. The same search is in **Settings → Devices**. On a computer, press `/` to jump to search.
 
 You can also use rooms in Chat and voice, such as "turn off the living room".
+
+### Set up the map
+
+An administrator adds the pictures. Open **Map** and select **Add a picture** (or **Edit map**, then **+ Floor**, for another floor). Any picture works:
+
+- a photo of a sketch drawn on paper,
+- the house's floor plan,
+- a screenshot of a robot vacuum's map, such as the iRobot app's. Crop the phone's status bar and buttons out first.
+
+HomeHub makes the picture smaller before sending it, so a phone photo is fine. Then, in **Edit map**, choose a room from the list and tap where it is on the picture. Drag a room to move it, or select it and **Take off the map**. Rooms already placed have a ✓, and a room on another floor says which. Name the floor (Main floor, Upstairs), and select **Done** to save. **Replace picture** keeps the rooms where they are; **Delete this floor** removes the picture and its rooms, not the devices.
+
+A room renamed or emptied of devices disappears from the map, and **Edit map** lists it as **no devices** so you can place the new name and take the old one off. Everyone can see the map; only administrators can change it. The pictures are kept in HomeHub's database, so the daily backup includes them.
 
 ## Names and groups
 

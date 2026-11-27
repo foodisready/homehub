@@ -40,7 +40,7 @@ export function roomIcon(name: string): string {
   return 'house';
 }
 
-const PATHS: Record<string, string> = {
+export const PATHS: Record<string, string> = {
   bed: 'M3 18v-7a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v7M3 14h18M7 9V6h4v3M3 18v2M21 18v2',
   coffee: 'M4 9h12v5a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5V9ZM16 11h1.5a2.5 2.5 0 0 1 0 5H16M8 3v3M12 3v3',
   door: 'M6 21V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v17M3 21h18M14 12h.01',
@@ -186,9 +186,11 @@ function saveAll(on: boolean): void {
       <div class="head" [style.--lit]="r.lit" [style.view-transition-name]="vt(r.name)">
         <span class="glow"></span>
         <div class="bar">
-          <button class="back" type="button" (click)="close()" [attr.aria-label]="cameFromAll() ? 'Back to all rooms' : 'Back to rooms'"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path [attr.d]="path('back')" /></svg></button>
+          <button class="back" type="button" (click)="close()" [attr.aria-label]="startRoom() !== null ? 'Back to the map' : cameFromAll() ? 'Back to all rooms' : 'Back to rooms'"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path [attr.d]="path('back')" /></svg></button>
           <h2>{{ r.name }}</h2>
-          <button class="back" type="button" (click)="showAll()" aria-label="All rooms" title="All rooms"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path [attr.d]="path('grid')" /></svg></button>
+          @if (startRoom() === null) {
+            <button class="back" type="button" (click)="showAll()" aria-label="All rooms" title="All rooms"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path [attr.d]="path('grid')" /></svg></button>
+          }
           @if (canTurnOff(r)) { <button class="all-off" type="button" (click)="allOff.emit(r.devices)">All off</button> }
         </div>
         <div class="sub">{{ subtitle(r) }}</div>
@@ -346,6 +348,10 @@ export class RoomsViewComponent implements AfterViewChecked, OnDestroy {
   readonly allOff = output<Device[]>();
   /** A room opened: these are its devices. */
   readonly roomOpened = output<number[]>();
+  /** Opened from the floor map on this room: back goes back to the map. */
+  readonly startRoom = input<string | null>(null);
+  /** Back from a room opened with startRoom. */
+  readonly closed = output<void>();
 
   private readonly thermostats = inject(ThermostatService);
   private readonly cd = inject(ChangeDetectorRef);
@@ -383,6 +389,11 @@ export class RoomsViewComponent implements AfterViewChecked, OnDestroy {
   readonly openName = signal<string | null>(null);
   /** Every room at once, instead of the cards. Remembered on this screen. */
   readonly overview = signal(readAll());
+  private readonly openStart = effect(() => {
+    const name = this.startRoom();
+    if (name === null) return;
+    untracked(() => { this.overview.set(false); this.openName.set(name); });
+  });
   /** The room open was opened from every room at once: back goes back there. */
   readonly cameFromAll = signal(false);
   /** Wide enough to switch devices from every room at once; a phone opens the room first. */
@@ -468,6 +479,7 @@ export class RoomsViewComponent implements AfterViewChecked, OnDestroy {
     requestAnimationFrame(() => this.host.nativeElement.scrollIntoView({ block: 'start' }));
   }
   close(): void {
+    if (this.startRoom() !== null) { this.closed.emit(); return; }
     if (this.cameFromAll()) { this.showAll(); return; }
     this.transition(() => this.openName.set(null));
   }

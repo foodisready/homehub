@@ -691,5 +691,24 @@ function migrate(db: Database.Database): void {
       closed_at    TEXT,
       UNIQUE(checkin_id, day)
     );
+
+    -- The dashboard's map: a picture of each floor (a photo, a sketch, the robot's map), kept here
+    -- so the daily backup has it, and where each room is on it.
+    CREATE TABLE IF NOT EXISTS floor_maps (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      name        TEXT    NOT NULL,
+      position    INTEGER NOT NULL DEFAULT 0,
+      image       BLOB    NOT NULL,
+      mime        TEXT    NOT NULL,
+      updated_at  TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    );
+    -- x and y: where on the picture, as a share (0–1) of its width and height.
+    CREATE TABLE IF NOT EXISTS floor_pins (
+      floor_id  INTEGER NOT NULL REFERENCES floor_maps(id) ON DELETE CASCADE,
+      room      TEXT    NOT NULL,
+      x         REAL    NOT NULL,
+      y         REAL    NOT NULL,
+      PRIMARY KEY (floor_id, room)
+    );
   `);
 }

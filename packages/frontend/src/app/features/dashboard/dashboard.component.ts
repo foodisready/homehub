@@ -14,6 +14,7 @@ import { MusicCardComponent } from './music-card.component';
 import { AlarmCardComponent } from './alarm-card.component';
 import { AwayComponent } from './away.component';
 import { RoomsViewComponent } from './rooms-view.component';
+import { FloorMapComponent } from './floor-map.component';
 import { WallFrameComponent } from './wall-frame.component';
 import { Device } from '../../shared/models/device.model';
 import { isVacuum } from '../../shared/vacuum';
@@ -21,8 +22,9 @@ import { isVacuum } from '../../shared/vacuum';
 const COLLAPSED_KEY = 'homehub.dashboard.collapsed';
 const VIEW_KEY = 'homehub.dashboard.view';
 
-function loadView(): 'rooms' | 'list' {
-  try { return localStorage.getItem(VIEW_KEY) === 'list' ? 'list' : 'rooms'; } catch { return 'rooms'; }
+type View = 'rooms' | 'list' | 'map';
+function loadView(): View {
+  try { const v = localStorage.getItem(VIEW_KEY); return v === 'list' || v === 'map' ? v : 'rooms'; } catch { return 'rooms'; }
 }
 const OFFLINE = 'Offline';
 const UNASSIGNED = 'Unassigned';
@@ -61,7 +63,7 @@ const isSpeaker = (d: Device) => d.driverType === 'sonos';
 @Component({
   selector: 'app-dashboard',
   standalone: true,
-  imports: [DeviceRowComponent, RoomsViewComponent, DeviceFilterComponent, SystemStatusComponent, HomeSetupNoticeComponent, CamerasCardComponent, MusicCardComponent, AlarmCardComponent, AwayComponent, DecimalPipe, WallFrameComponent, RouterLink],
+  imports: [DeviceRowComponent, RoomsViewComponent, FloorMapComponent, DeviceFilterComponent, SystemStatusComponent, HomeSetupNoticeComponent, CamerasCardComponent, MusicCardComponent, AlarmCardComponent, AwayComponent, DecimalPipe, WallFrameComponent, RouterLink],
   styles: [`
     .back-to-wall { display: flex; align-items: center; justify-content: center; min-height: 3rem; margin: 0 0 0.75rem; border-radius: 14px;
       background: var(--accent); color: #fff; font-weight: 650; text-decoration: none; }
@@ -170,10 +172,19 @@ const isSpeaker = (d: Device) => d.driverType === 'sonos';
           <div class="seg" role="group" aria-label="Show devices as">
             <button type="button" [attr.aria-pressed]="view() === 'rooms'" (click)="setView('rooms')">Rooms</button>
             <button type="button" [attr.aria-pressed]="view() === 'list'" (click)="setView('list')">List</button>
+            <button type="button" [attr.aria-pressed]="view() === 'map'" (click)="setView('map')">Map</button>
           </div>
         </div>
 
-        @if (view() === 'rooms') {
+        @if (view() === 'map') {
+          @if (mapRoom(); as room) {
+            <app-rooms-view [devices]="devices()" [busyIds]="busyIds()" [startRoom]="room" (closed)="mapRoom.set(null)"
+                            (toggled)="toggle($event)" (overrideSet)="setOverride($event)"
+                            (overrideCancelled)="cancelOverride($event)" (allOff)="allOff($event)" (roomOpened)="checkDevices($event)" />
+          } @else {
+            <app-floor-map [devices]="devices()" [isAdmin]="isAdmin()" (roomPicked)="mapRoom.set($event)" />
+          }
+        } @else if (view() === 'rooms') {
           <app-rooms-view [devices]="roomDevices()" [busyIds]="busyIds()"
                           (toggled)="toggle($event)" (overrideSet)="setOverride($event)"
                           (overrideCancelled)="cancelOverride($event)" (allOff)="allOff($event)" (roomOpened)="checkDevices($event)" />
@@ -232,8 +243,13 @@ export class DashboardComponent implements OnInit, OnDestroy {
   /** Rooms (tiles, and a room's devices as bubbles) or the list. */
   readonly view = signal(loadView());
 
-  setView(v: 'rooms' | 'list'): void {
+  /** The room opened from the map, or null for the map. */
+  readonly mapRoom = signal<string | null>(null);
+  readonly isAdmin = computed(() => this.auth.user()?.role === 'admin');
+
+  setView(v: View): void {
     this.view.set(v);
+    this.mapRoom.set(null);
     try { localStorage.setItem(VIEW_KEY, v); } catch { /* the choice lasts this visit */ }
   }
 
