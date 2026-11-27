@@ -114,6 +114,8 @@ Set it up on Wi-Fi with its own firmware: power it on, open improv-wifi.com in C
 
 On its factory firmware it connects without an encryption key. Its firmware plays only FLAC, so the bridge makes its replies into 48 kHz FLAC; phones running Ava get WAV.
 
+It turns its microphone up until even a quiet room is as loud as speech, so loudness alone never heard a command end, and every command ran to the eight-second limit. The bridge therefore also runs Silero, the speech detector Whisper uses, on what it hears: once Silero has heard someone speak, 0.8 seconds without a voice ends the command (1.3 seconds after a short one). If Silero never hears a voice, loudness decides as before, so a command it missed isn't cut short. It takes about 1 ms of a Pi 4's time for each 32 ms of sound. On an idle Pi 4, recognising a command with `base.en` takes about 5 seconds, 3 of them Whisper reading its 30-second window, however short the command; right after an update, while the Pi was busy, it took 15 to 19.
+
 ## Not done yet
 
 - Languages other than English, Cantonese, Vietnamese and Mandarin.

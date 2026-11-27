@@ -10,13 +10,14 @@ import json
 import tempfile
 import threading
 import unittest
+import wave
 from pathlib import Path
 from unittest import mock
 
 import numpy as np
 
 from homehub_voice import config as cfg
-from homehub_voice.endpoint import BYTES_PER_SECOND, Endpointer
+from homehub_voice.endpoint import BYTES_PER_SECOND, MAX_S, Endpointer, new_endpointer
 from homehub_voice.homehub import CommandResult, HomeHub, HomeHubError
 from homehub_voice.pipeline import NO_HOMEHUB, NOT_CAUGHT, NOTHING_HEARD, answer
 
@@ -93,6 +94,64 @@ class EndpointTest(unittest.TestCase):
         # A loud start (the wake word's end) followed by silence isn't speech.
         e = self.feed(tone(0.3, True) + tone(10, False))
         self.assertFalse(e.spoke)
+
+
+def room(seconds: float, level: float = 0.012, seed: int = 0) -> bytes:
+    """A Voice PE's quiet room: its microphone is turned up until the hiss is above THRESHOLD."""
+    noise = np.random.default_rng(seed).normal(0, level * 32768, int(16000 * seconds))
+    return np.clip(noise, -32768, 32767).astype(np.int16).tobytes()
+
+
+def over_room(voice: bytes, seed: int = 1) -> bytes:
+    hiss = np.frombuffer(room(len(voice) / BYTES_PER_SECOND, seed=seed), np.int16).astype(np.int32)
+    return np.clip(np.frombuffer(voice, np.int16) + hiss, -32768, 32767).astype(np.int16).tobytes()
+
+
+def spoken_command() -> bytes:
+    """'Turn on the office light.', 1.5 s, 16 kHz 16-bit mono."""
+    with wave.open(str(Path(__file__).parent / 'audio' / 'turn-on-the-office-light.wav')) as w:
+        return w.readframes(w.getnframes())
+
+
+class SpeechDetectorTest(unittest.TestCase):
+    """The end of a command heard by Silero, over a room that loudness alone hears as speech."""
+
+    def feed(self, audio: bytes) -> Endpointer:
+        e = new_endpointer()
+        self.assertIsNotNone(e.detector)
+        for c in chunks(audio):
+            if e.add(c):
+                break
+        return e
+
+    def test_a_noisy_room_used_to_run_every_command_to_eight_seconds(self):
+        e = Endpointer()
+        for c in chunks(room(0.5) + over_room(spoken_command()) + room(8, seed=2)):
+            if e.add(c):
+                break
+        self.assertAlmostEqual(e.seconds, MAX_S, delta=0.1)
+
+    def test_its_end_is_heard_over_a_noisy_room(self):
+        voice = spoken_command()
+        spoken = len(voice) / BYTES_PER_SECOND
+        e = self.feed(room(0.5) + over_room(voice) + room(8, seed=2))
+        self.assertTrue(e.done and e.spoke)
+        self.assertLess(e.seconds, 0.5 + spoken + 1.6)
+        self.assertGreater(e.seconds, 0.5 + spoken + 0.3)
+
+    def test_a_pause_before_speaking_doesnt_end_it(self):
+        voice = spoken_command()
+        e = self.feed(room(2.0) + over_room(voice) + room(8, seed=2))
+        # The recording ends with a moment of its own quiet, so the wait for the end starts a little before it.
+        self.assertGreater(e.seconds, 2.0 + len(voice) / BYTES_PER_SECOND + 0.3)
+        self.assertLess(e.seconds, MAX_S - 1)
+
+    def test_with_no_voice_loudness_decides_as_before(self):
+        # Silero hears no one, so it never cuts a command short that it might have missed.
+        e = self.feed(room(10))
+        self.assertAlmostEqual(e.seconds, MAX_S, delta=0.1)
+        e = self.feed(tone(0.5, False) + tone(1.2, True) + tone(3, False))
+        self.assertAlmostEqual(e.seconds, 0.5 + 1.2 + 0.8, delta=0.1)
 
 
 class FakeListener:

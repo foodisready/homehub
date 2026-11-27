@@ -17,7 +17,7 @@ from aioesphomeapi.model import VoiceAssistantFeature
 from . import confirm
 from .chatter import command_over_noise, english_talk
 from .config import Speaker
-from .endpoint import MAX_S, Endpointer, loudness
+from .endpoint import MAX_S, Endpointer, loudness, new_endpointer
 from .pipeline import Answer, wake_language
 
 log = logging.getLogger('homehub-voice')
@@ -35,7 +35,7 @@ WAIT_FOR_OTHERS_S = 2.0
 class Run:
     n: int
     conversation: str
-    listen: Endpointer = field(default_factory=Endpointer)
+    listen: Endpointer = field(default_factory=new_endpointer)
     ended: asyncio.Event = field(default_factory=asyncio.Event)
     started: float = field(default_factory=time.monotonic)
     # Which speaker heard it, by address: two speakers can have the same name.
