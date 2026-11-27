@@ -275,6 +275,9 @@ class FakeClient:
     """Stands in for aioesphomeapi.APIClient: one voice speaker."""
 
     instances: list['FakeClient'] = []
+    voice_config = None   # a Voice PE's wake words; None, like Ava
+    entities: list = []   # besides its media player
+    states: dict = {}
     voice_flags = 1
     media_formats: list[str] = []   # what its media player says it plays; none, like Ava
 
@@ -295,12 +298,26 @@ class FakeClient:
         self.handlers = handlers
 
     async def get_voice_assistant_configuration(self, timeout):
-        return None
+        return FakeClient.voice_config
 
     async def list_entities_services(self):
+        extra = list(FakeClient.entities)
         if not FakeClient.media_formats:
-            return [], []
-        return [mock.Mock(supported_formats=[mock.Mock(format=f) for f in FakeClient.media_formats])], []
+            return extra, []
+        return [mock.Mock(supported_formats=[mock.Mock(format=f) for f in FakeClient.media_formats])] + extra, []
+
+    def subscribe_states(self, on_state):
+        self.on_state = on_state
+        for key, value in FakeClient.states.items():
+            on_state(mock.Mock(key=key, state=value))
+
+    async def set_voice_assistant_configuration(self, active_wake_words):
+        self.events.append(('SET_WAKE_WORDS', list(active_wake_words)))
+        FakeClient.voice_config.active_wake_words = list(active_wake_words)
+
+    def select_command(self, key, state, device_id=0):
+        self.events.append(('SELECT', (key, state)))
+        self.on_state(mock.Mock(key=key, state=state))
 
     def send_voice_assistant_event(self, kind, data):
         self.events.append((kind.name, data))
@@ -319,6 +336,9 @@ class SpeakerLinkTest(unittest.IsolatedAsyncioTestCase):
         FakeClient.instances.clear()
         FakeClient.voice_flags = 1
         FakeClient.media_formats = []
+        FakeClient.voice_config = None
+        FakeClient.entities = []
+        FakeClient.states = {}
 
     async def connected_link(self, answer_fn, speak=None):
         from homehub_voice import speakers
@@ -718,6 +738,44 @@ class SpeakerLinkTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(near_silence(0.2, 0.36), 'a short loud word')
         self.assertFalse(near_silence(1.5, 0.02), 'quiet but long speech')
 
+    async def test_a_voice_pe_s_wake_words_and_sensitivity_are_reported_and_changed(self):
+        ww = lambda i, n: mock.Mock(id=i, wake_word=n, trained_languages=[])  # noqa: E731
+        FakeClient.voice_config = mock.Mock(available_wake_words=[ww('lao_you', '老友'), ww('xin_chao', 'Xin Chào'), ww('okay_nabu', 'Okay Nabu'), ww('stop', 'Stop')],
+                                            active_wake_words=['lao_you', 'okay_nabu'])
+        levels = ['Slightly sensitive', 'Moderately sensitive', 'Very sensitive']
+        FakeClient.entities = [mock.Mock(spec=['object_id', 'key', 'options'], object_id='wake_word_sensitivity', key=7, options=levels)]
+        FakeClient.states = {7: 'Slightly sensitive'}
+        link, c = await self.connected_link(lambda *a, **k: None)
+        for _ in range(50):
+            await asyncio.sleep(0.01)
+            if link.connected:
+                break
+        self.assertEqual(link.wake_words, [{'id': 'lao_you', 'name': '老友', 'on': True}, {'id': 'xin_chao', 'name': 'Xin Chào', 'on': False},
+                                           {'id': 'okay_nabu', 'name': 'Okay Nabu', 'on': True}], 'Stop, for timers, is left out')
+        self.assertEqual((link.sensitivity, link.sensitivities), ('Slightly sensitive', levels))
+
+        self.assertTrue(await link.apply({'wakeWords': ['lao_you', 'nonsense'], 'sensitivity': 'Moderately sensitive'}))
+        self.assertIn(('SET_WAKE_WORDS', ['lao_you']), c.events)
+        self.assertIn(('SELECT', (7, 'Moderately sensitive')), c.events)
+        self.assertEqual([w['id'] for w in link.wake_words if w['on']], ['lao_you'])
+        self.assertEqual(link.sensitivity, 'Moderately sensitive')
+        # Already so: nothing sent. None at all, or a level it doesn't have: left as it is.
+        n = len(c.events)
+        self.assertFalse(await link.apply({'wakeWords': ['lao_you'], 'sensitivity': 'Moderately sensitive'}))
+        self.assertFalse(await link.apply({'wakeWords': [], 'sensitivity': 'Loud'}))
+        self.assertEqual(len(c.events), n)
+        link.task.cancel()
+
+    async def test_a_speaker_without_wake_word_settings_reports_none(self):
+        link, c = await self.connected_link(lambda *a, **k: None)
+        for _ in range(50):
+            await asyncio.sleep(0.01)
+            if link.connected:
+                break
+        self.assertEqual((link.wake_words, link.sensitivity), ([], None))
+        self.assertFalse(await link.apply({'wakeWords': ['okay_nabu'], 'sensitivity': 'Very sensitive'}))
+        link.task.cancel()
+
     async def test_failure_still_ends_run(self):
         def boom(audio, spoke, asked=None, prefer=None, wake=''):
             raise RuntimeError('whisper crashed')
@@ -901,6 +959,21 @@ class SpeakerLinkTest(unittest.IsolatedAsyncioTestCase):
         made[0].connected = True
         made[1].usable = False
         self.assertEqual(group.status(), [{'name': '10.0.0.5', 'address': '10.0.0.5', 'connected': True, 'announce': False}])
+        # A Voice PE also says its wake words and how sensitive they are.
+        made[0].wake_words = [{'id': 'lao_you', 'name': '老友', 'on': True}]
+        made[0].sensitivity, made[0].sensitivities = 'Slightly sensitive', ['Slightly sensitive', 'Very sensitive']
+        self.assertEqual(group.status()[0]['wakeWords'], [{'id': 'lao_you', 'name': '老友', 'on': True}])
+        self.assertEqual(group.status()[0]['sensitivity'], 'Slightly sensitive')
+        # Each speaker gets what HomeHub chose for it, by name.
+        asked = []
+        async def apply(want):
+            asked.append(want)
+            return True
+        made[0].apply = apply
+        made[1].apply = apply
+        await group.apply({'10.0.0.5': {'wakeWords': ['lao_you']}, 'Somewhere else': {'wakeWords': ['x']}})
+        await group.apply(None)
+        self.assertEqual(asked, [{'wakeWords': ['lao_you']}])
 
     async def test_a_speaker_that_moves_is_followed_to_its_new_address(self):
         # 2026-11-17: Ava's phone changed its network ID and moved from .246 to .20.

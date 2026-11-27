@@ -14,7 +14,17 @@ export interface BridgeSpeaker {
   connected: boolean;
   /** Whether it can say something it wasn't asked, such as a reminder; null from a bridge before v0.1.85. */
   announce: boolean | null;
+  /** Its wake words and which are on: a Voice PE says, Ava doesn't (null). From v0.3.30. */
+  wakeWords: SpeakerWakeWord[] | null;
+  /** How readily its wake words wake it, and the choices: "Slightly sensitive" …; null if it can't say. */
+  sensitivity: string | null;
+  sensitivities: string[];
 }
+
+export interface SpeakerWakeWord { id: string; name: string; on: boolean }
+
+/** What an admin chose for a speaker in Settings → Voice control, by its name. The bridge applies it. */
+export interface SpeakerChoice { wakeWords?: string[]; sensitivity?: string }
 
 export interface BridgeReport {
   at: number;
@@ -54,8 +64,9 @@ export function recentBridges(now = Date.now()): { id: string; kind: BridgeRepor
 export function bridgeForSettings(now = Date.now(), lateMs: number):
   (Pick<BridgeReport, 'state' | 'kind' | 'version' | 'languages' | 'detail'> & {
     applying: boolean;
-    /** Each speaker and whether it's connected, so Settings can show them beside Restart. */
-    speakers: { name: string; connected: boolean }[];
+    /** Each speaker and whether it's connected, so Settings can show them beside Restart; and its
+     *  wake words and sensitivity, with `applying` while the bridge hasn't yet made it so. */
+    speakers: SettingsSpeaker[];
     /** 'asked' until the bridge picks up a restart, then 'restarting' until it checks in again. */
     restart: 'asked' | 'restarting' | null;
   }) | null {
@@ -64,7 +75,7 @@ export function bridgeForSettings(now = Date.now(), lateMs: number):
   return {
     state: last.state, kind: service ? 'service' : last.kind, version: last.version,
     languages: last.languages, detail: last.detail, applying: languagesPending(),
-    speakers: last.speakers.map((sp) => ({ name: sp.name, connected: sp.connected })),
+    speakers: last.speakers.map(settingsSpeaker),
     restart: bridgeRestartState(),
   };
 }
@@ -123,6 +134,75 @@ export function voiceConfig(): VoiceSettings & { version: string } {
   return { ...s, version: createHash('sha1').update(JSON.stringify(s)).digest('hex').slice(0, 12) };
 }
 
+export interface SettingsSpeaker {
+  name: string;
+  connected: boolean;
+  wakeWords?: SpeakerWakeWord[];
+  sensitivity?: string;
+  sensitivities?: string[];
+  /** What was chosen in Settings isn't on the speaker yet: the bridge applies it within about 10 seconds. */
+  applying?: boolean;
+}
+
+const CHOICES_KEY = 'voice_speaker_choices';
+
+/** Each speaker's wake words and sensitivity as chosen in Settings, by speaker name. */
+export function speakerChoices(): Record<string, SpeakerChoice> {
+  const row = getDb().prepare('SELECT value FROM settings WHERE key = ?').get(CHOICES_KEY) as { value: string } | undefined;
+  try {
+    const all = JSON.parse(row?.value ?? '{}');
+    return all && typeof all === 'object' && !Array.isArray(all) ? all : {};
+  } catch {
+    return {};
+  }
+}
+
+export class SpeakerChoiceError extends Error {
+  constructor(message: string, readonly status = 400) { super(message); }
+}
+
+/**
+ * Saves a speaker's wake words (the ones to have on) and sensitivity, checked against what the
+ * speaker last said it has. At least one wake word stays on, or the speaker could never be woken.
+ */
+export function chooseForSpeaker(name: unknown, body: unknown): SpeakerChoice {
+  const speaker = typeof name === 'string' ? last?.speakers.find((sp) => sp.name === name) : undefined;
+  if (!speaker) throw new SpeakerChoiceError('No speaker by that name has checked in.', 404);
+  const b = (body ?? {}) as Record<string, unknown>;
+  const choice: SpeakerChoice = { ...speakerChoices()[speaker.name] };
+  if (b['wakeWords'] !== undefined) {
+    if (!speaker.wakeWords) throw new SpeakerChoiceError('This speaker can\'t change its wake words.');
+    const ids = Array.isArray(b['wakeWords']) ? b['wakeWords'].filter((x): x is string => typeof x === 'string') : [];
+    const on = speaker.wakeWords.map((w) => w.id).filter((id) => ids.includes(id));
+    if (!on.length) throw new SpeakerChoiceError('Keep at least one wake word on, or the speaker can\'t be woken.');
+    choice.wakeWords = on;
+  }
+  if (b['sensitivity'] !== undefined) {
+    if (typeof b['sensitivity'] !== 'string' || !speaker.sensitivities.includes(b['sensitivity'])) {
+      throw new SpeakerChoiceError(`sensitivity: one of ${speaker.sensitivities.join(', ') || 'none for this speaker'}`);
+    }
+    choice.sensitivity = b['sensitivity'];
+  }
+  const all = { ...speakerChoices(), [speaker.name]: choice };
+  getDb().prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
+    .run(CHOICES_KEY, JSON.stringify(all));
+  return choice;
+}
+
+function settingsSpeaker(sp: BridgeSpeaker): SettingsSpeaker {
+  const out: SettingsSpeaker = { name: sp.name, connected: sp.connected };
+  if (!sp.wakeWords && !sp.sensitivity) return out;
+  const want = speakerChoices()[sp.name] ?? {};
+  // As chosen, while the bridge is still setting it, so Settings doesn't flick back.
+  if (sp.wakeWords) out.wakeWords = sp.wakeWords.map((w) => ({ ...w, on: want.wakeWords ? want.wakeWords.includes(w.id) : w.on }));
+  if (sp.sensitivity) { out.sensitivity = want.sensitivity ?? sp.sensitivity; out.sensitivities = sp.sensitivities; }
+  const on = (sp.wakeWords ?? []).filter((w) => w.on).map((w) => w.id).sort().join();
+  out.applying = sp.connected && (
+    (!!want.wakeWords && !!sp.wakeWords && [...want.wakeWords].sort().join() !== on)
+    || (!!want.sensitivity && !!sp.sensitivity && want.sensitivity !== sp.sensitivity));
+  return out;
+}
+
 const str = (v: unknown, max = 100): string => (typeof v === 'string' ? v.slice(0, max) : '');
 
 /** Validates and keeps a report. Returns null when it isn't one. */
@@ -135,7 +215,22 @@ export function recordBridgeReport(body: unknown, now = Date.now()): BridgeRepor
     const o = s as Record<string, unknown>;
     const address = str(o['address']);
     if (!address) return [];
-    return [{ name: str(o['name']) || address, address, connected: o['connected'] === true, announce: typeof o['announce'] === 'boolean' ? o['announce'] : null }];
+    const wakeWords = Array.isArray(o['wakeWords'])
+      ? (o['wakeWords'] as unknown[]).slice(0, 20).flatMap((w): SpeakerWakeWord[] => {
+        const ww = (w ?? {}) as Record<string, unknown>;
+        const id = str(ww['id'], 60);
+        return id ? [{ id, name: str(ww['name'], 60) || id, on: ww['on'] === true }] : [];
+      })
+      : null;
+    const sensitivities = Array.isArray(o['sensitivities'])
+      ? (o['sensitivities'] as unknown[]).slice(0, 10).map((x) => str(x, 60)).filter(Boolean)
+      : [];
+    const sensitivity = sensitivities.includes(str(o['sensitivity'], 60)) ? str(o['sensitivity'], 60) : null;
+    return [{
+      name: str(o['name']) || address, address, connected: o['connected'] === true,
+      announce: typeof o['announce'] === 'boolean' ? o['announce'] : null,
+      wakeWords: wakeWords?.length ? wakeWords : null, sensitivity, sensitivities: sensitivity ? sensitivities : [],
+    }];
   });
   const state = b['state'] === 'off' || b['state'] === 'starting' ? b['state'] : 'running';
   const id = str(b['id'], 40) || null;

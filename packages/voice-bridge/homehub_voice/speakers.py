@@ -135,6 +135,21 @@ async def flac_only(client) -> bool:
     return 'flac' in formats and 'wav' not in formats
 
 
+# The Voice PE's own wake word that stops a timer ringing: it turns it on itself while one rings.
+HIDDEN_WAKE_WORDS = {'stop'}
+# The Voice PE's setting for how readily its wake words wake it; our firmware applies it to 老友 and Xin Chào too.
+SENSITIVITY_SELECT = 'wake_word_sensitivity'
+
+
+def wake_words_of(config) -> list[dict]:
+    """The wake words a speaker has and which are on, from its voice assistant configuration."""
+    if config is None:
+        return []
+    active = set(getattr(config, 'active_wake_words', None) or [])
+    return [{'id': str(w.id), 'name': str(w.wake_word), 'on': w.id in active}
+            for w in getattr(config, 'available_wake_words', None) or [] if w.id not in HIDDEN_WAKE_WORDS]
+
+
 class StopTrying(Exception):
     """This device can't be used as a speaker, so don't reconnect."""
 
@@ -178,6 +193,12 @@ class SpeakerLink:
         self.can_start = False
         # Plays FLAC only, like the Voice PE: its replies are made into FLAC.
         self.flac = False
+        # Its wake words and which are on, and how sensitive they are, for HomeHub's Settings to change.
+        # Empty or None for a speaker that doesn't say, such as Ava.
+        self.wake_words: list[dict] = []
+        self.sensitivity: str | None = None
+        self.sensitivities: list[str] = []
+        self._sensitivity_key: int | None = None
 
     @property
     def who(self) -> str:
@@ -246,20 +267,71 @@ class SpeakerLink:
             self.flac = await flac_only(c)
             self.client = c
             self._subscribe(c)
-            try:
-                await asyncio.wait_for(c.get_voice_assistant_configuration(5), 6)
-            except Exception:  # noqa: BLE001 — older firmware doesn't support it
-                pass
+            await self._read_wake_words(c)
+            await self._watch_sensitivity(c)
             log.info('%s connected (%s), listening%s%s', self.name, self.speaker.label, '' if self.can_announce else "; it can't say reminders",
                      '; replies as FLAC' if self.flac else '')
             self._set_connected(True)
             await gone.wait()
         finally:
             self.client = None
+            self._sensitivity_key = None
             self._set_connected(False)
             if self.run:
                 self.run.ended.set()
             await c.disconnect()
+
+    async def _read_wake_words(self, c: api.APIClient) -> None:
+        try:
+            self.wake_words = wake_words_of(await asyncio.wait_for(c.get_voice_assistant_configuration(5), 6))
+        except Exception:  # noqa: BLE001 — older firmware doesn't support it
+            self.wake_words = []
+
+    async def _watch_sensitivity(self, c: api.APIClient) -> None:
+        """Finds the speaker's wake word sensitivity setting, and keeps up with it as it changes."""
+        try:
+            entities, _ = await asyncio.wait_for(c.list_entities_services(), 10)
+        except Exception:  # noqa: BLE001
+            return
+        select = next((e for e in entities if getattr(e, 'object_id', None) == SENSITIVITY_SELECT
+                       and isinstance(getattr(e, 'options', None), list)), None)
+        if select is None:
+            return
+        self._sensitivity_key = select.key
+        self.sensitivities = [str(o) for o in select.options]
+
+        def on_state(state) -> None:
+            if getattr(state, 'key', None) == self._sensitivity_key and isinstance(getattr(state, 'state', None), str):
+                if state.state != self.sensitivity:
+                    self.sensitivity = state.state
+                    self.on_change()
+
+        c.subscribe_states(on_state)
+
+    async def apply(self, want: dict) -> bool:
+        """Turns wake words on or off and sets their sensitivity, as chosen in HomeHub's Settings, where
+        the speaker differs. Returns whether anything was changed."""
+        c = self.client
+        if c is None or not self.connected:
+            return False
+        changed = False
+        ids = want.get('wakeWords')
+        if isinstance(ids, list) and self.wake_words:
+            known = [w['id'] for w in self.wake_words]
+            on = [i for i in known if i in ids]
+            if on and set(on) != {w['id'] for w in self.wake_words if w['on']}:
+                await c.set_voice_assistant_configuration(on)
+                await self._read_wake_words(c)
+                log.info('%s: wake words now %s', self.who, ', '.join(w['name'] for w in self.wake_words if w['on']) or 'none')
+                changed = True
+        level = want.get('sensitivity')
+        if isinstance(level, str) and self._sensitivity_key is not None and level in self.sensitivities and level != self.sensitivity:
+            c.select_command(self._sensitivity_key, level)
+            log.info('%s: wake word sensitivity now %s', self.who, level)
+            changed = True
+        if changed:
+            self.on_change()
+        return changed
 
     def _speak(self, text: str, lang: str) -> Callable[[], str]:
         """Makes the reply, in a format this speaker plays."""
@@ -481,9 +553,23 @@ class Speakers:
     def status(self) -> list[dict]:
         """Speakers for HomeHub's Health page. Devices that turned out not to be speakers are left out."""
         return [
-            {'name': l.name, 'address': l.speaker.label, 'connected': l.connected, 'announce': l.can_announce}
+            {'name': l.name, 'address': l.speaker.label, 'connected': l.connected, 'announce': l.can_announce,
+             **({'wakeWords': l.wake_words} if l.wake_words else {}),
+             **({'sensitivity': l.sensitivity, 'sensitivities': l.sensitivities} if l.sensitivity and l.sensitivities else {})}
             for l in self.links.values() if l.usable
         ]
+
+    async def apply(self, settings: object) -> None:
+        """Each speaker's wake words and sensitivity as chosen in HomeHub's Settings, by speaker name."""
+        if not isinstance(settings, dict):
+            return
+        for l in list(self.links.values()):
+            want = settings.get(l.name)
+            if l.usable and isinstance(want, dict):
+                try:
+                    await l.apply(want)
+                except Exception as e:  # noqa: BLE001 — one speaker failing mustn't stop the others
+                    log.warning('%s: could not change its wake words: %s', l.who, e)
 
     async def announce(self, text: str, lang: str, ask: int | None = None) -> tuple[list[str], str]:
         """Says it on every speaker that can. The names of those that did, or why none did."""

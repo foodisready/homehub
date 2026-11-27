@@ -6,7 +6,7 @@ import { requireAdmin } from '../middleware/auth';
 import { BUILT_IN, MAX_CUSTOM, MAX_LENGTH, MOMENTS, ReplyError, getReplyChoices, saveReplyChoices } from '../nlp/replies';
 import { logger } from '../logger';
 import { activityMiddleware } from '../activity/activity';
-import { VOICE_LANGUAGES, bridgeForSettings, getVoiceSettings, setVoiceSettings } from '../system/voice-bridge';
+import { SpeakerChoiceError, VOICE_LANGUAGES, bridgeForSettings, chooseForSpeaker, getVoiceSettings, setVoiceSettings } from '../system/voice-bridge';
 import { BRIDGE_LATE_MS } from '../system/health';
 
 export const nlpRouter = Router();
@@ -37,6 +37,20 @@ nlpRouter.put('/voice', requireAdmin, (req: Request, res: Response) => {
     res.json(saved);
   } catch (err) {
     res.status(400).json({ error: (err as Error).message, code: 'VALIDATION_ERROR' });
+  }
+});
+
+// PUT /api/nlp/voice/speakers { name, wakeWords?, sensitivity? } — a speaker's wake words (the ones
+// on) and how sensitive they are. The voice bridge sets them on the speaker within about 10 seconds.
+nlpRouter.put('/voice/speakers', requireAdmin, (req: Request, res: Response) => {
+  try {
+    const { name, ...choice } = (req.body ?? {}) as Record<string, unknown>;
+    const saved = chooseForSpeaker(name, choice);
+    logger.info({ speaker: name, ...saved, by: req.user?.name }, 'Speaker wake words changed');
+    res.json(saved);
+  } catch (err) {
+    if (!(err instanceof SpeakerChoiceError)) throw err;
+    res.status(err.status).json({ error: err.message, code: err.status === 404 ? 'NOT_FOUND' : 'VALIDATION_ERROR' });
   }
 });
 

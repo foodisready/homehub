@@ -28,7 +28,7 @@ import { recordVoiceCommand } from '../nlp/command-log';
 import { withActivity } from '../activity/activity';
 import { issueTokens, serviceUser } from '../auth/auth.service';
 import { automationsPaused } from '../automation/pause';
-import { VOICE_LANGUAGES, bridgeInstructions, recordBridgeReport, voiceConfig, voiceNames, type VoiceLanguage } from '../system/voice-bridge';
+import { VOICE_LANGUAGES, bridgeInstructions, recordBridgeReport, speakerChoices, voiceConfig, voiceNames, type VoiceLanguage } from '../system/voice-bridge';
 import { noteBridgeReport } from '../system/voice-ready';
 import { cancelPowerTimer, setScheduleTimer } from '../devices/power';
 import { MAX_STAY_ON_MINUTES } from './schedules';
@@ -74,9 +74,11 @@ internalRouter.get('/voice/device-names', (_req: Request, res: Response) => {
 // The bridge that comes with HomeHub waits until voice is on.
 // It asks every 10 seconds, so namesVersion lets a new nickname work by voice straight away.
 // announcements: reminders due now, for the bridge to say on its speakers; asking: reminders waiting
-// for a yes or no. Neither is part of `version`, which the bridge restarts for.
+// for a yes or no; speakers: each speaker's wake words and sensitivity as chosen in Settings, by name,
+// which the bridge sets on the speaker. None is part of `version`, which the bridge restarts for.
 internalRouter.get('/voice/config', (_req: Request, res: Response) => {
-  res.json({ ...voiceConfig(), namesVersion: voiceNames().version, announcements: pendingAnnouncements(), asking: [...openCheckinAsks(), ...openAsks()] });
+  res.json({ ...voiceConfig(), namesVersion: voiceNames().version, announcements: pendingAnnouncements(), asking: [...openCheckinAsks(), ...openAsks()],
+    speakers: speakerChoices() });
 });
 
 // POST /internal/voice/asks/:id  { answer: 'yes' | 'no', kind? }: the answer to a reminder's "done yet?",

@@ -128,6 +128,7 @@ async def main() -> int:
         # HomeHub before v0.1.79 doesn't say, so names wait for the next check-in.
         await names_changed(res.get('namesVersion'))
         start_announcements(res.get('announcements'))
+        await speakers.apply(res.get('speakers'))
         homehub.asking = [a for a in res.get('asking') or [] if isinstance(a, dict)]
         return bool(res.get('version')) and res['version'] != config_version
 

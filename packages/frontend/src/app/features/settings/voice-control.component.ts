@@ -11,10 +11,17 @@ interface BridgeStatus {
   detail?: string | null;
   /** Running with other languages than the ones saved: it's about to restart to load them. */
   applying?: boolean;
-  /** Each speaker and whether it's connected. From v0.2.10. */
-  speakers?: { name: string; connected: boolean }[];
+  /** Each speaker and whether it's connected (from v0.2.10); a Voice PE's wake words and sensitivity (from v0.3.30). */
+  speakers?: BridgeSpeaker[];
   /** A restart an admin asked for: 'asked' until the bridge picks it up, then 'restarting'. From v0.2.10. */
   restart?: 'asked' | 'restarting' | null;
+}
+interface BridgeSpeaker {
+  name: string; connected: boolean;
+  wakeWords?: { id: string; name: string; on: boolean }[];
+  sensitivity?: string; sensitivities?: string[];
+  /** Chosen here, and not on the speaker yet. */
+  applying?: boolean;
 }
 interface VoiceSettings { enabled: boolean; languages: string[]; bridge: BridgeStatus | null }
 
@@ -53,6 +60,14 @@ const POLL_MS = 5_000;
     .speakers li { display:flex; gap:0.5rem; align-items:flex-start; font-size:0.84rem; margin:0 0 0.35rem; line-height:1.45; }
     .speakers .name { overflow-wrap:anywhere; }
     .speakers .state { color:var(--text-muted); }
+    .speakers .sp { display:flex; flex-direction:column; gap:0.35rem; min-width:0; }
+    .speakers .ww { display:flex; flex-wrap:wrap; gap:0.35rem; align-items:center; }
+    .speakers .label { font-size:0.78rem; color:var(--text-muted); margin-right:0.15rem; }
+    .speakers .chip { display:inline-flex; align-items:center; gap:0.3rem; font-size:0.8rem; padding:0.2rem 0.55rem; border:1px solid var(--border); border-radius:999px; cursor:pointer; }
+    .speakers .chip.on { border-color:var(--green); }
+    .speakers .chip input { width:auto; margin:0; }
+    .speakers .sens { display:flex; gap:0.4rem; align-items:center; }
+    .speakers .sens select { width:auto; font-size:0.8rem; padding:0.2rem 0.4rem; }
     .speakers .none { font-size:0.82rem; color:var(--text-muted); margin:0; }
     .restart { display:flex; gap:0.6rem; align-items:center; flex-wrap:wrap; margin-top:0.7rem; }
     .restart .hint { font-size:0.78rem; color:var(--text-muted); flex:1 1 14rem; line-height:1.4; }
@@ -118,7 +133,30 @@ const POLL_MS = 5_000;
               @for (sp of speakers(); track $index) {
                 <li>
                   <span class="dot" [class.ok]="sp.connected" [class.busy]="!sp.connected"></span>
-                  <span><span class="name">{{ sp.name }}</span> · <span class="state">{{ sp.connected ? 'Connected' : 'Not connected' }}</span></span>
+                  <span class="sp">
+                    <span><span class="name">{{ sp.name }}</span> · <span class="state">{{ sp.connected ? 'Connected' : 'Not connected' }}</span></span>
+                    @if (sp.wakeWords?.length) {
+                      <span class="ww" role="group" [attr.aria-label]="'Wake words for ' + sp.name">
+                        <span class="label">Wake words</span>
+                        @for (w of sp.wakeWords; track w.id) {
+                          <label class="chip" [class.on]="w.on">
+                            <input type="checkbox" [checked]="w.on" [disabled]="speakerBusy() === sp.name || (w.on && onCount(sp) === 1)"
+                                   (change)="toggleWakeWord(sp, w.id, $any($event.target).checked)" /> {{ w.name }}
+                          </label>
+                        }
+                      </span>
+                    }
+                    @if (sp.sensitivity && sp.sensitivities?.length) {
+                      <label class="sens">
+                        <span class="label">Sensitivity</span>
+                        <select [value]="sp.sensitivity" [disabled]="speakerBusy() === sp.name" (change)="setSensitivity(sp, $any($event.target).value)">
+                          @for (o of sp.sensitivities; track o) { <option [value]="o" [selected]="o === sp.sensitivity">{{ o }}</option> }
+                        </select>
+                      </label>
+                    }
+                    @if (sp.applying) { <span class="state">Setting it on the speaker…</span> }
+                    @if (speakerError()?.name === sp.name) { <span class="msg err">{{ speakerError()!.text }}</span> }
+                  </span>
                 </li>
               }
             </ul>
@@ -229,6 +267,36 @@ export class VoiceControlComponent implements OnInit, OnDestroy {
         this.loaded.set(true);
       },
       error: () => { if (first) this.loadError.set("Couldn't load the voice settings."); },
+    });
+  }
+
+  /** The speaker whose wake words are being saved, and what went wrong for which. */
+  readonly speakerBusy = signal<string | null>(null);
+  readonly speakerError = signal<{ name: string; text: string } | null>(null);
+
+  onCount(sp: BridgeSpeaker): number {
+    return (sp.wakeWords ?? []).filter((w) => w.on).length;
+  }
+
+  toggleWakeWord(sp: BridgeSpeaker, id: string, on: boolean): void {
+    const ids = (sp.wakeWords ?? []).filter((w) => (w.id === id ? on : w.on)).map((w) => w.id);
+    this.chooseForSpeaker(sp.name, { wakeWords: ids });
+  }
+
+  setSensitivity(sp: BridgeSpeaker, level: string): void {
+    this.chooseForSpeaker(sp.name, { sensitivity: level });
+  }
+
+  private chooseForSpeaker(name: string, choice: { wakeWords?: string[]; sensitivity?: string }): void {
+    this.speakerBusy.set(name);
+    this.speakerError.set(null);
+    this.http.put('/api/nlp/voice/speakers', { name, ...choice }).subscribe({
+      next: () => { this.speakerBusy.set(null); this.load(false); },
+      error: (err) => {
+        this.speakerBusy.set(null);
+        this.speakerError.set({ name, text: err?.error?.error ?? "Couldn't change it. Try again." });
+        this.load(false);
+      },
     });
   }
 

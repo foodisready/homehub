@@ -356,7 +356,7 @@ describe('/internal/voice', () => {
     assert.equal((await post({ version: '0.1', speakers: [{ name: 'Tablet', address: '10.9.0.20', connected: true }] })).status, 200);
     const { lastBridgeReport } = await import('../system/voice-bridge');
     // A bridge from before v0.1.85 doesn't say whether a speaker can announce.
-    assert.deepEqual(lastBridgeReport()?.speakers, [{ name: 'Tablet', address: '10.9.0.20', connected: true, announce: null }]);
+    assert.deepEqual(lastBridgeReport()?.speakers, [{ name: 'Tablet', address: '10.9.0.20', connected: true, announce: null, wakeWords: null, sensitivity: null, sensitivities: [] }]);
     await post({ version: '0.1.85', speakers: [{ name: 'Tablet', address: '10.9.0.20', connected: true, announce: true }] });
     assert.equal(lastBridgeReport()?.speakers[0].announce, true);
   });
