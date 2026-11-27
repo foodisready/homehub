@@ -29,16 +29,30 @@ export const NO_SPEAKER = 'This camera has no speaker HomeHub can use.';
 export function checkOffer(offer: unknown): string {
   const bad = () => new TalkError('offer: a WebRTC offer that sends and receives sound only', 400);
   if (typeof offer !== 'string' || !offer.startsWith('v=0') || offer.length > MAX_OFFER) throw bad();
-  const sections = offer.split(/\r?\nm=/).slice(1);
+  // Lines end in CRLF or LF only: a lone CR, or any other control character, could split
+  // lines differently for go2rtc than here, and hide a section from this check.
+  // eslint-disable-next-line no-control-regex
+  if (/\r(?!\n)|[\x00-\x09\x0b\x0c\x0e-\x1f\x7f]/.test(offer)) throw bad();
+  const lines = offer.split(/\r?\n/);
+  const DIRECTION = /^a=(sendrecv|sendonly|recvonly|inactive)(:|\s|$)/;
+  const sections: { kind: string; dirs: string[] }[] = [];
+  for (const line of lines) {
+    if (line.startsWith('m=')) sections.push({ kind: line.slice(2).split(' ')[0], dirs: [] });
+    else if (DIRECTION.test(line)) {
+      // A direction for the whole session would apply to every section.
+      if (sections.length === 0) throw bad();
+      const dir = line.match(DIRECTION)![1];
+      // Exactly the attribute, with nothing after it to read differently.
+      if (line !== `a=${dir}`) throw bad();
+      sections[sections.length - 1].dirs.push(dir);
+    }
+  }
   if (sections.length === 0 || sections.length > 4) throw bad();
   let receives = false;
-  for (const s of sections) {
-    if (!/^audio /.test(s)) throw bad();
-    const dirs = s.match(/^a=(sendrecv|sendonly|recvonly|inactive)\s*$/gm) ?? [];
-    if (dirs.length !== 1) throw bad();
-    const dir = dirs[0].slice(2).trim();
-    if (dir === 'recvonly') receives = true;
-    else if (dir !== 'sendonly') throw bad();
+  for (const { kind, dirs } of sections) {
+    if (kind !== 'audio' || dirs.length !== 1) throw bad();
+    if (dirs[0] === 'recvonly') receives = true;
+    else if (dirs[0] !== 'sendonly') throw bad();
   }
   if (!receives) throw bad();
   return offer;

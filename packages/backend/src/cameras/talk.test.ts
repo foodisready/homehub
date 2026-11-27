@@ -60,6 +60,12 @@ describe('talking through a camera', () => {
       v + 'm=audio 9 UDP/TLS/RTP/SAVPF 0\r\n',                                 // no direction: both ways
       v + 'm=audio 9 UDP/TLS/RTP/SAVPF 0\r\na=recvonly\r\na=sendonly\r\n',      // two
       v + audio('recvonly').repeat(5),
+      // A section hidden behind a lone CR, which another parser may take as a line break.
+      v + audio('recvonly').replace(/\r\n$/, '\rm=video 9 UDP/TLS/RTP/SAVPF 96\ra=sendonly\r\n'),
+      v + audio('recvonly') + 'a=tool:x\x00\r\n',
+      v + 'a=sendonly\r\n' + audio('recvonly'),                                 // for the whole session
+      v + audio('recvonly').replace('a=recvonly', 'a=recvonly:1'),
+      v + audio('recvonly') + 'm=video 0 UDP/TLS/RTP/SAVPF 96\r\na=inactive\r\n',
       v + audio('recvonly') + 'x'.repeat(20_000),
     ]) {
       assert.throws(() => checkOffer(bad), (e: TalkError) => e.status === 400, String(bad).slice(0, 80));
