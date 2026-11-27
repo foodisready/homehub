@@ -20,10 +20,27 @@ const CONNECT_MS = 20_000;
 
 export const NO_SPEAKER = 'This camera has no speaker HomeHub can use.';
 
+/**
+ * Only the offer Hold to talk makes: sound only, each section either sending (the
+ * microphone) or receiving, and at least one receiving. go2rtc decides from the offer
+ * whether a connection watches a camera or is a new source for it: one that sends video,
+ * or only sends, would be taken as a source, and what it sent shown to everyone watching.
+ */
 export function checkOffer(offer: unknown): string {
-  if (typeof offer !== 'string' || !offer.startsWith('v=0') || offer.length > MAX_OFFER || !/\nm=audio /.test(offer)) {
-    throw new TalkError('offer: a WebRTC offer with audio', 400);
+  const bad = () => new TalkError('offer: a WebRTC offer that sends and receives sound only', 400);
+  if (typeof offer !== 'string' || !offer.startsWith('v=0') || offer.length > MAX_OFFER) throw bad();
+  const sections = offer.split(/\r?\nm=/).slice(1);
+  if (sections.length === 0 || sections.length > 4) throw bad();
+  let receives = false;
+  for (const s of sections) {
+    if (!/^audio /.test(s)) throw bad();
+    const dirs = s.match(/^a=(sendrecv|sendonly|recvonly|inactive)\s*$/gm) ?? [];
+    if (dirs.length !== 1) throw bad();
+    const dir = dirs[0].slice(2).trim();
+    if (dir === 'recvonly') receives = true;
+    else if (dir !== 'sendonly') throw bad();
   }
+  if (!receives) throw bad();
   return offer;
 }
 

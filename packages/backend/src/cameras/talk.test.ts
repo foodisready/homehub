@@ -46,10 +46,23 @@ describe('talking through a camera', () => {
     await assert.rejects(talkVia('http://g', 'cam', OFFER, { fetch: go2rtc({ body: '{}' }).f }), /didn't start talking/);
   });
 
-  it('takes only a WebRTC offer with audio', () => {
+  it('takes only an offer that sends and receives sound', () => {
     assert.equal(checkOffer(OFFER), OFFER);
-    for (const bad of [undefined, 42, 'hello', 'v=0\r\nm=video 9 UDP 96\r\n', 'v=0\r\nm=audio ' + 'x'.repeat(20_000)]) {
-      assert.throws(() => checkOffer(bad), (e: TalkError) => e.status === 400);
+    const v = 'v=0\r\no=- 1 2 IN IP4 127.0.0.1\r\n';
+    const audio = (dir: string) => `m=audio 9 UDP/TLS/RTP/SAVPF 0\r\na=${dir}\r\n`;
+    for (const bad of [
+      undefined, 42, 'hello', v,
+      v + 'm=video 9 UDP 96\r\na=recvonly\r\n',
+      // Sending video, or only sending, would make it a source for the camera's stream.
+      v + 'm=video 9 UDP/TLS/RTP/SAVPF 96\r\na=sendonly\r\n' + audio('recvonly'),
+      v + audio('sendonly'),
+      v + audio('sendrecv') + audio('recvonly'),
+      v + 'm=audio 9 UDP/TLS/RTP/SAVPF 0\r\n',                                 // no direction: both ways
+      v + 'm=audio 9 UDP/TLS/RTP/SAVPF 0\r\na=recvonly\r\na=sendonly\r\n',      // two
+      v + audio('recvonly').repeat(5),
+      v + audio('recvonly') + 'x'.repeat(20_000),
+    ]) {
+      assert.throws(() => checkOffer(bad), (e: TalkError) => e.status === 400, String(bad).slice(0, 80));
     }
   });
 
