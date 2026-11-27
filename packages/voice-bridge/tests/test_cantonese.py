@@ -339,6 +339,10 @@ class PipelineTest(unittest.TestCase):
         names = ['My office lamp', 'Kitchen lights', 'Office', "Brenden's left bedside lamp", "Brenden's right bedside lamp", '書房燈']
         self.assertEqual(closest_name('Turn on my office la.', names), 'Turn on My office lamp')
         self.assertEqual(closest_name('switch off, the kitchen light', names), 'switch off Kitchen lights')
+        # How long is kept, and doesn't stop the name being found (it went to Whisper, ten seconds more).
+        names.append('office corner lamp')
+        self.assertEqual(closest_name('Turn on office land for 5 minutes.', names), 'Turn on My office lamp for 5 minutes')
+        self.assertEqual(closest_name('Turn on the office corner lamb for 15 minutes', names), 'Turn on office corner lamp for 15 minutes')
         # Too close to call between two names, or nothing like any: left as heard.
         self.assertEqual(closest_name("Turn on Brenden's bedside lamp.", names), "Turn on Brenden's bedside lamp.")
         self.assertEqual(closest_name('Turn on the garage.', names), 'Turn on the garage.')

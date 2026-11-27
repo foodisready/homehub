@@ -262,6 +262,8 @@ def _answer(audio: bytes, spoke: bool, listener: Transcriber, homehub: Commander
             first = english(text, homehub, asked, retry=True)
             if first[1] is None or first[1].handled:
                 return finish(first, time.monotonic() - t0)
+        # What made it slow: Whisper takes several seconds more. The log shows which words weren't enough.
+        log.info('SenseVoice heard %r, which HomeHub didn\'t take, so Whisper listens too', quick)
     text = listener.transcribe(audio, homehub.names)
     if not text.strip(' .,!?'):
         return Answer('', NOT_CAUGHT, False, time.monotonic() - t0)
@@ -309,11 +311,13 @@ def closest_name(text: str, names: list[str]) -> str:
     if not m:
         return text
     key = lambda s: re.sub(r"^(my|the)\s+|['’]s\b", '', s.lower().strip())  # noqa: E731
-    said = key(m.group(2))
+    # "… office land for 5 minutes": the name is matched without how long, which is kept.
+    how_long = FOR_HOW_LONG.search(m.group(2))
+    said = key(FOR_HOW_LONG.sub('', m.group(2)))
     scored = sorted(((difflib.SequenceMatcher(None, said, key(n)).ratio(), n) for n in set(names) if n.isascii()), reverse=True)
     if not scored or scored[0][0] < NAME_MATCH or (len(scored) > 1 and scored[0][0] - scored[1][0] < NAME_MARGIN):
         return text
-    return f'{m.group(1)} {scored[0][1]}'
+    return f'{m.group(1)} {scored[0][1]}' + (how_long.group(0).rstrip(' .,!?') if how_long else '')
 
 
 def english(text: str, homehub: Commander, asked: str | None, retry: bool = False) -> tuple[str, CommandResult | None, float]:
