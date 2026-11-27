@@ -58,6 +58,7 @@
   },
   "overrides": {
     "ffmpeg-for-homebridge": "file:vendor/ffmpeg-for-homebridge",
-    "minimatch": "^11.0.1"
+    "minimatch": "^11.0.1",
+    "@eneris/push-receiver": "4.4.0"
   }
 }
