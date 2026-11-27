@@ -1,5 +1,6 @@
 # HomeHub's Wyze camera bridge: IDisposable's wyze-bridge, with its go2rtc
-# rebuilt to add pan and tilt for Wyze Pan cameras (go2rtc-wyze-ptz.patch).
+# rebuilt to add pan and tilt for Wyze Pan cameras (go2rtc-wyze-ptz.patch) and
+# talking to cameras whose speaker takes raw PCM (go2rtc-wyze-talk.patch).
 # Everything else is the upstream image, unchanged.
 
 # The go2rtc the bridge ships, built from source with the patch.
@@ -10,8 +11,8 @@ RUN apk add --no-cache git
 WORKDIR /src
 RUN git clone --quiet --depth 1 --branch "$GO2RTC_VERSION" https://github.com/AlexxIT/go2rtc.git . \
  && test "$(git rev-parse --short=7 HEAD)" = "$GO2RTC_COMMIT"
-COPY go2rtc-wyze-ptz.patch /tmp/
-RUN git apply /tmp/go2rtc-wyze-ptz.patch
+COPY go2rtc-wyze-ptz.patch go2rtc-wyze-talk.patch /tmp/
+RUN git apply /tmp/go2rtc-wyze-ptz.patch && git apply /tmp/go2rtc-wyze-talk.patch
 RUN --mount=type=cache,target=/root/.cache/go-build --mount=type=cache,target=/go/pkg/mod \
     go test ./pkg/wyze/ ./internal/wyze/ \
  && CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /go2rtc .

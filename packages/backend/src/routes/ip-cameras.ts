@@ -3,7 +3,8 @@ import { Readable } from 'stream';
 import { logger } from '../logger';
 import { requireAdmin } from '../middleware/auth';
 import * as ipcam from '../ipcam/ipcam';
-import { RelayError, hlsFetch, relayState } from '../ipcam/relay';
+import { RelayError, hlsFetch, relayState, talk } from '../ipcam/relay';
+import { TalkError, checkOffer } from '../cameras/talk';
 import type { PanAction } from '../ipcam/onvif-client';
 
 /**
@@ -14,7 +15,7 @@ import type { PanAction } from '../ipcam/onvif-client';
 export const ipCamerasRouter = Router();
 
 function fail(res: Response, err: unknown, fallback: string): void {
-  if (err instanceof ipcam.IpCamError || err instanceof RelayError) {
+  if (err instanceof ipcam.IpCamError || err instanceof RelayError || err instanceof TalkError) {
     res.status(err.status).json({ error: err.message, code: 'IP_CAMERA_ERROR' });
     return;
   }
@@ -138,6 +139,21 @@ ipCamerasRouter.post('/:id/ptz', async (req: Request, res: Response) => {
     await ipcam.pan(id, action as PanAction);
     res.status(204).end();
   } catch (err) { fail(res, err, 'The camera didn\'t turn'); }
+});
+
+/**
+ * POST /api/ip-cameras/:id/talk { offer } — the browser's microphone to the
+ * camera's speaker, through the relay. Cameras with two-way audio over RTSP
+ * (ONVIF Profile T) have one HomeHub can use.
+ */
+ipCamerasRouter.post('/:id/talk', async (req: Request, res: Response) => {
+  const id = idParam(req);
+  if (id === null) return res.status(404).json({ error: 'Camera not found', code: 'NOT_FOUND' });
+  try {
+    const offer = checkOffer((req.body as Record<string, unknown> | undefined)?.offer);
+    res.json({ answer: await talk(await ipcam.liveStream(id), offer) });
+    logger.info({ camera: id }, 'Talking through an IP camera');
+  } catch (err) { fail(res, err, 'Talking didn\'t start'); }
 });
 
 /**

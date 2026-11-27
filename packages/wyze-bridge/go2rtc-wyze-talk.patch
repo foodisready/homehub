@@ -1,0 +1,167 @@
+diff --git a/pkg/wyze/backchannel.go b/pkg/wyze/backchannel.go
+index 37472c1..1dc3dfc 100644
+--- a/pkg/wyze/backchannel.go
++++ b/pkg/wyze/backchannel.go
+@@ -5,10 +5,44 @@ import (
+ 
+ 	"github.com/AlexxIT/go2rtc/pkg/aac"
+ 	"github.com/AlexxIT/go2rtc/pkg/core"
++	"github.com/AlexxIT/go2rtc/pkg/pcm"
+ 	"github.com/AlexxIT/go2rtc/pkg/tutk"
+ 	"github.com/pion/rtp"
+ )
+ 
++// backchannelCodecs is what the camera's speaker takes: the codec the camera sends, and,
++// for a camera that sends raw PCM, G.711 too, converted to PCM on the way. A browser can't
++// send raw PCM over WebRTC, but every browser sends G.711.
++func backchannelCodecs(acodec *core.Codec) []*core.Codec {
++	codecs := []*core.Codec{acodec.Clone()}
++	if acodec.Name == core.CodecPCML {
++		codecs = append(codecs,
++			&core.Codec{Name: core.CodecPCMA, ClockRate: 8000},
++			&core.Codec{Name: core.CodecPCMU, ClockRate: 8000},
++		)
++	}
++	return codecs
++}
++
++// toCameraPCM converts G.711 to the camera's PCM and cuts it into the camera's frames,
++// whatever size the packets arrive in. Each frame is passed to write.
++func toCameraPCM(src *core.Codec, sampleRate uint32, channels uint8, samplesPerFrame uint32, write func([]byte)) func([]byte) {
++	if channels == 0 {
++		channels = 1
++	}
++	dst := &core.Codec{Name: core.CodecPCML, ClockRate: sampleRate, Channels: channels}
++	transcode := pcm.Transcode(dst, src)
++	size := int(samplesPerFrame) * 2 * int(channels)
++	var buf []byte
++	return func(payload []byte) {
++		buf = append(buf, transcode(payload)...)
++		for len(buf) >= size {
++			write(buf[:size])
++			buf = buf[size:]
++		}
++	}
++}
++
+ func (p *Producer) AddTrack(media *core.Media, codec *core.Codec, track *core.Receiver) error {
+ 	if err := p.client.StartIntercom(); err != nil {
+ 		return fmt.Errorf("wyze: failed to enable intercom: %w", err)
+@@ -21,7 +55,7 @@ func (p *Producer) AddTrack(media *core.Media, codec *core.Codec, track *core.Re
+ 	}
+ 
+ 	if p.client.verbose {
+-		fmt.Printf("[Wyze] Intercom enabled, using codec=0x%04x rate=%d ch=%d\n", tutkCodec, sampleRate, channels)
++		fmt.Printf("[Wyze] Intercom enabled, using codec=0x%04x rate=%d ch=%d, from %s\n", tutkCodec, sampleRate, channels, track.Codec.Name)
+ 	}
+ 
+ 	sender := core.NewSender(media, track.Codec)
+@@ -32,12 +66,13 @@ func (p *Producer) AddTrack(media *core.Media, codec *core.Codec, track *core.Re
+ 	samplesPerFrame := tutk.GetSamplesPerFrame(tutkCodec)
+ 	frameDurationUS := samplesPerFrame * 1000000 / sampleRate
+ 
+-	sender.Handler = func(pkt *rtp.Packet) {
+-		if err := p.client.WriteAudio(tutkCodec, pkt.Payload, timestamp, sampleRate, channels); err == nil {
+-			p.Send += len(pkt.Payload)
++	write := func(payload []byte) {
++		if err := p.client.WriteAudio(tutkCodec, payload, timestamp, sampleRate, channels); err == nil {
++			p.Send += len(payload)
+ 		}
+ 		timestamp += frameDurationUS
+ 	}
++	sender.Handler = func(pkt *rtp.Packet) { write(pkt.Payload) }
+ 
+ 	switch track.Codec.Name {
+ 	case core.CodecAAC:
+@@ -46,6 +81,11 @@ func (p *Producer) AddTrack(media *core.Media, codec *core.Codec, track *core.Re
+ 		} else {
+ 			sender.Handler = aac.EncodeToADTS(codec, sender.Handler)
+ 		}
++	case core.CodecPCMA, core.CodecPCMU:
++		if tutkCodec == tutk.CodecPCML {
++			convert := toCameraPCM(track.Codec, sampleRate, channels, samplesPerFrame, write)
++			sender.Handler = func(pkt *rtp.Packet) { convert(pkt.Payload) }
++		}
+ 	}
+ 
+ 	sender.HandleRTP(track)
+diff --git a/pkg/wyze/backchannel_test.go b/pkg/wyze/backchannel_test.go
+new file mode 100644
+index 0000000..c5a5711
+--- /dev/null
++++ b/pkg/wyze/backchannel_test.go
+@@ -0,0 +1,61 @@
++package wyze
++
++import (
++	"testing"
++
++	"github.com/AlexxIT/go2rtc/pkg/core"
++	"github.com/AlexxIT/go2rtc/pkg/pcm"
++)
++
++func TestBackchannelCodecsAddG711ForPCM(t *testing.T) {
++	got := backchannelCodecs(&core.Codec{Name: core.CodecPCML, ClockRate: 8000, Channels: 1})
++	if len(got) != 3 || got[0].Name != core.CodecPCML || got[1].Name != core.CodecPCMA || got[2].Name != core.CodecPCMU {
++		t.Fatalf("codecs = %v", got)
++	}
++	if got := backchannelCodecs(&core.Codec{Name: core.CodecPCMA, ClockRate: 8000}); len(got) != 1 {
++		t.Fatalf("a G.711 camera keeps its own codec only, got %v", got)
++	}
++}
++
++func TestToCameraPCMMakesWholeFrames(t *testing.T) {
++	var frames [][]byte
++	convert := toCameraPCM(&core.Codec{Name: core.CodecPCMA, ClockRate: 8000}, 8000, 1, 160, func(b []byte) {
++		frames = append(frames, append([]byte(nil), b...))
++	})
++	// A browser's 20 ms of A-law is 160 bytes; three and a half packets make seven frames of 320 bytes.
++	alaw := make([]byte, 160)
++	for i := range alaw {
++		alaw[i] = pcm.PCMtoPCMA(int16(i * 100))
++	}
++	convert(alaw)
++	convert(alaw)
++	convert(alaw)
++	convert(alaw[:80])
++	if len(frames) != 3 {
++		t.Fatalf("frames = %d, want 3 (the half packet waits)", len(frames))
++	}
++	for _, f := range frames {
++		if len(f) != 320 {
++			t.Fatalf("frame is %d bytes, want 320", len(f))
++		}
++	}
++	// Little-endian PCM, close to what went in.
++	s := int16(frames[0][201])<<8 | int16(frames[0][200])
++	if d := int(s) - 100*100; d < -400 || d > 400 {
++		t.Fatalf("sample 100 = %d, want about %d", s, 100*100)
++	}
++	convert(alaw[:80])
++	if len(frames) != 4 {
++		t.Fatalf("frames = %d, want 4 once the second half arrives", len(frames))
++	}
++}
++
++func TestToCameraPCMResamplesForA16kCamera(t *testing.T) {
++	var n int
++	convert := toCameraPCM(&core.Codec{Name: core.CodecPCMU, ClockRate: 8000}, 16000, 1, 320, func(b []byte) { n += len(b) })
++	convert(make([]byte, 160)) // 20 ms
++	convert(make([]byte, 160))
++	if n != 1280 {
++		t.Fatalf("got %d bytes, want 1280 (40 ms in, two frames of 20 ms at 16 kHz out)", n)
++	}
++}
+diff --git a/pkg/wyze/producer.go b/pkg/wyze/producer.go
+index 965c617..5214d9a 100644
+--- a/pkg/wyze/producer.go
++++ b/pkg/wyze/producer.go
+@@ -263,7 +263,7 @@ func probe(client *Client, quality byte) ([]*core.Media, error) {
+ 			medias = append(medias, &core.Media{
+ 				Kind:      core.KindAudio,
+ 				Direction: core.DirectionSendonly,
+-				Codecs:    []*core.Codec{acodec.Clone()},
++				Codecs:    backchannelCodecs(acodec),
+ 			})
+ 		}
+ 	}

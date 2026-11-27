@@ -2,6 +2,7 @@ import { Component, ElementRef, OnDestroy, OnInit, computed, inject, input, outp
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 import { AuthService } from '../../core/auth/auth.service';
+import { TalkButtonComponent, type TalkTarget, gathered } from './talk-button.component';
 
 interface LiveStart { sessionId: string; answer: string; maxSeconds: number }
 
@@ -15,10 +16,15 @@ const GATHER_MS = 2_500;
  * offer to Ring and Ring's answer back: the video then goes straight from
  * Ring to this browser, not through HomeHub. Ring ends it after a few
  * minutes, as the Ring app does, and so does closing this.
+ *
+ * Hold to talk sends the microphone on the same connection: its sound goes
+ * both ways from the start, silent until the button is held, when HomeHub
+ * asks Ring to turn on the camera's speaker.
  */
 @Component({
   selector: 'app-ring-live',
   standalone: true,
+  imports: [TalkButtonComponent],
   styles: [`
     .backdrop {
       position: fixed; inset: 0; z-index: 60; background: rgba(0, 0, 0, 0.88);
@@ -71,6 +77,7 @@ const GATHER_MS = 2_500;
             </div>
           }
         </div>
+        @if (state() === 'live' && talkTarget(); as t) { <app-talk-button [target]="t" (talking)="onTalking($event)" /> }
         <p class="note">Video comes straight from Ring, a few seconds behind, and stops after {{ maxMinutes() }} minutes.</p>
       </div>
     </div>
@@ -100,6 +107,9 @@ export class RingLiveComponent implements OnInit, OnDestroy {
   });
 
   private pc: RTCPeerConnection | null = null;
+  /** Talking on this session's connection; a new one comes with each session. */
+  readonly talkTarget = signal<TalkTarget | null>(null);
+  private mutedBeforeTalking: boolean | null = null;
   private sessionId: string | null = null;
   private timers: ReturnType<typeof setTimeout>[] = [];
   private tick?: ReturnType<typeof setInterval>;
@@ -138,7 +148,8 @@ export class RingLiveComponent implements OnInit, OnDestroy {
     const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
     this.pc = pc;
     pc.addTransceiver('video', { direction: 'recvonly' });
-    pc.addTransceiver('audio', { direction: 'recvonly' });
+    // Both ways, with no microphone yet: holding Hold to talk puts it on, with no new offer.
+    const audio = pc.addTransceiver('audio', { direction: 'sendrecv' });
     pc.ontrack = (e) => {
       const v = this.video().nativeElement;
       if (v.srcObject !== e.streams[0]) v.srcObject = e.streams[0] ?? new MediaStream([e.track]);
@@ -169,6 +180,7 @@ export class RingLiveComponent implements OnInit, OnDestroy {
       this.maxSeconds.set(res.maxSeconds);
       this.endsAt.set(Date.now() + res.maxSeconds * 1000);
       await pc.setRemoteDescription({ type: 'answer', sdp: res.answer });
+      this.talkTarget.set(this.ringTalk(pc, audio, res.sessionId));
     } catch (err) {
       if (attempt !== this.attempt) return;
       const text = err instanceof HttpErrorResponse ? err.error?.error : null;
@@ -178,13 +190,39 @@ export class RingLiveComponent implements OnInit, OnDestroy {
 
   /** Ring needs the browser's addresses in the offer itself, so wait for them, briefly. */
   private gathered(pc: RTCPeerConnection): Promise<void> {
-    if (pc.iceGatheringState === 'complete') return Promise.resolve();
-    return new Promise((resolve) => {
-      const done = () => { pc.removeEventListener('icegatheringstatechange', check); resolve(); };
-      const check = () => { if (pc.iceGatheringState === 'complete') done(); };
-      pc.addEventListener('icegatheringstatechange', check);
-      setTimeout(done, GATHER_MS);
-    });
+    return gathered(pc, GATHER_MS);
+  }
+
+  /** The microphone on this session's sound, and the camera's speaker turned on for it. */
+  private ringTalk(pc: RTCPeerConnection, audio: RTCRtpTransceiver, sessionId: string): TalkTarget {
+    let speakerOn = false;
+    return {
+      open: async (mic) => {
+        if (this.pc !== pc) throw new Error('Live video has ended.');
+        if (!audio.currentDirection?.includes('send')) throw new Error('This camera has no speaker HomeHub can use.');
+        await audio.sender.replaceTrack(mic);
+        if (!speakerOn) {
+          await firstValueFrom(this.http.post(`/api/ring/live/${sessionId}/speaker`, {}));
+          speakerOn = true;
+        }
+      },
+      close: () => {
+        if (this.pc === pc) void audio.sender.replaceTrack(null).catch(() => undefined);
+      },
+    };
+  }
+
+  /** The camera's sound is off while talking, as on a walkie-talkie, so the camera doesn't hear itself. */
+  onTalking(on: boolean): void {
+    const v = this.video().nativeElement;
+    if (on) {
+      this.mutedBeforeTalking ??= this.muted();
+      this.muted.set(true);
+    } else if (this.mutedBeforeTalking !== null) {
+      this.muted.set(this.mutedBeforeTalking);
+      this.mutedBeforeTalking = null;
+    }
+    v.muted = this.muted();
   }
 
   private finish(state: 'failed' | 'ended', message: string): void {
@@ -199,6 +237,7 @@ export class RingLiveComponent implements OnInit, OnDestroy {
     this.attempt++;
     this.pc?.close();
     this.pc = null;
+    this.talkTarget.set(null);
     const v = this.video()?.nativeElement;
     if (v) v.srcObject = null;
     if (this.sessionId) this.endSession(this.sessionId, leaving);

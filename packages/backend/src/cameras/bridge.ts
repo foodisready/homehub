@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { logger } from '../logger';
 import { notePicture } from './picture-status';
+import { talkVia } from './talk';
 
 /**
  * Client for the Wyze camera bridge: IDisposable's docker-wyze-bridge 4.x,
@@ -314,6 +315,11 @@ export async function restartStream(cam: string): Promise<void> {
 export function hlsFetch(cam: string, file: string, query: string, signal?: AbortSignal): Promise<Response> {
   const target = file === 'index.m3u8' ? `/api/stream.m3u8?src=${enc(cam)}` : `/api/${file}${query}`;
   return fetchImpl(go2rtcUrl() + target, { signal });
+}
+
+/** Connects a browser's microphone to the camera's speaker: `offer` in, go2rtc's answer out. See cameras/talk.ts. */
+export function talk(cam: string, offer: string): Promise<string> {
+  return talkVia(go2rtcUrl(), cam, offer, { fetch: fetchImpl });
 }
 
 export function logBridgeError(err: unknown, what: string): void {

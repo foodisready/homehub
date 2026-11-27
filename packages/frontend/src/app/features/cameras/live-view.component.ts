@@ -1,9 +1,10 @@
-import { AfterViewInit, Component, ElementRef, HostListener, OnDestroy, inject, input, output, signal, viewChild } from '@angular/core';
+import { AfterViewInit, Component, ElementRef, HostListener, OnDestroy, computed, inject, input, output, signal, viewChild } from '@angular/core';
 import { NgTemplateOutlet } from '@angular/common';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 import Hls from 'hls.js';
 import { AuthService } from '../../core/auth/auth.service';
+import { TalkButtonComponent, go2rtcTalk } from './talk-button.component';
 
 const MAX_ZOOM = 5;
 const DOUBLE_TAP_MS = 300;
@@ -31,11 +32,14 @@ const ARROW_KEYS: Record<string, Turn> = { ArrowLeft: 'left', ArrowRight: 'right
  *
  * Pan cameras also get arrows to turn the camera itself: hold one (or an
  * arrow key) to keep turning, let go to stop; a tap is a small nudge.
+ *
+ * Hold to talk sends this device's microphone to the camera's speaker, on a
+ * connection of its own (see talk-button.component.ts).
  */
 @Component({
   selector: 'app-live-view',
   standalone: true,
-  imports: [NgTemplateOutlet],
+  imports: [NgTemplateOutlet, TalkButtonComponent],
   styles: [`
     .backdrop {
       position: fixed; inset: 0; z-index: 60; background: rgba(0, 0, 0, 0.88);
@@ -136,6 +140,7 @@ const ARROW_KEYS: Record<string, Turn> = { ArrowLeft: 'left', ArrowRight: 'right
             <ng-container [ngTemplateOutlet]="arrows" />
           </div>
         }
+        <app-talk-button [target]="talkTarget()" (talking)="onTalking($event)" />
       </div>
     </div>
     <ng-template #arrows>
@@ -311,6 +316,26 @@ export class LiveViewComponent implements AfterViewInit, OnDestroy {
       this.status.set('Tap Play to start.');
       this.needsTap.set(true);
     });
+  }
+
+  /** Talking through the camera: offers go to its talk endpoint, beside hls/. */
+  readonly talkTarget = computed(() => {
+    const url = `${this.base()}/talk`;
+    return go2rtcTalk(async (offer) => (await firstValueFrom(this.http.post<{ answer: string }>(url, { offer }))).answer);
+  });
+  private mutedBeforeTalking: boolean | null = null;
+
+  /** The camera's sound is off while talking, as on a walkie-talkie, so the camera doesn't hear itself. */
+  onTalking(on: boolean): void {
+    const el = this.video().nativeElement;
+    if (on) {
+      this.mutedBeforeTalking ??= el.muted;
+      el.muted = true;
+    } else if (this.mutedBeforeTalking !== null) {
+      el.muted = this.mutedBeforeTalking;
+      this.mutedBeforeTalking = null;
+    }
+    this.muted.set(el.muted);
   }
 
   toggleSound(): void {

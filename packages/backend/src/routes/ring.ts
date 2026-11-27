@@ -115,6 +115,14 @@ ringRouter.post('/cameras/:id/live', async (req: Request, res: Response) => {
   } catch (err) { fail(res, err, 'Live video didn\'t start'); }
 });
 
+// POST /api/ring/live/:sessionId/speaker — turn on the camera's speaker, to talk
+ringRouter.post('/live/:sessionId/speaker', async (req: Request, res: Response) => {
+  try {
+    await ring.liveSpeaker(String(req.params.sessionId));
+    res.status(204).end();
+  } catch (err) { fail(res, err, 'The camera\'s speaker didn\'t turn on'); }
+});
+
 // DELETE /api/ring/live/:sessionId — stop live video
 ringRouter.delete('/live/:sessionId', async (req: Request, res: Response) => {
   const ended = await ring.endLive(String(req.params.sessionId));

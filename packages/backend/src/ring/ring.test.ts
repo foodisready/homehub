@@ -40,11 +40,17 @@ class FakeCam implements RingCam {
   emit(e: RingEvent): void { for (const l of this.listeners) l(e); }
   offers: string[] = [];
   ended = 0;
+  speakers = 0;
   liveError: Error | null = null;
+  speakerError: Error | null = null;
   async startLive(offer: string): Promise<LiveSession> {
     if (this.liveError) throw this.liveError;
     this.offers.push(offer);
-    return { answer: 'v=0\r\nanswer', end: async () => { this.ended++; } };
+    return {
+      answer: 'v=0\r\nanswer',
+      end: async () => { this.ended++; },
+      speaker: async () => { if (this.speakerError) throw this.speakerError; this.speakers++; },
+    };
   }
 }
 
@@ -422,6 +428,19 @@ describe('Ring cameras', () => {
       await api('DELETE', '/api/ring/login');
       assert.equal(ring.liveCount(), 0);
       assert.equal(door().ended, 2);
+    });
+
+    it('turns on the camera\'s speaker to talk, while the video is live', async () => {
+      await signInAndAdd();
+      const live = await api('POST', '/api/ring/cameras/1/live', { offer: 'v=0\r\noffer' }, 'user');
+      assert.equal((await api('POST', `/api/ring/live/${live.body.sessionId}/speaker`, undefined, 'user')).status, 204);
+      assert.equal(door().speakers, 1);
+      door().speakerError = new Error('400');
+      const failed = await api('POST', `/api/ring/live/${live.body.sessionId}/speaker`);
+      assert.equal(failed.status, 502);
+      assert.match(failed.body.error, /speaker/);
+      await api('DELETE', `/api/ring/live/${live.body.sessionId}`);
+      assert.equal((await api('POST', `/api/ring/live/${live.body.sessionId}/speaker`)).status, 404);
     });
 
     it('says why it can\'t start', async () => {

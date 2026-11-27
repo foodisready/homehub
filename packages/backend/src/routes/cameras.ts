@@ -7,6 +7,7 @@ import { requireAdmin } from '../middleware/auth';
 import { getCachedState } from '../kasa/device.cache';
 import * as bridge from '../cameras/bridge';
 import * as snaps from '../cameras/snapshots';
+import { TalkError, checkOffer } from '../cameras/talk';
 import { cameraDevices, lastMotionFor, liveCameras } from '../cameras/watch';
 import { camerasElsewhere, elsewhereHint, localNetworks, noPictureHint, pictureHealth } from '../cameras/picture-status';
 import { clearPowerCache } from '../drivers/WyzeDriver';
@@ -22,7 +23,7 @@ import { cameraCount as ipCameraCount } from '../ipcam/ipcam';
 export const camerasRouter = Router();
 
 function fail(res: Response, err: unknown, fallback = 'Camera request failed'): void {
-  if (err instanceof bridge.BridgeError) {
+  if (err instanceof bridge.BridgeError || err instanceof TalkError) {
     res.status(err.status >= 400 && err.status < 600 ? err.status : 502).json({ error: err.message, code: 'CAMERA_ERROR' });
     return;
   }
@@ -232,6 +233,20 @@ camerasRouter.post('/:deviceId/ptz', async (req: Request, res: Response) => {
     await ptz(device.cam, action as PtzAction);
     res.status(204).end();
   } catch (err) { fail(res, err, 'The camera didn\'t turn'); }
+});
+
+/**
+ * POST /api/cameras/:deviceId/talk { offer } — the browser's microphone to the
+ * camera's speaker. The answer connects the browser to the bridge's go2rtc.
+ */
+camerasRouter.post('/:deviceId/talk', async (req: Request, res: Response) => {
+  const device = deviceParam(req);
+  if (!device) return res.status(404).json({ error: 'Camera not found', code: 'NOT_FOUND' });
+  try {
+    const offer = checkOffer((req.body as Record<string, unknown> | undefined)?.offer);
+    res.json({ answer: await bridge.talk(device.cam, offer) });
+    logger.info({ cam: device.cam }, 'Talking through a camera');
+  } catch (err) { fail(res, err, 'Talking didn\'t start'); }
 });
 
 /**

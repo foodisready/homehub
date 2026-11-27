@@ -1,6 +1,6 @@
 # Wyze camera bridge
 
-HomeHub's camera bridge image is [IDisposable's wyze-bridge](https://hub.docker.com/r/idisposablegithub365/wyze-bridge) 4.5.0, with one change: its [go2rtc](https://github.com/AlexxIT/go2rtc) 1.9.14 is rebuilt from source with `go2rtc-wyze-ptz.patch`, which adds pan and tilt for Wyze Pan cameras. Everything else in the image is upstream's, unchanged.
+HomeHub's camera bridge image is [IDisposable's wyze-bridge](https://hub.docker.com/r/idisposablegithub365/wyze-bridge) 4.5.0, with one change: its [go2rtc](https://github.com/AlexxIT/go2rtc) 1.9.14 is rebuilt from source with two patches. `go2rtc-wyze-ptz.patch` adds pan and tilt for Wyze Pan cameras, and `go2rtc-wyze-talk.patch` lets a browser talk to cameras whose speaker takes raw PCM. Everything else in the image is upstream's, unchanged.
 
 The release workflow builds it for arm64 and amd64 as `ghcr.io/foodisready/homehub-wyze-bridge`, tagged with the HomeHub version. The build checks out go2rtc's tag, checks its commit matches the one the upstream image ships, applies the patch and runs its tests.
 
@@ -30,6 +30,12 @@ On firmware 4.50.17.25, in one home:
 - The position reads back as it changes. The vertical angle read 83, so the Pan v3's scale differs from the 0–40 the old bridge described for older Pans.
 
 `goto` and `tracking` follow the same commands but haven't been tried on a real camera yet. HomeHub uses only the moves and `stop`.
+
+## What the talk patch adds
+
+go2rtc plays sound a WebRTC viewer sends on a Wyze camera's speaker, in the codec the camera sends its own sound in. Wyze Pan v3s send raw PCM (`PCML/8000/1`), which a browser can't send over WebRTC, so nothing reached their speaker. The patch offers G.711 (`PCMA/8000`, `PCMU/8000`) as well for those cameras, and converts it to the camera's PCM with go2rtc's own `pcm.Transcode`, cut into the camera's 160-sample frames however the packets arrive. Cameras that send G.711, AAC or Opus are unchanged.
+
+HomeHub's Hold to talk (`POST /api/cameras/:deviceId/talk`) uses it. On a Pan v3 (firmware 4.50.17.25), a browser's A-law reached the camera's speaker as PCM: go2rtc's stream showed `audio, sendonly, PCML/8000/1, PCMA/8000, PCMU/8000` and the camera took every frame.
 
 ## Updating
 

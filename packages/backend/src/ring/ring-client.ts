@@ -49,6 +49,8 @@ export interface RingCam {
 export interface LiveSession {
   answer: string;
   end(): Promise<void>;
+  /** Turns on the camera's speaker, so the browser's microphone is heard there. */
+  speaker(): Promise<void>;
 }
 
 export interface RingSession {
@@ -169,7 +171,11 @@ function toCam(camera: Lib, home: string | null = null): RingCam {
       const session = camera.createSimpleWebRtcSession();
       const answer = await session.start(offer);
       if (typeof answer !== 'string' || !answer) throw new Error('Ring sent no answer');
-      return { answer, end: async () => { await session.end(); } };
+      return {
+        answer,
+        end: async () => { await session.end(); },
+        speaker: async () => { await session.activateCameraSpeaker(); },
+      };
     },
   };
 }

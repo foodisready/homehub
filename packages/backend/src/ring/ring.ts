@@ -415,6 +415,21 @@ export async function endLive(sessionId: string): Promise<boolean> {
   return true;
 }
 
+/**
+ * Turns on the camera's speaker for a live session, so what the browser sends on its
+ * connection is heard at the camera. Ring keeps it on until the session ends.
+ */
+export async function liveSpeaker(sessionId: string): Promise<void> {
+  const live = lives.get(sessionId);
+  if (!live) throw new RingError('Live video has ended', 404);
+  try {
+    await live.session.speaker();
+  } catch (err) {
+    logger.warn({ reason: (err as Error).message }, 'Ring speaker didn\'t turn on');
+    throw new RingError('Ring didn\'t turn on the camera\'s speaker. Try again in a moment.', 502);
+  }
+}
+
 export const liveCount = (): number => lives.size;
 
 // ── Events ───────────────────────────────────────────────────────────

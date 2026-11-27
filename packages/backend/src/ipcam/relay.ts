@@ -9,6 +9,8 @@
  * using it, so a restarted relay simply learns them again.
  */
 
+import { talkVia } from '../cameras/talk';
+
 export const relayUrl = () => (process.env.CAMERA_RELAY_URL || 'http://127.0.0.1:1985').replace(/\/+$/, '');
 
 type Fetch = typeof fetch;
@@ -94,6 +96,18 @@ export function resetRelayState(): void { given.clear(); }
 export function hlsFetch(name: string, file: string, query: string, signal?: AbortSignal): Promise<Response> {
   const target = file === 'index.m3u8' ? `/api/stream.m3u8?src=${encodeURIComponent(name)}` : `/api/${file}${query}`;
   return call(target, { signal }, 30_000);
+}
+
+/** Connects a browser's microphone to the camera's speaker: `offer` in, the relay's answer out. See cameras/talk.ts. */
+export function talk(name: string, offer: string): Promise<string> {
+  return talkVia(relayUrl(), name, offer, {
+    fetch: fetchImpl,
+    // In turn with stream changes, like the stream list, which go2rtc reads without a lock.
+    streamInfo: () => oneAtATime(async () => {
+      const res = await call(`/api/streams?src=${encodeURIComponent(name)}`);
+      return res.ok ? res.json() : null;
+    }),
+  });
 }
 
 /** A JPEG made from the video now. Slower than a camera's own snapshot: the relay connects first. */
