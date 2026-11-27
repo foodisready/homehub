@@ -394,7 +394,11 @@ describe('Alarm.com client', () => {
 
     it('puts the live-update token in the address as issued', () => {
       assert.equal(socketUrl('wss://w:8443', 'ab+c/d=='), 'wss://w:8443/?f=1&auth=ab+c/d==');
-      assert.equal(socketUrl('wss://w:8443', 'a&b#c'), 'wss://w:8443/?f=1&auth=a%26b%23c');
+      // Alarm.com issues it already escaped ("%2B", "&"): escaped again, every connection was closed
+      // at once with 1008 (the Pi, 2026-11-27).
+      assert.equal(socketUrl('wss://w:8443', 'abc%2Bd%3D&x=1'), 'wss://w:8443/?f=1&auth=abc%2Bd%3D&x=1');
+      // Only what can't be in an address at all is escaped.
+      assert.equal(socketUrl('wss://w:8443', 'a b#c'), 'wss://w:8443/?f=1&auth=a%20b%23c');
     });
 
     it('reads hidden fields and error codes', () => {

@@ -500,12 +500,14 @@ const makeSocket: SocketMaker = (url, headers) => new WsSocket(url, { headers, h
 
 /**
  * The live-update address. The token goes in as Alarm.com issued it, as the Python library sends
- * it; escaping its "+", "/" or "=" is the likeliest reason Alarm.com turned every connection away
- * at once (1008, seen 2026-11-22). Only a token with characters that would break the address is escaped.
+ * it: it comes already escaped for an address, with "%", "&" and "=" in it. Escaping it again made
+ * Alarm.com close every connection at once (1008, 2026-11-22 to 2026-11-27). Only characters that
+ * can't be in an address at all (spaces, "#", anything not ASCII) are escaped.
  */
 export function socketUrl(endpoint: string, token: string): string {
-  const safe = /^[A-Za-z0-9._~+/=:-]+$/.test(token);
-  return `${endpoint}/?f=1&auth=${safe ? token : encodeURIComponent(token)}`;
+  // eslint-disable-next-line no-control-regex
+  const auth = token.replace(/[\s#"<>\\^`{|}\u0000-\u001f\u007f-\u{10ffff}]/gu, (c) => encodeURIComponent(c));
+  return `${endpoint}/?f=1&auth=${auth}`;
 }
 
 /** A connection that ends sooner than this after opening counts as refused. */
