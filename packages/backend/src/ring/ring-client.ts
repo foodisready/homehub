@@ -8,6 +8,8 @@
  * 60 MB of memory, which a HomeHub without Ring shouldn't pay.
  */
 
+import { logger } from '../logger';
+
 export type RingEventKind = 'ding' | 'motion';
 
 export interface RingEvent {
@@ -92,7 +94,7 @@ const loaded = new Map<string, Promise<Lib>>();
  * TypeScript would turn import() into require(). Function keeps it a real
  * import().
  */
-function load(entry: 'ring-client-api' | 'ring-client-api/rest-client' = 'ring-client-api'): Promise<Lib> {
+function load(entry: 'ring-client-api' | 'ring-client-api/rest-client' | 'ring-client-api/util' = 'ring-client-api'): Promise<Lib> {
   let pending = loaded.get(entry);
   if (!pending) {
     pending = (new Function('m', 'return import(m)') as (m: string) => Promise<Lib>)(entry)
@@ -100,6 +102,22 @@ function load(entry: 'ring-client-api' | 'ring-client-api/rest-client' = 'ring-c
     loaded.set(entry, pending);
   }
   return pending;
+}
+
+let routed: Promise<void> | null = null;
+
+/**
+ * ring-client-api's own messages, such as the push connection failing or an alert it couldn't read, go
+ * to the `debug` package and are never seen. They go to HomeHub's log instead.
+ */
+function libraryLogs(): Promise<void> {
+  routed ??= load('ring-client-api/util').then((util: Lib) => {
+    util.useLogger({
+      logInfo: (...message: unknown[]) => logger.info({ ring: message.map(String).join(' ').slice(0, 500) }, 'Ring library'),
+      logError: (message: unknown) => logger.warn({ ring: String(message).slice(0, 500) }, 'Ring library'),
+    });
+  }).catch(() => undefined);
+  return routed;
 }
 
 /** Ring's error text, in words for people. */
@@ -152,7 +170,10 @@ function toCam(camera: Lib, home: string | null = null): RingCam {
     },
     onEvent(listener) {
       const sub = camera.onNewNotification.subscribe((n: Lib) => {
-        const kind = kindOf(String(n?.android_config?.category ?? ''));
+        const category = String(n?.android_config?.category ?? '');
+        const kind = kindOf(category);
+        // Each one, used or not: without it there's no telling whether Ring sends HomeHub any (2026-11-27).
+        logger.info({ camera: camera.name, category, kind }, 'Ring alert received');
         const ding = n?.data?.event?.ding;
         if (!kind || !ding?.id) return;
         const at = Date.parse(ding.created_at);
@@ -192,7 +213,7 @@ export const ringLibrary: RingConnector = {
   connect(token, onToken) {
     let api: Lib = null;
     let closed = false;
-    const ready = load().then(({ RingApi }) => {
+    const ready = libraryLogs().then(() => load()).then(({ RingApi }) => {
       api = new RingApi({
         refreshToken: token,
         controlCenterDisplayName: CLIENT_NAME,
