@@ -128,7 +128,7 @@ class PipelineTest(unittest.TestCase):
     def test_english_miss_is_asked_and_yes_answers_it(self):
         hub = Hub()
         a = answer(AUDIO, True, Whisper('Make the front brighter.'), hub)
-        self.assertEqual((a.reply, a.handled, a.asked, a.lang), ('Turn on Porch light?', False, 'confirm:c1', 'en'))
+        self.assertEqual((a.reply, a.handled, a.asked, a.lang), ('Turn on Porch light?', False, 'confirm:c1|on', 'en'))
         self.assertEqual(hub.sent[-1], ('Make the front brighter.', False, 'en', True))
         b = answer(AUDIO, True, Whisper('Yes.'), hub, asked=a.asked, prefer=a.lang)
         self.assertEqual(hub.answers, [('c1', 'yes')])
@@ -152,6 +152,29 @@ class PipelineTest(unittest.TestCase):
         self.assertEqual(hub.answers, [])
         self.assertEqual(b.reply, 'Done.')
 
+    def test_just_some_of_them_is_a_command_with_the_questions_verb(self):
+        # Voice PE, 2026-11-27: "Should I turn on Kitchen Thermostat, Kitchen ceiling lights and Kitchen
+        # counter lights for 30 minutes?" "Just the kitchen lights for 30 minutes." → "I heard words…".
+        hub = Hub()
+        a = answer(AUDIO, True, Whisper('Make the front brighter.'), hub)
+        b = answer(AUDIO, True, Whisper('Just the kitchen lights for 30 minutes.'), hub, asked=a.asked, prefer=a.lang)
+        self.assertEqual(hub.sent[-1][0], 'turn on the kitchen lights for 30 minutes')
+        self.assertEqual(hub.answers, [], 'the question is dropped')
+        self.assertTrue(b.handled)
+        c = answer(AUDIO, True, Whisper('No, only the desk lamp.'), hub, asked='confirm:c2|off', prefer='en')
+        self.assertEqual(hub.sent[-1][0], 'turn off the desk lamp')
+        self.assertTrue(c.handled)
+        # Without a question, "just" is only words.
+        answer(AUDIO, True, Whisper('Just the desk lamp.'), hub)
+        self.assertEqual(hub.sent[-1][0], 'Just the desk lamp.')
+
+    def test_asking_and_parse(self):
+        self.assertEqual(confirm.asking('c1', 'Should I turn off Hall Thermostat?'), 'confirm:c1|off')
+        self.assertEqual(confirm.asking('c1', '係咪要開Porch light？'), 'confirm:c1')
+        self.assertEqual(confirm.parse('confirm:c1|on'), ('c1', 'on'))
+        self.assertEqual(confirm.parse('confirm:c1'), ('c1', None))
+        self.assertEqual(confirm.parse('confirm:a|b'), ('a|b', None))
+
     def test_yes_without_a_question_is_just_words(self):
         hub = Hub()
         answer(AUDIO, True, Whisper('Yes.'), hub)
@@ -168,7 +191,7 @@ class PipelineTest(unittest.TestCase):
         hub = Hub()
         a = answer(AUDIO, True, Whisper('Make the front brighter.'), hub, Ears('en', 'Make the front brighter.'))
         self.assertEqual([s[1:] for s in hub.sent], [(True, 'en', True), (False, 'en', True)])
-        self.assertEqual(a.asked, 'confirm:c1')
+        self.assertEqual(a.asked, 'confirm:c1|on')
 
     def test_cantonese_miss_and_yes(self):
         hub = Hub()

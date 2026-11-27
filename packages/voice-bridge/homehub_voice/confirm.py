@@ -120,6 +120,19 @@ def loose_kind(text: str, lang: str) -> str | None:
     return YES if ws[0] in ('yes', 'yeah', 'yep', 'yup', 'sure', 'ok', 'okay') else None
 
 
+def asking(confirm_id: str, question: str) -> str:
+    """Answer.asked for a question: its id, and 'on' or 'off' when it says "turn on" or "turn off"."""
+    m = re.search(r'\bturn\s+(on|off)\b', question, re.I)
+    return f'{PREFIX}{confirm_id}' + (f'|{m.group(1).lower()}' if m else '')
+
+
+def parse(asked: str) -> tuple[str, str | None]:
+    """The question's id, and its verb if it has one, from asking()."""
+    rest = asked[len(PREFIX):]
+    confirm_id, _, verb = rest.rpartition('|')
+    return (confirm_id, verb) if confirm_id and verb in ('on', 'off') else (rest, None)
+
+
 # When HomeHub says the question is no longer waiting (over two minutes, or answered on another speaker).
 GONE = {
     'yue': '嗰個問題已經過咗時，請再講一次。',

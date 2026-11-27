@@ -686,6 +686,38 @@ class SpeakerLinkTest(unittest.IsolatedAsyncioTestCase):
         self.assertGreaterEqual(c.event_times[-1] - vad_end, MIC_STOP_S - 0.01)
         link.task.cancel()
 
+    async def test_woken_to_a_near_silent_room_it_stays_quiet_without_asking_homehub(self):
+        # Voice PE, 2026-11-27: woken by a TV, then 0.2 s voiced at 0.013, which Whisper wrote as
+        # "Good night.", and the scene ran.
+        asked = []
+
+        def answer_fn(audio, spoke, asked_=None, prefer=None, wake=''):
+            asked.append(1)
+            return mock.Mock(heard='Good night.', reply='Ran Good night.', handled=True, stt_s=0, homehub_s=0, lang='en', asked=None)
+
+        link, c = await self.connected_link(answer_fn)
+        await c.handlers['handle_start']('q1', 0, None, 'Okay Nabu')
+        quiet = (np.sin(np.arange(1600) * 0.2) * 300).astype(np.int16).tobytes()   # about 0.013
+        for ch in chunks(tone(0.3, False) + quiet * 2 + tone(2, False)):
+            await c.handlers['handle_audio'](ch, None)
+        for _ in range(300):
+            await asyncio.sleep(0.01)
+            if c.events and c.events[-1][0] == 'VOICE_ASSISTANT_RUN_END':
+                break
+        self.assertEqual(asked, [])
+        self.assertNotIn('VOICE_ASSISTANT_TTS_START', dict(c.events))
+        # Someone speaking is still heard.
+        events = await self.say(c, 2)
+        self.assertIn('VOICE_ASSISTANT_TTS_START', events)
+        self.assertEqual(asked, [1])
+        link.task.cancel()
+
+    def test_near_silence(self):
+        from homehub_voice.speakers import near_silence
+        self.assertTrue(near_silence(0.2, 0.013))
+        self.assertFalse(near_silence(0.2, 0.36), 'a short loud word')
+        self.assertFalse(near_silence(1.5, 0.02), 'quiet but long speech')
+
     async def test_failure_still_ends_run(self):
         def boom(audio, spoke, asked=None, prefer=None, wake=''):
             raise RuntimeError('whisper crashed')

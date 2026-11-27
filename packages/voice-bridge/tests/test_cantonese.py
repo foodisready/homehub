@@ -323,6 +323,40 @@ class PipelineTest(unittest.TestCase):
         self.assertEqual(h.retries, [True, False])
         self.assertFalse(a.handled)
 
+    def test_a_name_whisper_makes_up_over_a_tv_is_not_sent(self):
+        # Voice PE, 2026-11-27: TV talk, or a near silent room, and Whisper (given the home's names)
+        # wrote "Good night.": the Good night scene ran.
+        class Scene(FakeListener):
+            def transcribe(self, audio, names):
+                self.ran += 1
+                return 'Good night.'
+        for quick in ('The first super computer you get all this on cell phone.', 'sorry.'):
+            with self.subTest(quick=quick):
+                h = FakeHomeHub(response="Sorry, I didn't understand that.", handled=False)
+                h.names = NAMES + ['Good night']
+                a = answer(b'x', True, Scene(), h, FakeEars('en', quick))
+                self.assertNotIn('Good night.', h.sent)
+                self.assertEqual((a.heard, a.handled), (quick, False))
+
+    def test_same_talk(self):
+        from homehub_voice.pipeline import same_talk
+        self.assertTrue(same_talk('Purn along the kitchen last for 30 minutes want to the CIA?', 'And on the kitchen last for 30 minutes.'))
+        self.assertTrue(same_talk('Turn on the kitchen legs for 30 minutes instructor.', 'Turn on the kitchen lights for 30 minutes.'))
+        self.assertTrue(same_talk('Hey, nightt.', 'Good night.'))
+        self.assertTrue(same_talk('On.', 'Turn on the kitchen lights.'), 'too little heard to tell')
+        self.assertFalse(same_talk('sorry.', 'Good night.'))
+        self.assertFalse(same_talk('The first super computer you get all this on cell phone.', 'Turn on the kitchen lights.'))
+
+    def test_a_whole_command_from_whisper_is_taken_however_sensevoice_spelled_it(self):
+        class Learns(FakeHomeHub):
+            def command(self, text, retry=False):
+                self.handled = text == 'Turn on the kitchen lights.'
+                return super().command(text, retry)
+        h = Learns()
+        a = answer(b'x', True, FakeListener(), h, FakeEars('en', 'Croun cution like fodyfi menes.'))
+        self.assertIn('Turn on the kitchen lights.', h.sent)
+        self.assertTrue(a.handled)
+
     def test_a_nearly_right_name_is_corrected_before_asking_whisper(self):
         class Knows(FakeHomeHub):
             names = ['My office lamp', 'Kitchen lights', 'Office', '書房燈']

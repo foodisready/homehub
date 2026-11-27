@@ -112,11 +112,19 @@ const roomKeys = (room: string) => {
 };
 
 /** Names that say a device isn't a light, so "<room> lights" leaves it alone. */
-export const NOT_A_LIGHT = /\b(?:fans?|heaters?|tvs?|television|valves?|doors?|garage|pumps?|cameras?|cams?|speakers?|chargers?|ac|air|humidifiers?|dehumidifiers?|purifiers?|kettles?|coffee|printers?|routers?|plugs?|vacuums?|roombas?)\b/i;
+export const NOT_A_LIGHT = /\b(?:fans?|heaters?|tvs?|television|valves?|doors?|garage|pumps?|cameras?|cams?|speakers?|thermostats?|chargers?|ac|air|humidifiers?|dehumidifiers?|purifiers?|kettles?|coffee|printers?|routers?|plugs?|vacuums?|roombas?)\b/i;
 
-/** Whatever its name, a robot vacuum, a TV or a speaker is never one of a room's lights. */
-export const notALight = (d: { alias: string; driver_type?: string | null }) =>
-  NOT_A_LIGHT.test(d.alias) || d.driver_type === 'roomba' || d.driver_type === 'lgtv' || d.driver_type === 'sonos';
+const thermostatKind = (config: string | null | undefined) => {
+  try { return !!config && JSON.parse(config)?.kind === 'thermostat'; } catch { return false; }
+};
+
+/**
+ * Whatever its name, a robot vacuum, a TV, a speaker or a thermostat is never one of a room's
+ * lights: "turn on the kitchen light" turned on Kitchen Thermostat too (Voice PE, 2026-11-27).
+ */
+export const notALight = (d: { alias: string; driver_type?: string | null; driver_config?: string | null }) =>
+  NOT_A_LIGHT.test(d.alias) || d.driver_type === 'roomba' || d.driver_type === 'lgtv' || d.driver_type === 'sonos'
+  || thermostatKind(d.driver_config);
 
 /**
  * "Brenden's lights", "kitchen lamps": the lights in a room, meaning every
@@ -132,7 +140,7 @@ function roomLights(wanted: string, spoken: string, devices: NamedDevice[]): Nam
   const inRoom = devices.filter((d) => typeof d.room === 'string' && roomKeys(d.room).includes(place));
   if (!inRoom.length) return [];
   if ('device' in findDeviceByName(spoken)) return [];
-  return inRoom.filter((d) => !notALight(d as NamedDevice & { driver_type?: string })
+  return inRoom.filter((d) => !notALight(d as NamedDevice & { driver_type?: string; driver_config?: string | null })
     && !isProtectedDevice(d as unknown as PowerDevice));
 }
 

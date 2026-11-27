@@ -59,6 +59,8 @@ class Commander(Protocol):
 
 # The id of HomeHub's "Turn on …?" this command may be the answer to, while it's being answered.
 _confirming: ContextVar[str | None] = ContextVar('confirming', default=None)
+# Whether that question turns things on or off: "Just the kitchen lights" answers it with fewer of them.
+_confirm_verb: ContextVar[str | None] = ContextVar('confirm_verb', default=None)
 # The wake word the speaker was woken with, while its command is answered: HomeHub's Claude is told,
 # since speech recognition can catch its end at the start of the command (老友 heard as 冇有).
 _woken: ContextVar[str] = ContextVar('woken', default='')
@@ -80,7 +82,7 @@ def asked_back(heard: str, res: CommandResult, t0: float, t1: float, passes: int
         return None
     lang = res.say_lang or 'en'
     return Answer(heard, res.say, res.confirm_id is None, t1 - t0, time.monotonic() - t1, lang=lang,
-                  asked=f'{confirm.PREFIX}{res.confirm_id}' if res.confirm_id else None, passes=passes)
+                  asked=confirm.asking(res.confirm_id, res.say) if res.confirm_id else None, passes=passes)
 
 
 @dataclass
@@ -109,6 +111,8 @@ class Answer:
     named: bool = False
 
 
+# "Just the kitchen lights", "no, only the lamp for 10 minutes": fewer of what a question named.
+ONLY = re.compile(r'^\s*(?:no,?\s+)?(?:just|only)\s+(.+?)[\s.!?]*$', re.I)
 # "On", "off", "turn it on", "switch it off, please": an answer to "on or off?".
 ON_OR_OFF = re.compile(r'^\s*(?:(?:turn|switch)\s+(?:it\s+|them\s+)?)?(on|off)(?:\s+(?:it|them))?(?:,?\s*please)?[\s.!?]*$', re.I)
 
@@ -159,12 +163,15 @@ def answer(audio: bytes, spoke: bool, listener: Transcriber, homehub: Commander,
            vi_ears: VietnameseEars | None = None, prefer: str | None = None, where: str = '', wake: str = '') -> Answer:
     """What was heard and what to say back; a miss with nothing of a command in it is marked chatter.
     wake: the wake word the speaker heard, if it was woken by one."""
-    token = _confirming.set(asked[len(confirm.PREFIX):] if asked and asked.startswith(confirm.PREFIX) else None)
+    confirm_id, verb = confirm.parse(asked) if asked and asked.startswith(confirm.PREFIX) else (None, None)
+    token = _confirming.set(confirm_id)
+    verb_token = _confirm_verb.set(verb)
     woken = _woken.set(wake or '')
     try:
         a = _answer(audio, spoke, listener, homehub, ears, asked, vi_ears, prefer, where)
     finally:
         _woken.reset(woken)
+        _confirm_verb.reset(verb_token)
         _confirming.reset(token)
     names = list(getattr(homehub, 'names', []))
     if not a.handled and a.asked is None and not asked and looks_like_chatter(a.heard, names):
@@ -267,9 +274,36 @@ def _answer(audio: bytes, spoke: bool, listener: Transcriber, homehub: Commander
     text = listener.transcribe(audio, homehub.names)
     if not text.strip(' .,!?'):
         return Answer('', NOT_CAUGHT, False, time.monotonic() - t0)
+    if quick.strip(' .,!?') and bare_name(text, homehub.names) and not same_talk(quick, text):
+        # Whisper is given the home's names to spell them right, and over a TV or near silence it can
+        # write one of them, alone, that nobody said: "Good night." for SenseVoice's "The first super computer
+        # you get all this on cell phone.", and the Good night scene ran (Voice PE, 2026-11-27).
+        log.info('Whisper heard %r, nothing like SenseVoice\'s %r, so it isn\'t taken', text, quick)
+        return finish(first, time.monotonic() - t0)
     if a := special(text, 'en', homehub, t0, where, just_asked):
         return a
     return finish(english(completed(text, en_which), homehub, asked), time.monotonic() - t0)
+
+
+def bare_name(text: str, names: list[str]) -> bool:
+    """Whether Whisper wrote only one of the names it was given, with nothing else: "Good night."."""
+    plain = text.strip(' .,!?').lower()
+    return any(plain == n.strip(' .,!?').lower() for n in names)
+
+
+# Words too common to show two hearings were of the same talk.
+COMMON_WORDS = {'the', 'and', 'you', 'for', 'this', 'that', 'with', 'what', 'are', 'was', 'but', 'have', 'not', 'all', 'can', 'get'}
+
+
+def same_talk(quick: str, whisper: str) -> bool:
+    """Whether Whisper's words share at least one with SenseVoice's, as two hearings of the same speech
+    do however each misspells it ("Purn along the kitchen last" and "And on the kitchen last")."""
+    def words(s: str) -> list[str]:
+        return [w for w in re.findall(r"[a-z']+", s.lower()) if len(w) >= 3 and w not in COMMON_WORDS]
+    theirs = words(quick)
+    if not theirs:
+        return True   # SenseVoice made out too little to say ("On.")
+    return any(difflib.SequenceMatcher(None, w, q).ratio() >= 0.75 for w in words(whisper) for q in theirs)
 
 
 def which_asked(sent: str) -> tuple[str, str | None]:
@@ -324,8 +358,13 @@ def english(text: str, homehub: Commander, asked: str | None, retry: bool = Fals
     """Sends English words to HomeHub: what was heard, HomeHub's result (None if it can't be reached), and how long it took."""
     # "On" alone, answering "on or off?" about a device.
     reply_to = ON_OR_OFF.match(text) if asked else None
-    send = f'turn {reply_to.group(1).lower()} {asked}' if reply_to else text
-    heard = f'{text} → {send}' if reply_to else text
+    verb = _confirm_verb.get()
+    # "Should I turn on Kitchen Thermostat, Kitchen ceiling lights and Kitchen counter lights for 30
+    # minutes?" "Just the kitchen lights for 30 minutes." (Voice PE, 2026-11-27): a new command, with
+    # the question's verb.
+    only = ONLY.match(text) if verb and not reply_to else None
+    send = f'turn {reply_to.group(1).lower()} {asked}' if reply_to else f'turn {verb} {only.group(1)}' if only else text
+    heard = f'{text} → {send}' if reply_to or only else text
     t = time.monotonic()
     try:
         return heard, to_homehub(homehub, send, 'en', retry), time.monotonic() - t
@@ -340,7 +379,7 @@ def finish(sent: tuple[str, CommandResult | None, float], total_s: float) -> Ans
         return Answer(heard, NO_HOMEHUB, False, total_s - homehub_s, homehub_s)
     if res.say:
         return Answer(heard, res.say, res.confirm_id is None, total_s - homehub_s, homehub_s, lang=res.say_lang or 'en',
-                      asked=f'{confirm.PREFIX}{res.confirm_id}' if res.confirm_id else None)
+                      asked=confirm.asking(res.confirm_id, res.say) if res.confirm_id else None)
     if SEVERAL.match(res.response or ''):
         # "Turn on the lights" fits several: ask which, rather than read out every light's name.
         question, follow_up = which_asked(heard.split(' → ')[-1])
@@ -499,13 +538,18 @@ def answer_chinese(audio: bytes, ears: CantoneseEars, homehub: Commander, t0: fl
     return a
 
 
+def fewer(text: str) -> bool:
+    """"No, only the desk lamp": not a no, but fewer of what the question named."""
+    return bool(_confirm_verb.get() and ONLY.match(text))
+
+
 # special_kind's answer for a yes or no to HomeHub's "Turn on …?".
 CONFIRMED = 'confirmed'
 
 
 def special_kind(text: str, lang: str, homehub: Commander) -> str | None:
     """A call for help or "cancel" (sos), or, while a reminder is waiting for one, a yes or no (ask)."""
-    if _confirming.get() and confirm.loose_kind(text, lang):
+    if _confirming.get() and not fewer(text) and confirm.loose_kind(text, lang):
         return CONFIRMED
     return sos.kind(text, lang) or (ask.any_kind(text, lang, homehub) if getattr(homehub, 'asking', None) else None)
 
@@ -518,7 +562,7 @@ def special(text: str, lang: str, homehub: Commander, t0: float, where: str, jus
         return a
     # "Yes" just after HomeHub asked "Turn on …?": that question, before any reminder's.
     confirming = _confirming.get()
-    if confirming and (k := confirm.loose_kind(text, lang)):
+    if confirming and not fewer(text) and (k := confirm.loose_kind(text, lang)):
         t1 = time.monotonic()
         r = confirm.run(k, confirming, lang, homehub, text)
         if r is None:

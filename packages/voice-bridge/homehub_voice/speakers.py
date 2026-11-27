@@ -63,6 +63,16 @@ def background_talk(seconds: float, voiced: float, heard: str = '') -> bool:
     return not command_over_noise(heard)
 
 
+# A command is at least half a second of speech, and louder than this at its loudest. Less, and the
+# speaker woke to a quiet room: the TV's "Okay Nabu" and then a pause.
+NEAR_SILENCE_VOICED_S = 0.5
+NEAR_SILENCE_PEAK = 0.03
+
+
+def near_silence(voiced: float, peak: float) -> bool:
+    return voiced < NEAR_SILENCE_VOICED_S and peak < NEAR_SILENCE_PEAK
+
+
 # How long a speaker may take to turn its microphone off after being told the speech has ended.
 MIC_STOP_S = 0.5
 
@@ -313,6 +323,12 @@ class SpeakerLink:
                 # The answer to a question is in the question's language; otherwise the wake word's, if it says;
                 # a second try with no wake word is in the first try's language.
                 prefer = recent[2] if recent else wake_language(run.wake, self.languages) or (again[1] if again else None)
+                if run.listen.spoke and near_silence(run.listen.voiced, run.listen.peak) and not recent:
+                    # Not sent to HomeHub: Whisper can make a command out of a near silent room, and
+                    # "Good night." ran the scene (voiced 0.2 s, loudest 0.013; Voice PE, 2026-11-27).
+                    log.info('%s #%d (%s) woke but heard almost nothing, so it stays quiet (voiced %.1fs, loudest %.3f)',
+                             self.who, run.n, run.wake or 'no wake word', run.listen.voiced, run.listen.peak)
+                    return
                 a = await loop.run_in_executor(None, self.answer, bytes(run.listen.audio), run.listen.spoke, asked, prefer, run.wake)
                 # No words at all: most often the wake word heard in a noise or a conversation, so the
                 # speaker goes quiet instead of saying "Sorry, I didn't hear anything" to nobody.

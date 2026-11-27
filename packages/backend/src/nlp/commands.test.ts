@@ -167,6 +167,17 @@ describe('chat commands', () => {
       assert.deepEqual(calls, [{ ip: '10.0.0.51', state: false }]);
       assert.match(r!.response, /I left Hall Thermostat on: say “turn off Hall Thermostat” to turn it off\./);
     });
+
+    it('is never one of the room\'s lights', async () => {
+      // Voice PE, 2026-11-27: "Turn on the kitchen light" also turned on Kitchen Thermostat.
+      const on = await commands.runPowerCommand('turn on the hall lights');
+      assert.deepEqual(calls, [{ ip: '10.0.0.51', state: true }]);
+      assert.doesNotMatch(on!.response, /Thermostat/);
+      calls.length = 0;
+      const off = await commands.runPowerCommand('turn off the hall light');
+      assert.deepEqual(calls, [{ ip: '10.0.0.51', state: false }]);
+      assert.doesNotMatch(off!.response, /Thermostat/);
+    });
   });
 
   describe('garage doors', () => {
