@@ -145,6 +145,26 @@ export interface SettingsSpeaker {
 }
 
 const CHOICES_KEY = 'voice_speaker_choices';
+const LIMIT_KEY = 'voice_max_wake_words';
+/** Each wake word that's on is listened for all the time: more is more for the speaker to keep up with, and more false wakes. */
+export const WAKE_WORD_LIMITS = { min: 1, max: 5, default: 3 };
+
+/** The most wake words a speaker may have on at once, set in Settings → Voice control. */
+export function wakeWordLimit(): number {
+  const row = getDb().prepare('SELECT value FROM settings WHERE key = ?').get(LIMIT_KEY) as { value: string } | undefined;
+  const n = Number(row?.value);
+  return Number.isInteger(n) && n >= WAKE_WORD_LIMITS.min && n <= WAKE_WORD_LIMITS.max ? n : WAKE_WORD_LIMITS.default;
+}
+
+/** Sets it. Speakers with more on keep them until a wake word is changed. */
+export function setWakeWordLimit(value: unknown): number {
+  if (!Number.isInteger(value) || (value as number) < WAKE_WORD_LIMITS.min || (value as number) > WAKE_WORD_LIMITS.max) {
+    throw new SpeakerChoiceError(`max: a whole number from ${WAKE_WORD_LIMITS.min} to ${WAKE_WORD_LIMITS.max}`);
+  }
+  getDb().prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
+    .run(LIMIT_KEY, String(value));
+  return value as number;
+}
 
 /** Each speaker's wake words and sensitivity as chosen in Settings, by speaker name. */
 export function speakerChoices(): Record<string, SpeakerChoice> {
@@ -175,6 +195,10 @@ export function chooseForSpeaker(name: unknown, body: unknown): SpeakerChoice {
     const ids = Array.isArray(b['wakeWords']) ? b['wakeWords'].filter((x): x is string => typeof x === 'string') : [];
     const on = speaker.wakeWords.map((w) => w.id).filter((id) => ids.includes(id));
     if (!on.length) throw new SpeakerChoiceError('Keep at least one wake word on, or the speaker can\'t be woken.');
+    const limit = wakeWordLimit();
+    if (on.length > limit) {
+      throw new SpeakerChoiceError(`At most ${limit} wake word${limit === 1 ? '' : 's'} can be on at once. Untick one first, or raise the limit.`);
+    }
     choice.wakeWords = on;
   }
   if (b['sensitivity'] !== undefined) {

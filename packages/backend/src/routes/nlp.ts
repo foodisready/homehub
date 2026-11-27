@@ -6,7 +6,7 @@ import { requireAdmin } from '../middleware/auth';
 import { BUILT_IN, MAX_CUSTOM, MAX_LENGTH, MOMENTS, ReplyError, getReplyChoices, saveReplyChoices } from '../nlp/replies';
 import { logger } from '../logger';
 import { activityMiddleware } from '../activity/activity';
-import { SpeakerChoiceError, VOICE_LANGUAGES, bridgeForSettings, chooseForSpeaker, getVoiceSettings, setVoiceSettings } from '../system/voice-bridge';
+import { SpeakerChoiceError, VOICE_LANGUAGES, WAKE_WORD_LIMITS, bridgeForSettings, chooseForSpeaker, getVoiceSettings, setVoiceSettings, setWakeWordLimit, wakeWordLimit } from '../system/voice-bridge';
 import { BRIDGE_LATE_MS } from '../system/health';
 
 export const nlpRouter = Router();
@@ -24,6 +24,9 @@ nlpRouter.get('/voice', requireAdmin, (_req: Request, res: Response) => {
   res.json({
     ...getVoiceSettings(),
     languagesOffered: VOICE_LANGUAGES,
+    // The most wake words a speaker may have on at once, and the range it can be set in.
+    maxWakeWords: wakeWordLimit(),
+    wakeWordLimits: WAKE_WORD_LIMITS,
     // What the bridge said last, so Settings can say whether it's there and what it's doing.
     bridge: bridgeForSettings(Date.now(), BRIDGE_LATE_MS),
   });
@@ -51,6 +54,18 @@ nlpRouter.put('/voice/speakers', requireAdmin, (req: Request, res: Response) => 
   } catch (err) {
     if (!(err instanceof SpeakerChoiceError)) throw err;
     res.status(err.status).json({ error: err.message, code: err.status === 404 ? 'NOT_FOUND' : 'VALIDATION_ERROR' });
+  }
+});
+
+// PUT /api/nlp/voice/wake-word-limit { max } — the most wake words a speaker may have on at once (1–5).
+nlpRouter.put('/voice/wake-word-limit', requireAdmin, (req: Request, res: Response) => {
+  try {
+    const max = setWakeWordLimit((req.body ?? {}).max);
+    logger.info({ max, by: req.user?.name }, 'Wake word limit changed');
+    res.json({ max });
+  } catch (err) {
+    if (!(err instanceof SpeakerChoiceError)) throw err;
+    res.status(400).json({ error: err.message, code: 'VALIDATION_ERROR' });
   }
 });
 

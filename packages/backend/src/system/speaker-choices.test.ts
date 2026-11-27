@@ -59,6 +59,17 @@ describe('a speaker\'s wake words and sensitivity', () => {
     assert.equal(settingsSpeakers()[0].applying, false);
   });
 
+  it('keeps to the most wake words allowed on at once', () => {
+    report();
+    assert.equal(bridge.wakeWordLimit(), 3, 'three unless changed');
+    bridge.setWakeWordLimit(2);
+    assert.throws(() => bridge.chooseForSpeaker(VOICE_PE.name, { wakeWords: ['lao_you', 'xin_chao', 'okay_nabu'] }), /At most 2 wake words/);
+    assert.deepEqual(bridge.chooseForSpeaker(VOICE_PE.name, { wakeWords: ['lao_you', 'xin_chao'] }).wakeWords, ['lao_you', 'xin_chao']);
+    for (const bad of [0, 6, 2.5, '3', null]) assert.throws(() => bridge.setWakeWordLimit(bad), /whole number from 1 to 5/);
+    assert.equal(bridge.wakeWordLimit(), 2);
+    bridge.setWakeWordLimit(3);
+  });
+
   it('refuses what the speaker can\'t do', () => {
     report();
     const status = (fn: () => unknown) => { try { fn(); return 0; } catch (e) { return (e as InstanceType<typeof bridge.SpeakerChoiceError>).status; } };

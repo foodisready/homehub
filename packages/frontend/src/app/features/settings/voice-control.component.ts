@@ -23,7 +23,11 @@ interface BridgeSpeaker {
   /** Chosen here, and not on the speaker yet. */
   applying?: boolean;
 }
-interface VoiceSettings { enabled: boolean; languages: string[]; bridge: BridgeStatus | null }
+interface VoiceSettings {
+  enabled: boolean; languages: string[]; bridge: BridgeStatus | null;
+  /** The most wake words a speaker may have on at once. From v0.3.30. */
+  maxWakeWords?: number; wakeWordLimits?: { min: number; max: number };
+}
 
 const POLL_MS = 5_000;
 
@@ -68,6 +72,9 @@ const POLL_MS = 5_000;
     .speakers .chip input { width:auto; margin:0; }
     .speakers .sens { display:flex; gap:0.4rem; align-items:center; }
     .speakers .sens select { width:auto; font-size:0.8rem; padding:0.2rem 0.4rem; }
+    .speakers .limit { display:flex; flex-wrap:wrap; gap:0.4rem; align-items:center; margin:0.5rem 0 0.6rem; font-size:0.84rem; }
+    .speakers .limit select { width:auto; font-size:0.8rem; padding:0.2rem 0.4rem; }
+    .speakers .limit .hint { flex-basis:100%; font-size:0.78rem; color:var(--text-muted); }
     .speakers .none { font-size:0.82rem; color:var(--text-muted); margin:0; }
     .restart { display:flex; gap:0.6rem; align-items:center; flex-wrap:wrap; margin-top:0.7rem; }
     .restart .hint { font-size:0.78rem; color:var(--text-muted); flex:1 1 14rem; line-height:1.4; }
@@ -140,11 +147,14 @@ const POLL_MS = 5_000;
                         <span class="label">Wake words</span>
                         @for (w of sp.wakeWords; track w.id) {
                           <label class="chip" [class.on]="w.on">
-                            <input type="checkbox" [checked]="w.on" [disabled]="speakerBusy() === sp.name || (w.on && onCount(sp) === 1)"
+                            <input type="checkbox" [checked]="w.on" [disabled]="speakerBusy() === sp.name || (w.on && onCount(sp) === 1) || (!w.on && onCount(sp) >= maxWakeWords())"
                                    (change)="toggleWakeWord(sp, w.id, $any($event.target).checked)" /> {{ w.name }}
                           </label>
                         }
                       </span>
+                    }
+                    @if (sp.wakeWords?.length && onCount(sp) >= maxWakeWords()) {
+                      <span class="state">{{ onCount(sp) > maxWakeWords() ? onCount(sp) + ' are on, more than the limit of ' + maxWakeWords() + '.' : 'At the limit of ' + maxWakeWords() + ' on at once.' }} Untick one to choose another.</span>
                     }
                     @if (sp.sensitivity && sp.sensitivities?.length) {
                       <label class="sens">
@@ -162,6 +172,16 @@ const POLL_MS = 5_000;
             </ul>
           } @else {
             <p class="none">No speakers found. Check the speaker or tablet is on, and the voice app is open.</p>
+          }
+          @if (hasWakeWords()) {
+            <label class="limit">
+              <span class="label">Most wake words on at once</span>
+              <select [value]="maxWakeWords()" [disabled]="limitBusy()" (change)="setLimit(+$any($event.target).value)">
+                @for (n of limitChoices(); track n) { <option [value]="n" [selected]="n === maxWakeWords()">{{ n }}</option> }
+              </select>
+              <span class="hint">Each one is listened for all the time. More can slow the speaker, and means more chances for the TV to wake it.</span>
+            </label>
+            @if (limitError()) { <p class="msg err">{{ limitError() }}</p> }
           }
           <div class="restart">
             <button class="btn-sm btn-ghost" type="button" (click)="restart()" [disabled]="restarting()">
@@ -273,6 +293,24 @@ export class VoiceControlComponent implements OnInit, OnDestroy {
   /** The speaker whose wake words are being saved, and what went wrong for which. */
   readonly speakerBusy = signal<string | null>(null);
   readonly speakerError = signal<{ name: string; text: string } | null>(null);
+
+  readonly maxWakeWords = computed(() => this.saved()?.maxWakeWords ?? 5);
+  readonly limitChoices = computed(() => {
+    const l = this.saved()?.wakeWordLimits ?? { min: 1, max: 5 };
+    return Array.from({ length: l.max - l.min + 1 }, (_, i) => l.min + i);
+  });
+  readonly hasWakeWords = computed(() => (this.speakers() ?? []).some((sp) => sp.wakeWords?.length) && this.saved()?.maxWakeWords != null);
+  readonly limitBusy = signal(false);
+  readonly limitError = signal('');
+
+  setLimit(max: number): void {
+    this.limitBusy.set(true);
+    this.limitError.set('');
+    this.http.put<{ max: number }>('/api/nlp/voice/wake-word-limit', { max }).subscribe({
+      next: (r) => { this.limitBusy.set(false); this.saved.update((v) => (v ? { ...v, maxWakeWords: r.max } : v)); },
+      error: (err) => { this.limitBusy.set(false); this.limitError.set(err?.error?.error ?? "Couldn't change it. Try again."); this.load(false); },
+    });
+  }
 
   onCount(sp: BridgeSpeaker): number {
     return (sp.wakeWords ?? []).filter((w) => w.on).length;
