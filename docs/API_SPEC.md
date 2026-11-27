@@ -131,7 +131,7 @@ Returns all configured devices with current state.
 ---
 
 ### `GET /api/devices/nickname-suggestions`
-Vietnamese and Cantonese nicknames HomeHub suggests for each device, in the languages ticked in Settings → Voice control, made from the device's English names with a built-in word list. Names a device already has are left out. Nothing is saved: add them with `PATCH /api/devices/:id`.
+Cantonese, Mandarin and Vietnamese nicknames HomeHub suggests for each device, in the languages ticked in Settings → Voice control, made from the device's English names with a built-in word list. Names a device already has are left out. Nothing is saved: add them with `PATCH /api/devices/:id`.
 
 `needsName` marks a Cantonese one that needs a person's Chinese name in front of `text`. A person's Chinese name is learnt from nicknames already given (卓希房燈 on "Brenden's room lights").
 

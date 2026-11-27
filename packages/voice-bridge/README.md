@@ -83,6 +83,18 @@ On a 2015 MacBook Pro (Core i7-4980HQ) with `base.en`, recognising a 2 to 4 seco
 
 On a Raspberry Pi 4, SenseVoice takes about 0.9 seconds a pass. A Cantonese command that clearly matches one nickname the first time is read from that pass. Otherwise SenseVoice listens again, set to Cantonese, which hears the words better. In a test of 21 commands, 16 were read in one pass, and none of those was read differently from two passes. The log says `in 1 pass` or `in 2 passes`. Making a spoken Cantonese reply takes about 4 to 5 seconds, so replies are kept, up to 500 of them, in `reply-cache` in the models folder. A reply said before, such as 熄咗廚房燈, is ready at once, even after a restart, and is made again if the voice changes.
 
+## Mandarin
+
+With Mandarin on, each command can be Mandarin as well as English (and the other languages that are on), and is answered in Mandarin, in simplified characters.
+
+1. In **Settings → Voice control**, tick **Mandarin** and save. The bridge downloads SenseVoice Small, as for Cantonese (about 1 GB, of which it keeps 230 MB; nothing more if Cantonese is on), and a Mandarin voice (60 MB). For a bridge installed with install.sh, add `zh` to `LANGUAGES` in its `config.env` (for example `LANGUAGES=en zh`) and run `./install.sh` again instead.
+2. Give each device a Chinese nickname in **Settings → Devices**, such as 厨房灯. Simplified or traditional characters both work, and a Cantonese nickname such as 廚房燈 works for Mandarin too: a nickname is matched by how it sounds, using Pinyin with tones ignored.
+3. Say the verb, then the nickname: 打开厨房灯, 开厨房灯, 关掉厨房灯, 关闭厨房灯. Or the nickname first: 把厨房灯打开, 厨房灯关了. 请, 帮我 or 麻烦你 first, and 一下, 吧 or 了 after, are fine. A scene runs by its name alone.
+4. To turn something on for a while, add how long: 打开厨房灯十分钟, 开厨房灯半小时, 打开厨房灯一个半小时, 打开厨房灯，十分钟后关掉. The bridge answers 已打开厨房灯，十分钟后关掉。
+5. 现在几点？, 今天几号？, 今天天气怎么样？ and 明天会下雨吗？ are answered in Mandarin.
+
+With Cantonese and Mandarin both on, SenseVoice's label doesn't decide between them, because it often labels a short Cantonese command as Mandarin. A wake word named in Chinese characters doesn't decide either, since both are written that way. A command that clearly reads as Mandarin, such as 把客厅灯打开, is taken as Mandarin. Anything else is read as Cantonese first, then as Mandarin, heard again set to Mandarin, if Cantonese doesn't understand it, which takes about a second more. A command neither understands is answered in Cantonese.
+
 ## Vietnamese
 
 With Vietnamese on, each command can be in Vietnamese as well as English (and Cantonese, if that's on too), and is answered in the same language.
@@ -96,18 +108,6 @@ How it works: the Vietnamese model hears each command first, which takes about a
 
 The name is compared with your nicknames word by word, with accents left out, so "phong cách" still finds đèn phòng khách. A word more or less is another name, not a near miss: "đèn phòng ngủ" never switches đèn phòng ngủ lớn, and "ga" alone doesn't find ga-ra. The verb is read with its accents, since they tell bật (on) from tắt (off). Speech recognition sometimes writes "bắt" for either, so then the speaker asks "Bật hay tắt đèn bếp?" and switches nothing; answer "bật" or "tắt". If it hears only "bật đèn" (the name cut off or said too quietly), the speaker asks "Bật đèn nào?" and listens for the name: answer "nhà bếp", or say the whole command again. A first word that sounds like "đèn" ("nền nhà bếp") is taken as "đèn". A command that doesn't clearly match one nickname isn't guessed: the speaker says "Xin lỗi, tôi không hiểu", and HomeHub lists it with the commands it missed.
 
-## Mandarin
-
-With Mandarin on, each command can be Mandarin as well as English (and the other languages that are on), and is answered in Mandarin, in simplified characters.
-
-1. In **Settings → Voice control**, tick **Mandarin** and save. The bridge downloads SenseVoice Small, as for Cantonese (about 1 GB, of which it keeps 230 MB; nothing more if Cantonese is on), and a Mandarin voice (60 MB). For a bridge installed with install.sh, add `zh` to `LANGUAGES` in its `config.env` (for example `LANGUAGES=en zh`) and run `./install.sh` again instead.
-2. Give each device a Chinese nickname in **Settings → Devices**, such as 厨房灯. Simplified or traditional characters both work, and a Cantonese nickname such as 廚房燈 works for Mandarin too: a nickname is matched by how it sounds, using Pinyin with tones ignored.
-3. Say the verb, then the nickname: 打开厨房灯, 开厨房灯, 关掉厨房灯, 关闭厨房灯. Or the nickname first: 把厨房灯打开, 厨房灯关了. 请, 帮我 or 麻烦你 first, and 一下, 吧 or 了 after, are fine. A scene runs by its name alone.
-4. To turn something on for a while, add how long: 打开厨房灯十分钟, 开厨房灯半小时, 打开厨房灯一个半小时, 打开厨房灯，十分钟后关掉. The bridge answers 已打开厨房灯，十分钟后关掉。
-5. 现在几点？, 今天几号？, 今天天气怎么样？ and 明天会下雨吗？ are answered in Mandarin.
-
-With Cantonese and Mandarin both on, SenseVoice's label doesn't decide between them, because it often labels a short Cantonese command as Mandarin. A wake word named in Chinese characters doesn't decide either, since both are written that way. A command that clearly reads as Mandarin, such as 把客厅灯打开, is taken as Mandarin. Anything else is read as Cantonese first, then as Mandarin, heard again set to Mandarin, if Cantonese doesn't understand it, which takes about a second more. A command neither understands is answered in Cantonese.
-
 ## Home Assistant Voice
 
 Set it up on Wi-Fi with its own firmware: power it on, open improv-wifi.com in Chrome on a phone, connect over Bluetooth, enter the Wi-Fi, and press the center button when asked. After that the page sends you to Home Assistant, which HomeHub doesn't need: close it. Within a minute the bridge log says `Home Assistant Voice … connected (…), listening; replies as FLAC`, and "Okay Nabu" works.
@@ -118,7 +118,7 @@ It turns its microphone up until even a quiet room is as loud as speech, so loud
 
 ## Not done yet
 
-- Languages other than English, Cantonese, Vietnamese and Mandarin.
+- Languages other than English, Cantonese, Mandarin and Vietnamese.
 
 ## Credits
 

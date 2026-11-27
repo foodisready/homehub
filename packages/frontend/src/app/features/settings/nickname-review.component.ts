@@ -17,11 +17,11 @@ interface DeviceNames { id: number; alias: string; nicknames: string[] }
 interface Pending { device: DeviceNames; items: NicknameSuggestion[]; owners: string[] }
 
 /**
- * Settings → Voice control: the Vietnamese, Cantonese and Mandarin nicknames HomeHub
+ * Settings → Voice control: the Cantonese, Mandarin and Vietnamese nicknames HomeHub
  * suggests for every device at once, ticked to start with. Untick any that
  * aren't right, then add the rest with one button.
  */
-const ORDER: SuggestLang[] = ['vi', 'yue', 'zh'];
+const ORDER: SuggestLang[] = ['yue', 'zh', 'vi'];
 const LANG_WORD: Record<SuggestLang, string> = { vi: 'Vietnamese', yue: 'Cantonese', zh: 'Mandarin' };
 
 @Component({
@@ -199,7 +199,7 @@ export class NicknameReviewComponent {
     });
   }
 
-  /** Vietnamese first, then Cantonese, then Mandarin. */
+  /** Cantonese first, then Mandarin, then Vietnamese. */
   plainItems(p: Pending): NicknameSuggestion[] {
     return p.items.filter((s) => !s.needsName).sort((a, b) => ORDER.indexOf(a.lang) - ORDER.indexOf(b.lang));
   }

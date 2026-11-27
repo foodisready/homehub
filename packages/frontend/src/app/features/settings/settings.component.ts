@@ -64,7 +64,8 @@ interface SettingsSummary {
   ring?:      { state: string };
 }
 
-const LANGUAGE_NAME: Record<string, string> = { en: 'English', yue: 'Cantonese', vi: 'Vietnamese', zh: 'Mandarin' };
+const LANGUAGE_NAME: Record<string, string> = { en: 'English', yue: 'Cantonese', zh: 'Mandarin', vi: 'Vietnamese' };
+const LANG_ORDER = ['en', 'yue', 'zh', 'vi'];
 
 interface UserRow {
   id:   number;
@@ -1362,7 +1363,8 @@ export class SettingsComponent implements OnInit, OnDestroy {
       const bridge = this.healthItem('voice-bridge');
       const speakers = this.healthItem('speakers');
       const trouble = bad(bridge) ? bridge : bad(speakers) ? speakers : undefined;
-      const langs = v?.languages.map((l) => LANGUAGE_NAME[l] ?? l).join(', ');
+      // Always English, then Cantonese, Mandarin and Vietnamese, however they were saved.
+      const langs = v && [...v.languages].sort((a, b) => LANG_ORDER.indexOf(a) - LANG_ORDER.indexOf(b)).map((l) => LANGUAGE_NAME[l] ?? l).join(', ');
       out.push({
         key: 'voice', name: 'Voice control', group: 'Talking to HomeHub', icon: 'mic', hue: '#ff8a3d',
         status: !v ? 'Speakers and languages' : !v.enabled ? 'Off' : trouble ? `${trouble.label}: needs a look` : langs || 'On',
@@ -1448,7 +1450,7 @@ export class SettingsComponent implements OnInit, OnDestroy {
   editAlias    = '';
   editIp       = '';
   editNicknames: string[] = [];
-  /** Vietnamese and Cantonese nicknames HomeHub offers, by device id. */
+  /** Cantonese, Mandarin and Vietnamese nicknames HomeHub offers, by device id. */
   nicknameSuggestions = signal<Partial<Record<number, NicknameSuggestion[]>>>({});
   editRoom = '';
   deviceSearch = signal('');

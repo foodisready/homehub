@@ -14,6 +14,12 @@ interface Schedule { id: number; deviceAlias: string; state: boolean; enabled: b
 interface Coming { key: string; at: number; names: string; state: boolean }
 
 const WINDOWED_KEY = 'homehub.wall.windowed';
+/**
+ * A tablet or bigger. A phone can show the wall display for a look, but isn't made one: its lock
+ * would then send it here every time, full screen, as happened on a phone that had opened it once.
+ */
+const WALL_SIZED = '(min-width: 600px) and (min-height: 600px)';
+const wallSized = () => typeof matchMedia !== 'function' || matchMedia(WALL_SIZED).matches;
 const NIGHT_KEY = 'homehub.wall.night';
 /** How long a tap keeps the night screen away. */
 const AWAKE_MS = 2 * 60_000;
@@ -301,7 +307,7 @@ export class WallFrameComponent implements OnInit, OnDestroy {
   });
 
   ngOnInit(): void {
-    setWallHome(true);
+    setWallHome(wallSized());
     this.timers.push(setInterval(() => this.now.set(Date.now()), 15_000));
     this.http.get<{ timezone?: string }>('/api/home-settings').subscribe({ next: (h) => this.timeZone.set(h.timezone), error: () => undefined });
     this.loadWeather();
@@ -339,7 +345,13 @@ export class WallFrameComponent implements OnInit, OnDestroy {
     this.loadSchedules();
     void this.holdScreen();
   };
-  private readonly onFull = () => this.isFull.set(!!document.fullscreenElement);
+  private readonly onFull = () => {
+    const full = !!document.fullscreenElement;
+    // Left by the person, with the phone's own swipe or Back, while looking at it: that's their
+    // choice, so a tap no longer goes full screen again. Left because the screen went off, it does.
+    if (!full && this.isFull() && document.visibilityState === 'visible' && !this.leaving) this.stayWindowed = true;
+    this.isFull.set(full);
+  };
 
   /** Set by "Leave full screen": touches stop going full screen until "Full screen" is chosen. */
   private get stayWindowed(): boolean {
@@ -351,12 +363,14 @@ export class WallFrameComponent implements OnInit, OnDestroy {
   }
   /** Kept for the tab, so a reload for an update doesn't undo it. */
   private windowed = false;
+  /** Leaving the wall display ends full screen too; coming back still goes full screen. */
+  private leaving = false;
   /**
    * A browser goes full screen only from a touch, so the first touch on a touch screen does it,
    * and the tap still does what it was on. Again after the tablet wakes or Chrome leaves it.
    */
   private readonly onTouch = (e: PointerEvent) => {
-    if (e.pointerType !== 'touch' || this.stayWindowed || document.fullscreenElement) return;
+    if (e.pointerType !== 'touch' || this.stayWindowed || document.fullscreenElement || !wallSized()) return;
     // The menu's own Full screen and Leave buttons decide for themselves.
     if ((e.target as Element | null)?.closest?.('[data-no-auto-full]')) return;
     void document.documentElement.requestFullscreen?.().catch(() => undefined);
@@ -445,6 +459,7 @@ export class WallFrameComponent implements OnInit, OnDestroy {
   leave(): void {
     this.menu.set(false);
     this.lock.askPin('leave the wall display', () => {
+      this.leaving = true;
       if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined);
       void this.router.navigateByUrl('/dashboard');
     });
@@ -454,6 +469,7 @@ export class WallFrameComponent implements OnInit, OnDestroy {
   stopBeingWall(): void {
     this.menu.set(false);
     this.lock.askPin('stop using this tablet as a wall display', () => {
+      this.leaving = true;
       if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined);
       setWallHome(false);
       void this.router.navigateByUrl('/dashboard');

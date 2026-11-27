@@ -2,6 +2,71 @@
 
 This guide covers everyday use, from adding devices to automating your lights. To install HomeHub first, see the [install guide](./INSTALL.md).
 
+## Contents
+
+- [Find a setting](#find-a-setting)
+- [Devices HomeHub supports](#devices-homehub-supports)
+- [Add a device](#add-a-device)
+  - [Devices on another Wi-Fi network](#devices-on-another-wi-fi-network)
+  - [Kasa plugs](#kasa-plugs)
+  - [Shelly devices](#shelly-devices)
+  - [Tuya plugs](#tuya-plugs)
+  - [Meross garage door openers](#meross-garage-door-openers)
+  - [Robot vacuums (Roomba)](#robot-vacuums-roomba)
+  - [LG TVs](#lg-tvs)
+  - [Sonos speakers](#sonos-speakers)
+  - [Matter devices](#matter-devices)
+  - [Thermostats](#thermostats)
+  - [Temperature schedule](#temperature-schedule)
+  - [Honeywell thermostats (RedLINK)](#honeywell-thermostats-redlink)
+  - [Alarm system (Alarm.com)](#alarm-system-alarmcom)
+- [Cameras](#cameras)
+  - [Add your cameras](#add-your-cameras)
+  - [Turn cameras off](#turn-cameras-off)
+  - [Watch, pause and resume](#watch-pause-and-resume)
+  - [Snapshots](#snapshots)
+  - [Motion snapshots](#motion-snapshots)
+  - [Ring doorbells and cameras](#ring-doorbells-and-cameras)
+  - [IP cameras (Reolink, Amcrest and others)](#ip-cameras-reolink-amcrest-and-others)
+- [Control your devices](#control-your-devices)
+- [Activity](#activity)
+- [Energy](#energy)
+- [Rooms](#rooms)
+  - [Set up the map](#set-up-the-map)
+- [Names and groups](#names-and-groups)
+  - [Teach HomeHub what you meant](#teach-homehub-what-you-meant)
+  - [Choose what HomeHub says back](#choose-what-homehub-says-back)
+- [Schedules](#schedules)
+- [Away mode](#away-mode)
+- [Daily check-in](#daily-check-in)
+  - [Ask at home first](#ask-at-home-first)
+  - [Make the alert hard to miss](#make-the-alert-hard-to-miss)
+- [Scenes](#scenes)
+  - [Pause cameras by voice](#pause-cameras-by-voice)
+- [Motion lights](#motion-lights)
+  - [Several lights from one sensor](#several-lights-from-one-sensor)
+  - [Only when it's dark](#only-when-its-dark)
+- [Protected devices](#protected-devices)
+- [Backups](#backups)
+  - [Moving to another HomeHub](#moving-to-another-homehub)
+  - [Email backups](#email-backups)
+- [More than one HomeHub](#more-than-one-homehub)
+  - [Keeping the backup up to date](#keeping-the-backup-up-to-date)
+- [Pause automations](#pause-automations)
+- [Home location and time zone](#home-location-and-time-zone)
+- [AI for Chat and voice](#ai-for-chat-and-voice)
+  - [Set things up from Chat](#set-things-up-from-chat)
+- [AI assistant](#ai-assistant)
+- [Household members](#household-members)
+- [Wall display](#wall-display)
+  - [Lock HomeHub on a phone](#lock-homehub-on-a-phone)
+- [Remote access](#remote-access)
+- [Health](#health)
+  - [Restart the voice bridge](#restart-the-voice-bridge)
+  - [Go back a version](#go-back-a-version)
+- [Voice control](#voice-control)
+- [Troubleshooting](#troubleshooting)
+
 ## Find a setting
 
 **Settings** (**More** on a phone) shows its sections as tiles, grouped into Your home, Talking to HomeHub, Connections and More. Each tile says how that part is doing, such as "24 devices · 7 offline" or "Last backup 5 hours ago", and a yellow **Look** badge means something there needs you: a device offline, an account to sign in to again, a backup that's late or a voice speaker that isn't answering. Tap a tile to open it; the arrow at the top, or your phone's Back button, goes back to the tiles. Search finds a setting by its name or what's in it, such as "password", "wake word" or "Honeywell"; press Enter when it finds just one to open it. **List** at the top shows the sections as one list instead, and HomeHub remembers your choice on each browser.
@@ -410,13 +475,13 @@ On a phone, the tabs at the bottom take you to Home, Scenes, Chat and Schedules.
 - **Settings → Devices:** tap **On** or **Off** to test a light.
 - **Chat:** type a command, such as "turn on the porch light".
 
-Set up a timer in Chat by adding a time, such as "turn on my office lamp for an hour" or "porch light on for 10 minutes". It works typed in Vietnamese, Cantonese and Mandarin too, and HomeHub answers in the same language: "bật quạt 30 phút", 開門口燈十分鐘, 打开门口灯半小时. "In 10 minutes" (later, rather than for a while) goes to the AI model.
+Set up a timer in Chat by adding a time, such as "turn on my office lamp for an hour" or "porch light on for 10 minutes". It works typed in Cantonese, Mandarin and Vietnamese too, and HomeHub answers in the same language: 開門口燈十分鐘, 打开门口灯半小时, "bật quạt 30 phút". "In 10 minutes" (later, rather than for a while) goes to the AI model.
 
 When Chat doesn't know the words for a device, such as a misspelling ("turn of ffice liights") or a name in another language ("tắt đèn phòng khách"), the AI model works out what you probably meant, and Chat asks first: "Should I turn off Office lights?" or "Có phải bạn muốn tắt Living room lamps, Living room statue và Woman statue không?". Reply **yes** or **no** (có / không, 係 / 唔係, 是 / 不是). A yes switches them and saves your words as their nickname, so next time the same words work straight away, with no question. A no changes nothing. Anything else is read as a new command. The question waits two minutes, and only for the person who was asked. On a Pi 4 the question takes about 15 seconds. To skip asking and send these commands to the AI model's chat as before, set `CHAT_ASK=off` in `.env`.
 
 Ask what's on, such as "which devices are on?", "which lights are off?" or "is the kitchen light on?", in Chat or by voice. HomeHub answers these itself, straight away, from the states the dashboard shows. Cameras are left out of the lists. Anything HomeHub can't answer itself goes to the AI model, which runs on the HomeHub computer and can take a minute on an older one, unless you've chosen Claude Haiku (see [AI for Chat and voice](#ai-for-chat-and-voice)). Under each reply, Chat shows who answered, **HomeHub** or **the AI model**, and how long it took. If the AI model isn't answering, Chat says so, in the language you typed, and that simple commands still work; **Health** shows why.
 
-Ask the time, the date or the weather the same way: "what time is it?", "what's the date?", "what's the weather?", "what's the weather tomorrow?" or "will it rain today?". In Chat or by voice you can also ask in Vietnamese ("Mấy giờ rồi?", "Thời tiết hôm nay thế nào?", "Ngày mai có mưa không?"), Cantonese ("幾點呀？", "今日天氣點？", "聽日會唔會落雨？") or Mandarin ("现在几点？", "明天会下雨吗？"), and the answer comes in the same language. The weather needs your home's location in **Settings → Home**. It comes from Open-Meteo, a free weather service: only the location leaves the house, rounded to about a kilometre, and at most every ten minutes.
+Ask the time, the date or the weather the same way: "what time is it?", "what's the date?", "what's the weather?", "what's the weather tomorrow?" or "will it rain today?". In Chat or by voice you can also ask in Cantonese ("幾點呀？", "今日天氣點？", "聽日會唔會落雨？"), Mandarin ("现在几点？", "明天会下雨吗？") or Vietnamese ("Mấy giờ rồi?", "Thời tiết hôm nay thế nào?", "Ngày mai có mưa không?"), and the answer comes in the same language. The weather needs your home's location in **Settings → Home**. It comes from Open-Meteo, a free weather service: only the location leaves the house, rounded to about a kilometre, and at most every ten minutes.
 
 Ask "what should I wear?", "what should I wear tomorrow?" or "do I need a jacket?" (in Cantonese "今日著咩衫？", "使唔使著外套？"; in Mandarin "明天穿什么？"; in Vietnamese "Hôm nay mặc gì?") and HomeHub suggests clothes from the forecast: a heavy coat, a warm coat, a jacket, a sweater or a T-shirt, by how warm it feels. It adds layers when it warms up a lot later, an umbrella when rain is likely, and boots for snow. Today's advice uses the feels-like temperature now; tomorrow's uses the cool part of the day, when people get dressed. The suggestion only comes when you ask about clothes, not with every weather answer.
 
@@ -516,7 +581,7 @@ A room renamed or emptied of devices disappears from the map, and **Edit map** l
 
 Open **Settings → Devices** and select **Edit** to add nicknames. The device opens in a popup, with its name at the top; **Save** keeps the changes, and **✕**, **Cancel** or Esc closes it without saving. Type one and press **Add** or Enter; each becomes a tag, marked EN, VI or 中 for its language. A Chinese nickname (中) works in Cantonese and in Mandarin. Select **✕** on a tag to remove it (**Undo** brings it back), and **Save** to keep the changes. HomeHub recognizes nicknames in Chat and voice commands. A tag with a dashed edge is shared with another device, named under the tags.
 
-With Vietnamese, Cantonese or Mandarin ticked in **Settings → Voice control**, HomeHub suggests nicknames in those languages under the tags, made from the device's English names: "Kitchen lights" gets đèn bếp and đèn nhà bếp. Mandarin suggestions are in simplified characters, and only where the words differ from Cantonese: "Garage door" gets 车库门 next to 車房門, but "Kitchen lights" gets only 廚房燈, which works in both. Tap one to add it. The next suggestion also shows, greyed, in the empty nickname box: press **Tab** on a keyboard, or **Add** on a phone, to add it. Start typing and the box finishes a suggestion that begins the same way, without the accents needed: type "den n" and press **Tab** for đèn nhà bếp. For a person's room, Cantonese and Mandarin need their Chinese name: tap the suggestion, type the name in front of it, such as 以信 before 房燈, and press **Add**. HomeHub then uses that name in its other suggestions. It knows the usual rooms (including a breakfast area, kitchen counter or island, and media room), lights, doors and appliances, and words such as corner, little and long. Names with other words, such as "Woman statue", get no suggestions.
+With Cantonese, Mandarin or Vietnamese ticked in **Settings → Voice control**, HomeHub suggests nicknames in those languages under the tags, made from the device's English names: "Kitchen lights" gets đèn bếp and đèn nhà bếp. Mandarin suggestions are in simplified characters, and only where the words differ from Cantonese: "Garage door" gets 车库门 next to 車房門, but "Kitchen lights" gets only 廚房燈, which works in both. Tap one to add it. The next suggestion also shows, greyed, in the empty nickname box: press **Tab** on a keyboard, or **Add** on a phone, to add it. Start typing and the box finishes a suggestion that begins the same way, without the accents needed: type "den n" and press **Tab** for đèn nhà bếp. For a person's room, Cantonese and Mandarin need their Chinese name: tap the suggestion, type the name in front of it, such as 以信 before 房燈, and press **Add**. HomeHub then uses that name in its other suggestions. It knows the usual rooms (including a breakfast area, kitchen counter or island, and media room), lights, doors and appliances, and words such as corner, little and long. Names with other words, such as "Woman statue", get no suggestions.
 
 To add suggestions for every device at once, open **Settings → Voice control** and select **Review** under **Suggested nicknames**. They're all ticked: tap any that aren't right to untick them, then select **Add**. Ones you untick aren't suggested there again.
 
@@ -851,12 +916,13 @@ A tablet that's always on, on a wall or the kitchen counter, can be HomeHub's sc
 - **Scenes,** as large buttons. A tick shows it ran.
 - **Your rooms,** as on the Home page. Tap one to switch its devices.
 - **At night** (10 PM to 6:30 AM at first), the screen turns black with a dim clock and the next thing coming up. The clock moves a little each minute so nothing burns into the screen. Tap it to see everything for 2 minutes.
+- **Full screen:** on a tablet, the first tap makes the wall display full screen. Leave it with **⋯ → Leave full screen**, or with the tablet's own swipe or Back: either way it stays that way until you choose **Full screen** again. A phone doesn't go full screen by itself.
 - **⋯** in the corner sets the night hours or turns night dimming off, goes **Full screen**, and leaves the wall display. **Leave wall display** opens the rest of HomeHub for a while: the Dashboard shows **Back to wall display**, **Home** goes back too, and the tablet goes back by itself after 2 minutes without a touch. **Stop using this tablet as a wall display**, under it, makes it an ordinary screen again. With a PIN set, both ask for it first. These choices are kept on that tablet only. Its foot shows the version HomeHub is running, and says so when the tablet still has an older one waiting to reload.
 - **Getting back:** the **home** button next to **⋯** closes any room that's open and scrolls back to the top. Left on another page, such as Cameras, **Home** in the menu goes back to the wall display. And after 2 minutes without a touch, the tablet goes back by itself, except while a camera is playing. If its screen turned off before then, it goes back as soon as the screen wakes.
 
 **Keeping the screen on:** on a secure address (`https://`, such as the Tailscale one), HomeHub keeps the screen on while the wall display is open. On the home address (`http://`), the browser doesn't allow that, and **⋯** says so: on the tablet, set **Settings → Display → Screen timeout** to the longest, or turn on **Developer options → Stay awake** to keep it on while charging.
 
-**On the home screen:** with the wall display open in Chrome, tap **⋮ → Add to Home screen**. Once a tablet has opened the wall display, HomeHub opens straight into it there, from the icon too, until you tap **⋯ → Stop using this tablet as a wall display**. If the menu doesn't have it, tap **⋮ → Share** and choose **Add to Home screen** there. The tablet stays signed in, on the home address too, and if it ever has to sign in again, it goes back to the wall display afterwards. On the home address (`http://`) that's a shortcut that opens in Chrome, in a new tab each time it's tapped. On a secure address Chrome offers **Install app** instead: HomeHub then opens in its own window with no address bar, in landscape or portrait, and tapping the icon again brings back the window that's open rather than a second one. To get that on a tablet at home, install the Tailscale app on it and use HomeHub's Tailscale address ([Remote Access](REMOTE_ACCESS.md)). On the home address, the first touch on the wall display goes full screen, hiding the address bar, and the tap still does what it was on. It goes full screen again on the first touch after the tablet wakes or Chrome is reopened. **⋯ → Leave full screen** stops that until you choose **⋯ → Full screen**, or the page is opened again. For a tablet that only shows the wall display, a kiosk browser app such as Fully Kiosk Browser keeps it full screen all the time.
+**On the home screen:** with the wall display open in Chrome, tap **⋮ → Add to Home screen**. Once a tablet has opened the wall display, HomeHub opens straight into it there, from the icon too, until you tap **⋯ → Stop using this tablet as a wall display**. A phone isn't made a wall display: it can open it for a look, and its lock screen still opens the page you were on. If the menu doesn't have it, tap **⋮ → Share** and choose **Add to Home screen** there. The tablet stays signed in, on the home address too, and if it ever has to sign in again, it goes back to the wall display afterwards. On the home address (`http://`) that's a shortcut that opens in Chrome, in a new tab each time it's tapped. On a secure address Chrome offers **Install app** instead: HomeHub then opens in its own window with no address bar, in landscape or portrait, and tapping the icon again brings back the window that's open rather than a second one. To get that on a tablet at home, install the Tailscale app on it and use HomeHub's Tailscale address ([Remote Access](REMOTE_ACCESS.md)). On the home address, the first touch on the wall display goes full screen, hiding the address bar, and the tap still does what it was on. It goes full screen again on the first touch after the tablet wakes or Chrome is reopened. **⋯ → Leave full screen** stops that until you choose **⋯ → Full screen**, or the page is opened again. For a tablet that only shows the wall display, a kiosk browser app such as Fully Kiosk Browser keeps it full screen all the time.
 
 **Lock with a PIN:** so only people who know it can use the screen. In **⋯ → Lock with a PIN**, enter a PIN of 4 to 8 digits twice and select **Save**. Then:
 

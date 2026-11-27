@@ -32,3 +32,8 @@ docker compose -f docker-compose.yml up -d --build
 ```
 
 A plain `docker compose up` also applies `docker-compose.override.yml`, which runs the development builds.
+
+## Docs
+
+- Languages are always listed Cantonese, then Mandarin, then Vietnamese (after English), in docs and on screen.
+- `docs/USER_GUIDE.md` starts with a Contents list of its `##` and `###` headings. Adding, renaming or removing a heading means updating it.
