@@ -63,6 +63,9 @@ def background_talk(seconds: float, voiced: float, heard: str = '') -> bool:
     return not command_over_noise(heard)
 
 
+# How long a speaker may take to turn its microphone off after being told the speech has ended.
+MIC_STOP_S = 0.5
+
 # A reminder waits this long for a command being answered to finish, then is said anyway.
 ANNOUNCE_WAIT_S = 20.0
 # How long a speaker has to say a reminder.
@@ -375,6 +378,12 @@ class SpeakerLink:
                 log.exception('%s #%d failed', self.who, run.n)
                 event(E.VOICE_ASSISTANT_ERROR, {'code': 'bridge-error', 'message': str(e)[:200]})
             finally:
+                # A Voice PE ignores the run's end while it's still turning its microphone off after
+                # STT_VAD_END, then waits for an answer for ever: two blue lights blinking, and no wake
+                # word heard. A wake with no words used to end that soon (recognise 0.00s).
+                settle = MIC_STOP_S - (time.monotonic() - t_end)
+                if settle > 0:
+                    await asyncio.sleep(settle)
                 event(E.VOICE_ASSISTANT_RUN_END)
                 if self.run is run:
                     self.run = None

@@ -9,6 +9,7 @@ import http.server
 import json
 import tempfile
 import threading
+import time
 import unittest
 import wave
 from pathlib import Path
@@ -19,6 +20,7 @@ import numpy as np
 from homehub_voice import config as cfg
 from homehub_voice.endpoint import BYTES_PER_SECOND, MAX_S, Endpointer, new_endpointer
 from homehub_voice.homehub import CommandResult, HomeHub, HomeHubError
+from homehub_voice.speakers import MIC_STOP_S
 from homehub_voice.pipeline import NO_HOMEHUB, NOT_CAUGHT, NOTHING_HEARD, answer
 
 
@@ -278,6 +280,7 @@ class FakeClient:
 
     def __init__(self, host, port, password, **kw):
         self.events = []
+        self.event_times: list[float] = []
         self.on_stop = None
         self.handlers = None
         FakeClient.instances.append(self)
@@ -301,6 +304,7 @@ class FakeClient:
 
     def send_voice_assistant_event(self, kind, data):
         self.events.append((kind.name, data))
+        self.event_times.append(time.monotonic())
 
     async def send_voice_assistant_announcement_await_response(self, media_id, timeout, text='', preannounce_media_id='', start_conversation=False):
         self.events.append(('ANNOUNCE', {'url': media_id, 'text': text, **({'listen': True} if start_conversation else {})}))
@@ -675,6 +679,11 @@ class SpeakerLinkTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('VOICE_ASSISTANT_TTS_START', events)
         self.assertNotIn('VOICE_ASSISTANT_ERROR', events)
         self.assertEqual(c.events[-1][0], 'VOICE_ASSISTANT_RUN_END', 'the run still ends')
+        # Not straight after the speech ended: a Voice PE still turning its microphone off ignores the end,
+        # and is stuck blinking blue, deaf to its wake word.
+        names = [e[0] for e in c.events]
+        vad_end = c.event_times[len(names) - 1 - names[::-1].index('VOICE_ASSISTANT_STT_VAD_END')]
+        self.assertGreaterEqual(c.event_times[-1] - vad_end, MIC_STOP_S - 0.01)
         link.task.cancel()
 
     async def test_failure_still_ends_run(self):
