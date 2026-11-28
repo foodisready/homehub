@@ -131,6 +131,7 @@ const isSpeaker = (d: Device) => d.driverType === 'sonos';
       <!-- The wall display (/wall): the rooms, with a clock, weather, Coming up and scenes above. -->
       <app-wall-frame>
         <app-alarm-card />
+        <app-cameras-card />
         <app-music-card [devices]="devices()" />
         @if (loading()) { <div class="loading">Loading devices…</div> }
         @else {

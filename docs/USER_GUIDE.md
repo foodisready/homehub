@@ -916,7 +916,7 @@ A tablet that's always on, on a wall or the kitchen counter, can be HomeHub's sc
 
 - **At the top:** a large clock and the date, the weather now with today's high, low and chance of rain, and **Coming up**: what the schedules do in the next 12 hours, such as "6:32 PM · hallway lamp and Living room lamps on".
 - **Scenes,** as large buttons. A tick shows it ran.
-- **The alarm and the music:** the **Alarm** card, and with Sonos speakers, the **Music** card: what's playing and where, with play/pause and volume, as on the Dashboard.
+- **The alarm, the cameras and the music:** the **Alarm** card, the **Cameras** card, and with Sonos speakers, the **Music** card: what's playing and where, with play/pause and volume, as on the Dashboard.
 - **Your rooms,** as on the Home page, as **Rooms** (tiles), a **List** or the **Map**. Tap one to switch its devices. The wall display keeps its own choice, apart from the Dashboard's on the same tablet, and its map can't be edited there. Turning a thermostat off asks for the PIN as well, as everywhere.
 - **At night** (10 PM to 6:30 AM at first), the screen turns black with a dim clock and the next thing coming up. The clock moves a little each minute so nothing burns into the screen. Tap it to see everything for 2 minutes.
 - **Full screen:** on a tablet, the first tap makes the wall display full screen. Leave it with **⋯ → Leave full screen**, or with the tablet's own swipe or Back: either way it stays that way until you choose **Full screen** again. A phone doesn't go full screen by itself.
