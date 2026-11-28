@@ -17,7 +17,7 @@ from aioesphomeapi.model import VoiceAssistantFeature
 from . import confirm
 from .chatter import command_over_noise, english_talk
 from .config import Speaker
-from .endpoint import MAX_S, Endpointer, loudness, new_endpointer
+from .endpoint import BYTES_PER_SECOND, MAX_S, Endpointer, loudness, new_endpointer
 from .pipeline import Answer, wake_language
 
 log = logging.getLogger('homehub-voice')
@@ -460,7 +460,8 @@ class SpeakerLink:
                     log.info('%s #%d (%s) woke but heard almost nothing, so it stays quiet (voiced %.1fs, loudest %.3f)',
                              self.who, run.n, run.wake or 'no wake word', run.listen.voiced, run.listen.peak)
                     return
-                a = await loop.run_in_executor(None, self.answer, bytes(run.listen.audio), run.listen.spoke, asked, prefer, run.wake)
+                speech = run.listen.speech()
+                a = await loop.run_in_executor(None, self.answer, speech, run.listen.spoke, asked, prefer, run.wake)
                 # No words at all: most often the wake word heard in a noise or a conversation, so the
                 # speaker goes quiet instead of saying "Sorry, I didn't hear anything" to nobody.
                 if not a.heard.strip(' 。，.,!?！？') and not a.handled:
@@ -529,9 +530,9 @@ class SpeakerLink:
                 if now != a.reply:
                     how += f', said {now!r} first' if rest else f', said {now!r} for short'
                 log.info(
-                    '%s #%d (%s) heard %r -> %r (%s; speech %.1fs of which voiced %.1fs, loudness %.3f-%.3f, recognise %.2fs%s, HomeHub %.2fs, reply ready %.2fs after speech ended)',
+                    '%s #%d (%s) heard %r -> %r (%s; speech %.1fs of which voiced %.1fs, %.1fs recognised, loudness %.3f-%.3f, recognise %.2fs%s, HomeHub %.2fs, reply ready %.2fs after speech ended)',
                     self.who, run.n, run.wake or 'no wake word', a.heard, a.reply, 'done' if a.handled else 'not handled',
-                    run.listen.seconds, run.listen.voiced, min(run.listen.floor, run.listen.peak), run.listen.peak, a.stt_s, how,
+                    run.listen.seconds, run.listen.voiced, len(speech) / BYTES_PER_SECOND, min(run.listen.floor, run.listen.peak), run.listen.peak, a.stt_s, how,
                     a.homehub_s, time.monotonic() - t_end,
                 )
             except Exception as e:  # noqa: BLE001 — the speaker must always hear the run end

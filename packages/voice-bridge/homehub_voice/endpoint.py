@@ -24,6 +24,11 @@ SHORT_END_SILENCE_S = 1.3
 NO_SPEECH_S = 4.0
 # The longest command.
 MAX_S = 8.0
+# What's recognised is the speech, with this much around it: a soft 熄 or "s" starts quieter than the
+# threshold. Recognising takes about half a second for every second of audio on a Pi 4, and a command of
+# 3 s in a 6.7 s recording took 5.5 s to recognise (2026-11-28).
+SPEECH_BEFORE_S = 0.4
+SPEECH_AFTER_S = 0.3
 
 
 # Silero, the speech detector Whisper already uses, says whether each 32 ms is someone speaking.
@@ -111,6 +116,8 @@ class Endpointer:
         self.peak = 0.0
         self.floor = 1.0
         self.done = False
+        # Where the speech starts and ends, as byte offsets into audio; None until someone speaks.
+        self.speech_at: tuple[int, int] | None = None
 
     @property
     def seconds(self) -> float:
@@ -130,9 +137,20 @@ class Endpointer:
                 self.spoke = True
                 self.quiet = 0.0
                 self.voiced += len(chunk) / BYTES_PER_SECOND
+                start = self.speech_at[0] if self.speech_at else len(self.audio) - len(chunk)
+                self.speech_at = (start, len(self.audio))
             else:
                 self.quiet += len(chunk) / BYTES_PER_SECOND
         end_after = END_SILENCE_S if self.voiced >= SHORT_SPEECH_S else SHORT_END_SILENCE_S
         if (self.spoke and self.quiet >= end_after) or (not self.spoke and self.seconds >= NO_SPEECH_S) or self.seconds >= MAX_S:
             self.done = True
         return self.done
+
+    def speech(self) -> bytes:
+        """The audio to recognise: from just before the first speech to just after the last. All of it
+        if no speech was heard."""
+        if not self.speech_at:
+            return bytes(self.audio)
+        at = lambda seconds: int(seconds * BYTES_PER_SECOND) // 2 * 2  # noqa: E731
+        start, end = self.speech_at
+        return bytes(self.audio[max(0, start - at(SPEECH_BEFORE_S)): end + at(SPEECH_AFTER_S)])

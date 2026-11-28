@@ -28,6 +28,17 @@ class ChatterTest(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertFalse(looks_like_chatter(text, NAMES))
 
+    def test_on_or_off_in_tv_talk_isnt_a_command(self):
+        # 2026-11-28: a Sephora ad woke 老友 and got "Sorry, I didn't understand that."
+        for text in ["Should I come up? Sephora, there's fragrances on here.", 'Everything is on sale this weekend only.',
+                     'Come on, we are going to be late for the show.']:
+            with self.subTest(text=text):
+                self.assertTrue(english_talk(text, '老友'))
+        for text in ['Turn the master bedroom fan off now please.', 'kitchen on', 'office corner on please',
+                     'Can you switch the garage thing off for me?', 'Put the porch one on for a bit.']:
+            with self.subTest(text=text):
+                self.assertFalse(english_talk(text, '老友'))
+
     def test_only_what_was_heard_counts_not_what_was_sent(self):
         self.assertFalse(looks_like_chatter('Turn on the kitchen → turn on Kitchen lights', NAMES))
 
@@ -59,6 +70,17 @@ class EnglishTalkTest(unittest.TestCase):
                      'Sick.', 'Hoi chu',                       # short: 熄 or 開 cut off, maybe
                      'bat den bep di', 'tat den phong khach nhe',  # Vietnamese without its accents
                      '開廚房燈', 'Bật đèn bếp', '']:
+            with self.subTest(text=text):
+                self.assertFalse(english_talk(text, '老友'))
+
+    def test_on_or_off_in_tv_talk_isnt_a_command(self):
+        # 2026-11-28: a Sephora ad woke 老友 and got "Sorry, I didn't understand that."
+        for text in ["Should I come up? Sephora, there's fragrances on here.", 'Everything is on sale this weekend only.',
+                     'Come on, we are going to be late for the show.']:
+            with self.subTest(text=text):
+                self.assertTrue(english_talk(text, '老友'))
+        for text in ['Turn the master bedroom fan off now please.', 'kitchen on', 'office corner on please',
+                     'Can you switch the garage thing off for me?', 'Put the porch one on for a bit.']:
             with self.subTest(text=text):
                 self.assertFalse(english_talk(text, '老友'))
 

@@ -147,4 +147,17 @@ def english_talk(heard: str, wake: str, again_lang: str | None = None) -> bool:
         return False
     if any(w in VI_COMMAND for w in vi.words(text.lower())):
         return False
-    return not any(w in EN_COMMAND or w in THINGS for w in ws)
+    return not any((w in EN_COMMAND and (w not in ON_OFF or switched(ws, i))) or w in THINGS for i, w in enumerate(ws))
+
+
+# "On" and "off" are everywhere on TV ("fragrances on here", 老友 woke to a Sephora ad, 2026-11-28),
+# so in longer talk they count only next to a verb or a thing switched: "turn it on", "lights off".
+ON_OFF = {'on', 'off'}
+SWITCHED = {'turn', 'switch', 'put', 'fan', 'fans'} | THINGS
+SHORT_WORDS = 5
+
+
+def switched(ws: list[str], i: int) -> bool:
+    """Whether the "on" or "off" at ws[i] sounds like a command: in a few words ("kitchen on"), or near a
+    verb or a thing people switch ("turn the fan on")."""
+    return len(ws) <= SHORT_WORDS or any(w in SWITCHED for w in ws[max(0, i - 5): i + 2])

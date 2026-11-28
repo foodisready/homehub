@@ -82,6 +82,22 @@ class EndpointTest(unittest.TestCase):
         e = self.feed(tone(0.5, False) + tone(0.7, True) + tone(3, False))
         self.assertAlmostEqual(e.seconds, 0.5 + 0.7 + 1.3, delta=0.1)
 
+    def test_only_the_speech_is_recognised(self):
+        # 2026-11-28: 3 s of 熄廚房燈 in a 6.7 s recording took 5.5 s to recognise on the Pi.
+        quiet, loud = tone(1.5, False), tone(1.2, True)
+        e = self.feed(quiet + loud + tone(3, False))
+        speech = e.speech()
+        self.assertAlmostEqual(len(speech) / BYTES_PER_SECOND, 0.4 + 1.2 + 0.3, delta=0.1)
+        self.assertIn(loud[: BYTES_PER_SECOND // 2], speech, 'the speech is all there')
+
+    def test_a_pause_in_a_command_is_kept(self):
+        e = self.feed(tone(0.5, False) + tone(0.7, True) + tone(1.25, False) + tone(0.6, True) + tone(3, False))
+        self.assertAlmostEqual(len(e.speech()) / BYTES_PER_SECOND, 0.4 + 0.7 + 1.25 + 0.6 + 0.3, delta=0.15)
+
+    def test_nothing_heard_is_all_recognised(self):
+        e = self.feed(tone(10, False))
+        self.assertEqual(e.speech(), bytes(e.audio))
+
     def test_nobody_speaks(self):
         e = self.feed(tone(10, False))
         self.assertTrue(e.done)
@@ -390,7 +406,7 @@ class SpeakerLinkTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(dict(c.events)['VOICE_ASSISTANT_STT_END'], {'text': 'turn on office lamp'})
         self.assertEqual(dict(c.events)['VOICE_ASSISTANT_TTS_END'], {'url': 'http://me/18.wav'})
         self.assertEqual(heard[0][1], True)
-        self.assertAlmostEqual(heard[0][0] / BYTES_PER_SECOND, 2.3, delta=0.1)
+        self.assertAlmostEqual(heard[0][0] / BYTES_PER_SECOND, 0.4 + 1 + 0.3, delta=0.1, msg='only the speech')
         self.assertNotIn('continue_conversation', dict(c.events)['VOICE_ASSISTANT_INTENT_END'])
         link.task.cancel()
 
