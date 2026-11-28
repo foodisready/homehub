@@ -1,8 +1,8 @@
-import { Component, OnInit, OnDestroy, signal, computed } from '@angular/core';
+import { Component, OnInit, OnDestroy, signal, computed, effect, untracked } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
-import { isWallHome } from '../../core/wall-home';
-import { DecimalPipe } from '@angular/common';
+import { isWallHome, wallGoHome } from '../../core/wall-home';
+import { DecimalPipe, NgTemplateOutlet } from '@angular/common';
 import { AuthService } from '../../core/auth/auth.service';
 import { SocketService, DeviceStateEvent, DeviceOnlineEvent, DeviceOverrideEvent } from '../../core/socket/socket.service';
 import { DeviceRowComponent, OverrideRequest } from './device-row/device-row.component';
@@ -21,10 +21,12 @@ import { isVacuum } from '../../shared/vacuum';
 
 const COLLAPSED_KEY = 'homehub.dashboard.collapsed';
 const VIEW_KEY = 'homehub.dashboard.view';
+/** The wall display's own choice, so changing it on the tablet's Dashboard doesn't change the wall. */
+const WALL_VIEW_KEY = 'homehub.wall.view';
 
 type View = 'rooms' | 'list' | 'map';
-function loadView(): View {
-  try { const v = localStorage.getItem(VIEW_KEY); return v === 'list' || v === 'map' ? v : 'rooms'; } catch { return 'rooms'; }
+function loadView(key: string): View {
+  try { const v = localStorage.getItem(key); return v === 'list' || v === 'map' ? v : 'rooms'; } catch { return 'rooms'; }
 }
 const OFFLINE = 'Offline';
 const UNASSIGNED = 'Unassigned';
@@ -63,7 +65,7 @@ const isSpeaker = (d: Device) => d.driverType === 'sonos';
 @Component({
   selector: 'app-dashboard',
   standalone: true,
-  imports: [DeviceRowComponent, RoomsViewComponent, FloorMapComponent, DeviceFilterComponent, SystemStatusComponent, HomeSetupNoticeComponent, CamerasCardComponent, MusicCardComponent, AlarmCardComponent, AwayComponent, DecimalPipe, WallFrameComponent, RouterLink],
+  imports: [DeviceRowComponent, RoomsViewComponent, FloorMapComponent, DeviceFilterComponent, SystemStatusComponent, HomeSetupNoticeComponent, CamerasCardComponent, MusicCardComponent, AlarmCardComponent, AwayComponent, DecimalPipe, NgTemplateOutlet, WallFrameComponent, RouterLink],
   styles: [`
     .back-to-wall { display: flex; align-items: center; justify-content: center; min-height: 3rem; margin: 0 0 0.75rem; border-radius: 14px;
       background: var(--accent); color: #fff; font-weight: 650; text-decoration: none; }
@@ -132,9 +134,7 @@ const isSpeaker = (d: Device) => d.driverType === 'sonos';
         <app-music-card [devices]="devices()" />
         @if (loading()) { <div class="loading">Loading devices…</div> }
         @else {
-          <app-rooms-view [devices]="devices()" [busyIds]="busyIds()"
-                          (toggled)="toggle($event)" (overrideSet)="setOverride($event)"
-                          (overrideCancelled)="cancelOverride($event)" (allOff)="allOff($event)" (roomOpened)="checkDevices($event)" />
+          <ng-container [ngTemplateOutlet]="views" />
         }
       </app-wall-frame>
     } @else {
@@ -168,8 +168,16 @@ const isSpeaker = (d: Device) => d.driverType === 'sonos';
         </div>
       } @else {
         <app-device-filter [devices]="devices()" [(search)]="search" [(filter)]="filter" />
+        <ng-container [ngTemplateOutlet]="views" />
+      }
+
+    </div>
+    }
+
+    <!-- Rooms, List or Map: on the Dashboard under the search, on the wall display under the cards. -->
+    <ng-template #views>
         <div class="view-bar">
-          @if (totalWattage() > 0) { <div class="total">{{ totalWattage() | number:'1.1-1' }} W in use</div> }
+          @if (!wall && totalWattage() > 0) { <div class="total">{{ totalWattage() | number:'1.1-1' }} W in use</div> }
           <div class="seg" role="group" aria-label="Show devices as">
             <button type="button" [attr.aria-pressed]="view() === 'rooms'" (click)="setView('rooms')">Rooms</button>
             <button type="button" [attr.aria-pressed]="view() === 'list'" (click)="setView('list')">List</button>
@@ -183,7 +191,7 @@ const isSpeaker = (d: Device) => d.driverType === 'sonos';
                             (toggled)="toggle($event)" (overrideSet)="setOverride($event)"
                             (overrideCancelled)="cancelOverride($event)" (allOff)="allOff($event)" (roomOpened)="checkDevices($event)" />
           } @else {
-            <app-floor-map [devices]="devices()" [isAdmin]="isAdmin()" (roomPicked)="mapRoom.set($event)" />
+            <app-floor-map [devices]="devices()" [isAdmin]="isAdmin() && !wall" (roomPicked)="mapRoom.set($event)" />
           }
         } @else if (view() === 'rooms') {
           <app-rooms-view [devices]="roomDevices()" [busyIds]="busyIds()"
@@ -220,10 +228,7 @@ const isSpeaker = (d: Device) => d.driverType === 'sonos';
           }
         </div>
         }
-      }
-
-    </div>
-    }
+    </ng-template>
   `,
 })
 export class DashboardComponent implements OnInit, OnDestroy {
@@ -242,7 +247,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
   readonly filter = signal<DeviceFilter>('all');
   private readonly collapsed = signal(loadCollapsed());
   /** Rooms (tiles, and a room's devices as bubbles) or the list. */
-  readonly view = signal(loadView());
+  readonly view = signal<View>('rooms');
 
   /** The room opened from the map, or null for the map. */
   readonly mapRoom = signal<string | null>(null);
@@ -251,7 +256,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
   setView(v: View): void {
     this.view.set(v);
     this.mapRoom.set(null);
-    try { localStorage.setItem(VIEW_KEY, v); } catch { /* the choice lasts this visit */ }
+    try { localStorage.setItem(this.wall ? WALL_VIEW_KEY : VIEW_KEY, v); } catch { /* the choice lasts this visit */ }
   }
 
   /** What the Rooms view shows: the search and filter's matches, offline ones in their own rooms. */
@@ -317,6 +322,9 @@ export class DashboardComponent implements OnInit, OnDestroy {
     route:           ActivatedRoute,
   ) {
     this.wall = route.snapshot.data['wall'] === true;
+    this.view.set(loadView(this.wall ? WALL_VIEW_KEY : VIEW_KEY));
+    // The wall display's Home: a room opened from the map closes too, back to the map.
+    effect(() => { wallGoHome(); untracked(() => this.mapRoom.set(null)); });
   }
 
   ngOnInit(): void {

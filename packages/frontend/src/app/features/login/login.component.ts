@@ -40,6 +40,12 @@ import { SocketService } from '../../core/socket/socket.service';
       margin-bottom: 0.35rem;
     }
     .hint { font-size: 0.75rem; color: var(--text-muted); margin: 0.3rem 0 0; }
+    /* The eye: shows what's typed, so a password typed on a tablet's keyboard can be checked. */
+    .pw { position: relative; }
+    .pw input { width: 100%; padding-right: 2.8rem; }
+    .eye { position: absolute; right: 0.25rem; top: 50%; transform: translateY(-50%); width: 2.4rem; height: 2.4rem;
+      display: grid; place-items: center; padding: 0; background: none; border: 0; color: var(--text-muted); }
+    .eye svg { width: 1.2rem; height: 1.2rem; }
     .submit-btn {
       width: 100%;
       padding: 0.7rem;
@@ -58,18 +64,27 @@ import { SocketService } from '../../core/socket/socket.service';
             <div class="field">
               <label for="new-username">Username</label>
               <input id="new-username" type="text" [(ngModel)]="username" name="username"
-                     autocomplete="username" maxlength="32" [disabled]="loading()" required />
+                     autocomplete="username" autocapitalize="off" spellcheck="false" maxlength="32" [disabled]="loading()" required />
             </div>
             <div class="field">
               <label for="new-password">Password</label>
-              <input id="new-password" type="password" [(ngModel)]="password" name="password"
-                     autocomplete="new-password" [disabled]="loading()" required />
+              <div class="pw">
+              <input id="new-password" [type]="showPassword() ? 'text' : 'password'" [(ngModel)]="password" name="password"
+                     autocomplete="new-password" autocapitalize="off" spellcheck="false" [disabled]="loading()" required />
+              <button type="button" class="eye" (click)="showPassword.set(!showPassword())" [attr.aria-label]="showPassword() ? 'Hide password' : 'Show password'" [attr.aria-pressed]="showPassword()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  @if (showPassword()) { <path d="M2 12s3.6-7 10-7c2 0 3.8.7 5.3 1.7M22 12s-3.6 7-10 7c-2 0-3.8-.7-5.3-1.7" /><path d="M3 3l18 18" /> }
+                  @else { <path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z" /> }
+                  <circle cx="12" cy="12" r="3" />
+                </svg>
+              </button>
+              </div>
               <p class="hint">At least 8 characters.</p>
             </div>
             <div class="field">
               <label for="confirm-password">Confirm password</label>
-              <input id="confirm-password" type="password" [(ngModel)]="confirm" name="confirm"
-                     autocomplete="new-password" [disabled]="loading()" required />
+              <input id="confirm-password" [type]="showPassword() ? 'text' : 'password'" [(ngModel)]="confirm" name="confirm"
+                     autocomplete="new-password" autocapitalize="off" spellcheck="false" [disabled]="loading()" required />
             </div>
 
             @if (error()) {
@@ -92,6 +107,8 @@ import { SocketService } from '../../core/socket/socket.service';
                 [(ngModel)]="username"
                 name="username"
                 autocomplete="username"
+                autocapitalize="off"
+                spellcheck="false"
                 [disabled]="loading()"
                 required
               />
@@ -99,15 +116,26 @@ import { SocketService } from '../../core/socket/socket.service';
 
             <div class="field">
               <label for="password">Password</label>
+              <div class="pw">
               <input
                 id="password"
-                type="password"
+                [type]="showPassword() ? 'text' : 'password'"
                 [(ngModel)]="password"
                 name="password"
                 autocomplete="current-password"
+                autocapitalize="off"
+                spellcheck="false"
                 [disabled]="loading()"
                 required
               />
+              <button type="button" class="eye" (click)="showPassword.set(!showPassword())" [attr.aria-label]="showPassword() ? 'Hide password' : 'Show password'" [attr.aria-pressed]="showPassword()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  @if (showPassword()) { <path d="M2 12s3.6-7 10-7c2 0 3.8.7 5.3 1.7M22 12s-3.6 7-10 7c-2 0-3.8-.7-5.3-1.7" /><path d="M3 3l18 18" /> }
+                  @else { <path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z" /> }
+                  <circle cx="12" cy="12" r="3" />
+                </svg>
+              </button>
+              </div>
             </div>
 
             @if (error()) {
@@ -128,6 +156,8 @@ export class LoginComponent implements OnInit {
   password = '';
   confirm  = '';
   loading  = signal(false);
+  /** The eye beside the password: shows what's typed. */
+  readonly showPassword = signal(false);
   error    = signal('');
   /** A new HomeHub with no users yet: create the first admin instead of signing in. */
   setupMode = signal(false);
