@@ -347,6 +347,15 @@ class FakeClient:
         pass
 
 
+class TurnFixedTest(unittest.TestCase):
+    def test_a_misheard_turn_before_on_or_off(self):
+        from homehub_voice.pipeline import turn_fixed
+        self.assertEqual(turn_fixed('Tn on kitchen light.'), 'Turn on kitchen light.')
+        self.assertEqual(turn_fixed('please ton off the porch'), 'please Turn off the porch')
+        for same in ('Ten minutes later.', 'Turn on the lamp', 'tan line', 'Tonight on the news'):
+            self.assertEqual(turn_fixed(same), same)
+
+
 class SentencesTest(unittest.TestCase):
     def test_a_reply_in_sentences(self):
         from homehub_voice.speakers import sentences
@@ -355,6 +364,10 @@ class SentencesTest(unittest.TestCase):
         self.assertEqual(sentences('好。。'), ['好。。'])
         self.assertEqual(sentences('今日晴天。 記得帶遮！'), ['今日晴天。', '記得帶遮！'])
         self.assertEqual(sentences('今日晴天。 好！'), ['今日晴天。好！'], 'a word alone stays with the sentence before')
+        self.assertEqual(sentences('Turned on Kitchen lights. Next time I\'ll know "kitchen like this".'),
+                         ['Turned on Kitchen lights.', 'Next time I\'ll know "kitchen like this".'])
+        self.assertEqual(sentences("It's 72.5 degrees. Show's over, folks."), ["It's 72.5 degrees.", "Show's over, folks."])
+        self.assertEqual(sentences('Kitchen lamp is on.'), ['Kitchen lamp is on.'])
 
 
 class SpeakerLinkTest(unittest.IsolatedAsyncioTestCase):
@@ -1249,7 +1262,7 @@ class ReplyCacheTest(unittest.TestCase):
         en, yue = CountingVoice(), CountingVoice()
         yue.slow = True
         speak = self.speak_fn({'en': en, 'yue': yue})
-        self.assertTrue(speak.ready('Office lamp is on.'), 'English is quick to make')
+        self.assertFalse(speak.ready('Office lamp is on.'), 'English takes seconds too, made the first time')
         self.assertFalse(speak.ready('好，開咗。', 'yue'))
         speak.prepare('好，開咗。', 'yue')
         self.assertTrue(speak.ready('好，開咗。', 'yue'))

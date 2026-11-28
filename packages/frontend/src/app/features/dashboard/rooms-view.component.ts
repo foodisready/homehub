@@ -1,6 +1,7 @@
 import {
   AfterViewChecked, ChangeDetectorRef, Component, ElementRef, OnDestroy, computed, effect, inject, input, output, signal, untracked, viewChild,
 } from '@angular/core';
+import { LockService } from '../../core/lock/lock.service';
 import { NgTemplateOutlet } from '@angular/common';
 import type { Device } from '../../shared/models/device.model';
 import { ThermostatService, offQuestion, shown } from '../../shared/thermostat/thermostat.service';
@@ -354,6 +355,7 @@ export class RoomsViewComponent implements AfterViewChecked, OnDestroy {
   readonly closed = output<void>();
 
   private readonly thermostats = inject(ThermostatService);
+  private readonly lock = inject(LockService);
   private readonly cd = inject(ChangeDetectorRef);
 
   /**
@@ -733,7 +735,10 @@ export class RoomsViewComponent implements AfterViewChecked, OnDestroy {
   confirmAsk(): void {
     const a = this.asking();
     this.asking.set(null);
-    if (a) this.toggled.emit(a.device);
+    if (!a) return;
+    // A thermostat turned off on the wall display also asks for the PIN.
+    if (kindOf(a.device) === 'thermostat' && a.device.state) this.lock.askPinOnWall(`turn off ${a.device.alias}`, () => this.toggled.emit(a.device));
+    else this.toggled.emit(a.device);
   }
 
   // ── The lines from the room to each device ──

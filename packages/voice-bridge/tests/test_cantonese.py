@@ -486,3 +486,12 @@ class ShortReplyTest(unittest.TestCase):
         self.assertIsNone(yue.short(lamp, True, 'Kitchen light is protected', []))
         self.assertIsNone(yue.short(yue.Command('ask', '廚房燈', 1.0), True, '', []))
         self.assertIsNone(yue.short(None, True, '', []))
+
+
+class RepliesMadeAheadTest(unittest.TestCase):
+    def test_what_is_said_about_a_name_is_made_ahead(self):
+        made = yue.replies_for('廚房燈')
+        for cmd, handled in ((yue.Command('on', '廚房燈', 1.0), True), (yue.Command('off', '廚房燈', 1.0), True),
+                             (yue.Command('ask', '廚房燈', 1.0), True)):
+            self.assertIn(yue.reply(cmd, handled, 'ok', []), made)
+        self.assertIn('係咪要開廚房燈？', made, "HomeHub's own question (confirm.ts askText)")

@@ -86,14 +86,6 @@ async def main() -> int:
     log.info('HomeHub at %s knows %d device and scene names', conf.homehub_url, len(homehub.refresh_names()))
 
     speak = speak_with(replies, ReplyCache(conf.reply_cache_dir), voices)
-    if 'yue' in voices:
-        # The short Cantonese replies (好，開咗。) are ready before the first command, so it's answered at once.
-        from .cantonese import SHORT
-
-        def warm() -> None:
-            for text in SHORT.values():
-                speak.prepare(text, 'yue')
-        loop.run_in_executor(None, warm)
 
     speakers: Speakers
     one_answers = OneAnswers()   # so two speakers that hear the same command don't both answer
@@ -204,7 +196,34 @@ async def main() -> int:
                     log.warning("can't check in with HomeHub: %s", e)
                 failing = True
 
-    tasks = [asyncio.create_task(speakers.run()), asyncio.create_task(refresh_names()), asyncio.create_task(report())]
+    names_seen: set[str] = set()
+
+    async def make_ahead() -> None:
+        """The Cantonese replies made ahead of time, so they come at once: the short ones (好，開咗。), then
+        five about each Cantonese name (開咗廚房燈。, 係咪要開廚房燈？). Kept across restarts, so only new
+        names take time. One at a time, waiting while a speaker listens or answers."""
+        from . import cantonese
+        if 'yue' not in voices or speak.cache.dir is None:
+            return
+        while True:
+            names = {n for n in homehub.names if cantonese.has_chinese(n)} - names_seen
+            texts = list(cantonese.SHORT.values()) if not names_seen else []
+            texts += [t for n in sorted(names) for t in cantonese.replies_for(n)]
+            todo = [t for t in texts if not speak.ready(t, 'yue')]
+            if todo:
+                log.info('making %d Cantonese replies ahead of time', len(todo))
+                t0 = loop.time()
+                for t in todo:
+                    while speakers.busy():
+                        await asyncio.sleep(1)
+                    await loop.run_in_executor(None, speak.prepare, t, 'yue')
+                log.info('made %d Cantonese replies in %.0fs', len(todo), loop.time() - t0)
+            names_seen.update(names)
+            names_seen.add('')   # the short ones are done
+            await asyncio.sleep(NAMES_RETRY_S)
+
+    tasks = [asyncio.create_task(speakers.run()), asyncio.create_task(refresh_names()), asyncio.create_task(report()),
+             asyncio.create_task(make_ahead())]
     await stop.wait()
     log.info('stopping')
     for t in tasks:

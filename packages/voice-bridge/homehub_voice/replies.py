@@ -17,8 +17,9 @@ from pathlib import Path
 log = logging.getLogger('homehub-voice')
 
 KEEP_S = 600
-# Spoken replies kept for reuse, the least recently used dropped first: about 200 KB each.
-KEEP_FILES = 500
+# Spoken replies kept for reuse, the least recently used dropped first: about 100 KB each. Enough for
+# five replies about each Cantonese name (cantonese.replies_for) and the sentences said lately.
+KEEP_FILES = 1000
 
 
 def address_towards(host: str) -> str:
@@ -199,9 +200,8 @@ class Speech:
     there is one. Kept replies stay as the voice made them; the copy served gets its lead-in, and is FLAC for
     speakers that play only that.
 
-    A voice marked `slow` (the Cantonese one: seconds for a sentence on a Pi) is helped along: `ready` says
-    whether a reply can be played straight away, `prepare` makes one ahead of time, and `seconds` says how
-    long a served reply plays, so the next sentence can follow it."""
+    Making a reply takes seconds on a Pi, so `ready` says whether one can be played straight away, `prepare`
+    makes one ahead of time, and `seconds` says how long a served reply plays, so the next sentence can follow it."""
 
     def __init__(self, server: ReplyServer, cache: ReplyCache, voices: dict) -> None:
         self.server, self.cache, self.voices = server, cache, voices
@@ -211,9 +211,9 @@ class Speech:
         return self.voices.get(lang, self.voices['en'])
 
     def ready(self, text: str, lang: str = 'en') -> bool:
-        """True if saying `text` takes no time to make: a voice that's quick, or a reply already kept."""
-        voice = self.voice(lang)
-        return getattr(voice, 'slow', False) is not True or self.cache.find(text, lang, voice) is not None
+        """True if saying `text` takes no time to make: a reply already kept. Even the English voice takes
+        nearly 4 s for two sentences on a Pi 4 (2026-11-28)."""
+        return self.cache.find(text, lang, self.voice(lang)) is not None
 
     def prepare(self, text: str, lang: str = 'en') -> None:
         """Makes and keeps the reply, without serving it, so the next time it's said it's ready. Slow: run it in a thread."""

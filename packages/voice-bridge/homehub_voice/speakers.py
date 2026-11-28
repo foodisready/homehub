@@ -87,12 +87,13 @@ NEXT_SENTENCE_GAP_S = 0.8
 
 def sentences(text: str) -> list[str]:
     """A reply in sentences, each with its full stop: 開咗書房燈。 下次我會記得「書房屋燈」。 is two."""
-    parts = [p.strip() for p in re.findall(r'[^。！？!?]+[。！？!?」]*|[。！？!?」]+', text)]
+    # An English full stop ends a sentence before a space, not in 72.5 or "Dr.Who".
+    parts = [p.strip() for p in re.findall(r'(?:[^。！？!?.]|\.(?=\S))+(?:[。！？!?」"”]|\.(?!\S))*|[。！？!?.」"”]+', text)]
     out: list[str] = []
     for p in parts:
         if not p:
             continue
-        if out and len(p.strip('。！？!?」 ')) < 2:   # a stray full stop or a word: kept with the one before
+        if out and len(p.strip('。！？!?.」"” ')) < 2:   # a stray full stop or a word: kept with the one before
             out[-1] += p
         else:
             out.append(p)
@@ -625,6 +626,10 @@ class Speakers:
         self.named: dict[str, str] = {}
         self.listed = listed
         self.changed = asyncio.Event()
+
+    def busy(self) -> bool:
+        """Whether a speaker is listening or answering right now."""
+        return any(l.run is not None for l in self.links.values())
 
     def status(self) -> list[dict]:
         """Speakers for HomeHub's Health page. Devices that turned out not to be speakers are left out."""

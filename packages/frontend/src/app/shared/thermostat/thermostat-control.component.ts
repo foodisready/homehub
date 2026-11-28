@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, OnDestroy, OnInit, computed, inject, input, signal } from '@angular/core';
+import { LockService } from '../../core/lock/lock.service';
 import { RouterLink } from '@angular/router';
 import { MODE_NAME, ThermostatService, offQuestion, shown, step, toC, type ThermostatMode, type ThermostatView } from './thermostat.service';
 import { describeNext, describeTargets } from './schedule-text';
@@ -102,6 +103,7 @@ import { describeNext, describeTargets } from './schedule-text';
 export class ThermostatControlComponent implements OnInit, OnDestroy {
   readonly deviceId = input.required<number>();
   private readonly svc = inject(ThermostatService);
+  private readonly lock = inject(LockService);
 
   readonly view = computed<ThermostatView | undefined>(() => this.svc.views().get(this.deviceId()));
   /** Targets tapped but not sent yet, in °C. */
@@ -195,7 +197,8 @@ export class ThermostatControlComponent implements OnInit, OnDestroy {
 
   confirmOff(): void {
     this.askingOff.set(false);
-    this.setMode('off', true);
+    // On the wall display, the PIN too.
+    this.lock.askPinOnWall(`turn off ${this.view()?.alias ?? 'the thermostat'}`, () => this.setMode('off', true));
   }
 
   setMode(mode: ThermostatMode, confirmed = false): void {

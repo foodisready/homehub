@@ -263,7 +263,7 @@ def _answer(audio: bytes, spoke: bool, listener: Transcriber, homehub: Commander
     # on a Pi, but knows the home's device names. So try SenseVoice's words first, and ask Whisper
     # only if HomeHub doesn't understand them.
     if quick.strip(' .,!?'):
-        quick = completed(quick, en_which)
+        quick = completed(turn_fixed(quick), en_which)
         # As heard, then with the device's name spelled as HomeHub knows it ("my office la" → "My office lamp").
         if a := special(quick, 'en', homehub, t0, where, just_asked):
             return a
@@ -330,6 +330,16 @@ def completed(text: str, en_which: str | None) -> str:
         return text
     verb, _, how_long = en_which[len(EN_WHICH_PREFIX):].partition('|')
     return f'{verb} {text.strip(" .,!?")}{how_long}'
+
+
+# SenseVoice's "turn", cut short or misheard, before "on" or "off": "Tn on kitchen light." sent the command
+# to Whisper, 14 s more on the Pi (2026-11-28). Only before on or off, so "ten" or "tan" elsewhere stay.
+MISHEARD_TURN = re.compile(r'^(\s*(?:please\s+)?)(?:tn|tun|tum|tan|ten|tern|torn|turnt|tur|ton)(?=\s+(?:on|off)\b)', re.I)
+
+
+def turn_fixed(text: str) -> str:
+    """SenseVoice's English with a misheard "turn" at the start put right."""
+    return MISHEARD_TURN.sub(lambda m: f'{m.group(1)}Turn', text, count=1)
 
 
 # "Turn on my office la.": a verb, then a name.

@@ -205,6 +205,19 @@ describe('Did you mean…?', () => {
       assert.deepEqual(calls, [{ ip: '10.0.0.2', state: true }]);
     });
 
+    it('doesn\'t learn a name joined to more words: two lamps asked for, one misheard', async () => {
+      // 2026-11-28: 熄客廳男人燈同埋客廳女人燈, heard as 熄客廳男人燈同為客車女人等, became the statue's nickname.
+      db.prepare("UPDATE devices SET nicknames = '[\"living room lights\",\"客廳男人燈\"]' WHERE alias = 'Living room statue'").run();
+      const p = asked('熄客廳男人燈同為客車女人等', form({ action: 'off', devices: ['Living room statue'], lang: 'yue' }));
+      const done = await c.confirm(p);
+      assert.equal(done.learned, null);
+      assert.deepEqual(nicknames('Living room statue'), ['living room lights', '客廳男人燈']);
+      assert.deepEqual(calls, [{ ip: '10.0.0.2', state: false }], 'it still switches');
+      assert.equal(c.joinsNames('turn on the office corner lamp'), false, 'no joining word');
+      assert.equal(c.joinsNames('the statue and the painting'), false, 'no name of a device in it');
+      assert.equal(c.joinsNames('living room lights and the porch'), true);
+    });
+
     it('closes a door and says so', async () => {
       const p = asked('close the garaj', form({ action: 'close', devices: ['Garage Left'] }));
       const done = await c.confirm(p);

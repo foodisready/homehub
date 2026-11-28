@@ -242,6 +242,33 @@ export function answerKind(text: string): 'yes' | 'no' | null {
   return YES.has(key) ? 'yes' : NO.has(key) ? 'no' : null;
 }
 
+// "And" between two things: 同, 同埋, 和, 跟, 及, "and", "và", "&".
+const JOINED = /同|和|跟|及|\band\b|\bvà\b|&/i;
+
+/**
+ * Whether the words name a device and then go on to something else ("客廳男人燈同為客車女人等":
+ * the man statue's lamp and the woman's, misheard), so they're a command, not a new name. On
+ * 2026-11-28 that phrase was saved as the man statue's nickname, and came up in every question about it.
+ */
+export function joinsNames(phrase: string): boolean {
+  if (!JOINED.test(phrase)) return false;
+  const words = normalize(phrase);
+  const rows = getDb().prepare('SELECT alias, nicknames FROM devices').all() as { alias: string; nicknames: string | null }[];
+  return rows.some((r) => [r.alias, ...readNicknames(r.nicknames)].some((n) => {
+    const name = normalize(n);
+    return name.length >= 2 && name.length < words.length && words.includes(name);
+  }));
+}
+
+function readNicknames(raw: string | null): string[] {
+  try {
+    const v = JSON.parse(raw ?? '[]');
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
 export interface Confirmed { response: string; actions: ActionTaken[]; learned: string | null }
 
 /**
@@ -258,7 +285,7 @@ export async function confirm(p: Proposal): Promise<Confirmed> {
   const ok = done.actions.some((a) => (a.result as { success?: boolean } | undefined)?.success);
 
   let learned: string | null = null;
-  if (ok && p.phrase && rows.length === p.deviceIds.length) {
+  if (ok && p.phrase && rows.length === p.deviceIds.length && !joinsNames(p.phrase)) {
     try {
       if (saveDeviceNickname(p.phrase, p.deviceIds).added) learned = p.phrase;
     } catch (err) {

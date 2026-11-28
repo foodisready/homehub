@@ -1,4 +1,5 @@
 import { Component, OnDestroy, computed, effect, inject, input, output, signal, untracked } from '@angular/core';
+import { LockService } from '../../../core/lock/lock.service';
 import { HttpClient } from '@angular/common/http';
 import { DecimalPipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
@@ -286,6 +287,7 @@ export class DeviceRowComponent implements OnDestroy {
     return this.namedRooms().length ? 'Clean whole house' : paused ? 'Start a new job' : 'Start cleaning';
   });
   private readonly thermostats = inject(ThermostatService);
+  private readonly lock = inject(LockService);
   private readonly watchThermostat = effect(() => { if (this.isThermostat()) untracked(() => this.thermostats.watch(this.device().id)); });
 
   /** Ticks while a turn-off is coming, so the countdown moves. */
@@ -529,7 +531,10 @@ export class DeviceRowComponent implements OnDestroy {
 
   confirm(): void {
     this.confirming.set(false);
-    this.toggled.emit(this.device());
+    const d = this.device();
+    // A thermostat turned off on the wall display also asks for the PIN.
+    if (this.isThermostat() && d.state) this.lock.askPinOnWall(`turn off ${d.alias}`, () => this.toggled.emit(d));
+    else this.toggled.emit(d);
   }
 
   setTimer(durationMinutes: number): void {

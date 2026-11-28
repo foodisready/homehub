@@ -143,8 +143,6 @@ class CantoneseVoice:
             rule_fsts=str(folder / 'rule.fst')))
         self.simplify = opencc.OpenCC('t2s').convert
         self.model_file = model
-        # Seconds for a sentence: replies are kept, said short, and said a sentence at a time (replies.Speech).
-        self.slow = True
         self.lock = threading.Lock()
 
     def say(self, text: str, path: Path) -> None:

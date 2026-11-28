@@ -359,6 +359,12 @@ NO_HOMEHUB = '而家連唔到HomeHub。'
 SHORT = {'on': '好，開咗。', 'off': '好，熄咗。', 'scene': '搞掂。'}
 
 
+def replies_for(name: str) -> list[str]:
+    """The replies said about a device or scene by its Cantonese name: made ahead of time, so they come
+    at once (the Cantonese voice takes seconds a sentence). HomeHub's own questions are 係咪要開…？"""
+    return [f'開咗{name}。', f'熄咗{name}。', f'你想開定熄{name}？', f'係咪要開{name}？', f'係咪要熄{name}？']
+
+
 def short(command: Command | None, handled: bool, response: str, failed: list[str]) -> str | None:
     """The short reply to a command that did what was asked, or None (a question, a miss, a device that failed)."""
     if command is None or command.action not in SHORT or not handled:
