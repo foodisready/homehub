@@ -197,8 +197,8 @@ export class ThermostatControlComponent implements OnInit, OnDestroy {
 
   confirmOff(): void {
     this.askingOff.set(false);
-    // On the wall display, the PIN too.
-    this.lock.askPinOnWall(`turn off ${this.view()?.alias ?? 'the thermostat'}`, () => this.setMode('off', true));
+    // Then the PIN, on any device, when the login has one.
+    this.lock.askPin(`turn off ${this.view()?.alias ?? 'the thermostat'}`, () => this.setMode('off', true));
   }
 
   setMode(mode: ThermostatMode, confirmed = false): void {

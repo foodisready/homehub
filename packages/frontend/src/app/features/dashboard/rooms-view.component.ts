@@ -736,8 +736,8 @@ export class RoomsViewComponent implements AfterViewChecked, OnDestroy {
     const a = this.asking();
     this.asking.set(null);
     if (!a) return;
-    // A thermostat turned off on the wall display also asks for the PIN.
-    if (kindOf(a.device) === 'thermostat' && a.device.state) this.lock.askPinOnWall(`turn off ${a.device.alias}`, () => this.toggled.emit(a.device));
+    // Turning a thermostat off also asks for the PIN, on any device, when the login has one.
+    if (kindOf(a.device) === 'thermostat' && a.device.state) this.lock.askPin(`turn off ${a.device.alias}`, () => this.toggled.emit(a.device));
     else this.toggled.emit(a.device);
   }
 

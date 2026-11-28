@@ -532,8 +532,8 @@ export class DeviceRowComponent implements OnDestroy {
   confirm(): void {
     this.confirming.set(false);
     const d = this.device();
-    // A thermostat turned off on the wall display also asks for the PIN.
-    if (this.isThermostat() && d.state) this.lock.askPinOnWall(`turn off ${d.alias}`, () => this.toggled.emit(d));
+    // Turning a thermostat off also asks for the PIN, on any device, when the login has one.
+    if (this.isThermostat() && d.state) this.lock.askPin(`turn off ${d.alias}`, () => this.toggled.emit(d));
     else this.toggled.emit(d);
   }
 

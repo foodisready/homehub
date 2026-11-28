@@ -2,7 +2,6 @@ import { Injectable, computed, effect, inject, signal } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable, tap } from 'rxjs';
 import { AuthService } from '../auth/auth.service';
-import { isWallHome } from '../wall-home';
 
 const SETTINGS_KEY = 'homehub.lock';
 const LOCKED_KEY = 'homehub.lock.locked';
@@ -129,15 +128,6 @@ export class LockService {
     this.then = then;
     this.asking.set(what);
     this.setLocked(true);
-  }
-
-  /**
-   * On a wall display, asks for the PIN before something anyone passing could do by mistake, such as
-   * turning a thermostat off. On a phone, where each person is signed in as themselves, it just does it.
-   */
-  askPinOnWall(what: string, then: () => void): void {
-    if (isWallHome()) this.askPin(what, then);
-    else then();
   }
 
   cancelAsk(): void {

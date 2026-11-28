@@ -10,6 +10,10 @@ interface RoomState { lit: number; on: number; of: number; offline: number }
 
 const FLOOR_KEY = 'homehub.map.floor';
 const ZOOMS = [1, 1.5, 2, 3];
+/** Pinching goes as far as this, past the − and + steps. */
+const MAX_ZOOM = 4;
+/** The map's frame is at most this tall; at its smallest, the whole picture fits in it. */
+const FRAME_H = '78vh';
 
 function readFloor(): number | null {
   try { const v = Number(localStorage.getItem(FLOOR_KEY)); return Number.isInteger(v) && v > 0 ? v : null; } catch { return null; }
@@ -37,7 +41,7 @@ function readFloor(): number | null {
     .edit-btn { border: 1px solid var(--border); background: transparent; color: var(--text-muted); border-radius: 999px; padding: 0.35rem 0.9rem; font-size: 0.85rem; }
 
     .scroller { overflow: auto; border-radius: 14px; border: 1px solid var(--border); background: #e5e7eb; max-height: 78vh; touch-action: pan-x pan-y; }
-    .canvas { position: relative; min-width: 100%; }
+    .canvas { position: relative; margin: 0 auto; }
     .canvas img { display: block; width: 100%; height: auto; user-select: none; -webkit-user-drag: none; pointer-events: none; }
     .canvas.placing { cursor: crosshair; }
     .loading-img { padding: 3rem 1rem; text-align: center; color: #334155; }
@@ -128,18 +132,18 @@ function readFloor(): number | null {
         }
         <span class="grow"></span>
         <div class="zoom" role="group" aria-label="Zoom">
-          <button type="button" (click)="zoomBy(-1)" [disabled]="zoomAt() === 0" aria-label="Zoom out">−</button>
-          <button type="button" (click)="zoomBy(1)" [disabled]="zoomAt() === ZOOMS.length - 1" aria-label="Zoom in">+</button>
+          <button type="button" (click)="zoomBy(-1)" [disabled]="zoom() <= 1" aria-label="Zoom out">−</button>
+          <button type="button" (click)="zoomBy(1)" [disabled]="zoom() >= MAX_ZOOM" aria-label="Zoom in">+</button>
         </div>
         @if (isAdmin() && !editing()) { <button class="edit-btn" type="button" (click)="startEdit()">Edit map</button> }
       </div>
 
       @if (floor(); as f) {
-        <div class="scroller">
+        <div #scroller class="scroller">
           <div #canvas class="canvas" [class.placing]="editing() && placing() !== null" [class.editing]="editing()"
-               [style.width.%]="ZOOMS[zoomAt()] * 100" (click)="canvasTap($event)">
+               [style.width]="canvasWidth()" (click)="canvasTap($event)">
             @if (picture()) {
-              <img [src]="picture()" [alt]="'Map of ' + f.name" />
+              <img [src]="picture()" [alt]="'Map of ' + f.name" (load)="pictureLoaded($event)" />
             } @else {
               <div class="loading-img">{{ pictureFailed() ? 'The picture could not be loaded.' : 'Loading the picture…' }}</div>
             }
@@ -220,8 +224,20 @@ export class FloorMapComponent implements OnDestroy {
   /** A room tapped: open it. */
   readonly roomPicked = output<string>();
 
-  readonly ZOOMS = ZOOMS;
-  readonly zoomAt = signal(0);
+  readonly MAX_ZOOM = MAX_ZOOM;
+  /** 1 shows the whole picture; − and + step through ZOOMS, and a pinch goes anywhere up to MAX_ZOOM. */
+  readonly zoom = signal(1);
+  /** The picture's width over its height, once loaded. */
+  private readonly aspect = signal<number | null>(null);
+  /**
+   * At 1, as wide as the frame, or narrower if that would make it taller than the frame, so a tall
+   * picture (a phone's screenshot of a map) is seen whole on a wide tablet; zoomed, that times the zoom.
+   */
+  readonly canvasWidth = computed(() => {
+    const a = this.aspect();
+    const fit = a ? `min(100%, calc((${FRAME_H} - 2px) * ${a.toFixed(4)}))` : '100%';
+    return `calc(${fit} * ${this.zoom()})`;
+  });
   readonly floorId = signal<number | null>(readFloor());
   readonly editing = signal(false);
   /** While editing: where each room is on the floor shown, not yet saved. */
@@ -236,10 +252,89 @@ export class FloorMapComponent implements OnDestroy {
   readonly pictureFailed = signal(false);
 
   private readonly canvas = viewChild<ElementRef<HTMLElement>>('canvas');
+  private readonly scroller = viewChild<ElementRef<HTMLElement>>('scroller');
   private pictureSub?: Subscription;
 
   constructor() {
     this.floors.load();
+  }
+
+  pictureLoaded(e: Event): void {
+    const img = e.target as HTMLImageElement;
+    if (img.naturalWidth && img.naturalHeight) this.aspect.set(img.naturalWidth / img.naturalHeight);
+  }
+
+  // ── Pinching ──
+  // Two fingers zoom about the point between them; one finger still scrolls, as the frame's own.
+  // Touch events, not pointer ones: the browser takes over pointers once it starts scrolling.
+
+  private pinch: { d0: number; z0: number } | null = null;
+  private pinchEl: HTMLElement | null = null;
+
+  private readonly watchPinch = effect(() => {
+    const el = this.scroller()?.nativeElement ?? null;
+    if (el === this.pinchEl) return;
+    this.unwatchPinch();
+    this.pinchEl = el;
+    if (!el) return;
+    el.addEventListener('touchstart', this.onTouchStart, { passive: true });
+    el.addEventListener('touchmove', this.onTouchMove, { passive: false });
+    el.addEventListener('touchend', this.onTouchEnd);
+    el.addEventListener('touchcancel', this.onTouchEnd);
+    el.addEventListener('wheel', this.onWheel, { passive: false });
+  });
+
+  private unwatchPinch(): void {
+    const el = this.pinchEl;
+    if (!el) return;
+    el.removeEventListener('touchstart', this.onTouchStart);
+    el.removeEventListener('touchmove', this.onTouchMove);
+    el.removeEventListener('touchend', this.onTouchEnd);
+    el.removeEventListener('touchcancel', this.onTouchEnd);
+    el.removeEventListener('wheel', this.onWheel);
+    this.pinchEl = null;
+  }
+
+  private static spread(t: TouchList): number {
+    return Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+  }
+
+  private readonly onTouchStart = (e: TouchEvent) => {
+    if (e.touches.length === 2) this.pinch = { d0: FloorMapComponent.spread(e.touches) || 1, z0: this.zoom() };
+  };
+
+  private readonly onTouchMove = (e: TouchEvent) => {
+    if (!this.pinch || e.touches.length !== 2) return;
+    e.preventDefault();
+    const [a, b] = [e.touches[0], e.touches[1]];
+    this.zoomTo(this.pinch.z0 * FloorMapComponent.spread(e.touches) / this.pinch.d0, (a.clientX + b.clientX) / 2, (a.clientY + b.clientY) / 2);
+  };
+
+  private readonly onTouchEnd = (e: TouchEvent) => {
+    if (e.touches.length < 2) this.pinch = null;
+  };
+
+  /** A trackpad's pinch comes as a wheel with Ctrl held. */
+  private readonly onWheel = (e: WheelEvent) => {
+    if (!e.ctrlKey) return;
+    e.preventDefault();
+    this.zoomTo(this.zoom() * Math.exp(-e.deltaY / 200), e.clientX, e.clientY);
+  };
+
+  /** To `z`, keeping the point at (x, y) on screen where it is. */
+  private zoomTo(z: number, x: number, y: number): void {
+    const next = Math.min(MAX_ZOOM, Math.max(1, z));
+    const canvas = this.canvas()?.nativeElement;
+    const frame = this.scroller()?.nativeElement;
+    if (!canvas || !frame || next === this.zoom()) { this.zoom.set(next); return; }
+    const before = canvas.getBoundingClientRect();
+    const fx = before.width ? (x - before.left) / before.width : 0.5;
+    const fy = before.height ? (y - before.top) / before.height : 0.5;
+    this.zoom.set(next);
+    canvas.style.width = this.canvasWidth();   // now, so the scroll below is measured at the new size
+    const after = canvas.getBoundingClientRect();
+    frame.scrollLeft += after.left + fx * after.width - x;
+    frame.scrollTop += after.top + fy * after.height - y;
   }
 
   readonly floor = computed<Floor | null>(() => {
@@ -319,8 +414,13 @@ export class FloorMapComponent implements OnDestroy {
     try { localStorage.setItem(FLOOR_KEY, String(id)); } catch { /* this visit only */ }
   }
 
+  /** − and +: the next of ZOOMS down or up from wherever a pinch left it, about the frame's middle. */
   zoomBy(step: number): void {
-    this.zoomAt.update((z) => Math.min(ZOOMS.length - 1, Math.max(0, z + step)));
+    const z = this.zoom();
+    const next = step > 0 ? (ZOOMS.find((v) => v > z + 0.01) ?? MAX_ZOOM) : ([...ZOOMS].reverse().find((v) => v < z - 0.01) ?? 1);
+    const box = this.scroller()?.nativeElement.getBoundingClientRect();
+    if (box) this.zoomTo(next, box.left + box.width / 2, box.top + box.height / 2);
+    else this.zoom.set(next);
   }
 
   // ── Looking ──
@@ -488,5 +588,6 @@ export class FloorMapComponent implements OnDestroy {
     const url = this.picture();
     if (url) URL.revokeObjectURL(url);
     this.onUp();
+    this.unwatchPinch();
   }
 }
