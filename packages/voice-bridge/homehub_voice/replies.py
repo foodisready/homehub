@@ -12,7 +12,6 @@ import threading
 import time
 import uuid
 import wave
-from collections.abc import Callable
 from pathlib import Path
 
 log = logging.getLogger('homehub-voice')
@@ -186,24 +185,76 @@ def to_flac(path: Path) -> Path | None:
     return out
 
 
-def speak_with(server: ReplyServer, cache: ReplyCache, voices: dict) -> Callable[..., str]:
+def seconds_of(path: Path) -> float:
+    """How long a WAV file plays, or 0 if it can't be read."""
+    try:
+        with wave.open(str(path), 'rb') as r:
+            return r.getnframes() / float(r.getframerate() or 1)
+    except (OSError, EOFError, wave.Error):
+        return 0.0
+
+
+class Speech:
     """speak(text, host, lang, flac=False) -> the URL a speaker plays the reply from, reusing a kept reply when
     there is one. Kept replies stay as the voice made them; the copy served gets its lead-in, and is FLAC for
-    speakers that play only that."""
-    def served(path: Path, name: str, host: str, flac: bool) -> str:
+    speakers that play only that.
+
+    A voice marked `slow` (the Cantonese one: seconds for a sentence on a Pi) is helped along: `ready` says
+    whether a reply can be played straight away, `prepare` makes one ahead of time, and `seconds` says how
+    long a served reply plays, so the next sentence can follow it."""
+
+    def __init__(self, server: ReplyServer, cache: ReplyCache, voices: dict) -> None:
+        self.server, self.cache, self.voices = server, cache, voices
+        self.lengths: dict[str, float] = {}   # served URL -> seconds it plays, the last few
+
+    def voice(self, lang: str):
+        return self.voices.get(lang, self.voices['en'])
+
+    def ready(self, text: str, lang: str = 'en') -> bool:
+        """True if saying `text` takes no time to make: a voice that's quick, or a reply already kept."""
+        voice = self.voice(lang)
+        return getattr(voice, 'slow', False) is not True or self.cache.find(text, lang, voice) is not None
+
+    def prepare(self, text: str, lang: str = 'en') -> None:
+        """Makes and keeps the reply, without serving it, so the next time it's said it's ready. Slow: run it in a thread."""
+        voice = self.voice(lang)
+        if self.cache.dir is None or self.cache.find(text, lang, voice) is not None:
+            return
+        path, _ = self.server.new_file()
+        try:
+            voice.say(text, path)
+            self.cache.keep_copy(path, text, lang, voice)
+        except Exception as e:  # noqa: BLE001 — only a head start; the reply is made when it's needed
+            log.warning('reply %r not made ahead: %s', text, e)
+        finally:
+            path.unlink(missing_ok=True)
+
+    def seconds(self, url: str) -> float:
+        """How long the reply at `url` plays, lead-in included; 0 if unknown."""
+        return self.lengths.get(url, 0.0)
+
+    def _served(self, path: Path, name: str, host: str, flac: bool) -> str:
         lead_in(path)
+        length = seconds_of(path)
         if flac and (made := to_flac(path)):
             name = made.name
-        return server.url(name, host)
+        url = self.server.url(name, host)
+        if len(self.lengths) > 50:
+            self.lengths.clear()
+        self.lengths[url] = length
+        return url
 
-    def speak(text: str, host: str, lang: str = 'en', flac: bool = False) -> str:
-        voice = voices.get(lang, voices['en'])
-        kept = cache.find(text, lang, voice)
-        copied = server.copy_in(kept) if kept else None
+    def __call__(self, text: str, host: str, lang: str = 'en', flac: bool = False) -> str:
+        voice = self.voice(lang)
+        kept = self.cache.find(text, lang, voice)
+        copied = self.server.copy_in(kept) if kept else None
         if copied:
-            return served(*copied, host, flac)
-        path, name = server.new_file()
+            return self._served(*copied, host, flac)
+        path, name = self.server.new_file()
         voice.say(text, path)
-        cache.keep_copy(path, text, lang, voice)
-        return served(path, name, host, flac)
-    return speak
+        self.cache.keep_copy(path, text, lang, voice)
+        return self._served(path, name, host, flac)
+
+
+def speak_with(server: ReplyServer, cache: ReplyCache, voices: dict) -> Speech:
+    return Speech(server, cache, voices)

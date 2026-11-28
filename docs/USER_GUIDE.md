@@ -995,6 +995,8 @@ Voice also understands Cantonese, and answers in it. Tick **Cantonese** in **Set
 
 To turn a light on for a while, add how long, as you would in English with "for 10 minutes": 開廚房燈十分鐘, 開廚房燈半個鐘, 開廚房燈個半鐘 (an hour and a half), 開廚房燈兩個鐘, or 開廚房燈，十分鐘後熄. 三個字 (fifteen minutes) works too. HomeHub answers 開咗廚房燈，十分鐘後熄。 and turns it off when the time is up.
 
+The Cantonese voice takes several seconds on the HomeHub computer to say a new sentence, so the first time a command is said, a speaker answers with a short 好，開咗。, 好，熄咗。 or 搞掂。 as soon as it's done. HomeHub makes the full reply meanwhile, and says that one from then on. A reply of more than one sentence starts with the first sentence and says the rest after it.
+
 A Cantonese command HomeHub didn't understand is listed under **Settings → Teach HomeHub**, like an English one. **Teach** suggests the name without its verb, such as 主人房燈 from 開主人房燈. Choose its devices and save, and voice understands it within seconds.
 
 Voice also understands Vietnamese, and answers in it. Tick **Vietnamese** in **Settings → Voice control**, which downloads about 150 MB more, and give your devices Vietnamese nicknames in **Settings → Devices**, such as đèn bếp. Add one for each way your household says it, such as đèn bếp and đèn nhà bếp, because a word more or less counts as a different name. Say the verb, then the nickname: bật đèn bếp, tắt đèn bếp, mở cửa ga-ra, đóng cửa ga-ra. Add how long to turn something on for a while: bật đèn bếp mười phút. If HomeHub isn't sure whether you said bật or tắt, it asks "Bật hay tắt đèn bếp?" and switches nothing until you answer. See [Vietnamese](../packages/voice-bridge/README.md#vietnamese).

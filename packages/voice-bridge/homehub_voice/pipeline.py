@@ -109,6 +109,8 @@ class Answer:
     # Not understood, but a few words with one of the home's names in them: someone speaking to the
     # speaker over a noisy room, answered even after eight seconds of sound (chatter.says_a_name).
     named: bool = False
+    # A shorter reply that says the same, for when `reply` would take seconds to make: 好，開咗。
+    short: str | None = None
 
 
 # "Just the kitchen lights", "no, only the lamp for 10 minutes": fewer of what a question named.
@@ -405,11 +407,12 @@ class Chinese:
     unread: Callable[[str], str]   # a command it couldn't read, as sent to HomeHub to be listed
     not_understood: str
     no_homehub: str
+    short: Callable | None = None   # the short reply to a command done, if the voice is slow
 
 
 WAYS = {
     'yue': Chinese('yue', yue.parse, lambda t: yue.read_verb(yue.syllables(t))[0] is not None, questions.yue_kind, yue.verb_alone, yue.reply, yue.traditional,
-                   yue.NOT_UNDERSTOOD, yue.NO_HOMEHUB),
+                   yue.NOT_UNDERSTOOD, yue.NO_HOMEHUB, yue.short),
     'zh': Chinese('zh', zh.parse, lambda t: zh.read_verb(zh.syllables(t))[0] is not None, questions.zh_kind, zh.verb_alone, zh.reply, zh.plain,
                   zh.NOT_UNDERSTOOD, zh.NO_HOMEHUB),
 }
@@ -490,8 +493,9 @@ def send_chinese(way: Chinese, r: Reading, homehub: Commander, t0: float, where:
     if a := asked_back(heard, res, t0, t1, passes):
         return a
     reply = way.reply(command, res.handled, res.response, res.failed)
+    short = way.short(act, res.handled, res.response, res.failed) if way.short and act else None
     return Answer(heard, reply, bool(act) and res.handled, t1 - t0, time.monotonic() - t1, lang=way.lang,
-                  asked=command.name if command and command.action == 'ask' else None, passes=passes)
+                  asked=command.name if command and command.action == 'ask' else None, passes=passes, short=short)
 
 
 def answer_cantonese(audio: bytes, ears: CantoneseEars, homehub: Commander, t0: float, asked: str | None = None,

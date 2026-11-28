@@ -470,3 +470,19 @@ class ConfigTest(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class ShortReplyTest(unittest.TestCase):
+    def test_a_command_done_has_a_short_reply(self):
+        on = yue.Command('on', '書房角落頭燈', 1.0, 15)
+        self.assertEqual(yue.short(on, True, 'Turned on', []), '好，開咗。')
+        self.assertEqual(yue.short(yue.Command('off', '廚房燈', 1.0), True, 'Turned off', []), '好，熄咗。')
+        self.assertEqual(yue.short(yue.Command('scene', '晚安', 1.0), True, 'Ran', []), '搞掂。')
+
+    def test_anything_else_is_said_in_full(self):
+        lamp = yue.Command('on', '廚房燈', 1.0)
+        self.assertIsNone(yue.short(lamp, False, '', []))
+        self.assertIsNone(yue.short(lamp, True, "I couldn't reach it", ['廚房燈']), 'a failure says which')
+        self.assertIsNone(yue.short(lamp, True, 'Kitchen light is protected', []))
+        self.assertIsNone(yue.short(yue.Command('ask', '廚房燈', 1.0), True, '', []))
+        self.assertIsNone(yue.short(None, True, '', []))

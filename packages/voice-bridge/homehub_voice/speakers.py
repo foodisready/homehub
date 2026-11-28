@@ -80,6 +80,39 @@ MIC_STOP_S = 0.5
 ANNOUNCE_WAIT_S = 20.0
 # How long a speaker has to say a reminder.
 ANNOUNCE_TIMEOUT_S = 60.0
+# Between the first sentence of a reply and the next: the speaker starts playing a moment after the run
+# ends, and an announcement sent while it still plays would cut it off.
+NEXT_SENTENCE_GAP_S = 0.8
+
+
+def sentences(text: str) -> list[str]:
+    """A reply in sentences, each with its full stop: 開咗書房燈。 下次我會記得「書房屋燈」。 is two."""
+    parts = [p.strip() for p in re.findall(r'[^。！？!?]+[。！？!?」]*|[。！？!?」]+', text)]
+    out: list[str] = []
+    for p in parts:
+        if not p:
+            continue
+        if out and len(p.strip('。！？!?」 ')) < 2:   # a stray full stop or a word: kept with the one before
+            out[-1] += p
+        else:
+            out.append(p)
+    return out or [text]
+
+
+def first_words(speak, reply: str, short: str | None, lang: str, may_split: bool) -> tuple[str, list[str], bool]:
+    """What to say straight away, the sentences to say after it, and whether the whole reply should be
+    made meanwhile for next time. A reply that's ready (a quick voice, or said before) is said whole.
+    Otherwise a short reply that says the same (好，開咗。) if there is one and it's ready; otherwise the
+    first sentence, then the rest one at a time, if the speaker can be told to say more after its run."""
+    ready = getattr(speak, 'ready', None)
+    if ready is None or ready(reply, lang):
+        return reply, [], False
+    if short and ready(short, lang):
+        return short, [], True
+    parts = sentences(reply)
+    if may_split and len(parts) > 1:
+        return parts[0], parts[1:], False
+    return reply, [], False
 
 # Its own reply, heard back within this long of saying it, isn't a command.
 ECHO_S = 30.0
@@ -366,6 +399,31 @@ class SpeakerLink:
             self.asked = (f'{PREFIX}{ask}', time.monotonic(), lang)
         return True
 
+    async def _say_rest(self, c: api.APIClient, rest: list[str], lang: str, first_done: float, n: int) -> None:
+        """The rest of a reply, a sentence at a time, each made while the one before plays. Given up if
+        the speaker is woken again meanwhile, or disconnects."""
+        loop = asyncio.get_running_loop()
+        making = loop.run_in_executor(None, self._speak(rest[0], lang))
+        for i, sentence in enumerate(rest):
+            try:
+                url = await making
+            except Exception as e:  # noqa: BLE001 — the first sentence was said; the rest is a bonus
+                log.warning('%s #%d: the rest of the reply could not be made: %s', self.who, n, e)
+                return
+            if i + 1 < len(rest):
+                making = loop.run_in_executor(None, self._speak(rest[i + 1], lang))
+            if i == 0:
+                await asyncio.sleep(max(0.0, first_done - time.monotonic()))
+            if self.run is not None or self.client is not c:
+                log.info('%s #%d: woken again, so the rest of the reply isn\'t said', self.who, n)
+                return
+            self.said = (sentence, time.monotonic())
+            try:
+                await c.send_voice_assistant_announcement_await_response(url, ANNOUNCE_TIMEOUT_S, sentence)
+            except Exception as e:  # noqa: BLE001
+                log.warning('%s #%d could not say %r: %s', self.who, n, sentence, e)
+                return
+
     def _subscribe(self, c: api.APIClient) -> None:
         loop = asyncio.get_running_loop()
 
@@ -381,6 +439,7 @@ class SpeakerLink:
                 run.dropped = True
                 return
             t_end = time.monotonic()
+            later = None
             event(E.VOICE_ASSISTANT_STT_VAD_END)
             try:
                 if not await self.one_answers.answers(run):
@@ -442,11 +501,22 @@ class SpeakerLink:
                 # A question: the speaker listens again after the reply, with no wake word.
                 event(E.VOICE_ASSISTANT_INTENT_END, {'conversation_id': run.conversation,
                                                      **({'continue_conversation': '1'} if follow_up or try_again else {})})
-                event(E.VOICE_ASSISTANT_TTS_START, {'text': a.reply})
-                self.said = (a.reply, time.monotonic())
-                url = await loop.run_in_executor(None, self._speak(a.reply, a.lang))
-                event(E.VOICE_ASSISTANT_TTS_END, {'url': url})
                 lang = a.lang if isinstance(getattr(a, 'lang', None), str) else 'en'
+                short = a.short if isinstance(getattr(a, 'short', None), str) else None
+                # More sentences are said after the run, as announcements: not after a question, which the
+                # speaker listens for the answer to as soon as it has asked.
+                now, rest, make_whole = first_words(self.speak, a.reply, short, lang,
+                                                    self.can_announce and not follow_up and not try_again)
+                event(E.VOICE_ASSISTANT_TTS_START, {'text': now})
+                self.said = (a.reply, time.monotonic())
+                url = await loop.run_in_executor(None, self._speak(now, lang))
+                event(E.VOICE_ASSISTANT_TTS_END, {'url': url})
+                if make_whole:
+                    # Ready the next time it's said: the same command, the same reply.
+                    loop.run_in_executor(None, self.speak.prepare, a.reply, lang)
+                if rest:
+                    seconds = getattr(self.speak, 'seconds', lambda _u: 0.0)(url)
+                    later = (rest, lang, seconds, run.n)
                 if follow_up:
                     self.asked = (follow_up, time.monotonic(), lang)
                 if try_again:
@@ -456,6 +526,8 @@ class SpeakerLink:
                 label = getattr(a, 'label', '')
                 how = ({1: ' in 1 pass', 2: ' in 2 passes'}.get(passes, '') if isinstance(passes, int) else '')
                 how += f' labelled {label}' if isinstance(label, str) and label else ''
+                if now != a.reply:
+                    how += f', said {now!r} first' if rest else f', said {now!r} for short'
                 log.info(
                     '%s #%d (%s) heard %r -> %r (%s; speech %.1fs of which voiced %.1fs, loudness %.3f-%.3f, recognise %.2fs%s, HomeHub %.2fs, reply ready %.2fs after speech ended)',
                     self.who, run.n, run.wake or 'no wake word', a.heard, a.reply, 'done' if a.handled else 'not handled',
@@ -475,6 +547,9 @@ class SpeakerLink:
                 event(E.VOICE_ASSISTANT_RUN_END)
                 if self.run is run:
                     self.run = None
+                if later:
+                    rest, lang, seconds, n = later
+                    asyncio.create_task(self._say_rest(c, rest, lang, time.monotonic() + seconds + NEXT_SENTENCE_GAP_S, n))
 
         async def on_start(conversation: str, flags: int, settings, wake_word: str | None) -> int:
             self.count += 1

@@ -86,6 +86,14 @@ async def main() -> int:
     log.info('HomeHub at %s knows %d device and scene names', conf.homehub_url, len(homehub.refresh_names()))
 
     speak = speak_with(replies, ReplyCache(conf.reply_cache_dir), voices)
+    if 'yue' in voices:
+        # The short Cantonese replies (好，開咗。) are ready before the first command, so it's answered at once.
+        from .cantonese import SHORT
+
+        def warm() -> None:
+            for text in SHORT.values():
+                speak.prepare(text, 'yue')
+        loop.run_in_executor(None, warm)
 
     speakers: Speakers
     one_answers = OneAnswers()   # so two speakers that hear the same command don't both answer

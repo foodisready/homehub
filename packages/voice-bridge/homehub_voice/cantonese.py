@@ -354,6 +354,20 @@ NOTHING_HEARD = '唔好意思，我聽唔到。'
 NO_HOMEHUB = '而家連唔到HomeHub。'
 
 
+# Said instead of the whole reply when that isn't ready: the Cantonese voice takes seconds to make
+# 開咗書房角落頭燈，十五分鐘後熄 (7 s on the Pi, 2026-11-28), and these are made when the bridge starts.
+SHORT = {'on': '好，開咗。', 'off': '好，熄咗。', 'scene': '搞掂。'}
+
+
+def short(command: Command | None, handled: bool, response: str, failed: list[str]) -> str | None:
+    """The short reply to a command that did what was asked, or None (a question, a miss, a device that failed)."""
+    if command is None or command.action not in SHORT or not handled:
+        return None
+    full = reply(command, handled, response, failed)
+    done = (f'開咗{command.name}', f'熄咗{command.name}', f'搞掂，{command.name}')
+    return SHORT[command.action] if full.startswith(done) else None
+
+
 def reply(command: Command | None, handled: bool, response: str, failed: list[str]) -> str:
     """A short Cantonese reply from HomeHub's answer. HomeHub's own wording is English."""
     if command is not None and command.action == 'ask':

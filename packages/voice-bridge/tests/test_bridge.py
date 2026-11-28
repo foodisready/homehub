@@ -331,6 +331,16 @@ class FakeClient:
         pass
 
 
+class SentencesTest(unittest.TestCase):
+    def test_a_reply_in_sentences(self):
+        from homehub_voice.speakers import sentences
+        self.assertEqual(sentences('開咗書房角落頭燈。 下次我會記得「書房角屋頭燈」。'), ['開咗書房角落頭燈。', '下次我會記得「書房角屋頭燈」。'])
+        self.assertEqual(sentences('開咗書房燈，十五分鐘後熄。'), ['開咗書房燈，十五分鐘後熄。'])
+        self.assertEqual(sentences('好。。'), ['好。。'])
+        self.assertEqual(sentences('今日晴天。 記得帶遮！'), ['今日晴天。', '記得帶遮！'])
+        self.assertEqual(sentences('今日晴天。 好！'), ['今日晴天。好！'], 'a word alone stays with the sentence before')
+
+
 class SpeakerLinkTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         FakeClient.instances.clear()
@@ -435,6 +445,98 @@ class SpeakerLinkTest(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0.01)
             if c.events and c.events[-1][0] == 'VOICE_ASSISTANT_RUN_END':
                 return dict(c.events)
+
+    def slow_speak(self, kept=()):
+        """A speak() for a slow voice: only what's in `kept` is ready, and each reply plays 2 s."""
+        made, prepared = [], []
+
+        def speak(text, host, lang='en', **kw):
+            made.append(text)
+            return f'http://me/{len(made)}.wav'
+        speak.ready = lambda text, lang='en': text in kept
+        speak.prepare = lambda text, lang='en': prepared.append(text)
+        speak.seconds = lambda url: 0.05
+        return speak, made, prepared
+
+    async def test_a_slow_reply_not_ready_is_said_short_and_made_for_next_time(self):
+        # The Cantonese voice took 7 s to make 開咗書房角屋頭燈，十五分鐘後熄。 (Pi, 2026-11-28).
+        from homehub_voice import speakers
+        speak, made, prepared = self.slow_speak(kept={'好，開咗。'})
+
+        def answer_fn(audio, spoke, asked=None, prefer=None, wake=''):
+            return speakers.Answer('開書房角屋頭燈', '開咗書房角屋頭燈，十五分鐘後熄。', True, lang='yue', short='好，開咗。')
+
+        link, c = await self.connected_link(answer_fn, speak)
+        events = await self.say(c, 1, '老友')
+        self.assertEqual(events['VOICE_ASSISTANT_TTS_START'], {'text': '好，開咗。'})
+        self.assertEqual(made, ['好，開咗。'])
+        await asyncio.sleep(0.05)
+        self.assertEqual(prepared, ['開咗書房角屋頭燈，十五分鐘後熄。'], 'the whole reply is ready next time')
+        link.task.cancel()
+
+    async def test_a_reply_ready_is_said_whole(self):
+        from homehub_voice import speakers
+        speak, made, prepared = self.slow_speak(kept={'好，開咗。', '開咗書房燈。'})
+
+        def answer_fn(audio, spoke, asked=None, prefer=None, wake=''):
+            return speakers.Answer('開書房燈', '開咗書房燈。', True, lang='yue', short='好，開咗。')
+
+        link, c = await self.connected_link(answer_fn, speak)
+        await self.say(c, 1, '老友')
+        self.assertEqual((made, prepared), (['開咗書房燈。'], []))
+        link.task.cancel()
+
+    async def test_a_slow_reply_of_two_sentences_is_said_one_at_a_time(self):
+        from homehub_voice import speakers
+        speak, made, _ = self.slow_speak()
+
+        def answer_fn(audio, spoke, asked=None, prefer=None, wake=''):
+            return speakers.Answer('係啦', '開咗書房角落頭燈。 下次我會記得「書房角屋頭燈」。', True, lang='yue')
+
+        FakeClient.voice_flags = 1 | 16   # voice assistant, announce
+        link, c = await self.connected_link(answer_fn, speak)
+        events = await self.say(c, 1)
+        self.assertEqual(events['VOICE_ASSISTANT_TTS_START'], {'text': '開咗書房角落頭燈。'})
+        for _ in range(100):
+            await asyncio.sleep(0.01)
+            if c.events[-1][0] == 'ANNOUNCE':
+                break
+        self.assertEqual(c.events[-1], ('ANNOUNCE', {'url': 'http://me/2.wav', 'text': '下次我會記得「書房角屋頭燈」。'}))
+        self.assertEqual(made, ['開咗書房角落頭燈。', '下次我會記得「書房角屋頭燈」。'])
+        link.task.cancel()
+
+    async def test_a_question_or_a_speaker_that_cant_announce_gets_the_whole_reply(self):
+        from homehub_voice import speakers
+        for flags, asked in ((1, None), (1 | 16, 'confirm:c1|on')):
+            FakeClient.instances.clear()
+            FakeClient.voice_flags = flags
+            speak, made, _ = self.slow_speak()
+
+            def answer_fn(audio, spoke, a=None, prefer=None, wake='', asked=asked):
+                return speakers.Answer('開燈', '有兩盞燈。 你想開邊盞？', False, lang='yue', asked=asked)
+
+            link, c = await self.connected_link(answer_fn, speak)
+            await self.say(c, 1)
+            await asyncio.sleep(0.1)
+            self.assertEqual(made, ['有兩盞燈。 你想開邊盞？'], (flags, asked))
+            self.assertNotIn('ANNOUNCE', [k for k, _ in c.events])
+            link.task.cancel()
+
+    async def test_the_rest_isnt_said_once_woken_again(self):
+        from homehub_voice import speakers
+        speak, made, _ = self.slow_speak()
+        speak.seconds = lambda url: 0.3
+
+        def answer_fn(audio, spoke, asked=None, prefer=None, wake=''):
+            return speakers.Answer('係啦', '開咗書房燈。 下次我會記得。', True, lang='yue')
+
+        FakeClient.voice_flags = 1 | 16
+        link, c = await self.connected_link(answer_fn, speak)
+        await self.say(c, 1)
+        await c.handlers['handle_start']('conv2', 0, None, '老友')   # woken while the first sentence plays
+        await asyncio.sleep(1.3)
+        self.assertNotIn('ANNOUNCE', [k for k, _ in c.events])
+        link.task.cancel()
 
     async def test_a_vietnamese_wake_word_asks_for_vietnamese(self):
         langs = []
@@ -1126,6 +1228,20 @@ class ReplyCacheTest(unittest.TestCase):
         speak('Kitchen lights is on.', '127.0.0.1')
         self.assertEqual(len(yue.said), 2)
         self.assertEqual(en.said, ['Kitchen lights is on.'])
+
+    def test_a_slow_voice_says_whether_a_reply_is_ready_and_can_make_one_ahead(self):
+        en, yue = CountingVoice(), CountingVoice()
+        yue.slow = True
+        speak = self.speak_fn({'en': en, 'yue': yue})
+        self.assertTrue(speak.ready('Office lamp is on.'), 'English is quick to make')
+        self.assertFalse(speak.ready('好，開咗。', 'yue'))
+        speak.prepare('好，開咗。', 'yue')
+        self.assertTrue(speak.ready('好，開咗。', 'yue'))
+        self.assertEqual(list(self.server.dir.iterdir()), [], 'made ahead, not served')
+        url = speak('好，開咗。', '127.0.0.1', 'yue')
+        self.assertEqual(yue.said, ['好，開咗。'], 'made once')
+        # 16 kHz 16-bit: the words' bytes, half a sample each, plus the half second lead-in.
+        self.assertAlmostEqual(speak.seconds(url), len('好，開咗。'.encode()) * 100 / 2 / 16000 + 0.5, places=3)
 
     def test_each_reply_starts_with_half_a_second_of_silence(self):
         # From the Pi, 2026-11-21: on Ava 開咗啊亮燈 was heard as 啊亮燈, its first words lost.
