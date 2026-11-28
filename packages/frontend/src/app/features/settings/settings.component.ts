@@ -2290,7 +2290,7 @@ export class SettingsComponent implements OnInit, OnDestroy {
 
   savePassword(id: number): void {
     if (!this.editPassword.trim()) return;
-    this.http.patch(`/api/users/${id}/password`, { password: this.editPassword }).subscribe({
+    this.http.patch(`/api/users/${id}/password`, { newPassword: this.editPassword }).subscribe({
       next: () => {
         this.userMsg.set('Password updated');
         this.userErr.set(false);

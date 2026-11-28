@@ -55,9 +55,11 @@ usersRouter.patch('/:id/password', async (req: Request, res: Response) => {
   const target = findUserById(targetId);
   if (!target) return res.status(404).json({ error: 'User not found', code: 'NOT_FOUND' });
 
-  const { newPassword } = req.body as { newPassword?: string };
-  if (!newPassword || newPassword.length < 8) {
-    return res.status(400).json({ error: 'newPassword must be at least 8 characters', code: 'VALIDATION_ERROR' });
+  // Settings sent it as `password` until v0.3.34; both are taken, so an open page that hasn't reloaded still works.
+  const body = req.body as { newPassword?: unknown; password?: unknown };
+  const newPassword = typeof body.newPassword === 'string' ? body.newPassword : typeof body.password === 'string' ? body.password : '';
+  if (newPassword.length < 8) {
+    return res.status(400).json({ error: 'The password must be at least 8 characters.', code: 'VALIDATION_ERROR' });
   }
 
   await updatePassword(targetId, newPassword);
